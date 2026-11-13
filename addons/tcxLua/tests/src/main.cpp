@@ -112,10 +112,17 @@ static bool preCompileAllocationFailure(const fs::path& dir, bool solPanic) {
         lua_type(raw, base + 4) == LUA_TTABLE && lua_topointer(raw, base + 4) == table;
 }
 
+int runLuaEventTests(const std::filesystem::path& temp);
+
 int main(int argc, char** argv) {
     fs::path dir = fs::temp_directory_path() /
         ("tcxLua-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir);
+    if (argc > 1 && string(argv[1]) == "--events-only") {
+        int failures = runLuaEventTests(dir);
+        fs::remove_all(dir);
+        return failures ? 1 : 0;
+    }
     check("pre-compile allocation failure: custom panic", preCompileAllocationFailure(dir, false));
     check("pre-compile allocation failure: sol panic", preCompileAllocationFailure(dir, true));
     if (argc > 1 && string(argv[1]) == "--pre-compile-allocation") {
@@ -458,11 +465,31 @@ int main(int argc, char** argv) {
             root:append_child("empty"):text():set("")
             root:append_child("item"):append_attribute("value"):set("seven")
             root:child("item"):text():set("text & <markup>")
+            local children = root:children()
+            assert(#children == 2 and children[2]:name() == "item")
             local serialized = xml:toString()
             assert(serialized:find("<empty />", 1, true))
             local restored = parseXml(serialized)
             assert(restored:root():child("item"):attribute("value"):value() == "seven")
             assert(restored:root():child("item"):text():get() == "text & <markup>")
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
+    L["saveTestDir"] = tc::pathToUtf8(dir);
+    checkNoThrow("SaveResult: JSON/XML success and failure use ok()", true, [&] {
+        auto result = L.safe_script(R"lua(
+            local json = Json.new()
+            json["name"] = "TrussC"
+            local xml = Xml.new()
+            xml:addRoot("project")
+            assert(saveJson(json, saveTestDir .. "/saved.json"):ok())
+            assert(xml:save(saveTestDir .. "/saved.xml"):ok())
+            -- An existing directory cannot be used as an output file.
+            local jsonFailure = saveJson(json, saveTestDir)
+            local xmlFailure = xml:save(saveTestDir)
+            assert(not jsonFailure:ok() and not xmlFailure:ok())
             return true
         )lua", sol::script_pass_on_error);
         return result.valid() && result.get<bool>();
@@ -475,6 +502,34 @@ int main(int argc, char** argv) {
     checkNoThrow("bundled sketch: Shift is ignored", true, [&] { return tcxLua::call(L, "keyPressed", 340); });
     checkNoThrow("bundled sketch: arrow is ignored", true, [&] { return tcxLua::call(L, "keyPressed", 262); });
     checkNoThrow("bundled sketch: ordinary key works", true, [&] { return tcxLua::call(L, "keyPressed", 65); });
+
+    // The same call-level checks also run with a GPU in bindcheck.
+    fs::path bindingSource = fs::path(__FILE__).parent_path().parent_path();
+    L["bindingTestSource"] = bindingSource;
+    L["bindingTestTemp"] = dir;
+#ifndef __EMSCRIPTEN__
+    L["bindingTestNativeAudio"] = true;
+#else
+    L["bindingTestNativeAudio"] = false;
+#endif
+    auto bindingCases = L.safe_script_file((bindingSource / "bindings.lua").string(), sol::script_pass_on_error);
+    check("approved bindings: shared checks load", bindingCases.valid());
+    if (bindingCases.valid()) {
+        sol::table cases = bindingCases;
+        for (size_t i = 1; i <= cases.size(); ++i) {
+            sol::table test = cases[i];
+            string label = test[1];
+            sol::protected_function body = test[2];
+            auto result = body();
+            if (!result.valid()) {
+                sol::error error = result;
+                std::printf("  %s\n", error.what());
+            }
+            check(label.c_str(), result.valid() && result.get<bool>());
+        }
+    }
+
+    check("Lua event lifetime and delivery regressions", runLuaEventTests(dir) == 0);
 
     bool defaultHandlerThrows = false;
     try {

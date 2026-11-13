@@ -67,6 +67,134 @@ public:
     internal::PipelineSelection selection() { return selectPipelineForCurrentTarget_(); }
     sg_pipeline_desc recipe() const { return recipe_; }
 };
+template<class Base>
+class MutableBlendShader : public Base {
+public:
+    void setBlend(bool enabled) {
+        this->recipe_.colors[0].blend.enabled = enabled;
+        this->recipe_.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        this->recipe_.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    }
+};
+void recipeMutationChecks() {
+    Fbo fbo; fbo.allocate(32,24);
+    Texture source;
+    unsigned char red[] = {255,0,0,128};
+    source.allocate(1,1,TextureFormat::RGBA8,TextureUsage::Dynamic); source.loadData(red,1,1,4);
+    MutableBlendShader<Shader> shader, generated;
+    MutableBlendShader<FullscreenShader> fullscreen;
+    check("mutable draw shader loads", shader.load(pipeline_mesh_shader_desc));
+    check("mutable fullscreen shader loads", fullscreen.load(pipeline_full_shader_desc));
+    check("mutable generated shader loads", generated.load(pipeline_generated_shader_desc));
+    fullscreen.setTexture(0,source.getView(),source.getSampler());
+    generated.setTexture(0,source.getView(),source.getSampler());
+    for (bool blend : {true, false, true}) {
+        const Color expected(blend ? 0.5f : 1.f, 0, 0);
+        fbo.begin(0,0,0);
+        shader.setBlend(blend); setColor(1,0,0,0.5f);
+        shader.begin(); drawRect(-0.8f,-0.8f,1.6f,1.6f); shader.end();
+        fbo.end();
+        expect(read(fbo),16,12,expected,"draw uses current protected recipe blend");
+        fbo.begin(0,0,0);
+        fullscreen.setBlend(blend); fullscreen.draw();
+        fbo.end();
+        expect(read(fbo),16,12,expected,"FullscreenShader uses current protected recipe blend");
+        fbo.begin(0,0,0);
+        generated.setBlend(blend); generated.drawVertices(3);
+        fbo.end();
+        expect(read(fbo),16,12,expected,"drawVertices uses current protected recipe blend");
+    }
+}
+void recipeRetirementChecks(RecipeShader& shader) {
+    auto& target = internal::currentTarget();
+    auto& selections = *target.resources().selectionCache;
+    auto disabled = shader.recipe();
+    auto enabled = disabled;
+    disabled.colors[0].blend.enabled = false;
+    enabled.colors[0].blend.enabled = true;
+    const auto off = internal::PipelineKey::raw(internal::PipelineRole::Shader, disabled);
+    const auto on = internal::PipelineKey::raw(internal::PipelineRole::Shader, enabled);
+    const auto before = selections.size();
+    {
+        internal::PipelineRecipe live[2];
+        live[0].reset(off); live[1].reset(on);
+        const auto first = live[0].select(target);
+        const auto second = live[1].select(target);
+        const auto pipelines = target.resources().rawCache->cache.size();
+        bool bounded = true, reused = true;
+        {
+            internal::PipelineRecipe changing;
+            for (int i=0; i<300; ++i) {
+                changing.reset(i%2 ? on : off);
+                reused &= changing.select(target).raw.id == (i%2 ? second.raw.id : first.raw.id);
+                bounded &= selections.size() == before + 3;
+                // Reset must preserve both independently live selections.
+                reused &= live[0].select(target).raw.id == first.raw.id && live[1].select(target).raw.id == second.raw.id;
+            }
+            internal::PipelineRecipe moved = std::move(changing);
+            reused &= moved.select(target).raw.id == second.raw.id && selections.size() == before + 3;
+        }
+        check("reset selections stay bounded by live recipes and reuse canonical pipelines", bounded && reused &&
+            target.resources().rawCache->cache.size() == pipelines && selections.size() == before + 2);
+        for (int i=0; i<300; ++i) {
+            internal::PipelineRecipe temporary;
+            temporary.reset(i%2 ? on : off); temporary.select(target);
+        }
+        check("temporary recipe destruction removes selections while program stays live", selections.size() == before + 2);
+    }
+    check("destroying live recipes removes all their selections", selections.size() == before);
+}
+// The shared selection cache must remember every variant, not only the last.
+void rememberedSelections(RecipeShader& shader) {
+    auto& target = internal::currentTarget();
+    auto& resources = target.resources();
+    internal::PipelineRecipe recipes[2];
+    auto changed = shader.recipe();
+    for (int i=0; i<2; ++i) {
+        changed.colors[0].blend.enabled = i != 0;
+        recipes[i].reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, changed));
+    }
+    const auto first = recipes[0].select(target);
+    const auto second = recipes[1].select(target);
+    check("recipe revisions separate raster state", first.raw.id != second.raw.id);
+    // Exercise interned custom-blend ids in the reserved packed bits, without
+    // adding #1436's public API. Factories run only on a new selection.
+    const auto revision = internal::nextPipelineRecipeRevision();
+    int builds = 0;
+    auto select = [&](uint64_t blendId) {
+        return target.selectPipeline({revision, uint64_t(internal::PipelineRole::Shader) | (blendId << 32)}, [&] {
+            ++builds;
+            auto desc = shader.recipe(); desc.colors[0].blend.enabled = blendId != 1;
+            return internal::PipelineKey::raw(internal::PipelineRole::Shader, desc);
+        });
+    };
+    const auto packedFirst = select(1);
+    const auto packedSecond = select(2);
+    internal::active2D(BlendMode::Alpha); internal::active2D(BlendMode::Add);
+    auto& pbr = internal::getPbrPipeline(); pbr.ensureInit();
+    auto& points = internal::getPointPipeline(); points.ensureInit();
+    pbr.getPipeline(false); pbr.getPipeline(true);
+    points.getPipeline(); points.getPrimPipeline(); shader.selection();
+    const auto lookups = resources.canonicalLookups;
+    const auto pipelines = resources.rawCache->cache.size();
+    bool reused = true;
+    for (int i=0; i<3000; ++i) {
+        reused &= recipes[i%2].select(target).raw.id == (i%2 ? second.raw.id : first.raw.id);
+        reused &= select(i%2+1).raw.id == (i%2 ? packedSecond.raw.id : packedFirst.raw.id);
+        internal::active2D(i%2 ? BlendMode::Add : BlendMode::Alpha);
+        pbr.getPipeline(i%2 != 0); points.getPipeline(); points.getPrimPipeline(); shader.selection();
+    }
+    check("all alternating selections skip canonical lookup after warm-up", reused && builds == 2 &&
+        resources.canonicalLookups == lookups && resources.rawCache->cache.size() == pipelines);
+    changed = shader.recipe(); changed.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    recipes[0].reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, changed));
+    const auto replacement = recipes[0].select(target);
+    check("reset recipe invalidates last selection on same target", replacement.raw.id != first.raw.id &&
+        replacement.raw.id == target.pipeline(internal::PipelineKey::raw(internal::PipelineRole::Shader, changed)).raw.id);
+    internal::retirePipelineRecipe(revision);
+    check("retiring a recipe removes every packed variant", std::none_of(resources.selectionCache->begin(),
+        resources.selectionCache->end(), [&](const auto& entry) { return entry.first.recipe == revision; }));
+}
 const char* formatName(TextureFormat format) { return format==TextureFormat::RGBA8?"rgba8":"rgba16f"; }
 void signaturesAndLeases(int samples, TextureFormat format) {
     Fbo first, second; first.allocate(160,96,samples,format); second.allocate(113,79,samples,format,true);
@@ -74,6 +202,8 @@ void signaturesAndLeases(int samples, TextureFormat format) {
     first.begin(0,0,0); setupScreenOrtho();
     auto& target=internal::currentTarget();
     const auto selected=shader.selection();
+    rememberedSelections(shader);
+    recipeRetirementChecks(shader);
     const auto desc=sg_query_pipeline_desc(selected.raw);
     check("raw descriptor uses actual target attachments",desc.colors[0].pixel_format==target.colorFormat &&
         desc.sample_count==samples && desc.depth.pixel_format==target.depthFormat);
@@ -101,7 +231,11 @@ void signaturesAndLeases(int samples, TextureFormat format) {
     second.begin(0,0,0); setupScreenOrtho();
     check("nested compatible targets share raw cache",shader.selection().raw.id==selected.raw.id);
     check("nested immediate contexts and pipelines are exclusive",internal::currentTarget().resources().context.id!=context && internal::activeFill2D().id!=immediate.id);
-    second.end(); first.end();
+    second.end();
+    const auto lookupsBeforeReturn=target.resources().canonicalLookups;
+    check("returning to a warmed target skips canonical lookup",shader.selection().raw.id==selected.raw.id &&
+        target.resources().canonicalLookups==lookupsBeforeReturn);
+    first.end();
     expect(read(first),80,48,Color(0,1,0),"queued shader survives nested lease");
     // Retire a compatible bucket while the parent keeps its old generation.
     first.begin(0,0,0); patch(shader);
@@ -121,6 +255,9 @@ void signaturesAndLeases(int samples, TextureFormat format) {
         const auto program=moved.selection().raw.id;
         check("move preserves program identity",program!=0 && !local.isLoaded());
         check("reload creates another program generation",moved.load(pipeline_mesh_shader_desc) && moved.selection().raw.id!=program);
+        const auto& remembered = *internal::currentTarget().resources().selectionCache;
+        check("reload removes retired remembered handles",std::none_of(remembered.begin(),remembered.end(),
+            [&](const auto& entry) { return entry.second.raw.id == program; }));
     }
     first.end(); expect(read(first),80,48,Color(0,1,0),"destroy/reload retains captured program draws");
 }
@@ -364,12 +501,14 @@ void lazyResizeChecks() {
 class PipelineApp : public App {
     int frame_=0, baseVertices_=0, baseCommands_=0;
     Fbo survivor_, otherSurvivor_;
+    RecipeShader survivorShader_;
     std::shared_ptr<Window> secondary_;
     EventListener after_;
 public:
     void setup() override {
         baseVertices_=internal::sglBudget().maxVertices; baseCommands_=internal::sglBudget().maxCommands;
         survivor_.allocate(32,24); otherSurvivor_.allocate(29,19,4);
+        check("generation-surviving shader loads",survivorShader_.load(pipeline_mesh_shader_desc));
         if (internal::supportsSecondaryWindows()) {
             WindowSettings secondary; secondary.setSize(80,60);
             secondary_ = createWindow(secondary);
@@ -390,6 +529,7 @@ public:
     void draw() override {
         if(frame_==0) {
             lazyResizeChecks();
+            recipeMutationChecks();
             for(int samples:{1,4}) for(auto format:{TextureFormat::RGBA8,TextureFormat::RGBA16F}) {
                 signaturesAndLeases(samples,format); pointsAndPremult(samples,format); transformedConsumers(samples,format);
             }
@@ -406,7 +546,10 @@ public:
         if(frame_>=2 && frame_<52) {
             // Real sgl rebuild, fifty separate frames; two surviving Fbos and
             // the window must never retain contexts from the previous setup.
-            survivor_.begin(1,0,0); const auto old=internal::currentTarget().resources().generation; survivor_.end();
+            survivor_.begin(1,0,0);
+            const auto old=internal::currentTarget().resources().generation;
+            const auto oldSelection=survivorShader_.selection();
+            survivor_.end();
             otherSurvivor_.begin(0,0,1); otherSurvivor_.end();
             const auto windowGeneration = secondary_ ? trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().generation : 0;
             internal::resizeSgl(baseVertices_+(frame_%2?0:64),baseCommands_+(frame_%2?0:16));
@@ -414,7 +557,14 @@ public:
             otherSurvivor_.begin(0,0,1); otherSurvivor_.end();
             expect(read(otherSurvivor_),4,4,Color(0,0,1),"second surviving lease after global resize");
             survivor_.allocate(frame_%2?113:160,frame_%2?79:96,frame_%2?4:1,frame_%2?TextureFormat::RGBA16F:TextureFormat::RGBA8);
-            survivor_.begin(0,1,0); check("resize recreates lease generation",internal::currentTarget().resources().generation!=old); survivor_.end();
+            survivor_.begin(0,1,0);
+            auto& target=internal::currentTarget();
+            check("resize recreates lease generation",target.resources().generation!=old);
+            const auto selected=survivorShader_.selection();
+            check("remembered Shader follows rebuilt generation and target signature",selected.raw.id &&
+                selected.generation->serial!=oldSelection.generation->serial &&
+                selected.raw.id==target.pipeline(internal::PipelineKey::raw(internal::PipelineRole::Shader,survivorShader_.recipe())).raw.id);
+            survivor_.end();
             expect(read(survivor_),4,4,Color(0,1,0),"resize survivor pixels");
         }
         ++frame_;

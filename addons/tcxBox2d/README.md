@@ -1,19 +1,32 @@
 # tcxBox2d
 
+Add `tcxBox2d` to your project's `addons.make`, then run `trusscli update`
+from that project and include `<tcxBox2d.h>`. A plain `trusscli new` project
+starts with no addons selected.
+
 2D physics for [TrussC](https://github.com/TrussC-org/TrussC), built on
-[Box2D](https://box2d.org/) (fetched by CMake; version in
+[Box2D 2.4.2](https://box2d.org/) (fetched by CMake; version in
 [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)). Namespace `tcx::box2d`.
 
-Add `tcxBox2d` to your project's `addons.make`, then `#include <tcxBox2d.h>`.
-
+Start with the **Mod API** (`example-basic`), the recommended starting point.
 Two APIs share one `box2d::World`:
 
 - **Classic**: `World` plus body nodes: `CircleBody`, `RectBody`, `PolyShape`.
   See `example-node` / `example-collision` / `example-rawAccess`.
-- **Mod** (experimental): `node->addMod<box2d::RigidBody2D>(box2d::Shape2D::...)`
+- **Mod** (recommended): `node->addMod<box2d::RigidBody2D>(box2d::Shape2D::...)`
   plus `box2d::ColliderRenderer2D` to draw it. See `example-basic`.
 
 Units are pixels (30 px = 1 m by default, `World::scale`) and radians.
+
+## Position and bounds
+
+Call `setPos()` before `addMod<box2d::RigidBody2D>()`: body setup reads the
+node's world position. Circle and box shapes are centered on the node, rather
+than using its position as a top-left corner. Polygon points are local to the
+node; center the points yourself if that is what you need.
+
+`World::createBounds()` creates all four walls, including a ceiling, as one
+static body. `World::getBodyCount()` includes that bounds body (one, not four).
 
 ## Polygon shapes
 
@@ -143,6 +156,15 @@ for solid contacts.
   in Box2D's destruction-listener slot.
 
 Migration: move destroyed-side Exit cleanup before release, accept callback-return surviving Exits with null counterparts, and drain raw Step events through update.
+
+## Box2D 2.4.2 compatibility
+
+Both wrapper APIs keep their polygon welding tolerance and hull order by passing
+the checked hull to Box2D directly. Raw Box2D polygon creation now uses stronger
+welding and removes nearly collinear points; its point-array `Set()` returns
+`bool`. Raw body mass data is returned by `GetMassData()` instead of written to
+a pointer. Math types now have defaulted constructors (value initialization
+zero-initializes them; ordinary default initialization still leaves values unset).
 
 ## Raw Box2D access
 

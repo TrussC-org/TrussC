@@ -1,3 +1,9 @@
+// =============================================================================
+// jsonXmlExample - Read and write structured JSON and XML data.
+//
+// Shows serialization and access to values in both formats.
+// =============================================================================
+
 #include "TrussC.h"
 #include "tcApp.h"
 

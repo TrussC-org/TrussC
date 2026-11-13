@@ -511,10 +511,9 @@ if(("${LUAJIT_NUMMODE}" STREQUAL "1") OR
   list(APPEND HOST_CFLAGS -DLUAJIT_NUMMODE=${LUAJIT_NUMMODE})
 endif()
 
-# TrussC does not enable GDB JIT registration. Keep the upstream GDB source
-# out of ordinary builds (its disabled body contains nonportable macro calls).
-if(LUAJIT_ENABLE_GDBJIT OR LUAJIT_USE_GDBJIT)
-  message(FATAL_ERROR "TrussC builds do not support GDB JIT registration")
+if(LUAJIT_ENABLE_GDBJIT)
+  list(APPEND LJ_DEFINITIONS LUAJIT_ENABLE_GDBJIT)
+  list(APPEND HOST_CFLAGS -DLUAJIT_ENABLE_GDBJIT)
 endif()
 
 if(LUAJIT_ENABLE_LUA52COMPAT)
@@ -726,7 +725,6 @@ add_custom_target(lj_gen_folddef ALL
 )
 
 file(GLOB_RECURSE SRC_LJCORE    "${LJ_DIR}/lj_*.c")
-list(REMOVE_ITEM SRC_LJCORE "${LJ_DIR}/lj_gdbjit.c")
 file(GLOB_RECURSE SRC_LIBCORE   "${LJ_DIR}/lib_*.c")
 
 if(LUAJIT_BUILD_ALAMG)

@@ -3143,8 +3143,8 @@ value_desc.sweep.en = "Screen transition whoosh"
 
 ["BlendMode"]
 description.en = "Selects how drawing colors blend with the existing image."
-description.ja = "描画色と既存の画像を混ぜる方法を指定する。"
-description.ko = "그리기 색상을 기존 이미지와 혼합하는 방식을 지정한다."
+description.ja = "描画色と既存の画像を混ぜる方法を指定します。"
+description.ko = "그리기 색상을 기존 이미지와 혼합하는 방식을 지정합니다."
 details.en = '''
 - Select a mode with `setBlendMode` and read it with `getBlendMode`. The default is `Alpha`, which uses the source alpha for normal compositing.
 - `Add` adds source RGB multiplied by source alpha; `Subtract` subtracts that contribution from the destination. Both add source and destination alpha. `Disabled` overwrites the destination without blending.
@@ -3161,13 +3161,475 @@ details.ko = '''
 - RGBA가 모두 0인 투명한 FBO에 `Multiply`로 그리면 RGB 계산의 두 항 모두에 0인 대상 RGB를 곱하므로 RGB는 검정으로 남습니다. `Multiply`는 소스 알파를 반영하며 곱셈으로 어둡게 만듭니다. 불투명한 대상에서는 정확하지만 반투명한 대상에서는 근사값이며 완전히 투명한 대상에서는 검정에 가까워집니다. `Screen`은 더 밝게 합성하며 소스 알파도 반영합니다.
 '''
 keywords = ["alpha", "additive", "multiply", "transparent FBO", "RGBA zero", "RGB stays black", "destination color", "blend factors"]
-related = ["setBlendMode", "getBlendMode"]
+related = ["setBlendMode", "getBlendMode", "BlendDesc", "setCustomBlendDesc"]
 value_desc.Alpha.en = "Normal alpha blending (default)"
 value_desc.Add.en = "Additive blending"
 value_desc.Multiply.en = "Multiply blending"
 value_desc.Screen.en = "Screen blending"
 value_desc.Subtract.en = "Subtractive blending"
 value_desc.Disabled.en = "No blending (overwrite)"
+value_desc.Custom.en = "Uses the stored BlendDesc for custom RGB/alpha equations. Select after setCustomBlendDesc; source conversion defaults off (see BlendDesc::premultiplySource)."
+value_desc.Custom.ja = "保存済みの BlendDesc で RGB・アルファの式を指定します。setCustomBlendDesc の後に選択します。描画元変換は既定でオフです（BlendDesc::premultiplySource を参照）。"
+value_desc.Custom.ko = "저장된 BlendDesc로 RGB 및 알파 수식을 지정합니다. setCustomBlendDesc 뒤에 선택합니다. 소스 변환은 기본적으로 꺼져 있습니다(BlendDesc::premultiplySource 참조)."
+
+["BlendDesc"]
+category = "graphics"
+description.en = "Defines blend equations that standard modes cannot express, such as adding light while keeping destination alpha."
+description.ja = "光を加算しながら描画先のアルファを保つなど、標準モードでは表せないブレンド式を指定します。"
+description.ko = "빛을 더하면서 대상 알파를 유지하는 등 표준 모드로 표현할 수 없는 블렌드 수식을 지정합니다."
+details.en = '''
+- Use BlendDesc with BlendMode::Custom to write blend equations beyond the standard modes, such as adding light while keeping destination alpha.
+
+Text glow:
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::addKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Glow", 20, 20);
+}
+```
+
+- Use with BlendMode::Custom for separate RGB and alpha equations: `op(source * src, destination * dst)`. Defaults to straight Alpha. Presets leave source conversion off; screenKeepAlpha and premultipliedAdd need it on for straight-alpha text, shapes and images. Fbo sources are already premultiplied. Custom tests depth when enabled but never writes it; windows, Fbos and MSAA support shapes, textures, Font and GlyphBatch.
+'''
+details.ja = '''
+- BlendDesc は、光を加算しながら描画先のアルファを保つなど、標準モードでは表せないブレンド式を BlendMode::Custom で使うための設定です。
+
+文字の光を加算します。
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::addKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Glow", 20, 20);
+}
+```
+
+- BlendMode::Custom で RGB とアルファに別々の式 `op(source * src, destination * dst)` を使います。既定値は通常の Alpha です。プリセットは変換をオフにします。screenKeepAlpha と premultipliedAdd で通常の文字・図形・画像を描くときは変換をオンにします。Fbo は乗算済みです。Custom は有効な深度テストに従いますが、深度は書き込みません。ウィンドウ・Fbo・MSAA で図形、テクスチャ、Font、GlyphBatch に使えます。
+'''
+details.ko = '''
+- BlendDesc는 빛을 더하면서 대상 알파를 유지하는 등 표준 모드로 표현할 수 없는 블렌드 수식을 BlendMode::Custom에서 사용하기 위한 설정입니다.
+
+텍스트의 빛을 더합니다.
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::addKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Glow", 20, 20);
+}
+```
+
+- BlendMode::Custom에서 RGB와 알파에 별도 수식 `op(source * src, destination * dst)`을 사용합니다. 기본값은 일반 Alpha입니다. 프리셋은 변환을 끕니다. screenKeepAlpha와 premultipliedAdd로 일반 텍스트, 도형, 이미지를 그릴 때는 변환을 켭니다. Fbo는 이미 사전 곱셈 상태입니다. Custom은 활성 깊이 테스트를 따르지만 깊이를 기록하지 않습니다. 창, Fbo, MSAA에서 도형, 텍스처, Font, GlyphBatch에 사용합니다.
+'''
+related = ["BlendFactor", "BlendOp", "setCustomBlendDesc", "getCustomBlendDesc", "BlendMode", "BlendDesc::premultiplySource"]
+
+["BlendDesc::Component"]
+description.en = "Holds source and destination factors and an operation."
+description.ja = "描画元と描画先の係数と演算を保持します。"
+description.ko = "소스 및 대상 계수와 연산을 보관합니다."
+details.en = "Assign `{src, dst, op}` to `BlendDesc::rgb` or `alpha`; omitted `op` means Add."
+details.ja = "`BlendDesc::rgb` または `alpha` に `{src, dst, op}` を代入します。`op` を省略すると Add です。"
+details.ko = "`BlendDesc::rgb` 또는 `alpha`에 `{src, dst, op}`를 대입합니다. `op`를 생략하면 Add입니다."
+
+["BlendDesc::Component::src"]
+description.en = "Multiplies the source component."
+description.ja = "描画元の成分に掛ける係数です。"
+description.ko = "소스 성분에 곱하는 계수입니다."
+
+["BlendDesc::Component::dst"]
+description.en = "Multiplies the destination component."
+description.ja = "描画先の成分に掛ける係数です。"
+description.ko = "대상 성분에 곱하는 계수입니다."
+
+["BlendDesc::Component::op"]
+description.en = "Combines the components; defaults to Add."
+description.ja = "成分を合成する演算です。既定値は Add です。"
+description.ko = "성분을 합성하는 연산입니다. 기본값은 Add입니다."
+
+["BlendDesc::rgb"]
+description.en = "Sets the RGB equation; defaults to SrcAlpha/OneMinusSrcAlpha/Add."
+description.ja = "RGB の式です。既定値は SrcAlpha/OneMinusSrcAlpha/Add です。"
+description.ko = "RGB 수식입니다. 기본값은 SrcAlpha/OneMinusSrcAlpha/Add입니다."
+
+["BlendDesc::alpha"]
+description.en = "Sets the alpha equation; defaults to One/OneMinusSrcAlpha/Add."
+description.ja = "アルファの式です。既定値は One/OneMinusSrcAlpha/Add です。"
+description.ko = "알파 수식입니다. 기본값은 One/OneMinusSrcAlpha/Add입니다."
+
+
+["BlendDesc::premultiplySource"]
+description.en = "Multiplies shader source RGB by source alpha before blending; defaults to false."
+description.ja = "ブレンド前にシェーダーの描画元 RGB にアルファを掛けます。既定値は false です。"
+description.ko = "블렌드 전에 셰이더 소스 RGB에 소스 알파를 곱합니다. 기본값은 false입니다."
+details.en = '''
+- Enable for straight-alpha text (Font or GlyphBatch), shapes and images with screenKeepAlpha or premultipliedAdd. Alpha includes texture/glyph coverage. Leave off for Fbos and addKeepAlpha: multiplying alpha twice darkens translucent pixels. All presets leave it false; Style saves this flag.
+
+Prepare screen for straight-alpha text; then select Custom and draw:
+```cpp
+void tcApp::draw() {
+    auto blend = BlendDesc::screenKeepAlpha();
+    blend.premultiplySource = true;
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ja = '''
+- screenKeepAlpha や premultipliedAdd で通常の文字（Font・GlyphBatch）、図形、画像を描くときに有効にします。アルファにはテクスチャ・グリフの被覆率を含みます。Fbo と addKeepAlpha ではオフにします。アルファを二重に掛けると半透明部分が暗くなります。全プリセットの既定値は false です。Style はこのフラグも保存します。
+
+通常の文字用に screen を設定し、続いて Custom を選んで描画します。
+```cpp
+void tcApp::draw() {
+    auto blend = BlendDesc::screenKeepAlpha();
+    blend.premultiplySource = true;
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ko = '''
+- screenKeepAlpha 또는 premultipliedAdd로 일반 텍스트(Font 및 GlyphBatch), 도형, 이미지를 그릴 때 켭니다. 알파에는 텍스처 및 글리프 커버리지가 포함됩니다. Fbo와 addKeepAlpha에서는 끕니다. 알파를 두 번 곱하면 반투명 픽셀이 어두워집니다. 모든 프리셋의 기본값은 false입니다. Style은 이 플래그도 저장합니다.
+
+일반 텍스트용 screen을 설정한 뒤 Custom을 선택하고 그립니다.
+```cpp
+void tcApp::draw() {
+    auto blend = BlendDesc::screenKeepAlpha();
+    blend.premultiplySource = true;
+    setCustomBlendDesc(blend);
+}
+```
+'''
+related = ["BlendDesc", "BlendDesc::screenKeepAlpha", "BlendDesc::premultipliedAdd", "BlendDesc::addKeepAlpha", "GlyphBatch", "Fbo::draw"]
+snippet = '''
+void tcApp::draw() {
+    auto blend = BlendDesc::screenKeepAlpha();
+    blend.premultiplySource = true;
+    setCustomBlendDesc(blend);
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Screen", 20, 20);
+}
+'''
+
+["BlendDesc::premultipliedAdd"]
+description.en = "Adds RGB and alpha with One/One; leaves source conversion off."
+description.ja = "RGB とアルファを One/One で加算し、描画元変換はオフにします。"
+description.ko = "RGB와 알파를 One/One으로 더하며 소스 변환은 끕니다."
+details.en = '''
+- Use for premultiplied Fbo sources; straight-alpha text, shapes and images require premultiplySource = true or transparent quad pixels also add RGB. This preset adds alpha too; use a KeepAlpha preset to preserve destination alpha.
+
+Fbo (already premultiplied); draw an allocated tcApp member `Fbo fbo`:
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::premultipliedAdd());
+    setBlendMode(BlendMode::Custom);
+    fbo.draw(0, 0);
+}
+```
+'''
+details.ja = '''
+- 乗算済みの Fbo に使います。通常の文字・図形・画像では premultiplySource = true が必要です。オフのままでは四角形の透明部分も RGB を加算します。アルファも加算するため、描画先のアルファを保つ場合は KeepAlpha プリセットを使います。
+
+乗算済みの Fbo を描画します。確保済みの tcApp メンバー `Fbo fbo` を使います。
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::premultipliedAdd());
+    setBlendMode(BlendMode::Custom);
+    fbo.draw(0, 0);
+}
+```
+'''
+details.ko = '''
+- 사전 곱셈 Fbo에 사용합니다. 일반 텍스트, 도형, 이미지에는 premultiplySource = true가 필요합니다. 끄면 사각형의 투명한 픽셀도 RGB를 더합니다. 알파도 더하므로 대상 알파를 유지하려면 KeepAlpha 프리셋을 사용합니다.
+
+사전 곱셈 Fbo를 그립니다. 할당된 tcApp 멤버 `Fbo fbo`를 사용합니다.
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::premultipliedAdd());
+    setBlendMode(BlendMode::Custom);
+    fbo.draw(0, 0);
+}
+```
+'''
+related = ["BlendDesc", "BlendDesc::premultiplySource", "BlendDesc::addKeepAlpha", "Fbo::draw"]
+
+["BlendDesc::addKeepAlpha"]
+description.en = "Adds RGB with SrcAlpha/One and preserves destination alpha with Zero/One."
+description.ja = "RGB を SrcAlpha/One で加算し、アルファを Zero/One で保持する式を返します。"
+description.ko = "RGB를 SrcAlpha/One으로 더하고 알파를 Zero/One으로 유지하는 수식을 반환합니다."
+details.en = '''
+- Use for straight-alpha text, shapes and images. Both operations are Add; leave premultiplySource false because SrcAlpha already scales RGB by alpha and glyph coverage. For premultiplied Fbos, use a One source factor instead.
+
+Text glow:
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::addKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Glow", 20, 20);
+}
+```
+'''
+details.ja = '''
+- 通常の文字・図形・画像に使います。両方の演算は Add です。SrcAlpha がアルファとグリフの被覆率を RGB に掛けるため、premultiplySource は false のままにします。乗算済みの Fbo では描画元の係数を One にします。
+
+文字の光を加算します。
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::addKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Glow", 20, 20);
+}
+```
+'''
+details.ko = '''
+- 일반 텍스트, 도형, 이미지에 사용합니다. 두 연산은 Add입니다. SrcAlpha가 알파와 글리프 커버리지를 RGB에 곱하므로 premultiplySource는 false로 둡니다. 사전 곱셈 Fbo에서는 소스 계수 One을 사용합니다.
+
+텍스트의 빛을 더합니다.
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::addKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    drawBitmapString("Glow", 20, 20);
+}
+```
+'''
+related = ["BlendDesc", "BlendDesc::premultipliedAdd", "BlendDesc::premultiplySource"]
+
+["BlendDesc::screenKeepAlpha"]
+description.en = "Screens RGB with OneMinusDstColor/One and preserves destination alpha."
+description.ja = "RGB を OneMinusDstColor/One でスクリーン合成し、描画先のアルファを保持します。"
+description.ko = "RGB를 OneMinusDstColor/One으로 스크린 합성하고 대상 알파를 유지합니다."
+details.en = '''
+- Use for lighter RGB (`S*(1-D)+D`) while keeping alpha (Zero/One); both operations are Add. Conversion defaults off for premultiplied Fbos. Straight-alpha text, shapes and images need premultiplySource = true; see that field for the setup.
+
+Fbo (already premultiplied); draw an allocated tcApp member `Fbo fbo`:
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::screenKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    fbo.draw(0, 0);
+}
+```
+'''
+details.ja = '''
+- RGB を明るく合成し（`S*(1-D)+D`）、アルファを保持します（Zero/One）。両方の演算は Add です。乗算済みの Fbo 用に変換は既定でオフです。通常の文字・図形・画像では premultiplySource = true が必要です。設定はそのフィールドを参照してください。
+
+乗算済みの Fbo を描画します。確保済みの tcApp メンバー `Fbo fbo` を使います。
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::screenKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    fbo.draw(0, 0);
+}
+```
+'''
+details.ko = '''
+- RGB를 밝게 합성하고(`S*(1-D)+D`) 알파를 유지합니다(Zero/One). 두 연산은 Add입니다. 사전 곱셈 Fbo용으로 변환은 기본적으로 꺼져 있습니다. 일반 텍스트, 도형, 이미지에는 premultiplySource = true가 필요합니다. 설정은 해당 필드를 참조합니다.
+
+사전 곱셈 Fbo를 그립니다. 할당된 tcApp 멤버 `Fbo fbo`를 사용합니다.
+```cpp
+void tcApp::draw() {
+    setCustomBlendDesc(BlendDesc::screenKeepAlpha());
+    setBlendMode(BlendMode::Custom);
+    fbo.draw(0, 0);
+}
+```
+'''
+related = ["BlendDesc", "BlendDesc::premultiplySource", "Fbo::draw"]
+
+["BlendFactor"]
+category = "graphics"
+description.en = "Selects a portable source or destination blend factor."
+description.ja = "移植可能な描画元・描画先のブレンド係数を選択します。"
+description.ko = "이식 가능한 소스 및 대상 블렌드 계수를 선택합니다."
+details.en = '''
+- Use in BlendDesc components: Zero, One, source/destination color or alpha, and their one-minus forms. Color factors are RGB-only; alpha accepts only scalar factors. Constants, saturation and dual-source factors are unavailable.
+
+Keep destination alpha:
+```cpp
+void tcApp::draw() {
+    BlendDesc blend;
+    blend.alpha = {BlendFactor::Zero, BlendFactor::One};
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ja = '''
+- BlendDesc の成分に Zero、One、描画元・描画先の色やアルファ、およびそれらを 1 から引いた値を指定します。色の係数は RGB 専用で、アルファにはスカラー係数だけを使います。定数、飽和、デュアルソースの係数は使えません。
+
+描画先のアルファを保持します。
+```cpp
+void tcApp::draw() {
+    BlendDesc blend;
+    blend.alpha = {BlendFactor::Zero, BlendFactor::One};
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ko = '''
+- BlendDesc 성분에 Zero, One, 소스 및 대상의 색상이나 알파와 이를 1에서 뺀 값을 지정합니다. 색상 계수는 RGB 전용이며 알파에는 스칼라 계수만 사용합니다. 상수, 포화, 이중 소스 계수는 사용할 수 없습니다.
+
+대상 알파를 유지합니다.
+```cpp
+void tcApp::draw() {
+    BlendDesc blend;
+    blend.alpha = {BlendFactor::Zero, BlendFactor::One};
+    setCustomBlendDesc(blend);
+}
+```
+'''
+related = ["BlendDesc", "BlendOp"]
+
+["BlendOp"]
+category = "graphics"
+description.en = "Selects Add, Subtract, ReverseSubtract, Minimum or Maximum."
+description.ja = "Add、Subtract、ReverseSubtract、Minimum、Maximum を選択します。"
+description.ko = "Add, Subtract, ReverseSubtract, Minimum, Maximum을 선택합니다."
+details.en = '''
+- Use in BlendDesc components. Subtract is weighted source minus weighted destination; ReverseSubtract reverses the order. Minimum/Maximum compare unweighted components and require One/One.
+
+Choose the larger RGB components:
+```cpp
+void tcApp::draw() {
+    BlendDesc blend;
+    blend.rgb = {BlendFactor::One, BlendFactor::One, BlendOp::Maximum};
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ja = '''
+- BlendDesc の成分に指定します。Subtract は係数を掛けた描画元から描画先を引き、ReverseSubtract は逆順に引きます。Minimum/Maximum は係数を掛けない成分を比較し、One/One が必要です。
+
+RGB の各成分の大きい値を選びます。
+```cpp
+void tcApp::draw() {
+    BlendDesc blend;
+    blend.rgb = {BlendFactor::One, BlendFactor::One, BlendOp::Maximum};
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ko = '''
+- BlendDesc 성분에 지정합니다. Subtract는 계수를 곱한 소스에서 대상을 빼며 ReverseSubtract는 반대 순서로 뺍니다. Minimum/Maximum은 계수를 곱하지 않은 성분을 비교하며 One/One이 필요합니다.
+
+RGB의 각 성분에서 큰 값을 선택합니다.
+```cpp
+void tcApp::draw() {
+    BlendDesc blend;
+    blend.rgb = {BlendFactor::One, BlendFactor::One, BlendOp::Maximum};
+    setCustomBlendDesc(blend);
+}
+```
+'''
+related = ["BlendDesc", "BlendFactor"]
+
+["setCustomBlendDesc"]
+category = "graphics"
+description.en = "Stores a blend equation and source-conversion flag; updates an active Custom mode immediately."
+description.ja = "ブレンド式と描画元変換フラグを保存し、Custom が有効なら直ちに適用します。"
+description.ko = "블렌드 수식과 소스 변환 플래그를 저장하고 Custom이 활성 상태이면 즉시 적용합니다."
+details.en = '''
+- Select Custom separately; the setter keeps the current mode. Set both inside draw() because Nodes reset Style before drawing. pushStyle/popStyle restore the mode and descriptor; resetStyle restores Alpha and BlendDesc{}. Invalid descriptors warn and retain the previous state.
+
+Restore with the style stack:
+```cpp
+void tcApp::draw() {
+    pushStyle();
+    setBlendMode(BlendMode::Custom);
+    popStyle();
+}
+```
+
+Invalid descriptor keeps the previous state:
+```cpp
+void tcApp::draw() {
+    BlendDesc invalid;
+    invalid.rgb.op = BlendOp::Maximum;
+    setCustomBlendDesc(invalid); // Rejected: Maximum needs One/One.
+}
+```
+'''
+details.ja = '''
+- Custom は別に選択します。この関数は現在のモードを変えません。Node は描画前に Style を初期化するため、両方を draw() 内で設定します。pushStyle/popStyle はモードと式を復元し、resetStyle は Alpha と BlendDesc{} に戻します。不正な式は警告し、以前の状態を保持します。
+
+Style スタックで復元します。
+```cpp
+void tcApp::draw() {
+    pushStyle();
+    setBlendMode(BlendMode::Custom);
+    popStyle();
+}
+```
+
+不正な式では以前の状態を保持します。
+```cpp
+void tcApp::draw() {
+    BlendDesc invalid;
+    invalid.rgb.op = BlendOp::Maximum;
+    setCustomBlendDesc(invalid); // 拒否されます。Maximum には One/One が必要です。
+}
+```
+'''
+details.ko = '''
+- Custom은 별도로 선택합니다. 이 함수는 현재 모드를 바꾸지 않습니다. Node는 그리기 전에 Style을 초기화하므로 둘 다 draw() 안에서 설정합니다. pushStyle/popStyle은 모드와 수식을 복원하며 resetStyle은 Alpha와 BlendDesc{}로 되돌립니다. 잘못된 수식은 경고하고 이전 상태를 유지합니다.
+
+Style 스택으로 복원합니다.
+```cpp
+void tcApp::draw() {
+    pushStyle();
+    setBlendMode(BlendMode::Custom);
+    popStyle();
+}
+```
+
+잘못된 수식은 이전 상태를 유지합니다.
+```cpp
+void tcApp::draw() {
+    BlendDesc invalid;
+    invalid.rgb.op = BlendOp::Maximum;
+    setCustomBlendDesc(invalid); // 거부합니다. Maximum에는 One/One이 필요합니다.
+}
+```
+'''
+related = ["BlendDesc", "getCustomBlendDesc", "setBlendMode", "BlendDesc::premultiplySource"]
+
+["getCustomBlendDesc"]
+category = "graphics"
+description.en = "Returns a copy of the custom blend slot, regardless of the active mode."
+description.ja = "有効なモードにかかわらず、カスタムブレンドのスロットのコピーを返します。"
+description.ko = "활성 모드와 관계없이 사용자 지정 블렌드 슬롯의 복사본을 반환합니다."
+details.en = '''
+- Use to inspect or edit a copy of the stored descriptor, initially BlendDesc{} (straight Alpha). Editing the copy has no effect until setCustomBlendDesc; getBlendMode reports the active mode separately.
+
+Edit the stored RGB operation:
+```cpp
+void tcApp::draw() {
+    auto blend = getCustomBlendDesc();
+    blend.rgb.op = BlendOp::Add;
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ja = '''
+- 保存済みの式を確認したり、コピーを編集したりするときに使います。初期値は通常の Alpha の式 BlendDesc{} です。コピーの編集は setCustomBlendDesc まで反映されません。有効なモードは getBlendMode で取得します。
+
+保存済みの RGB 演算を変更します。
+```cpp
+void tcApp::draw() {
+    auto blend = getCustomBlendDesc();
+    blend.rgb.op = BlendOp::Add;
+    setCustomBlendDesc(blend);
+}
+```
+'''
+details.ko = '''
+- 저장된 수식을 확인하거나 복사본을 편집할 때 사용합니다. 초기값은 일반 Alpha 수식 BlendDesc{}입니다. 복사본 편집은 setCustomBlendDesc까지 반영되지 않습니다. 활성 모드는 getBlendMode로 조회합니다.
+
+저장된 RGB 연산을 변경합니다.
+```cpp
+void tcApp::draw() {
+    auto blend = getCustomBlendDesc();
+    blend.rgb.op = BlendOp::Add;
+    setCustomBlendDesc(blend);
+}
+```
+'''
+related = ["BlendDesc", "setCustomBlendDesc", "getBlendMode"]
 
 ["Bottom"]
 keywords = ["direction", "align", "vertical"]
@@ -8625,19 +9087,19 @@ details.en = '''
 - `drawStencil(x, y)` reconstructs all eight stencil bits into a cached R8 Fbo using the internal eight-draw path, then draws at attachment size with nearest sampling. Each byte is displayed as gray `value / 255`; no CPU readback is needed. It preserves the source color and stencil.
 - Uses the current target's coordinates, transformations, depth test and scissor. The preview is opaque and ignores the current tint and blend mode; the tint, blend mode and pipeline are restored afterward. Like other image draws, it leaves texturing off, so call `bind()` again on a texture you were drawing with. Repeated calls refresh the capture and reuse the cache.
 - Only allocated, ended, owned single-sample Fbos are supported. Unallocated, active or MSAA sources warn and draw nothing. There is no main-target/free-function form in this slice.
-- The snippet uses the internal round-trip test fixture to write an ended R8 pattern into stencil; `writeGray` is not a public application API. Public stencil writing and main-target capture are later slices.
+- The snippet uses the internal round-trip test fixture to write an ended R8 pattern into stencil; `writeGray` is not a public application API. Use `beginStencil` and `clearStencil` for uniform public byte clearing. Geometry writing and main-target capture are later slices.
 '''
 details.ja = '''
 - `drawStencil(x, y)` は内部の 8 回描画の処理で stencil の全 8 ビットをキャッシュした R8 Fbo に復元し、添付画像と同じサイズで最近傍サンプリングして描画します。各バイトを `value / 255` のグレーで表示し、CPU への読み出しは行いません。元の色と stencil は保持します。
 - 現在の描画先の座標、変換、深度テスト、scissor を使います。プレビューは不透明で、現在の色とブレンドモードを使いません。色、ブレンドモード、パイプラインは呼び出し後に復元します。ほかの画像の描画と同じく、テクスチャは無効のままになるので、使っていたテクスチャは `bind()` し直してください。繰り返し呼び出すとキャッシュを再利用して内容を更新します。
 - 確保済みで `end()` 後の、所有するシングルサンプル Fbo のみ対応します。未確保、アクティブ、MSAA の場合は警告して描画しません。この段階ではメイン描画先や自由関数の形式はありません。
-- 使用例は内部の往復テスト用処理で、描画済みの R8 パターンを stencil に書き込みます。`writeGray` は公開アプリ API ではありません。公開書き込み API とメイン描画先の取得は後の段階で扱います。
+- 使用例は内部の往復テスト用処理で、描画済みの R8 パターンを stencil に書き込みます。`writeGray` は公開アプリ API ではありません。一様なバイト値のクリアには公開 API の `beginStencil` と `clearStencil` を使います。形状の書き込みとメイン描画先の取得は後の段階で扱います。
 '''
 details.ko = '''
 - `drawStencil(x, y)`는 내부의 8회 그리기 경로로 스텐실의 전체 8비트를 캐시된 R8 Fbo에 복원하고 첨부 이미지 크기로 최근접 샘플링하여 그립니다. 각 바이트를 `value / 255` 회색으로 표시하며 CPU로 읽지 않습니다. 원본 색상과 스텐실을 보존합니다.
 - 현재 타깃의 좌표, 변환, 깊이 테스트와 scissor를 사용합니다. 미리보기는 불투명하며 현재 색상과 블렌드 모드를 사용하지 않습니다. 색상, 블렌드 모드, 파이프라인은 호출 후 복원합니다. 다른 이미지 그리기와 마찬가지로 텍스처는 비활성 상태로 남으므로, 사용하던 텍스처는 `bind()`를 다시 호출하세요. 반복 호출하면 캐시를 재사용하고 캡처를 갱신합니다.
 - 할당되었고 `end()`가 끝난 소유 단일 샘플 Fbo만 지원합니다. 미할당, 활성 또는 MSAA 소스는 경고하고 그리지 않습니다. 이 단계에는 메인 타깃이나 자유 함수 형식이 없습니다.
-- 예제는 내부 왕복 테스트용 처리로 렌더링이 끝난 R8 패턴을 스텐실에 기록합니다. `writeGray`는 공개 애플리케이션 API가 아닙니다. 공개 쓰기 API와 메인 타깃 캡처는 이후 단계에서 다룹니다.
+- 예제는 내부 왕복 테스트용 처리로 렌더링이 끝난 R8 패턴을 스텐실에 기록합니다. `writeGray`는 공개 애플리케이션 API가 아닙니다. 균일한 바이트 값 지우기에는 공개 API인 `beginStencil`과 `clearStencil`을 사용합니다. 도형 쓰기와 메인 타깃 캡처는 이후 단계에서 다룹니다.
 '''
 snippet = '''
 // gray: ended R8 pattern; fbo: equally sized, ended, single-sample Fbo
@@ -8658,19 +9120,19 @@ details.en = '''
 - `bool readStencil(Pixels& pixels) const` uses the same cached R8 reconstruction as `drawStencil`, then the existing Fbo color readback. On success it replaces `pixels` with top-left, one-channel U8 bytes and returns `true`. On failure it returns `false` and leaves `pixels` unchanged. The source color and stencil are preserved.
 - Call after `end()` on all active Fbos. Unallocated, active and MSAA sources are refused with a warning. Main-target capture is unavailable. GPU readback synchronizes work and is intended for debugging.
 - Save through `pixels.save("stencil.png")`; the existing PNG writer stores the channel bytes without gamma remapping. WebGL2 uses existing GL readback; WebGPU synchronous readback is unsupported and returns `false` (a later slice adds asynchronous readback).
-- The snippet's `writeGray` is an internal test fixture, not a public stencil-writing API; `gray` contains an ended R8 pattern.
+- The snippet's `writeGray` is an internal test fixture, not a public stencil-writing API; `gray` contains an ended R8 pattern. Use `beginStencil` and `clearStencil` for uniform clearing while owned.
 '''
 details.ja = '''
 - `bool readStencil(Pixels& pixels) const` は `drawStencil` と同じキャッシュした R8 への復元処理と、既存の Fbo カラー読み出しを使います。成功すると `pixels` を左上原点の 1 チャンネル U8 バイト列に置き換えて `true` を返します。失敗すると `false` を返し、`pixels` は変更しません。元の色と stencil は保持します。
 - すべてのアクティブな Fbo の `end()` 後に呼んでください。未確保、アクティブ、MSAA の場合は警告して拒否します。メイン描画先の取得には対応しません。GPU の読み出しは処理を同期するため、デバッグ用です。
 - `pixels.save("stencil.png")` で保存します。既存の PNG ライターはガンマ変換をせずにチャンネルのバイトを保存します。WebGL2 は既存の GL 読み出しを使います。WebGPU の同期読み出しは非対応で `false` を返します。非同期読み出しは後の段階で扱います。
-- 使用例の `writeGray` は内部テスト用で、公開の stencil 書き込み API ではありません。`gray` には描画済みの R8 パターンを用意します。
+- 使用例の `writeGray` は内部テスト用で、公開の stencil 書き込み API ではありません。`gray` には描画済みの R8 パターンを用意します。所有中の一様なクリアには `beginStencil` と `clearStencil` を使います。
 '''
 details.ko = '''
 - `bool readStencil(Pixels& pixels) const`는 `drawStencil`과 같은 캐시된 R8 복원 경로와 기존 Fbo 색상 읽기를 사용합니다. 성공하면 `pixels`를 왼쪽 위 원점의 1채널 U8 바이트로 교체하고 `true`를 반환합니다. 실패하면 `false`를 반환하며 `pixels`를 변경하지 않습니다. 원본 색상과 스텐실을 보존합니다.
 - 모든 활성 Fbo에서 `end()`를 호출한 뒤 사용합니다. 미할당, 활성 또는 MSAA 소스는 경고하고 거부합니다. 메인 타깃 캡처는 지원하지 않습니다. GPU 읽기는 작업을 동기화하므로 디버깅용입니다.
 - `pixels.save("stencil.png")`로 저장합니다. 기존 PNG 작성기는 감마 변환 없이 채널 바이트를 저장합니다. WebGL2는 기존 GL 읽기를 사용합니다. WebGPU의 동기 읽기는 지원하지 않으며 `false`를 반환합니다. 비동기 읽기는 이후 단계에서 다룹니다.
-- 예제의 `writeGray`는 내부 테스트용이며 공개 스텐실 쓰기 API가 아닙니다. `gray`에는 렌더링이 끝난 R8 패턴을 준비합니다.
+- 예제의 `writeGray`는 내부 테스트용이며 공개 스텐실 쓰기 API가 아닙니다. `gray`에는 렌더링이 끝난 R8 패턴을 준비합니다. 소유 중인 균일한 지우기에는 `beginStencil`과 `clearStencil`을 사용합니다.
 '''
 snippet = '''
 // gray: ended R8 pattern; fbo: equally sized, ended, single-sample Fbo
@@ -9812,7 +10274,7 @@ description.en = "Draws text with the loaded font."
 description.ja = "読み込んだフォントでテキストを描画する。"
 description.ko = "로드된 폰트로 텍스트를 그린다."
 details.en = '''
-- Draws UTF-8 `text` at the alignment anchor `(x, y)` using the current color, transform, and rendering target; an unloaded font or empty string draws nothing.
+- Draws UTF-8 `text` at the alignment anchor `(x, y)` using the current color, blend mode, transform, and rendering target; an unloaded font or empty string draws nothing.
 - The three-argument overload uses the global alignment set by `setTextAlign`, rather than the values stored by `Font::setAlign`; the five-argument overload uses its explicit `Direction h, Direction v` arguments.
 - Missing characters use glyph index `0` in the loaded font; there is no automatic fallback to OS fonts. Load a font that contains the characters you need.
 - Horizontal writing advances left to right and starts a new row at each newline; `WritingMode::VerticalRL` advances top to bottom and starts successive columns to the left. Horizontal tabs advance by four spaces; vertical tabs are ignored.
@@ -9822,7 +10284,7 @@ details.en = '''
 - Call Font methods on the main thread. `loadAsync` handles background preparation internally, while shared-cache access, GPU work, and completion delivery occur on the main thread.
 '''
 details.ja = '''
-- UTF-8 の `text` を、揃えの基準点 `(x, y)` に現在の色、変換、描画先で描画します。フォントが未読み込みの場合や文字列が空の場合は何も描画しません。
+- UTF-8 の `text` を、揃えの基準点 `(x, y)` に現在の色、ブレンドモード、変換、描画先で描画します。フォントが未読み込みの場合や文字列が空の場合は何も描画しません。
 - 引数が 3 個の版は、`Font::setAlign` が保持する値ではなく、`setTextAlign` で設定したグローバルな揃えを使います。引数が 5 個の版は、明示した `Direction h, Direction v` を使います。
 - 読み込んだフォントにない文字はグリフ番号 `0` を使い、OS のフォントには自動で切り替わりません。必要な文字を含むフォントを読み込んでください。
 - 横書きは左から右に進み、改行で次の行へ移ります。`WritingMode::VerticalRL` は上から下に進み、改行で左隣の列へ移ります。横書きのタブはスペース 4 個分進み、縦書きのタブは無視します。
@@ -9832,7 +10294,7 @@ details.ja = '''
 - Font の関数はメインスレッドで呼び出してください。`loadAsync` は内部でバックグラウンドの準備を行いますが、共有キャッシュへのアクセス、GPU 処理、完了通知はメインスレッドで行います。
 '''
 details.ko = '''
-- UTF-8 `text`를 정렬 기준점 `(x, y)`에 현재 색상, 변환 및 렌더링 대상으로 그립니다. 폰트가 로드되지 않았거나 문자열이 비어 있으면 아무것도 그리지 않습니다.
+- UTF-8 `text`를 정렬 기준점 `(x, y)`에 현재 색상, 블렌드 모드, 변환 및 렌더링 대상으로 그립니다. 폰트가 로드되지 않았거나 문자열이 비어 있으면 아무것도 그리지 않습니다.
 - 인수가 세 개인 오버로드는 `Font::setAlign`에 저장된 값 대신 `setTextAlign`으로 설정한 전역 정렬을 사용합니다. 인수가 다섯 개인 오버로드는 명시한 `Direction h, Direction v`를 사용합니다.
 - 로드한 폰트에 없는 문자는 글리프 인덱스 `0`을 사용하며 OS 폰트로 자동 전환하지 않습니다. 필요한 문자가 포함된 폰트를 로드해야 합니다.
 - 가로쓰기는 왼쪽에서 오른쪽으로 진행하고 줄바꿈에서 다음 행으로 이동합니다. `WritingMode::VerticalRL`은 위에서 아래로 진행하고 줄바꿈에서 왼쪽 열로 이동합니다. 가로쓰기의 탭은 공백 네 개만큼 진행하며 세로쓰기의 탭은 무시합니다.
@@ -34230,7 +34692,7 @@ details.en = '''
 - It waits for the program, not for children it leaves running.
 - The frame waits too when it is called from `update()` or `draw()`. For anything slow, use `Process`.
 - `started == false` means the program could not be started (not found, not executable, or a platform without processes: Web, iOS, Android); an error is logged.
-- Windows: `args[0]` is found on PATH only as an `.exe`. Run batch scripts through cmd: `{"cmd", "/c", "npm", "run", "build"}`. Console programs run without a console window.
+- Windows: `args[0]` is found on PATH only as an `.exe`. Run batch scripts through cmd: `{"cmd", "/c", "npm", "run", "build"}`. Embedded quotes are escaped for CommandLineToArgvW / the MSVC CRT; `cmd /c` uses its own parser and does not receive them verbatim. Console programs run without a console window.
 '''
 details.ja = '''
 - プログラム名、引数、作業ディレクトリに埋め込み NUL があれば起動前に拒否します。環境変数は継承し、子プロセスごとの上書きはありません。Windows の出力バイト列は子プロセスのコードページから変換しません。
@@ -34240,7 +34702,7 @@ details.ja = '''
 - 待つのはプログラム本体だけで、そのプログラムが残した子プロセスは待ちません。
 - `update()` や `draw()` から呼ぶとフレームも待たされます。時間のかかる処理には `Process` を使ってください。
 - `started == false` はプログラムを起動できなかったことを表します（見つからない、実行できない、またはプロセスのないプラットフォーム: Web、iOS、Android）。エラーがログに出ます。
-- Windows: `args[0]` は PATH 上の `.exe` だけが見つかります。バッチスクリプトは cmd 経由で実行してください: `{"cmd", "/c", "npm", "run", "build"}`。コンソールプログラムはコンソールウィンドウを開かずに実行されます。
+- Windows: `args[0]` は PATH 上の `.exe` だけが見つかります。バッチスクリプトは cmd 経由で実行してください: `{"cmd", "/c", "npm", "run", "build"}`。引数内の引用符は CommandLineToArgvW / MSVC CRT 向けにエスケープされるため、独自のパーサーを使う `cmd /c` にはそのまま渡りません。コンソールプログラムはコンソールウィンドウを開かずに実行されます。
 '''
 details.ko = '''
 - 프로그램 이름, 인자 또는 작업 디렉터리에 포함된 NUL은 시작 전에 거부합니다. 환경 변수는 상속하며 자식별 재정의는 없습니다. Windows 출력 바이트는 자식의 코드 페이지에서 변환하지 않습니다.
@@ -34250,7 +34712,7 @@ details.ko = '''
 - 프로그램 자체만 기다리며, 프로그램이 남겨 둔 자식 프로세스는 기다리지 않습니다.
 - `update()`나 `draw()`에서 호출하면 프레임도 함께 멈춥니다. 오래 걸리는 작업에는 `Process`를 사용합니다.
 - `started == false`는 프로그램을 시작하지 못했다는 뜻입니다(찾을 수 없음, 실행할 수 없음, 또는 프로세스가 없는 플랫폼: Web, iOS, Android). 오류가 로그에 남습니다.
-- Windows: `args[0]`은 PATH에 있는 `.exe`만 찾습니다. 배치 스크립트는 cmd를 거쳐 실행합니다: `{"cmd", "/c", "npm", "run", "build"}`. 콘솔 프로그램은 콘솔 창을 열지 않고 실행됩니다.
+- Windows: `args[0]`은 PATH에 있는 `.exe`만 찾습니다. 배치 스크립트는 cmd를 거쳐 실행합니다: `{"cmd", "/c", "npm", "run", "build"}`. 인자 안의 따옴표는 CommandLineToArgvW / MSVC CRT에 맞게 이스케이프되므로 자체 파서를 쓰는 `cmd /c`에는 그대로 전달되지 않습니다. 콘솔 프로그램은 콘솔 창을 열지 않고 실행됩니다.
 '''
 snippet = '''
 ProcessResult r = runProcess({"git", "rev-parse", "HEAD"});
@@ -34350,10 +34812,10 @@ details.ko = '''
 - macOS, Windows, Linux를 지원합니다. 그 밖의 플랫폼에서는 `startAsync()`가 false를 반환하고 오류가 로그에 남습니다.
 '''
 snippet = '''
-// App members: std::mutex outputMutex; std::vector<std::string> output;
+// App members: mutex outputMutex; vector<string> output;
 // Process process; EventListener lineListener, exitListener;
 lineListener = process.onLine.listen([this](ProcessLineEventArgs& e) {
-    std::lock_guard<std::mutex> lock(outputMutex);
+    lock_guard<mutex> lock(outputMutex);
     output.push_back(e.line);
 });
 exitListener = process.onExit.listen([this](ProcessExitEventArgs& e) {
@@ -34566,9 +35028,9 @@ description.ja = "`startAsync()` から終了までの時間を秒で保持し�
 description.ko = "`startAsync()`부터 종료까지의 시간을 초 단위로 담습니다."
 
 ["ProcessExitEventArgs::killed"]
-description.en = "Indicates whether the program was ended by `kill()` or by destroying the Process."
-description.ja = "プログラムが `kill()` または Process の破棄で終了したかどうかを表します。"
-description.ko = "프로그램이 `kill()`이나 Process 파괴로 종료되었는지 나타냅니다."
+description.en = "Indicates whether the program was ended by `kill()`. Destroying the Process clears listeners, so `onExit` is not delivered on destruction."
+description.ja = "プログラムが `kill()` で終了したかどうかを表します。Process の破棄時はリスナーが解除されるため、`onExit` は通知されません。"
+description.ko = "프로그램이 `kill()`로 종료되었는지 나타냅니다. Process를 파괴할 때는 리스너를 해제하므로 `onExit`는 전달되지 않습니다."
 
 ["Top"]
 keywords = ["direction", "align", "vertical"]
@@ -42976,6 +43438,46 @@ details.ko = '''
 - `WindowSettings&`를 반환합니다. 설정 함수의 공통 동작은 `WindowSettings::setSize`에 설명되어 있습니다.
 '''
 
+["WindowSettings::maxFrameLatency"]
+description.en = "Windows D3D11 maximum frame latency; defaults to 2."
+description.ja = "Windows D3D11 の最大フレーム遅延です。既定値は 2 です。"
+description.ko = "Windows D3D11의 최대 프레임 지연이며 기본값은 2입니다."
+details.en = "Use at window creation to balance CPU/GPU overlap against input latency and GPU memory on Windows D3D11. Accepts 1–16 (default 2, three back buffers); other backends ignore it. See `WindowSettings::setMaxFrameLatency` for details."
+details.ja = "Windows D3D11 で CPU/GPU の並行処理、入力遅延、GPU メモリのバランスを調整するため、ウィンドウの作成時に指定します。範囲は 1〜16、既定値は 2（バックバッファ 3 個）です。他のバックエンドは無視します。詳細は `WindowSettings::setMaxFrameLatency` を参照してください。"
+details.ko = "Windows D3D11에서 CPU/GPU 병렬 처리, 입력 지연, GPU 메모리의 균형을 조정할 때 윈도우 생성 시 지정합니다. 범위는 1–16이며 기본값은 2(백 버퍼 3개)입니다. 다른 백엔드는 이 설정을 무시합니다. 자세한 내용은 `WindowSettings::setMaxFrameLatency`을 참조하시기 바랍니다."
+related = ["WindowSettings::setMaxFrameLatency"]
+
+["WindowSettings::setMaxFrameLatency"]
+description.en = "Sets per-window Windows D3D11 CPU/GPU overlap; lower values reduce input latency and back-buffer memory."
+description.ja = "Windows D3D11 でウィンドウごとの CPU/GPU の並行処理量を設定します。小さな値は入力遅延とバックバッファのメモリ使用量を抑えます。"
+description.ko = "Windows D3D11에서 윈도우별 CPU/GPU 병렬 처리량을 설정합니다. 작은 값은 입력 지연과 백 버퍼 메모리 사용량을 줄입니다."
+details.en = '''
+- Use at window creation to balance CPU/GPU overlap against input latency and GPU memory on Windows D3D11. Accepts 1–16 (default 2); each window holds latency + 1 back buffers, capped at 16 buffers for latency 16. Other backends ignore it.
+- Each extra back buffer uses about 8 MB at 1080p RGBA8. Each out-of-range call logs a Warning and uses 2. Returns the same `WindowSettings&` for chaining.
+- 1 gives the lowest input latency. Higher values let CPU and GPU work overlap for a smoother frame rate, with up to N−1 frames of extra input latency.
+- It does not set the update or draw rate.
+'''
+details.ja = '''
+- Windows D3D11 で CPU/GPU の並行処理、入力遅延、GPU メモリのバランスを調整するため、ウィンドウの作成時に指定します。範囲は 1〜16、既定値は 2 です。各ウィンドウは遅延値 + 1 個のバックバッファを保持しますが、遅延値 16 では 16 個を上限とします。他のバックエンドは無視します。
+- バックバッファ 1 個の追加につき、1080p RGBA8 で約 8 MB を使います。範囲外の呼び出しは毎回 Warning を記録し、2 を使います。連結用に同じ `WindowSettings&` を返します。
+- 1 は入力遅延を最小にします。大きな値では CPU と GPU の処理が重なり、フレームレートが滑らかになりますが、入力遅延が最大 N−1 フレーム増えます。
+- update や draw のレートは設定しません。
+'''
+details.ko = '''
+- Windows D3D11에서 CPU/GPU 병렬 처리, 입력 지연, GPU 메모리의 균형을 조정할 때 윈도우 생성 시 지정합니다. 범위는 1–16이며 기본값은 2입니다. 각 윈도우는 지연 값 + 1개의 백 버퍼를 유지하며 지연 값 16에서는 16개로 제한합니다. 다른 백엔드는 이 설정을 무시합니다.
+- 백 버퍼를 하나 추가할 때마다 1080p RGBA8에서 약 8 MB를 사용합니다. 범위를 벗어난 호출마다 Warning을 기록하고 2를 사용합니다. 연결 호출을 위해 같은 `WindowSettings&`를 반환합니다.
+- 1은 입력 지연을 최소화합니다. 값이 높으면 CPU와 GPU 작업이 겹쳐 프레임 속도가 부드러워지지만 입력 지연이 최대 N−1프레임 늘어납니다.
+- update나 draw 빈도를 설정하지 않습니다.
+'''
+related = ["WindowSettings::maxFrameLatency", "WindowSettings::setSwapInterval", "createWindow"]
+snippet = '''
+class tcApp : public App {
+    void setup() override {
+        auto window = createWindow(WindowSettings().setMaxFrameLatency(1));
+    }
+};
+'''
+
 ["WindowSettings::visible"]
 description.en = "Initial requested visibility; true by default."
 description.ja = "作成時に要求する表示状態です。既定値は true です。"
@@ -44573,6 +45075,96 @@ details.ko = '''
 - 이 자유 함수는 오버라이드할 수 있는 `Node::cleanup()` 콜백과 별개입니다. 앱과 노드의 종료 처리는 `App`과 `Node`를 참조하세요.
 '''
 related = ["setup", "exitApp", "App", "Node"]
+
+["beginStencil"]
+category = "graphics_fbo"
+keywords = ["stencil", "ownership", "mask"]
+description.en = "Borrows all eight stencil bits on the current drawing target."
+description.ja = "現在の描画先の stencil の全 8 ビットを借り受けます。"
+description.ko = "현재 그리기 타깃의 스텐실 전체 8비트를 빌립니다."
+details.en = '''
+- Returns `true` on success without clearing stored bytes. Pair `endStencil()` only with a successful begin, while that target is current. Ownership is independent per target and may span Fbo end/begin calls and frames. Fbo allocation initializes stencil to zero; reallocation resets ownership.
+- Returns `false` with a warning when there is no stencil attachment, the target is already owned, or a framework stencil clip scope is active. There is no shared user mode.
+- While owned, values are plain bytes 0–255. Framework stencil clipping and draw-once are suspended; scissor still works. Slice 2a provides uniform clearing; geometry writing and value testing come later.
+- endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values. It restores saved semantic state, without restoring previous pixels. Fbo bytes persist across frames and color/depth clears; screen persistence is not guaranteed.
+'''
+details.ja = '''
+- 保存済みの値をクリアせず、成功時に `true` を返します。成功した場合だけ、その描画先が現在の描画先である間に `endStencil()` を呼びます。所有権は描画先ごとに独立し、Fbo の end/begin やフレームをまたいで保持できます。Fbo の確保時に stencil をゼロで初期化し、再確保時に所有権をリセットします。
+- stencil 添付画像がない場合、すでに所有中の場合、フレームワークの stencil クリップスコープが有効な場合は、警告して `false` を返します。ユーザー用の共有モードはありません。
+- 所有中の値は 0〜255 の通常のバイト値です。フレームワークの stencil クリップと draw-once は停止しますが、scissor は使えます。2a では一様なクリアを提供し、形状の書き込みと値のテストは後の段階で追加します。
+- endStencil は stencil を 0 に戻します。値が必要な場合は、endStencil の前に readStencil で読み取ってください。保存した意味上の状態を復元しますが、以前のピクセル値は復元しません。Fbo の値はフレームや色・深度のクリアをまたいで保持しますが、画面の保持は保証しません。
+'''
+details.ko = '''
+- 저장된 값을 지우지 않고 성공 시 `true`를 반환합니다. 성공한 경우에만 해당 타깃이 현재 타깃일 때 `endStencil()`을 호출합니다. 소유권은 타깃별로 독립적이며 Fbo의 end/begin 호출과 프레임을 넘어 유지할 수 있습니다. Fbo 할당 시 스텐실을 0으로 초기화하고 재할당 시 소유권을 초기화합니다.
+- 스텐실 첨부 이미지가 없거나 이미 소유 중이거나 프레임워크 스텐실 클립 스코프가 활성화된 경우 경고하고 `false`를 반환합니다. 사용자 공유 모드는 없습니다.
+- 소유 중인 값은 0~255의 일반 바이트 값입니다. 프레임워크 스텐실 클립과 draw-once는 중단되지만 scissor는 작동합니다. 2a는 균일한 지우기를 제공하며 도형 쓰기와 값 테스트는 이후 단계에서 추가합니다.
+- endStencil은 스텐실을 0으로 되돌립니다. 값이 필요하면 endStencil 전에 readStencil로 읽어야 합니다. 저장한 의미상 상태를 복원하지만 이전 픽셀 값은 복원하지 않습니다. Fbo 값은 프레임과 색상·깊이 지우기를 넘어 유지하지만 화면의 지속성은 보장하지 않습니다.
+'''
+snippet = '''
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+'''
+related = ["clearStencil", "endStencil", "Fbo::readStencil"]
+
+["clearStencil"]
+category = "graphics_fbo"
+keywords = ["stencil", "clear", "byte"]
+description.en = "Replaces all stencil bytes with a plain value while owned."
+description.ja = "所有中の stencil の全バイトを通常の値で置き換えます。"
+description.ko = "소유 중인 스텐실의 모든 바이트를 일반 값으로 바꿉니다."
+details.en = '''
+- `clearStencil(value = 0)` requires successful `beginStencil()` on the current target. Outside ownership, every call warns and does nothing.
+- Replaces all eight bits over the full attachment with a value 0–255. Earlier drawing finishes first; later drawing follows the clear. Color and depth are preserved. Transforms, viewport and scissor do not restrict the clear, and drawing state is restored afterward.
+- See `beginStencil` for target lifetime and handback behavior.
+'''
+details.ja = '''
+- `clearStencil(value = 0)` は現在の描画先での `beginStencil()` の成功を必要とします。所有していない場合は呼び出すたびに警告し、何も変更しません。
+- 添付画像全体の全 8 ビットを 0〜255 の値で置き換えます。それまでの描画を先に実行し、以降の描画はクリアの後に実行します。色と深度を保持します。変換、viewport、scissor はクリア範囲を制限せず、描画状態は呼び出し後に復元します。
+- 描画先の寿命と返却時の動作は `beginStencil` を参照してください。
+'''
+details.ko = '''
+- `clearStencil(value = 0)`은 현재 타깃에서 `beginStencil()`이 성공해야 합니다. 소유권이 없으면 호출할 때마다 경고하고 아무것도 변경하지 않습니다.
+- 첨부 이미지 전체의 8비트를 0~255 값으로 바꿉니다. 이전 그리기를 먼저 실행하며 이후 그리기는 지우기 뒤에 실행합니다. 색상과 깊이를 보존합니다. 변환, viewport, scissor는 지우기 영역을 제한하지 않으며 호출 후 그리기 상태를 복원합니다.
+- 타깃 수명과 반환 동작은 `beginStencil`을 참조합니다.
+'''
+snippet = '''
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+'''
+related = ["beginStencil", "endStencil", "clear"]
+
+["endStencil"]
+category = "graphics_fbo"
+keywords = ["stencil", "restore", "ownership"]
+description.en = "Returns the whole stencil to 0, ends ownership and restores the saved framework state."
+description.ja = "stencil 全体を 0 に戻して所有権を返却し、保存したフレームワークの状態を復元します。"
+description.ko = "스텐실 전체를 0으로 되돌리고 소유권을 반환하며 저장한 프레임워크 상태를 복원합니다."
+details.en = '''
+- Call on the target with a successful `beginStencil()`. An unmatched call warns and does nothing.
+- endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
+- Submits earlier drawing, zeroes all eight stencil bits with a colorless draw using write mask `0xFF`, then restores saved semantic state. No pixel snapshot is restored.
+- See `beginStencil` for the complete ownership rules.
+'''
+details.ja = '''
+- `beginStencil()` が成功した描画先で呼びます。対応する開始がない場合は警告し、何もしません。
+- endStencil は stencil を 0 に戻します。値が必要な場合は、endStencil の前に readStencil で読み取ってください。
+- それまでの描画を実行し、書き込みマスク `0xFF` で色を書かずに stencil の全 8 ビットをゼロにしてから、保存した意味上の状態を復元します。ピクセルのスナップショットは復元しません。
+- 所有権の全規則は `beginStencil` を参照してください。
+'''
+details.ko = '''
+- `beginStencil()`이 성공한 타깃에서 호출합니다. 대응하는 시작이 없으면 경고하고 아무것도 하지 않습니다.
+- endStencil은 스텐실을 0으로 되돌립니다. 값이 필요하면 endStencil 전에 readStencil로 읽어야 합니다.
+- 이전 그리기를 실행하고 쓰기 마스크 `0xFF`로 색상을 쓰지 않으면서 스텐실 전체 8비트를 0으로 지운 뒤 저장한 의미상 상태를 복원합니다. 픽셀 스냅샷은 복원하지 않습니다.
+- 전체 소유권 규칙은 `beginStencil`을 참조합니다.
+'''
+snippet = '''
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+'''
+related = ["beginStencil", "clearStencil"]
 
 ["clear"]
 category = "graphics_color"
@@ -53077,7 +53669,17 @@ description.en = "Set the blend mode used by drawing from now on."
 description.ja = "これ以降の描画が使うブレンドモードを設定する。"
 description.ko = "이후 그리기에 사용할 블렌드 모드를 설정한다."
 details.en = '''
+- Applies to shapes, images, Font::drawString and GlyphBatch::draw on windows and Fbos, including MSAA. Text coverage scales source alpha; Multiply and Screen premultiply that covered source automatically. Custom uses BlendDesc::premultiplySource, like shapes and images. The mode persists until changed.
+
+With a Font loaded in setup(), draw additive text, then restore Alpha:
+```cpp
+setBlendMode(BlendMode::Add);
+font.drawString("Glow", 20, 20);
+resetBlendMode();
+```
+
 - `setBlendMode()` chooses how new drawing is combined with what is already on the target. The modes are `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, and `Disabled` (no blending; the new color simply overwrites the old one).
+- `Custom` selects the slot stored by `setCustomBlendDesc`; `getBlendMode()` then returns `Custom`. See `BlendDesc` for literal equations and the no-depth-write rule.
 - The mode stays in effect until you change it. It works the same way on the main window and inside an `Fbo`, it carries over to later frames, and it is passed on to a later `Fbo::begin()`. A forgotten `Add` or `Multiply` can therefore affect drawing you did not intend. When you are done with a temporary mode, call `resetBlendMode()` or wrap the change in `pushStyle()` and `popStyle()`.
 - With `Add`, the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB` (RGB factors `SRC_ALPHA` and `ONE`). With `Screen`, the source RGB is multiplied by its alpha first, and the RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`.
 - For the output alpha, `Alpha`, `Multiply` and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` (alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`). For example, drawing twice with alpha `0.5` on a transparent target gives `0.75`. `Add` and `Subtract` add the two alpha values (alpha factors `ONE` and `ONE`). `Disabled` overwrites without blending.
@@ -53085,7 +53687,17 @@ details.en = '''
 - A translucent `Alpha` shape also writes depth, hiding anything drawn behind it afterwards. For correct transparency, draw opaque objects first, then translucent ones from back to front; TrussC does not sort draws.
 '''
 details.ja = '''
+- ウィンドウと Fbo（MSAA を含む）の図形、画像、Font::drawString、GlyphBatch::draw に適用します。文字の被覆率を描画元のアルファに掛け、Multiply と Screen ではその描画元を自動で乗算済みにします。Custom は図形・画像と同じ BlendDesc::premultiplySource に従います。変更するまでモードは維持されます。
+
+setup() で読み込んだ Font を使い、加算で文字を描いて Alpha に戻します。
+```cpp
+setBlendMode(BlendMode::Add);
+font.drawString("Glow", 20, 20);
+resetBlendMode();
+```
+
 - `setBlendMode()` は、これから描くものを、すでに描かれている内容とどのように合成するかを選びます。モードは `BlendMode::Alpha`（デフォルト。通常のアルファブレンディング）、`Add`（加算）、`Multiply`（乗算）、`Screen`（スクリーン）、`Subtract`（減算）、`Disabled`（ブレンドせず、新しい色でそのまま上書き）です。
+- `Custom` は `setCustomBlendDesc` で保存したスロットを選択し、`getBlendMode()` も `Custom` を返します。式の適用と深度を書き込まない規則は `BlendDesc` を参照してください。
 - 設定したモードは、変更するまで有効です。メインウィンドウでも `Fbo` の中でも同じように働き、次のフレームにも、その後の `Fbo::begin()` にも引き継がれます。そのため、`Add` や `Multiply` を戻し忘れると、意図しない描画にも影響します。一時的なモードが済んだら `resetBlendMode()` を呼ぶか、変更を `pushStyle()` と `popStyle()` で囲んでください。
 - `Add` では、合成後の RGB は `sourceRGB * sourceAlpha + destinationRGB` になります（RGB の係数は `SRC_ALPHA` と `ONE`）。`Screen` では、描画元の RGB にあらかじめアルファを掛け、RGB の係数は `ONE` と `ONE_MINUS_SRC_COLOR` になります。
 - 出力のアルファは、`Alpha`、`Multiply`、`Screen` では `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` です（アルファの係数は `ONE` と `ONE_MINUS_SRC_ALPHA`）。たとえば、透明な描画先にアルファ `0.5` で 2 回重ねると `0.75` になります。`Add` と `Subtract` は両方のアルファを足します（アルファの係数は `ONE` と `ONE`）。`Disabled` はブレンドせずに上書きします。
@@ -53093,7 +53705,17 @@ details.ja = '''
 - 半透明の `Alpha` の図形も深度を書き込むため、そのあとに奥へ描いたものは隠れます。透明度を正しく合成するには、不透明な物体を先に描き、次に半透明の物体を奥から手前へ描いてください（TrussC は描画順を並べ替えません）。
 '''
 details.ko = '''
+- 창과 Fbo(MSAA 포함)의 도형, 이미지, Font::drawString, GlyphBatch::draw에 적용됩니다. 텍스트 커버리지는 소스 알파에 곱해지며 Multiply와 Screen은 해당 소스를 자동으로 사전 곱셈합니다. Custom은 도형 및 이미지와 같은 BlendDesc::premultiplySource를 따릅니다. 모드는 변경할 때까지 유지됩니다.
+
+setup()에서 로드한 Font로 가산 텍스트를 그린 다음 Alpha로 복원합니다.
+```cpp
+setBlendMode(BlendMode::Add);
+font.drawString("Glow", 20, 20);
+resetBlendMode();
+```
+
 - `setBlendMode()`는 지금부터 그리는 내용을 이미 그려진 내용과 어떻게 합성할지 선택합니다. 모드는 `BlendMode::Alpha`(기본값, 일반 알파 블렌딩), `Add`(가산), `Multiply`(곱셈), `Screen`(스크린), `Subtract`(감산), `Disabled`(블렌딩 없이 새 색으로 그대로 덮어쓰기)입니다.
+- `Custom`은 `setCustomBlendDesc`로 저장한 슬롯을 선택하며 `getBlendMode()`도 `Custom`을 반환합니다. 수식 적용과 깊이를 기록하지 않는 규칙은 `BlendDesc`를 참조하십시오.
 - 설정한 모드는 바꾸기 전까지 유지됩니다. 메인 윈도우에서도 `Fbo` 안에서도 똑같이 동작하며, 다음 프레임에도, 이후의 `Fbo::begin()`에도 이어집니다. 그래서 `Add`나 `Multiply`를 되돌리는 것을 잊으면 의도하지 않은 그리기에도 영향을 줍니다. 임시 모드가 끝나면 `resetBlendMode()`를 호출하거나 변경을 `pushStyle()`과 `popStyle()`로 감싸세요.
 - `Add`에서는 합성된 RGB가 `sourceRGB * sourceAlpha + destinationRGB`가 됩니다(RGB 계수는 `SRC_ALPHA`와 `ONE`). `Screen`에서는 소스 RGB에 알파를 미리 곱하며, RGB 계수는 `ONE`과 `ONE_MINUS_SRC_COLOR`입니다.
 - 출력 알파는 `Alpha`, `Multiply`, `Screen`에서는 `sourceAlpha + destinationAlpha * (1 - sourceAlpha)`입니다(알파 계수는 `ONE`과 `ONE_MINUS_SRC_ALPHA`). 예를 들어 투명한 대상에 알파 `0.5`로 두 번 겹쳐 그리면 `0.75`가 됩니다. `Add`와 `Subtract`는 두 알파 값을 더합니다(알파 계수는 `ONE`과 `ONE`). `Disabled`는 블렌딩 없이 덮어씁니다.
@@ -59145,6 +59767,16 @@ details.ko = '''
 - 고급 처리에서 컨텍스트가 필요하면 `internal::getDefaultContext()`로 얻을 수 있습니다.
 '''
 
+["Font::forEachGlyphWithMatrix"]
+category = "font"
+description.en = "Protected layout helper that uses a supplied model matrix for baseline grid fitting."
+description.ja = "指定したモデル行列でベースラインのグリッドフィットを判定する protected の配置ヘルパーです。"
+description.ko = "지정한 모델 행렬로 베이스라인 그리드 피팅을 판정하는 protected 배치 헬퍼입니다."
+details.en = "Uses the same wrapping, writing mode, alignment, and synchronous visitor as forEachGlyph. GlyphBatch supplies current matrix × batch transform without changing the global matrix."
+details.ja = "forEachGlyph と同じ折り返し、書字方向、揃え、同期ビジターを使います。GlyphBatch はグローバル行列を変えずに、現在の行列 × バッチ変換を渡します。"
+details.ko = "forEachGlyph와 같은 줄 바꿈, 쓰기 방향, 정렬 및 동기 비지터를 사용합니다. GlyphBatch는 전역 행렬을 바꾸지 않고 현재 행렬 × 배치 변환을 전달합니다."
+related = ["Font::forEachGlyph", "GlyphBatch::setTransform", "Font::gridFitLands"]
+
 ["Font::forEachGlyphHorizontal"]
 description.en = "Visits glyphs positioned by horizontal text layout."
 description.ja = "横書きレイアウトで配置したグリフを順に処理する。"
@@ -61984,20 +62616,23 @@ details.ko = '''
 related = ["Font::setGridFit", "Font::gridFitLands"]
 
 ["Font::gridFitLands"]
-description.en = "Test whether the current scale permits baseline grid fitting."
-description.ja = "現在の倍率でベースラインのグリッドフィットを適用できるか判定する。"
-description.ko = "현재 배율에서 베이스라인 그리드 피팅을 적용할 수 있는지 판정한다."
+description.en = "Tests whether the current or supplied model scale permits baseline grid fitting."
+description.ja = "現在または指定したモデルの倍率でベースラインのグリッドフィットを適用できるか判定します。"
+description.ko = "현재 또는 지정한 모델 배율에서 베이스라인 그리드 피팅을 적용할 수 있는지 판정합니다."
 details.en = '''
+- The matrix overload tests the supplied final model; the no-argument overload uses the current model.
 - This protected helper returns `true` only when grid fitting is enabled and the effective scale differs from 1 by less than `0.01`.
-- Effective scale is the larger X/Y basis length of the model-view matrix, replaced with 1 if nonpositive, then multiplied by the target pixel scale. The test does not account for anchor translation or camera projection, so `true` does not guarantee that the final baseline lies on an absolute device-pixel boundary.
+- Effective scale is the larger X/Y basis length of the model matrix, replaced with 1 if nonpositive, then multiplied by the target pixel scale. The test does not account for anchor translation or camera projection, so `true` does not guarantee that the final baseline lies on an absolute device-pixel boundary.
 '''
 details.ja = '''
+- 行列を渡す版は指定した最終モデルを判定し、引数なしの版は現在のモデルを使います。
 - この protected ヘルパーは、グリッドフィットが有効で、実効倍率と 1 の差の絶対値が `0.01` 未満の場合だけ `true` を返します。
-- 実効倍率には、モデルビュー行列の X/Y 基底の長さの大きい方を使い、その値が 0 以下なら 1 に置き換えてから描画先のピクセル倍率を掛けます。アンカーの平行移動とカメラの投影は判定しないため、`true` でも最終的なベースラインが絶対的なデバイスピクセル境界に乗るとは限りません。
+- 実効倍率には、モデル行列の X/Y 基底の長さの大きい方を使い、その値が 0 以下なら 1 に置き換えてから描画先のピクセル倍率を掛けます。アンカーの平行移動とカメラの投影は判定しないため、`true` でも最終的なベースラインが絶対的なデバイスピクセル境界に乗るとは限りません。
 '''
 details.ko = '''
+- 행렬을 전달하는 버전은 지정한 최종 모델을 판정하고 인수가 없는 버전은 현재 모델을 사용합니다.
 - 이 protected 헬퍼는 그리드 피팅이 활성화되어 있고 실효 배율과 1의 차이의 절댓값이 `0.01` 미만일 때만 `true`를 반환합니다.
-- 실효 배율은 모델뷰 행렬의 X/Y 기저 길이 중 큰 값이 0 이하이면 1로 바꾼 뒤 대상 픽셀 배율을 곱한 값입니다. 기준점의 평행 이동과 카메라 투영은 판정하지 않으므로, `true`여도 최종 베이스라인이 절대적인 장치 픽셀 경계에 놓인다고 보장하지 않습니다.
+- 실효 배율은 모델 행렬의 X/Y 기저 길이 중 큰 값이 0 이하이면 1로 바꾼 뒤 대상 픽셀 배율을 곱한 값입니다. 기준점의 평행 이동과 카메라 투영은 판정하지 않으므로, `true`여도 최종 베이스라인이 절대적인 장치 픽셀 경계에 놓인다고 보장하지 않습니다.
 '''
 related = ["Font::setGridFit", "Font::getGridFit", "Font::fitY"]
 
@@ -62007,16 +62642,19 @@ description.ja = "グリッドフィットを適用できる場合にベース�
 description.ko = "그리드 피팅을 적용할 수 있으면 베이스라인 오프셋을 반올림한다."
 details.en = '''
 - This protected helper returns `round(offsetFromAnchor)` when `Font::gridFitLands` is `true`; otherwise, it returns the input unchanged. The offset is measured in logical pixels.
+- A non-null matrix pointer selects the supplied final model for the scale test; otherwise the current model is used.
 - Pass the offset accumulated from the anchor, such as `getAscent() + lineIdx * getLineHeight()`, then round once. Rounding the line height before repeated addition causes layout error to accumulate across lines.
 - Add the returned offset to the unchanged anchor. This preserves fractional anchor movement while limiting each fitted baseline offset to half a unit of rounding error.
 '''
 details.ja = '''
 - この protected ヘルパーは、`Font::gridFitLands` が `true` の場合に `round(offsetFromAnchor)` を返し、それ以外では入力をそのまま返します。オフセットの単位は論理ピクセルです。
+- 行列ポインターが非 null なら指定した最終モデルで倍率を判定し、それ以外では現在のモデルを使います。
 - `getAscent() + lineIdx * getLineHeight()` のようにアンカーから累積したオフセットを渡し、一度だけ丸めてください。行の高さを先に丸めて繰り返し加算すると、行が増えるほど配置の誤差が蓄積します。
 - 返されたオフセットを、変更していないアンカーに加えます。これによりアンカーの小数座標での移動を保ち、各ベースラインオフセットの丸め誤差を最大で半単位に抑えます。
 '''
 details.ko = '''
 - 이 protected 헬퍼는 `Font::gridFitLands`가 `true`이면 `round(offsetFromAnchor)`를 반환하고, 그렇지 않으면 입력을 그대로 반환합니다. 오프셋의 단위는 논리 픽셀입니다.
+- 행렬 포인터가 null이 아니면 지정한 최종 모델로 배율을 판정하고 그렇지 않으면 현재 모델을 사용합니다.
 - `getAscent() + lineIdx * getLineHeight()`처럼 기준점에서 누적한 오프셋을 전달한 뒤 한 번만 반올림합니다. 줄 높이를 먼저 반올림하여 반복해서 더하면 줄 수가 늘어날수록 배치 오차가 누적됩니다.
 - 반환된 오프셋을 변경하지 않은 기준점에 더합니다. 이렇게 하면 기준점의 소수 좌표 이동을 유지하면서 각 베이스라인 오프셋의 반올림 오차를 최대 반 단위로 제한합니다.
 '''
@@ -66740,3 +67378,360 @@ details.ko = '''
 - 초기값이 미설정인 `optional<AudioDeviceInfo>`입니다. `AudioEngine::listDevices()`의 출력 항목을 대입합니다. 설정하면 해당 백엔드가 `AudioSettings::backend`보다 우선하며 `uniqueId`가 `deviceName`보다 우선합니다. 이름 변경은 비교에 영향을 주지 않습니다.
 - ID가 비어 있거나 없으면 다른 장치를 열지 않고 Warning과 함께 초기화에 실패합니다. 이름 또는 기본 장치 선택으로 돌아가려면 optional을 초기화합니다. 인수 없는 `AudioEngine::init()`은 이 선택을 유지하지 않습니다.
 '''
+
+["GlyphBatch"]
+category = "font"
+keywords = ["glyph", "batch", "retained", "atlas", "text"]
+description.en = "Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused."
+description.ja = "グリフを保持して繰り返し描画します。文字列やグリフごとの配置を再利用するときに、drawString の代わりに使います。"
+description.ko = "글리프를 저장하여 반복해서 그립니다. 텍스트나 글리프별 배치를 재사용할 때 drawString 대신 사용합니다."
+details.en = '''
+- GlyphBatch reuses built text and gives each glyph its own color and matrix (for rotation, for example). Font::drawString normally draws text, but rebuilding its layout on every call can be costly. GlyphBatch builds the text once and draws it repeatedly. Like Mesh, it separates building from drawing with draw().
+
+Create the batch, set a loaded font, add once, and draw every frame:
+```cpp
+// tcApp members
+GlyphBatch batch;
+Font font;
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void tcApp::draw() {
+    batch.draw();
+}
+```
+
+Call this tcApp member when the text changes; draw() keeps using the rebuilt batch:
+```cpp
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.add("Updated", Color(1));
+}
+```
+
+After setup(), this alternative rebuild applies transform and color settings to the new glyph:
+```cpp
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A');
+}
+```
+
+- Transforms and colors are recorded at add(); changing batch settings does not change retained glyphs. Blending uses the mode current at draw().
+
+- Configure Font options before setFont(); see GlyphBatch::setFont for copying behavior. Rebuild after Font::clearAtlas.
+'''
+details.ja = '''
+- GlyphBatch は、一度組み立てたテキストを繰り返し描画し、一文字ずつ色や Matrix（回転など）を指定するために使います。通常は Font::drawString で文字を描画しますが、呼び出すたびに配置を再構築するため、処理が重くなる場合があります。GlyphBatch は組み立てたテキストを再利用できます。使い方は Mesh と似ていて、構築するコードと描画するコード（draw）を分けます。
+
+バッチを作り、読み込み済みのフォントを設定して一度追加し、毎フレーム描画します。
+```cpp
+// tcApp members
+GlyphBatch batch;
+Font font;
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void tcApp::draw() {
+    batch.draw();
+}
+```
+
+文字列が変わったときに、この tcApp メンバーを呼びます。draw() は再構築したバッチを使い続けます。
+```cpp
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.add("Updated", Color(1));
+}
+```
+
+setup() 後に使う別の再構築例です。変換と色の設定を新しいグリフに適用します。
+```cpp
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A');
+}
+```
+
+- 変換と色は add() 時に記録します。バッチ設定を変えても保持済みのグリフは変わりません。ブレンドは draw() 時のモードを使います。
+
+- Font のオプションは setFont() より先に設定します。コピーの動作は GlyphBatch::setFont を参照してください。Font::clearAtlas 後は再構築してください。
+'''
+details.ko = '''
+- GlyphBatch는 한 번 구성한 텍스트를 반복해서 그리고 글리프마다 색상과 Matrix(회전 등)를 지정할 때 사용합니다. 보통 Font::drawString으로 텍스트를 그리지만 호출할 때마다 배치를 다시 구성하므로 처리 비용이 커질 수 있습니다. GlyphBatch는 구성한 텍스트를 재사용합니다. Mesh처럼 구성 코드와 그리기 코드(draw)를 분리합니다.
+
+배치를 만들고 로드된 폰트를 설정한 뒤 한 번 추가하고 매 프레임 그립니다.
+```cpp
+// tcApp members
+GlyphBatch batch;
+Font font;
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void tcApp::draw() {
+    batch.draw();
+}
+```
+
+텍스트가 바뀌면 이 tcApp 멤버를 호출합니다. draw()는 재구성된 배치를 계속 사용합니다.
+```cpp
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.add("Updated", Color(1));
+}
+```
+
+setup() 후에 사용하는 다른 재구성 예입니다. 변환과 색상 설정을 새 글리프에 적용합니다.
+```cpp
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A');
+}
+```
+
+- 변환과 색상은 add() 시점에 기록합니다. 배치 설정을 변경해도 저장된 글리프는 바뀌지 않습니다. 블렌드는 draw() 시점의 모드를 사용합니다.
+
+- Font 옵션은 setFont() 전에 설정합니다. 복사 동작은 GlyphBatch::setFont를 참조합니다. Font::clearAtlas 후에는 재구성합니다.
+'''
+related = ["Font", "Font::drawString", "GlyphBatch::setFont", "GlyphBatch::add", "GlyphBatch::draw", "GlyphBatch::clear", "GlyphBatch::setTransform", "GlyphBatch::setColor"]
+snippet = '''
+// tcApp members
+GlyphBatch batch;
+Font font;
+void setup() override {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void draw() override {
+    batch.draw();
+}
+'''
+
+["GlyphBatch::setFont"]
+category = "font"
+description.en = "Clears the batch and retains a copy of a Font and its current settings."
+description.ja = "バッチを消去し、Font と現在の設定のコピーを保持します。"
+description.ko = "배치를 지우고 Font와 현재 설정의 복사본을 유지합니다."
+related = ["GlyphBatch", "Font::load"]
+
+details.en = "Copies Font settings and shares its current atlas. Later source setOversampling/setMipmaps changes do not propagate: configure first, or call setFont again and rebuild."
+details.ja = "設定をコピーし、現在のアトラスを共有します。元 Font の setOversampling/setMipmaps の変更は追従しません。先に設定するか、setFont を再度呼んで再構築してください。"
+details.ko = "설정을 복사하고 현재 아틀라스를 공유합니다. 이후 원본의 setOversampling/setMipmaps 변경은 반영되지 않습니다. 먼저 설정하거나 setFont를 다시 호출하고 재구성합니다."
+
+["GlyphBatch::setAlign"]
+category = "font"
+description.en = "Sets horizontal and vertical alignment for subsequent adds; defaults to Left/Top like Font."
+description.ja = "以後の追加に使う水平・垂直揃えを設定します。既定値は Font と同じ Left・Top です。"
+description.ko = "이후 추가에 사용할 가로/세로 정렬을 설정합니다. 기본값은 Font와 같은 Left/Top입니다."
+related = ["GlyphBatch::add", "GlyphBatch::setAlignToInk"]
+
+["GlyphBatch::setAlignToInk"]
+category = "font"
+description.en = "Centers subsequent independent glyphs on their outline ink box instead of advance and line metrics."
+description.ja = "以後の単独グリフを、送り幅と行メトリクスの代わりに輪郭のインク矩形の中心へ揃えます。"
+description.ko = "이후 독립 글리프를 전진 폭과 행 메트릭 대신 윤곽 잉크 사각형의 중심에 정렬합니다."
+details.en = "Defaults to false. When true, independent codepoint adds ignore setAlign. The pivot excludes raster/filter padding and is a box center, not an optical centroid. String adds keep drawString layout."
+details.ja = "既定値は false です。true のとき、単独コードポイントの追加は setAlign を使いません。基準点はラスタライズやフィルターの余白を含まない矩形の中心で、見た目の重心ではありません。文字列の追加は drawString の配置を保ちます。"
+details.ko = "기본값은 false입니다. true이면 독립 코드 포인트 추가는 setAlign을 무시합니다. 기준점은 래스터/필터 여백을 제외한 사각형의 중심이며 시각적 무게 중심은 아닙니다. 문자열 추가는 drawString 배치를 유지합니다."
+related = ["Font::getGlyphInkBox", "GlyphBatch::setAlign"]
+
+["GlyphBatch::setWritingMode"]
+category = "font"
+description.en = "Sets writing mode for subsequent string adds; independent codepoints ignore it."
+description.ja = "以後の文字列追加に使う書字方向を設定します。単独コードポイントには影響しません。"
+description.ko = "이후 문자열 추가의 쓰기 방향을 설정합니다. 독립 코드 포인트에는 영향을 주지 않습니다."
+related = ["Font::setWritingMode", "GlyphBatch::add"]
+
+["GlyphBatch::setTransform"]
+category = "font"
+description.en = "Sets the transform for each later glyph; defaults to identity."
+description.ja = "以後の各グリフに使う変換を設定します。既定値は単位行列です。"
+description.ko = "이후 각 글리프에 사용할 변환을 설정합니다. 기본값은 단위 행렬입니다."
+details.en = "Uses current matrix × transform for later adds without a matrix. An explicit matrix replaces both. Scaling pivots on the align point: the ink center with setAlignToInk(true). A string uses one matrix for its whole layout. Unlike setTransform, draw(transform) moves the whole recorded batch at draw time. clear() keeps transform and color."
+details.ja = "行列を省略した以後の追加に、現在の行列 × transform を使います。明示した行列は両方を置き換えます。拡大縮小の基準点は揃え位置で、setAlignToInk(true) ではインク中心です。文字列全体には 1 つの行列を使います。setTransform と異なり、draw(transform) は記録済みバッチ全体を描画時に動かします。clear() は変換と色を保持します。"
+details.ko = "행렬을 생략한 이후 추가에 현재 행렬 × transform을 사용합니다. 명시적 행렬은 둘 다 대체합니다. 배율의 기준점은 정렬 위치이며 setAlignToInk(true)에서는 잉크 중심입니다. 문자열 전체에는 하나의 행렬을 사용합니다. setTransform과 달리 draw(transform)은 기록된 배치 전체를 그릴 때 이동합니다. clear()는 변환과 색상을 유지합니다."
+related = ["GlyphBatch::add", "GlyphBatch::draw", "GlyphBatch::setAlignToInk", "GlyphBatch::clear"]
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Font font;
+GlyphBatch batch;
+void setup() override {
+    font.load(TC_FONT_SANS, 24);
+    batch.setFont(font);
+    batch.setAlignToInk(true);
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+}
+void draw() override {
+    batch.clear(); // Keeps transform and color.
+    pushMatrix();
+    translate(100, 100);
+    batch.add(U'A');
+    popMatrix();
+    batch.draw();
+}
+'''
+
+["GlyphBatch::getTransform"]
+category = "font"
+description.en = "Returns the current batch transform."
+description.ja = "現在のバッチ変換を返します。"
+description.ko = "현재 배치 변환을 반환합니다."
+related = ["GlyphBatch::setTransform"]
+
+["GlyphBatch::resetTransform"]
+category = "font"
+description.en = "Resets the batch transform to identity."
+description.ja = "バッチ変換を単位行列に戻します。"
+description.ko = "배치 변환을 단위 행렬로 초기화합니다."
+related = ["GlyphBatch::setTransform"]
+
+["GlyphBatch::setColor"]
+category = "font"
+description.en = "Sets the color for later adds that omit a color; defaults to white (1,1,1,1)."
+description.ja = "色を省略した以後の追加に使う色を設定します。既定値は白 (1,1,1,1) です。"
+description.ko = "색상을 생략한 이후 추가에 사용할 색상을 설정합니다. 기본값은 흰색 (1,1,1,1)입니다."
+details.en = "A color passed to add replaces this setting for that add. The setting persists until setColor or resetColor, including across clear()."
+details.ja = "add に色を渡すと、その追加だけこの設定を置き換えます。設定は setColor または resetColor まで保持し、clear() でも残ります。"
+details.ko = "add에 전달한 색상은 해당 추가에서만 이 설정을 대체합니다. 설정은 setColor 또는 resetColor까지 유지하며 clear() 후에도 남습니다."
+related = ["GlyphBatch::add", "GlyphBatch::resetColor", "GlyphBatch::clear"]
+
+["GlyphBatch::getColor"]
+category = "font"
+description.en = "Returns the current batch color."
+description.ja = "現在のバッチ色を返します。"
+description.ko = "현재 배치 색상을 반환합니다."
+related = ["GlyphBatch::setColor"]
+
+["GlyphBatch::resetColor"]
+category = "font"
+description.en = "Resets the batch color to white (1,1,1,1)."
+description.ja = "バッチ色を白 (1,1,1,1) に戻します。"
+description.ko = "배치 색상을 흰색 (1,1,1,1)으로 초기화합니다."
+related = ["GlyphBatch::setColor"]
+
+["GlyphBatch::add"]
+category = "font"
+description.en = "Appends a glyph or UTF-8 string, using batch settings for omitted arguments."
+description.ja = "グリフまたは UTF-8 文字列を追加します。省略した引数にはバッチ設定を使います。"
+description.ko = "글리프 또는 UTF-8 문자열을 추가하며 생략한 인수에는 배치 설정을 사용합니다."
+details.en = "The codepoint overload adds one independent glyph without cursor advance or vertical substitution. add(cp), add(cp, color), add(text), and add(text, color) use current matrix × batch transform. add(cp, M) and add(cp, M, color) use only M. An omitted color uses the batch color; a supplied color replaces it for that add. The Mat4 overload replaces both current and batch matrices; the active camera view/projection is applied once at draw time. The UTF-8 string overload uses the retained Font's drawString layout, including wrapping, vertical forms, and TCY. Color floats are copied without clamping. Additions mark GPU geometry dirty; existing recorded draws retain their previous buffers. Empty ink emits no quad. Call on the main thread."
+details.ja = "コードポイント版は、カーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。add(cp)、add(cp, color)、add(text)、add(text, color) は現在の行列 × バッチ変換を使います。add(cp, M)、add(cp, M, color) は M だけを使います。色を省略するとバッチ色を使い、指定するとその追加だけ置き換えます。Mat4 版は現在とバッチの両行列を置き換えます。現在のカメラの view/projection は draw 時に一度適用します。UTF-8 文字列版は、保持した Font の drawString と同じ配置を使い、折り返し、縦書き字形、縦中横を反映します。色の float 値は制限せずにコピーします。追加後は GPU 形状を更新対象にしますが、記録済みの描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。メインスレッドで呼び出してください。"
+details.ko = "코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. add(cp), add(cp, color), add(text), add(text, color)는 현재 행렬 × 배치 변환을 사용합니다. add(cp, M), add(cp, M, color)는 M만 사용합니다. 색상을 생략하면 배치 색상을 사용하고 지정하면 해당 추가에서만 대체합니다. Mat4 버전은 현재 행렬과 배치 행렬을 모두 대체합니다. 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. UTF-8 문자열 버전은 유지한 Font의 drawString 배치를 사용하며 자동 줄바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다. 색상의 float 값은 제한 없이 복사합니다. 추가하면 GPU 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다. 메인 스레드에서 호출합니다."
+related = ["GlyphBatch::draw", "Font::forEachGlyph"]
+
+["GlyphBatch::draw"]
+category = "font"
+description.en = "Draws the retained glyphs with the current camera, target and blend mode; draw(transform) places the whole batch."
+description.ja = "保持したグリフを現在のカメラ、描画先、ブレンドモードで描画します。draw(transform) はバッチ全体を配置します。"
+description.ko = "유지한 글리프를 현재 카메라, 대상, 블렌드 모드로 그립니다. draw(transform)은 배치 전체를 배치합니다."
+details.en = '''
+- draw() does not clear the batch and does not reapply the current model matrix; glyphs draw in add order, one draw per run of glyphs on the same atlas page.
+
+Under an EasyCam, the current camera applies and moving it does not re-upload the glyphs:
+```cpp
+// tcApp members
+GlyphBatch batch;
+EasyCam cam;
+void tcApp::draw() {
+    cam.begin();
+    batch.draw();
+    cam.end();
+}
+```
+
+draw(transform) draws the same batch at different places:
+```cpp
+// tcApp members
+GlyphBatch batch;
+void tcApp::draw() {
+    batch.draw(Mat4::translate(100, 100, 0));
+    batch.draw(Mat4::translate(100, 300, 0));
+}
+```
+'''
+details.ja = '''
+- draw() はバッチを消去せず、現在のモデル行列も再適用しません。グリフは追加順に描画し、同じアトラスページが続く区間ごとに 1 回描画します。
+
+EasyCam の下では現在のカメラが適用され、カメラを動かしてもグリフは再転送されません。
+```cpp
+// tcApp members
+GlyphBatch batch;
+EasyCam cam;
+void tcApp::draw() {
+    cam.begin();
+    batch.draw();
+    cam.end();
+}
+```
+
+draw(transform) で同じバッチを別の場所に描画できます。
+```cpp
+// tcApp members
+GlyphBatch batch;
+void tcApp::draw() {
+    batch.draw(Mat4::translate(100, 100, 0));
+    batch.draw(Mat4::translate(100, 300, 0));
+}
+```
+'''
+details.ko = '''
+- draw()는 배치를 지우지 않으며 현재 모델 행렬도 다시 적용하지 않습니다. 글리프는 추가 순서대로 그리며 같은 아틀라스 페이지가 이어지는 구간마다 한 번 그립니다.
+
+EasyCam 아래에서는 현재 카메라가 적용되며 카메라를 움직여도 글리프를 다시 업로드하지 않습니다.
+```cpp
+// tcApp members
+GlyphBatch batch;
+EasyCam cam;
+void tcApp::draw() {
+    cam.begin();
+    batch.draw();
+    cam.end();
+}
+```
+
+draw(transform)으로 같은 배치를 다른 위치에 그릴 수 있습니다.
+```cpp
+// tcApp members
+GlyphBatch batch;
+void tcApp::draw() {
+    batch.draw(Mat4::translate(100, 100, 0));
+    batch.draw(Mat4::translate(100, 300, 0));
+}
+```
+'''
+related = ["GlyphBatch", "GlyphBatch::clear", "EasyCam"]
+
+["GlyphBatch::clear"]
+category = "font"
+description.en = "Discards retained geometry while keeping the font and batch settings."
+description.ja = "フォントとバッチ設定を保ったまま、保持した形状を破棄します。"
+description.ko = "폰트와 배치 설정을 유지하면서 보관한 형상을 버립니다."
+details.en = "Keeps transform, color, alignment, and CPU/GPU capacity for rebuilding each frame. Already submitted draws keep valid GPU resources until replay. draw does not clear automatically."
+details.ja = "変換、色、揃えを保持します。送信済みの描画は再生まで有効な GPU リソースを保持します。draw は自動で消去しません。"
+details.ko = "변환, 색상, 정렬을 유지합니다. 제출된 그리기는 재생할 때까지 유효한 GPU 리소스를 유지합니다. draw는 자동으로 지우지 않습니다."
+related = ["GlyphBatch::draw"]
+
+["Font::getGlyphInkBox"]
+category = "font"
+keywords = ["ink", "glyph", "pivot", "bounds", "half-size"]
+description.en = "Returns a glyph's outline ink rectangle in logical pixels relative to the horizontal baseline."
+description.ja = "水平ベースラインを基準に、グリフ輪郭のインク矩形を論理ピクセルで返します。"
+description.ko = "가로 기준선을 기준으로 글리프 윤곽의 잉크 사각형을 논리 픽셀로 반환합니다."
+details.en = "Excludes advance, line metrics, atlas padding and oversampling/filter margins. Y points down; ascenders have negative Y. Rect::getCenter gives the box pivot and Vec2(box.width / 2, box.height / 2) gives half-size. An unloaded font or empty outline returns an empty Rect; missing glyphs follow Font's .notdef fallback. This metric does not rasterize or upload glyphs."
+details.ja = "送り幅、行メトリクス、アトラスの余白、オーバーサンプリングやフィルターの余白を含みません。Y は下向きで、ベースラインより上の部分は負の Y になります。Rect::getCenter で矩形の基準点、Vec2(box.width / 2, box.height / 2) で半サイズを取得できます。未読み込みや空の輪郭では空の Rect を返し、未収録文字は Font の .notdef に置き換えます。この計測はグリフのラスタライズや転送を行いません。"
+details.ko = "전진 폭, 행 메트릭, 아틀라스 여백 및 오버샘플링/필터 여백을 제외합니다. Y는 아래쪽이며 기준선 위 부분은 음수 Y입니다. Rect::getCenter는 사각형 기준점을, Vec2(box.width / 2, box.height / 2)는 절반 크기를 제공합니다. 로드되지 않은 폰트나 빈 윤곽은 빈 Rect를 반환하며 없는 글리프는 Font의 .notdef로 대체합니다. 이 측정은 글리프를 래스터화하거나 업로드하지 않습니다."
+related = ["GlyphBatch::setAlignToInk", "Font::getGlyphPath", "Rect"]

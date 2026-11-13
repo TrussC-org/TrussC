@@ -6,16 +6,13 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'examples'))
-from build_all import find_examples
 
 EXAMPLE_TIMEOUT = 60  # Bound (hung example): stop a self-check that never exits.
 
 
 def discover_examples(root):
-    """Search only example sources, excluding README mentions and test harnesses."""
-    for directory in find_examples(str(root)):
-        example = Path(directory)
+    """Search check project sources only under examples/tests, excluding README mentions."""
+    for example in sorted((Path(root) / 'examples/tests').glob('*')):
         if any('"--self-check"' in source.read_text(encoding='utf-8')
                for source in sorted((example / 'src').rglob('*'))
                if source.suffix in {'.cpp', '.cc', '.cxx', '.h', '.hpp'}):

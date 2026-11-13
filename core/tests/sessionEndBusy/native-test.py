@@ -412,6 +412,8 @@ code=r'''
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <utility>
+#include <vector>
 #include <stdexcept>
 #include <thread>
 #include <functional>
@@ -510,7 +512,7 @@ void sgl_destroy_pipeline(Handle) { ++operations; }
 void sgl_destroy_context(Handle) { ++operations; }
 Handle sgl_default_context() { ++operations;return {1}; }
 struct RenderTargetResources {
- std::unordered_map<int,Handle> cache;std::unordered_map<int,int> selections;
+ std::unordered_map<int,Handle> cache;std::vector<std::pair<int,Handle>> immediateCache;std::shared_ptr<void> selectionCache;std::unordered_map<int,int> selections;
  std::shared_ptr<void> rawCache;Handle context;bool contextFailed=false;
  void release();
 };

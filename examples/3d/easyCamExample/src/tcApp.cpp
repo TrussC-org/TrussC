@@ -1,3 +1,9 @@
+// =============================================================================
+// easyCamExample - Orbit a lit scene with mouse camera controls.
+//
+// Drag to orbit and scroll to zoom; camera drawing is followed by a 2D overlay.
+// =============================================================================
+
 #include "tcApp.h"
 #include <sstream>
 

@@ -25,6 +25,7 @@ using namespace tc;
 namespace trussc::internal {
 sg_shader sglPremultShader() { return {}; }
 sg_shader sglCoverageShader() { return {}; }
+sg_shader sglCoveragePremultShader() { return {}; }
 }
 // One-shot failure at the real deferred replay allocation, as in the review.
 static bool failAllocation = false;
@@ -78,6 +79,19 @@ void applied(sg_pipeline pipeline, void*) { appliedPipeline = sg_query_pipeline_
 void began(const sg_pass* pass, void*) { passes.push_back(*pass); }
 void committed(void*) { ++commits; }
 const sg_shader_desc* descriptor(sg_backend) { static sg_shader_desc desc = {}; return &desc; }
+const sg_shader_desc* sampledDescriptor(sg_backend) {
+    static const sg_shader_desc desc = [] {
+        sg_shader_desc value = {};
+        value.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        value.views[0].texture.image_type = SG_IMAGETYPE_2D;
+        value.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        value.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        value.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        value.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        return value;
+    }();
+    return &desc;
+}
 void submit(Shader& shader) {
     ShaderVertex vertices[3] = {};
     shader.submitVertices(vertices, 3, PrimitiveType::Triangles);
@@ -362,6 +376,82 @@ bool pipelineGenerationProbe() {
     internal::currentWindowCtx()=previous;
     std::printf("PIPELINE failure cached/retry + resize x50=%d expected=1\n",ok);
     return ok;
+}
+
+template<class Base>
+struct MutableRecipeShader : Base {
+    void setBlend(bool enabled) { this->recipe_.colors[0].blend.enabled = enabled; }
+    const sg_pipeline_desc& recipe() const { return this->recipe_; }
+};
+bool recipeSelectionProbe() {
+    auto* previous = internal::currentWindowCtx();
+    DrawingWindowState windowState;
+    auto& window = windowState.context;
+    window.fbWidth = 256; window.fbHeight = 192;
+    window.acquireSwapchain = dummySwapchain;
+    internal::currentWindowCtx() = &window;
+    internal::prepareWindowTarget();
+    MutableRecipeShader<Shader> shader, generated;
+    MutableRecipeShader<FullscreenShader> fullscreen;
+    bool ok = shader.load(descriptor) && generated.load(sampledDescriptor) && fullscreen.load(descriptor);
+    // Sokol requires nonempty bindings even for an attribute-free shader.
+    Texture source; source.allocate(1,1,TextureFormat::RGBA8,TextureUsage::Dynamic);
+    generated.setTexture(0,source.getView(),source.getSampler());
+    Fbo first, second;
+    first.allocate(16,16); second.allocate(16,16);
+    first.begin(0,0,0);
+    auto& target = internal::currentTarget();
+    for (bool blend : {true, false, true}) {
+        shader.setBlend(blend);
+        shader.begin(); drawRect(0,0,8,8); shader.end();
+        ok &= sg_query_pipeline_desc(target.deferredShaderDraws.back().pipeline).colors[0].blend.enabled == blend;
+        generated.setBlend(blend); generated.drawVertices(3);
+        const auto selected = sg_query_pipeline_desc(target.deferredShaderDraws.back().pipeline);
+        ok &= selected.colors[0].blend.enabled == blend && selected.layout.attrs[0].format == SG_VERTEXFORMAT_INVALID &&
+            selected.index_type == SG_INDEXTYPE_NONE;
+        fullscreen.setBlend(blend); fullscreen.draw();
+        ok &= appliedPipeline.colors[0].blend.enabled == blend;
+    }
+    std::printf("SHADER protected recipe mutation draw/fullscreen/drawVertices=%d expected=1\n",ok);
+    second.begin(0,0,0); internal::activeFill2D(); second.end();
+    internal::activeFill2D();
+    auto& selections = *target.resources().selectionCache;
+    const auto before = selections.size();
+    std::shared_ptr<internal::PipelineSelectionCache> otherSelections;
+    size_t otherBefore = 0;
+    bool bounded = true;
+    {
+        internal::PipelineRecipe live[2], changing;
+        auto desc = shader.recipe();
+        for (int i=0; i<2; ++i) {
+            desc.colors[0].blend.enabled = i != 0;
+            live[i].reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, desc));
+            live[i].select(target);
+        }
+        // Two simultaneously live target maps must both lose obsolete ids.
+        second.begin(0,0,0);
+        live[0].select(internal::currentTarget());
+        otherSelections = internal::currentTarget().resources().selectionCache;
+        otherBefore = otherSelections->size() - 1;
+        second.end();
+        const auto pipelines = target.resources().rawCache->cache.size();
+        for (int i=0; i<300; ++i) {
+            changing.reset(live[i%2].key());
+            bounded &= changing.select(target).raw.id == live[i%2].select(target).raw.id;
+            second.begin(0,0,0); changing.select(internal::currentTarget()); second.end();
+            bounded &= selections.size() == before + 3 && otherSelections->size() == otherBefore + 2;
+        }
+        internal::PipelineRecipe moved;
+        { internal::PipelineRecipe source = std::move(changing); moved = std::move(source); }
+        bounded &= moved.select(target).raw.id == live[1].select(target).raw.id &&
+            selections.size() == before + 3 && target.resources().rawCache->cache.size() == pipelines;
+    }
+    bounded &= selections.size() == before && otherSelections->size() == otherBefore;
+    std::printf("RECIPE reset/destruction/move retires obsolete selections on both targets=%d expected=1\n",bounded);
+    first.end();
+    window.swapchainTarget.endPass();
+    internal::restoreWindowContext(previous);
+    return ok && bounded;
 }
 
 // Adversarial review: recording on a lazy bottom target must survive both
@@ -2279,6 +2369,7 @@ int main(int argc, char** argv) {
     const bool failedLease = leaseFailureProbe();
     const bool stores = storePolicyProbe();
     const bool pipelines = pipelineGenerationProbe();
+    const bool recipes = recipeSelectionProbe();
     const bool lazyResize = lazyResizeProbe(false) && lazyResizeProbe(true);
     const bool tickRestore = windowTickRestoreProbe(false) && windowTickRestoreProbe(true);
     const bool interleaved = interleavedRewindProbe(false,false) && interleavedRewindProbe(true,false) && interleavedRewindProbe(true,true);
@@ -2316,7 +2407,7 @@ int main(int argc, char** argv) {
     const bool curveRollback = curveRollbackProbe();
     const bool retirementRestart = retirementRestartProbe();
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=textureUploads && strokeStyles && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
+    const int result=textureUploads && strokeStyles && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && recipes && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
     return result;
 }
 #else

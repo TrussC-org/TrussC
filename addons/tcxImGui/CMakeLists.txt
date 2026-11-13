@@ -24,6 +24,9 @@ file(GLOB TCX_IMGUI_HEADERS
 
 add_library(tcxImGui STATIC ${TCX_IMGUI_IMPL} ${TCX_IMGUI_HEADERS})
 target_include_directories(tcxImGui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# [TrussC] Enable test engine hooks for MCP ImGui tools (widget collection).
+# PUBLIC keeps ImGui's layout/configuration identical in the addon and consumers.
+target_compile_definitions(tcxImGui PUBLIC IMGUI_ENABLE_TEST_ENGINE=)
 target_link_libraries(tcxImGui PUBLIC TrussC)
 
 message(STATUS "[tcxImGui] Addon loaded")

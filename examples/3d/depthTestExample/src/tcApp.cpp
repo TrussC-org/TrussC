@@ -1,3 +1,9 @@
+// =============================================================================
+// depthTestExample - Compare depth testing with blended drawing.
+//
+// Blended pipelines disable depth testing; restore it before drawing opaque 3D geometry.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::update() {

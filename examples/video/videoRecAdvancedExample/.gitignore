@@ -23,10 +23,16 @@ build-web.*
 bin/*
 !bin/data/
 
+# Packages written by 'trusscli dist'
+dist/
+
 # IDE specific
 .vscode/
 .vs/
 .cache/
+
+# Generated shader headers (rebuilt by CMake)
+*.glsl.h
 
 # OS specific
 .DS_Store
@@ -35,7 +41,3 @@ Thumbs.db
 # Secrets (don't commit these!)
 .env
 secrets.*
-
-# Recording output
-bin/data/*.mp4
-bin/data/*.mov

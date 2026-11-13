@@ -17,6 +17,7 @@
 namespace trussc::internal {
 sg_shader sglPremultShader() { return {}; }
 sg_shader sglCoverageShader() { return {}; }
+sg_shader sglCoveragePremultShader() { return {}; }
 }
 #else
 #include <cstdio>

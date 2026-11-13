@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - Shared FBO example
+// sharedFboExample - Share one offscreen image across three windows.
 // =============================================================================
 // One wide Fbo holds the whole picture. It is animated ONCE per frame, in the
 // main window's update(). Three windows (this one plus two more) each show

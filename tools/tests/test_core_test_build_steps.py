@@ -16,6 +16,13 @@ from check_build_warnings import run_build
 # per entry: linking/compiling an interceptor affects every entry in that binary.
 # Keep exact operations here, not a blanket exemption for a test directory.
 REVIEWED_TARGET_OPTIONS = {
+    # Packages a font at a test-specific path; no symbol or runtime interception.
+    ('customBlend', 'target_link_options',
+     ('allCoreTests', 'PRIVATE',
+      f'SHELL:--preload-file {ROOT}/core/tests/customBlend/../renderTargetState/src/fixture.ttf@/data/customBlend-fixture.ttf')),
+    ('textBlend', 'target_link_options',
+     ('allCoreTests', 'PRIVATE',
+      f'SHELL:--preload-file {ROOT}/core/tests/textBlend/../renderTargetState/src/fixture.ttf@/data/textBlend-fixture.ttf')),
     # HEAD's legacy define has no consumer in the merged production sources;
     # it enables no interception. Preserve the existing per-test recipe.
     ('eglWindowSurfaces', 'target_compile_definitions',
@@ -177,7 +184,7 @@ include("{recipe.as_posix()}")
                 self.assert_build_steps(selected)
 
     def test_web_conditional_steps_are_included(self):
-        self.assert_build_steps(['asyncLoadsWeb', 'asyncScreenshotMicWeb', 'saveContract'], web=True)
+        self.assert_build_steps(['asyncLoadsWeb', 'asyncScreenshotMicWeb', 'saveContract', 'customBlend'], web=True)
 
     def test_combined_target_options_require_isolation_review(self):
         # Evaluate the full combined recipe (including nested includes and any

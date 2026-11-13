@@ -129,6 +129,9 @@ void imguiSetup(int initialVertices);
 
 void imguiShutdown();
 
+// tcxImGui forwards input but does not request redraws; in EVENT_DRIVEN mode,
+// one redraw() per event can leave trickled input pending. Render continuously
+// while the UI is in use (e.g. tc::setFps(60)); see README.md, "EVENT_DRIVEN input".
 bool imguiBegin();
 
 void imguiEnd();

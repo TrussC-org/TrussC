@@ -1157,7 +1157,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
         )
         # Visual Studio: Set as startup project
         set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
-        # Windows: Setup icon
+        # Windows/Linux: Setup icon
         trussc_setup_icon(${PROJECT_NAME})
         # Windows: application manifest (UTF-8 process code page, long paths)
         trussc_setup_manifest(${PROJECT_NAME})

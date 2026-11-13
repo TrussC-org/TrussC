@@ -4,8 +4,8 @@
 // tcLight.h - Light (light source)
 // =============================================================================
 //
-// Light source definition for Phong lighting model
-// Lighting calculation is performed on CPU side
+// Light source definition for GPU PBR lighting.
+// Lit meshes evaluate lighting on the GPU via Mesh::drawGpuPbr().
 //
 // Supported light types:
 // - Directional: Parallel light source (like sunlight, constant direction regardless of position)

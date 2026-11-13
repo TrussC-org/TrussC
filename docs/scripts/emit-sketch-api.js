@@ -52,8 +52,8 @@ function argBindable(a) {
     }
     return true;
 }
-// types NOT bound (mirror luagen-types EXCLUDE of internal::-poisoned ones)
-const UNBOUND_TYPES = new Set(['Thread', 'SoundSource', 'Environment', 'VideoPlayerBase']);
+// Types with no Lua binding; SoundSource is handwritten, VideoPlayerBase generated.
+const UNBOUND_TYPES = new Set(['Thread', 'Environment']);
 
 const en = d => (d && d.en) || '';
 const cleanName = n => (n || '').replace(/_+$/, '');
@@ -137,7 +137,8 @@ for (const id in data) {
         }
     } else {
         // Generated usertype — reference-data IS the binding source.
-        if (bindCtors.length) {
+        // VideoPlayerBase is abstract: its bound methods do not imply a constructor.
+        if (bindCtors.length && e.name !== 'VideoPlayerBase') {
             const best = bindCtors.reduce((x, y) => ((y.args || []).length > (x.args || []).length ? y : x));
             t.constructor = { snippet: snippetOf(e.name, best.args || []) };
         }

@@ -1,1 +1,4 @@
 {test} --gpu-check
+{test} --midpass-check
+{test} --burst-check
+{test} --burst-check --per-glyph

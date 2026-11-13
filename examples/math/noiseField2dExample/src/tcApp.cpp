@@ -1,3 +1,9 @@
+// =============================================================================
+// noiseField2dExample - Animate a two-dimensional noise field.
+//
+// Noise samples drive a continuous field instead of independent random values.
+// =============================================================================
+
 #include "tcApp.h"
 #include <sstream>
 

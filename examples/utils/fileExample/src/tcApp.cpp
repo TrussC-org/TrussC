@@ -1,3 +1,9 @@
+// =============================================================================
+// fileExample - Explore file paths, directories, and file streams.
+//
+// Displays path operations and reads and writes sample files in the data directory.
+// =============================================================================
+
 #include "tcApp.h"
 
 // =============================================================================

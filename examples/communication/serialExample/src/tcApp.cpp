@@ -1,3 +1,10 @@
+// =============================================================================
+// serialExample - Send and receive text over a serial port.
+//
+// Lists local ports and reconnects after disconnection. A serial device is
+// needed to exchange data; select its path and baud rate in the app.
+// =============================================================================
+
 #include "tcApp.h"
 #include "TrussC.h"
 

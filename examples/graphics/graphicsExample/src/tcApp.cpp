@@ -1,3 +1,9 @@
+// =============================================================================
+// graphicsExample - Draw basic shapes and compare drawing styles.
+//
+// Shows primitives, fills, outlines, and transforms in a single window.
+// =============================================================================
+
 #include "tcApp.h"
 
 // ---------------------------------------------------------------------------

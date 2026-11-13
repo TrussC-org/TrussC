@@ -330,6 +330,8 @@ myProject/
 - `.ico` - Windows icon format; a user file in `icon/` takes priority over PNG
 - `.png` - Converted at configure time with ImageMagick 7 (`magick`) to `<target>_icon.ico` in the build tree; nothing is written into `icon/`. The result is reused while the PNG's SHA-256 is unchanged; PNG edits trigger reconfiguration and conversion. A non-square PNG produces a warning. Missing or failing ImageMagick warns and uses `default.ico`.
 
+**Linux:** The first `.png` in glob order is embedded in the executable at build time and used for every X11 window (also under XWayland). Without a PNG, the default TrussC icon is embedded. PNG edits, additions, and removals trigger reconfiguration. No image conversion tool is needed. 1024 px is recommended; larger images are automatically scaled down to a 1024 px longest side, preserving aspect ratio.
+
 
 ## 9. Deploying an Installation
 

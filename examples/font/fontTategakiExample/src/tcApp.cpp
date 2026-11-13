@@ -1,3 +1,10 @@
+// =============================================================================
+// fontTategakiExample - Compare horizontal and vertical Japanese text.
+//
+// Vertical layout rotates or substitutes glyphs according to character type.
+// The panels compare Latin and digit orientation policies.
+// =============================================================================
+
 #include "tcApp.h"
 #include "TrussC.h"
 

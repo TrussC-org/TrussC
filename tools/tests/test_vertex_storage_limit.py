@@ -16,6 +16,7 @@ PREAMBLE = r'''
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <cstring>
 int driverLimit = 0, queries = 0, made = 0;
 constexpr int GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS = 0x90D6;
 void glGetIntegerv(int name, int* value) {
@@ -35,11 +36,20 @@ template<class T> void deferGpuDestroy(T) {}
 
 LOAD_SEAM = r'''
 namespace trussc {
+namespace internal {
+// This test exercises load's capacity refusal, before target selection.
+enum class PipelineRole { Shader };
+struct PipelineKey {
+    static PipelineKey raw(PipelineRole, const sg_pipeline_desc&) { return {}; }
+};
+struct PipelineRecipe { void reset(const PipelineKey&) {} };
+}
 class ShaderProbe {
 public:
     sg_shader shader{};
     sg_buffer vertexBuffer{}, indexBuffer{};
-    sg_pipeline_desc recipe_{};
+    sg_pipeline_desc recipe_{}, cachedRecipe_{};
+    internal::PipelineRecipe pipelineRecipe_, vertexPipelineRecipe_;
     std::shared_ptr<int> stream_;
     bool loaded = false, hasStorageBuffers_ = false, hasVertexAttributes_ = false;
     void clear() {
@@ -151,7 +161,7 @@ class VertexStorageLimitTests(unittest.TestCase):
         self.assertTrue(compiler.is_file(), 'requires the locally installed sokol-shdc; no downloads')
         with tempfile.TemporaryDirectory(dir=ROOT / '.build') as temporary:
             generated = Path(temporary) / 'particles.glsl.h'
-            shader = ROOT / 'examples/graphics/computeParticlesExample/src/particles.compute.glsl'
+            shader = ROOT / 'examples/compute/computeParticlesExample/src/particles.compute.glsl'
             result = subprocess.run([str(compiler), '-i', str(shader), '-o', str(generated),
                                      '-l', 'glsl430', '--ifdef'],
                                     capture_output=True, text=True, encoding='utf-8')

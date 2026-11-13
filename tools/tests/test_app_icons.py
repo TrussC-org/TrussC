@@ -19,7 +19,7 @@ class AppIconTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory(prefix='trussc-icons-')
         self.addCleanup(self.scratch.cleanup)
         self.base = Path(self.scratch.name)
-        self.source = self.base / 'project with spaces'
+        self.source = self.base / 'project with spaces 日本語'
         self.source.mkdir()
         self.icons = self.source / 'icon'
         self.icons.mkdir()
@@ -82,11 +82,28 @@ if(TEST_BUNDLE)
     set(CMAKE_C_LINK_EXECUTABLE "\\"${CMAKE_COMMAND}\\" -E touch <TARGET>")
     add_executable(app MACOSX_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/main.c")
     set_target_properties(app PROPERTIES LINKER_LANGUAGE C)
+elseif(TEST_PLATFORM STREQUAL "linux")
+    enable_language(CXX)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/main.cpp" [=[
+#include <cstdio>
+namespace trussc::internal {
+const unsigned char* linuxAppIcon(int&, const char*&);
+}
+int main() {
+    int size = 0;
+    const char* name = nullptr;
+    const auto* bytes = trussc::internal::linuxAppIcon(size, name);
+    return std::fwrite(bytes, 1, size, stdout) == static_cast<size_t>(size) ? 0 : 1;
+}
+]=])
+    add_executable(app "${CMAKE_CURRENT_BINARY_DIR}/main.cpp")
 else()
     add_custom_target(app)
 endif()
 if(TEST_PLATFORM STREQUAL "ios")
     _trussc_setup_icon_ios(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
+elseif(TEST_PLATFORM STREQUAL "linux")
+    _trussc_setup_icon_linux(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
 elseif(TEST_PLATFORM STREQUAL "windows")
     _trussc_setup_icon_windows(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
 else()
@@ -113,6 +130,8 @@ endforeach()
                    '-DCMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH=FALSE',
                    '-DTEST_PLATFORM=' + platform,
                    '-DDEFAULT_DIR=' + (ROOT / 'core/resources').as_posix()]
+        if platform == 'linux':
+            command.append('-DCMAKE_CXX_COMPILER=' + (shutil.which('c++') or 'c++'))
         if folder is not None:
             command.append('-DTEST_FOLDER_SUCCESS=' + ('TRUE' if folder else 'FALSE'))
         if bundle:
@@ -166,6 +185,48 @@ pathlib.Path(args[2], 'Assets.car').write_bytes(b'user icon catalog')
 
     def bundle_commands(self):
         return (self.build / 'bundle-commands.txt').read_text(encoding='utf-8')
+
+    def embedded_png(self):
+        result = subprocess.run(['cmake', '--build', str(self.build)],
+                                capture_output=True, text=True, encoding='utf-8', env=self.env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return subprocess.check_output([str(self.build / 'app')], env=self.env)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux ELF assembler')
+    def test_linux_default_without_icon_folder(self):
+        self.icons.rmdir()
+        self.configure(platform='linux')
+        self.assertEqual(self.embedded_png(), (ROOT / 'core/resources/default.png').read_bytes())
+        self.assertIn('app_icon.cpp', self.selection)
+        self.assertEqual(self.calls(), [])
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux ELF assembler')
+    def test_linux_png_selection_and_edits(self):
+        chosen = self.png()
+        (self.icons / 'z.png').write_bytes(b'other size')
+        self.configure(platform='linux')
+        self.assertEqual(self.embedded_png(), chosen.read_bytes())
+        self.assertIn(chosen.as_posix(), self.selection)
+        source_before = (self.build / 'app_icon.cpp').read_bytes()
+        chosen.write_bytes(b'changed PNG')
+        # OBJECT_DEPENDS rebuilds the embedded bytes even though the source is unchanged.
+        result = subprocess.run(['cmake', '--build', str(self.build)],
+                                capture_output=True, text=True, encoding='utf-8', env=self.env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.embedded_png(), chosen.read_bytes())
+        self.assertEqual((self.build / 'app_icon.cpp').read_bytes(), source_before)
+        chosen.unlink()
+        (self.icons / 'z.png').unlink()
+        result = subprocess.run(['cmake', '--build', str(self.build)],
+                                capture_output=True, text=True, encoding='utf-8', env=self.env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.embedded_png(), (ROOT / 'core/resources/default.png').read_bytes())
+        added = self.png()
+        result = subprocess.run(['cmake', '--build', str(self.build)],
+                                capture_output=True, text=True, encoding='utf-8', env=self.env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.embedded_png(), added.read_bytes())
+        self.assertEqual(self.calls(), [])
 
     def test_default_uses_prebuilt_catalog_without_actool(self):
         self.xcode()

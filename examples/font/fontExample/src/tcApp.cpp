@@ -1,3 +1,9 @@
+// =============================================================================
+// fontExample - Compare font sizes, alignment, and line spacing.
+//
+// Loads platform font paths and draws horizontal and vertical alignment guides.
+// =============================================================================
+
 #include "tcApp.h"
 #include "TrussC.h"
 

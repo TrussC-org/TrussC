@@ -41,6 +41,7 @@ struct FboSharedMipResources {
     bool ready = false;   // both shaders usable (internalShaderReady)
     sg_shader shader = {};
     sg_shader blitShader = {};
+    PipelineRecipe mipRecipe, blitRecipe;
     sg_buffer vbuf = {};
     sg_sampler sampler = {};
     bool initialized = false;
@@ -258,6 +259,18 @@ public:
         // FBO color texture stores premultiplied alpha (due to alpha blending + MSAA resolve)
         colorTexture_.setPremultipliedAlpha(true);
 
+        // Initialize this attachment once. All later activations, including
+        // color/depth clears, load and store stencil across frame boundaries.
+        sg_pass initial = {};
+        initial.attachments.depth_stencil = depthAttView_;
+        initial.action.depth.load_action = SG_LOADACTION_CLEAR;
+        initial.action.depth.clear_value = 1;
+        initial.action.stencil.load_action = SG_LOADACTION_CLEAR;
+        initial.action.stencil.clear_value = 0;
+        {
+            internal::TargetPassScope scope(initial, w, h, SG_PIXELFORMAT_NONE, sampleCount, true);
+            if (!scope.active()) { failed(); return; }
+        }
         allocated_ = true;
     }
 
@@ -269,6 +282,10 @@ public:
             return;
         }
         stencilCache_.reset();
+        target_.stencil = {};
+        target_.savedStencil = {};
+        target_.stencilOwned = false;
+        target_.frameworkStencilClipDepth = 0;
         // Also release partial allocations, before allocated_ is published.
         // Shared context/pipelines are NOT destroyed here (shared across FBOs)
         if (depthAttView_.id) sg_destroy_view(depthAttView_);
@@ -452,6 +469,10 @@ public:
         return SaveResult::fail(SaveError::WriteFailed, "Cannot read Fbo pixels");
     }
 
+    // To sample this Fbo in a shader, use getTextureView()/getSampler():
+    // shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    // FullscreenShader needs a GL/GLES V flip: see docs/guides/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+    // End this Fbo before sampling it; render into a different target.
     // Access to internal resources (for advanced users).
     // Like getTexture(), these refer to the CURRENT version's texture.
     sg_image getColorImage() const { return curColorTex_().getImage(); }
@@ -688,7 +709,7 @@ private:
         internal::TargetPassScope scope(pass, dst.getWidth(), dst.getHeight(), target_.colorFormat);
         if (!scope.active()) return;
 
-        if (!applyMipPipeline_(s.blitShader, internal::PipelineRole::Blit)) return;
+        if (!applyMipPipeline_(s.blitRecipe)) return;
         sg_bindings bind = {};
         bind.vertex_buffers[0] = s.vbuf;
         bind.views[VIEW_tc_fbomip_srcTex] = src.getViewForMip(0);
@@ -750,16 +771,19 @@ private:
             return;
         }
 
-        s.initialized = true;
-    }
-
-    static bool applyMipPipeline_(sg_shader shader, internal::PipelineRole role) {
         sg_pipeline_desc desc = {};
-        desc.shader = shader;
+        desc.shader = s.shader;
         desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
         desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
         desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
-        const auto selected = internal::currentTarget().pipeline(internal::PipelineKey::raw(role, desc));
+        s.mipRecipe.reset(internal::PipelineKey::raw(internal::PipelineRole::Mip, desc));
+        desc.shader = s.blitShader;
+        s.blitRecipe.reset(internal::PipelineKey::raw(internal::PipelineRole::Blit, desc));
+        s.initialized = true;
+    }
+
+    static bool applyMipPipeline_(internal::PipelineRecipe& recipe) {
+        const auto selected = recipe.select(internal::currentTarget());
         if (!selected.raw.id) return false;
         sg_apply_pipeline(selected.raw);
         return true;
@@ -789,7 +813,7 @@ private:
                     std::max(1, target_.height >> level), target_.colorFormat);
                 if (!scope.active()) return;
 
-                if (!applyMipPipeline_(s.shader, internal::PipelineRole::Mip)) return;
+                if (!applyMipPipeline_(s.mipRecipe)) return;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;
@@ -809,7 +833,7 @@ private:
                     std::max(1, target_.height >> level), target_.colorFormat);
                 if (!scope.active()) return;
 
-                if (!applyMipPipeline_(s.blitShader, internal::PipelineRole::Blit)) return;
+                if (!applyMipPipeline_(s.blitRecipe)) return;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;
@@ -860,7 +884,7 @@ private:
         target_.viewport = {0, 0, float(target_.width), float(target_.height), true};
         target_.sglLayerNext = 0;
         target_.openShaderScopes = 0;
-        target_.selectedPipeline = internal::fillSelection(target_.currentBlendMode, target_.depthTestEnabled);
+        target_.selectedPipeline = internal::fillSelection(target_.currentBlendMode, target_.depthTestEnabled, target_.customBlendId);
         target_.owner = this;
         target_.finalize = [](void* owner) { static_cast<Fbo*>(owner)->finishActivation_(); };
         // A preparation entry parks the outgoing parent while version-copy
@@ -903,6 +927,7 @@ private:
             target_.clearAction.colors[0].clear_value = {r, g, b, a};
             target_.clearAction.depth.load_action = SG_LOADACTION_CLEAR;
             target_.clearAction.depth.clear_value = 1;
+            target_.clearAction.stencil.load_action = SG_LOADACTION_LOAD;
             internal::setupScreenFovWithSize(TAU / 8, float(target_.width), float(target_.height), 0, 0, false);
             // Match the base: camera setup selects 3D; a fresh Fbo starts in
             // the inherited 2D blend mode, including its logical depth flag.

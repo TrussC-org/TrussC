@@ -59,6 +59,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("beginLines", []() { return trussc::beginLines(); });
     lua->set_function("beginShadowPass", [](trussc::Light & light) { return trussc::beginShadowPass(light); });
     lua->set_function("beginShape", []() { return trussc::beginShape(); });
+    lua->set_function("beginStencil", []() { return trussc::beginStencil(); });
     lua->set_function("beginStroke", []() { return trussc::beginStroke(); });
     lua->set_function("binToFrequency", [](int bin, int fftSize, int sampleRate) { return trussc::binToFrequency(bin, fftSize, sampleRate); });
     lua->set_function("bindCursorImage", sol::overload(
@@ -87,6 +88,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("clearEnvironment", []() { return trussc::clearEnvironment(); });
     lua->set_function("clearLights", []() { return trussc::clearLights(); });
     lua->set_function("clearMaterial", []() { return trussc::clearMaterial(); });
+    lua->set_function("clearStencil", sol::overload(
+        []() { return trussc::clearStencil(); },
+        [](uint8_t value) { return trussc::clearStencil(value); }
+    ));
     lua->set_function("closeLogFile", []() { return trussc::closeLogFile(); });
     lua->set_function("colorFromHSB", sol::overload(
         [](float h, float s, float b) { return trussc::colorFromHSB(h, s, b); },
@@ -294,6 +299,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::endShape(); },
         [](bool close) { return trussc::endShape(close); }
     ));
+    lua->set_function("endStencil", []() { return trussc::endStencil(); });
     lua->set_function("endStroke", sol::overload(
         []() { return trussc::endStroke(); },
         [](bool close) { return trussc::endStroke(close); }
@@ -361,6 +367,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getCurveMode", []() { return trussc::getCurveMode(); });
     lua->set_function("getCurveResolution", []() { return trussc::getCurveResolution(); });
     lua->set_function("getCurveTolerance", []() { return trussc::getCurveTolerance(); });
+    lua->set_function("getCustomBlendDesc", []() { return trussc::getCustomBlendDesc(); });
     lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
     lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
     lua->set_function("getDay", []() { return trussc::getDay(); });
@@ -729,6 +736,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setCursor", [](trussc::Cursor cursor) { return trussc::setCursor(cursor); });
     lua->set_function("setCurveResolution", [](int n) { return trussc::setCurveResolution(n); });
     lua->set_function("setCurveTolerance", [](float pixels) { return trussc::setCurveTolerance(pixels); });
+    lua->set_function("setCustomBlendDesc", [](const trussc::BlendDesc & desc) { return trussc::setCustomBlendDesc(desc); });
     lua->set_function("setDataPathRoot", [](const fs::path & path) { return trussc::setDataPathRoot(path); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });

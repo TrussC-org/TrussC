@@ -405,20 +405,25 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
 
 inline RenderTarget& currentTarget() { return *currentWindowContext().currentTarget; }
 inline sgl_pipeline active2D(BlendMode mode) {
-    return currentTarget().pipeline(PipelineKey::immediate(fillSelection(mode, currentTarget().depthTestEnabled))).immediate;
+    return currentTarget().immediatePipeline(fillSelection(mode, currentTarget().depthTestEnabled, currentTarget().customBlendId));
 }
-inline sgl_pipeline activeFill2D() { return active2D(BlendMode::Alpha); }
+inline sgl_pipeline activeFill2D() {
+    return active2D(currentTarget().currentBlendMode == BlendMode::Custom ? BlendMode::Custom : BlendMode::Alpha);
+}
 inline sgl_pipeline activePremult() {
-    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Premult, BlendMode::Alpha, currentTarget().depthTestEnabled})).immediate;
+    return currentTarget().immediatePipeline({PipelineRole::Premult, BlendMode::Alpha, currentTarget().depthTestEnabled});
 }
 inline sgl_pipeline activeCoverage2D() {
-    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Coverage, BlendMode::Alpha, currentTarget().depthTestEnabled})).immediate;
+    auto selection = fillSelection(currentTarget().currentBlendMode,
+        currentTarget().depthTestEnabled, currentTarget().customBlendId);
+    selection.role = PipelineRole::Coverage;
+    return currentTarget().immediatePipeline(selection);
 }
 inline sgl_pipeline activeClear() {
-    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Clear})).immediate;
+    return currentTarget().immediatePipeline({PipelineRole::Clear});
 }
 inline sgl_pipeline active3D() {
-    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Geometry3D, BlendMode::Alpha, true})).immediate;
+    return currentTarget().immediatePipeline({PipelineRole::Geometry3D, BlendMode::Alpha, true});
 }
 inline void loadTemporaryPipeline(sgl_pipeline pipeline) {
     if (!sg_isvalid() || !currentTarget().resources().context.id) return;
@@ -438,7 +443,7 @@ inline void loadPipeline(sgl_pipeline pipeline) {
 }
 inline void restoreCurrentPipeline() {
     auto& target = currentTarget();
-    loadTemporaryPipeline(target.pipeline(PipelineKey::immediate(target.selectedPipeline)).immediate);
+    loadTemporaryPipeline(target.immediatePipeline(target.selectedPipeline));
 }
 
 inline void applyTargetModelView() {

@@ -1,6 +1,6 @@
 # TrussC
 
-[![Build](https://github.com/TrussC-org/TrussC/actions/workflows/build.yml/badge.svg)](https://github.com/TrussC-org/TrussC/actions/workflows/build.yml)
+[![Build](https://github.com/TrussC-org/TrussC/actions/workflows/build.yml/badge.svg?event=merge_group)](https://github.com/TrussC-org/TrussC/actions/workflows/build.yml?query=event%3Amerge_group)
 [![Discord](https://img.shields.io/discord/1454128450112847998?label=discord&logo=discord&color=5865F2)](https://discord.gg/7MRRny56VQ)
 
 A lightweight creative coding framework based on sokol.
@@ -160,6 +160,7 @@ src/                  # Platform-specific implementations
 - [Architecture](docs/architecture/README.md) - Design philosophy and architecture
 - [CONTRIBUTING.md](.github/CONTRIBUTING.md) - How changes are proposed, decided and merged
 - [BUILD_SYSTEM.md](docs/guides/BUILD_SYSTEM.md) - CMake build system details
+- [DISTRIBUTION.md](docs/guides/DISTRIBUTION.md) - Packaging an app for other machines (`trusscli dist`)
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap
 
 ## Support

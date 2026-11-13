@@ -11,9 +11,7 @@ option(USE_LUAJIT "Enable building with LuaJIT" OFF)
 if(USE_LUAJIT)
     message(STATUS "[${ADDON_NAME}] LuaJIT enabled")
 
-    set(LUAJIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/LuaJIT)
-    add_subdirectory(luajit-cmake)
-    set(LUAJIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/LuaJIT) # WORKAROUND
+    include(cmake/LuaJIT.cmake)
 
     set(LUA_C_SOURCES "")
     set(LUA_CXX_SOURCES "")
@@ -49,7 +47,6 @@ add_library(${ADDON_NAME} STATIC
 if(USE_LUAJIT)
     target_compile_definitions(${ADDON_NAME} PRIVATE TCXLUA_USE_LUAJIT=1 SOL_LUAJIT=1)
     target_include_directories(${ADDON_NAME} PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/luajit-header/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )

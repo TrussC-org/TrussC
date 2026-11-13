@@ -59,6 +59,7 @@ int luaLoadFileProtected(lua_State* state) {
 
 
 bool tcxLua::runFile(sol::state& lua, const std::filesystem::path& path) {
+    clearEventListeners(lua);
     lua_State* state = lua.lua_state();
     const int originalTop = lua_gettop(state);
     try {

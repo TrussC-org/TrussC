@@ -1,3 +1,10 @@
+// =============================================================================
+// threadExample - Compare locked and unlocked worker data access.
+//
+// Start and stop the worker with keys. The unlocked mode intentionally
+// illustrates inconsistent reads; use locking for coherent shared data.
+// =============================================================================
+
 #include "tcApp.h"
 #include <thread>
 

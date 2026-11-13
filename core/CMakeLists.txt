@@ -386,6 +386,7 @@ endif()
 #   iOS: .png (resized to 1024x1024 with sips)
 #   macOS: .icns, .icon (macOS 26 Tahoe+, requires actool), .png (sips + iconutil)
 #   Windows: .ico (or auto-converted from .png)
+#   Linux: .png (embedded for every X11 window)
 # =============================================================================
 
 function(trussc_setup_icon TARGET_NAME)
@@ -398,7 +399,51 @@ function(trussc_setup_icon TARGET_NAME)
         _trussc_setup_icon_macos(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
     elseif(WIN32)
         _trussc_setup_icon_windows(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        _trussc_setup_icon_linux(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
     endif()
+endfunction()
+
+# -----------------------------------------------------------------------------
+# Linux icon setup (PNG embedded in the executable, decoded with stb_image)
+# -----------------------------------------------------------------------------
+function(_trussc_setup_icon_linux TARGET_NAME ICON_DIR DEFAULT_DIR)
+    file(GLOB PNG_FILES CONFIGURE_DEPENDS "${ICON_DIR}/*.png")
+    if(PNG_FILES)
+        list(GET PNG_FILES 0 PNG_FILE)
+    else()
+        set(PNG_FILE "${DEFAULT_DIR}/default.png")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PNG_FILE}")
+    file(RELATIVE_PATH ICON_NAME "${CMAKE_CURRENT_SOURCE_DIR}" "${PNG_FILE}")
+    # Escape assembler paths; the C++ raw strings preserve spaces and UTF-8.
+    string(REPLACE "\\" "\\\\" PNG_PATH "${PNG_FILE}")
+    string(REPLACE "\"" "\\\"" PNG_PATH "${PNG_PATH}")
+    set(ICON_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.cpp")
+    file(WRITE "${ICON_SOURCE}.in" [=[
+asm(R"TCICON(
+.pushsection .rodata
+.global trussc_linux_icon_start, trussc_linux_icon_end
+.hidden trussc_linux_icon_start, trussc_linux_icon_end
+trussc_linux_icon_start:
+.incbin "@PNG_PATH@"
+trussc_linux_icon_end:
+.popsection
+)TCICON");
+extern "C" {
+extern const unsigned char trussc_linux_icon_start[], trussc_linux_icon_end[];
+}
+namespace trussc::internal {
+const unsigned char* linuxAppIcon(int& size, const char*& name) {
+    size = trussc_linux_icon_end - trussc_linux_icon_start;
+    name = R"TCICON(@ICON_NAME@)TCICON";
+    return trussc_linux_icon_start;
+}
+}
+]=])
+    configure_file("${ICON_SOURCE}.in" "${ICON_SOURCE}" @ONLY)
+    set_source_files_properties("${ICON_SOURCE}" PROPERTIES OBJECT_DEPENDS "${PNG_FILE}")
+    target_sources(${TARGET_NAME} PRIVATE "${ICON_SOURCE}")
 endfunction()
 
 # -----------------------------------------------------------------------------

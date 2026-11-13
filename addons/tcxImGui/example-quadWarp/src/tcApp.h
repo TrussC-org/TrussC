@@ -25,6 +25,7 @@ public:
     }
 
 private:
+    void rawEvent(const sapp_event& event);
     enum class PointerAction { Hover, Down, Drag, Up, Cancel };
     bool screenToFbo(Vec2 screen, Vec2& fboPx);
     bool pointerInput(Vec2 screenPos, PointerAction action);
@@ -43,6 +44,3 @@ private:
 
     friend class SelfCheckApp;
 };
-
-// Kept separately so the reference example stays focused on rendering and input.
-int runSelfCheck(const WindowSettings& settings);

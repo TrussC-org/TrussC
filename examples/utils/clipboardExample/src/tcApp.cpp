@@ -1,3 +1,10 @@
+// =============================================================================
+// clipboardExample - Copy text and receive platform paste events.
+//
+// Use Cmd/Ctrl+V to receive clipboardPasted, including browser paste where
+// on-demand clipboard reads are restricted.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

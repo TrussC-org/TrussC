@@ -49,8 +49,8 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     parts.append(f'namespace {platform} {{\n' + r'''
 using Client=void(*)(const sapp_event*,sapp_window,void*);
 using Tick=void(*)(sapp_window,void*);
-struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_window parent{}; bool hidden=false; int swap_interval=0; };
-struct sapp_desc { Tick _tc_close_cb=nullptr; bool(*_tc_close_request_cb)(sapp_window,void*)=nullptr; int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
+struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_window parent{}; bool hidden=false; int swap_interval=0,max_frame_latency=0; };
+struct sapp_desc { Tick _tc_close_cb=nullptr; bool(*_tc_close_request_cb)(sapp_window,void*)=nullptr; int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1,max_frame_latency=0; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
 struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
 struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true,link_suspended=false,fullscreen=false,fullscreen_requested=false; int swap_interval=0,requested_swap_interval=1; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; void* window=nullptr; const char* title="test"; };
@@ -111,7 +111,9 @@ void run() {
         _sapp_tc.app.desc._tc_event_cb=direct ? client : nullptr;
         // Legacy callback presence enables the same production readiness predicate.
         _sapp_tc.app.desc.event_cb=[](const sapp_event*) {};
+        _sapp_tc.app.desc.max_frame_latency=16;
         check("launch creation succeeds",CREATE_MAIN());
+        LATENCY_CHECK
         check("construction focus/resize/key/drop stay suppressed as with old trampoline",callbacks==0 && bound==1);
         _sapp_tc.app.init_called=true; // desktop sets this BEFORE entering init
         sapp_event during{}; during.type=SAPP_EVENTTYPE_RESIZED;
@@ -124,7 +126,7 @@ void run() {
     }
 }
 }
-'''.replace('CREATE_MAIN()', f'_sapp_tc_{platform}_create_main_window()'))
+'''.replace('LATENCY_CHECK', 'check("Windows launch latency transfers",record.desc.max_frame_latency==16);' if platform=='win32' else '').replace('CREATE_MAIN()', f'_sapp_tc_{platform}_create_main_window()'))
 
 # These ports retain sokol's opposite flag ordering: init_called becomes true
 # AFTER init returns, so their native predicate suppresses init-time events.

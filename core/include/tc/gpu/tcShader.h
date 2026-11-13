@@ -19,6 +19,15 @@
 //
 //   drawCircle(400, 400, 50);  // Normal sokol_gl drawing
 //
+// Fullscreen effect (include TrussC.h, then generated shaders/effect.glsl.h):
+//   FullscreenShader effect;
+//   effect.load(effect_shader_desc);
+//   effect_params_t params = {};  // generated from the uniform block
+//   effect.setParams(params);
+//   effect.setTexture(0, source.getTextureView(), source.getSampler()); // source: Fbo
+//   effect.draw();  // fills the current render target
+// Fbo sampling needs a GL/GLES V flip: see docs/guides/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+//
 // =============================================================================
 
 // Note: This file is included from TrussC.h after tcMath.h, tcLog.h, etc.
@@ -109,6 +118,12 @@ public:
 
         recipe_ = pipDesc;
         recipe_.label = nullptr; // subclass-owned label need not outlive load()
+        pipelineRecipe_.reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, recipe_));
+        auto vertexRecipe = recipe_;
+        vertexRecipe.layout = {};
+        vertexRecipe.index_type = SG_INDEXTYPE_NONE;
+        vertexPipelineRecipe_.reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, vertexRecipe));
+        std::memcpy(&cachedRecipe_, &recipe_, sizeof(recipe_));
 
         // Create dynamic vertex buffer
         createVertexBuffer();
@@ -383,11 +398,8 @@ public:
         }
         if (!scoped) begin();
         try {
-            auto recipe = recipe_;
-            recipe.layout = {};
-            recipe.index_type = SG_INDEXTYPE_NONE;
-            const auto selection = internal::currentTarget().pipeline(
-                internal::PipelineKey::raw(internal::PipelineRole::Shader, recipe));
+            refreshPipelineRecipes_();
+            const auto selection = vertexPipelineRecipe_.select(internal::currentTarget());
             if (selection.raw.id) {
                 internal::DeferredShaderDraw draw;
                 draw.pipeline = selection.raw;
@@ -491,6 +503,7 @@ protected:
     // Sokol resources
     sg_shader shader = {};
     sg_pipeline_desc recipe_ = {};
+    internal::PipelineRecipe pipelineRecipe_, vertexPipelineRecipe_;
     sg_buffer vertexBuffer = {};
     sg_buffer indexBuffer = {};
     bool loaded = false;
@@ -553,11 +566,25 @@ protected:
     virtual void setupBindings(sg_bindings& bind) {}
 
     internal::PipelineSelection selectPipelineForCurrentTarget_() {
-        return internal::currentTarget().pipeline(internal::PipelineKey::raw(internal::PipelineRole::Shader, recipe_));
+        refreshPipelineRecipes_();
+        return pipelineRecipe_.select(internal::currentTarget());
     }
     sg_pipeline pipelineForCurrentTarget() { return selectPipelineForCurrentTarget_().raw; }
 
 private:
+    // Subclasses can write recipe_ directly. Compare its snapshot before the
+    // last-selection fast path; rebuild both variants only after a change.
+    void refreshPipelineRecipes_() {
+        if (std::memcmp(&recipe_, &cachedRecipe_, sizeof(recipe_)) == 0) return;
+        pipelineRecipe_.reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, recipe_));
+        auto vertexRecipe = recipe_;
+        vertexRecipe.layout = {};
+        vertexRecipe.index_type = SG_INDEXTYPE_NONE;
+        vertexPipelineRecipe_.reset(internal::PipelineKey::raw(internal::PipelineRole::Shader, vertexRecipe));
+        std::memcpy(&cachedRecipe_, &recipe_, sizeof(recipe_));
+    }
+    sg_pipeline_desc cachedRecipe_ = {};
+
     void snapshotUniforms_(internal::DeferredShaderDraw& draw) const {
         draw.uniforms.reserve(pendingUniforms.size());
         for (const auto& [slot, bytes] : pendingUniforms) draw.uniforms.emplace_back(slot, bytes);
@@ -611,6 +638,9 @@ private:
     void moveFrom(Shader&& other) {
         shader = other.shader;
         recipe_ = other.recipe_;
+        std::memcpy(&cachedRecipe_, &other.cachedRecipe_, sizeof(cachedRecipe_));
+        pipelineRecipe_ = std::move(other.pipelineRecipe_);
+        vertexPipelineRecipe_ = std::move(other.vertexPipelineRecipe_);
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
@@ -675,7 +705,9 @@ class FullscreenShader : public Shader {
 public:
     FullscreenShader() = default;
 
-    // Set uniform params (call before draw)
+    // Set fragment uniform block 0 (call before draw). Copies raw bytes.
+    // T must match the sokol-shdc <block>_t layout, including padding;
+    // prefer the generated type (GLSL vec4 maps to float[4] by default).
     template<typename T>
     void setParams(const T& params) {
         paramsData_.resize(sizeof(T));

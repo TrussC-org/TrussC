@@ -1,3 +1,10 @@
+// =============================================================================
+// normalMapExample - Compare a material with and without a normal map.
+//
+// A procedural tangent-space normal map changes lighting detail without
+// changing the sphere geometry. Both spheres use the same base material.
+// =============================================================================
+
 #include "tcApp.h"
 
 /*

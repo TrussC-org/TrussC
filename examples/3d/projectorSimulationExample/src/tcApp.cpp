@@ -1,3 +1,10 @@
+// =============================================================================
+// projectorSimulationExample - Project an animated image onto a folded screen.
+//
+// An Fbo supplies the projector's gobo texture. Lens shift moves the projected
+// image upward without tilting the projector; the scene also uses IES lighting.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

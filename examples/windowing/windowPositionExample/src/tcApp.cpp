@@ -1,3 +1,10 @@
+// =============================================================================
+// windowPositionExample - Move a native window and display its position.
+//
+// Arrow keys move the window; R resets its position.
+// Window positioning depends on platform support and the window manager.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

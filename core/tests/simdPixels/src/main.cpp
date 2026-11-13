@@ -186,11 +186,39 @@ void rowConversions() {
             }
         }
     }
+
+    // Aperture origins are in top-down coded coordinates, even for bottom-up storage.
+    for (int width : {1, 3, 15, 16, 17, 31, 33, 642}) {
+        const int codedWidth = width == 642 ? 656 : width + 14;
+        for (const auto& display : {trussc::internal::VideoDisplayRect{7, 3, std::uint32_t(width), 362},
+                                   trussc::internal::VideoDisplayRect{14, 6, std::uint32_t(width), 362}}) {
+            for (size_t padding : {0u, 4u, 64u}) {
+                const SiteLayout layout{codedWidth, 368, width, size_t(codedWidth) * 4 + padding, display};
+                for (size_t srcOffset : {0u, 1u, 7u}) {
+                    for (size_t dstOffset : {0u, 3u}) {
+                        Bytes src(srcOffset + layout.pitch * layout.height);
+                        fill(src);
+                        const auto original = src;
+                        Bytes expected(dstOffset + size_t(display.width) * display.height * 4 + 19, 0xA5);
+                        for (int index : {7, 8}) {
+                            auto result = expected;
+                            auto reference = expected;
+                            rowSites[index].before(src.data() + srcOffset, reference.data() + dstOffset, layout);
+                            rowSites[index].after(src.data() + srcOffset, result.data() + dstOffset, layout);
+                            check(reference == result && src == original, rowSites[index].name,
+                                  size_t(display.width) * display.height);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 constexpr int benchWidth = 1920, benchHeight = 1080;
 constexpr size_t benchPixels = benchWidth * benchHeight;
 constexpr size_t benchPitch = benchWidth * 4 + 64;
+constexpr SiteLayout cropLayout{656, 368, 642, 656 * 4 + 64, {7, 3, 642, 362}};
 using Kernel = void (*)(const std::uint8_t*, std::uint8_t*);
 volatile unsigned benchChecksum = 0;
 
@@ -285,6 +313,16 @@ int benchmark() {
         }, [](auto s, auto d) {
             const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
             rowSites[8].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"windows_player_source_positive_crop_642x362", [](auto s, auto d) {
+            rowSites[7].before(const_cast<std::uint8_t*>(s), d, cropLayout);
+        }, [](auto s, auto d) {
+            rowSites[7].after(const_cast<std::uint8_t*>(s), d, cropLayout);
+        }},
+        {"windows_player_source_negative_crop_642x362", [](auto s, auto d) {
+            rowSites[8].before(const_cast<std::uint8_t*>(s), d, cropLayout);
+        }, [](auto s, auto d) {
+            rowSites[8].after(const_cast<std::uint8_t*>(s), d, cropLayout);
         }},
         // The symmetric swizzle is the shared BGRA/RGBA kernel.
         {"swizzle_kernel", [](auto s, auto d) { simd::scalar::bgraToRgba(s, d, benchPixels); },

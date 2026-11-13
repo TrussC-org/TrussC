@@ -1,3 +1,10 @@
+// =============================================================================
+// fboMipmapExample - Compare minified Fbo textures with and without mipmaps.
+//
+// Both cubes use the same stripe pattern. As the camera moves away,
+// mipmaps reduce the shimmering visible on the cube without them.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

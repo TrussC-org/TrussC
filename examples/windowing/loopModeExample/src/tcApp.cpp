@@ -1,3 +1,10 @@
+// =============================================================================
+// loopModeExample - Compare frame scheduling modes and measured rates.
+//
+// Switch between VSync, fixed rates, event-driven drawing, and decoupled
+// updates. Event-driven mode redraws on input instead of continuously.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

@@ -1,3 +1,9 @@
+// =============================================================================
+// strokeMeshExample - Build reusable stroke geometry.
+//
+// StrokeMesh turns a path into triangles for repeated drawing with stroke styling.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

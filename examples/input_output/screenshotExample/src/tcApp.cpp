@@ -1,3 +1,9 @@
+// =============================================================================
+// screenshotExample - Save screenshots of the window.
+//
+// Requests a screenshot and displays the resulting file information.
+// =============================================================================
+
 #include "tcApp.h"
 
 namespace fs = std::filesystem;
