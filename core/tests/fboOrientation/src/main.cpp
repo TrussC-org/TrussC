@@ -27,6 +27,20 @@ void check(const char* label, bool ok) {
     std::printf("%s: %s\n", ok ? "PASS" : "FAIL", label);
     if (!ok) ++failures;
 }
+// Web has no window capture (grabScreen); skip those checks, keep Fbo readback ones.
+bool captureWindow(const char* label, Pixels& pixels) {
+#ifdef __EMSCRIPTEN__
+    static bool noted = false;
+    if (!noted) std::printf("SKIP: window capture checks (no grabScreen on Web); Fbo readback checks still run\n");
+    noted = true;
+    (void)label; (void)pixels;
+    return false;
+#else
+    const bool ok = grabScreen(pixels);
+    check(label, ok);
+    return ok;
+#endif
+}
 void expect(const Pixels& pixels, int x, int y, Color wanted) {
     const auto actual = pixels.getColor(x, y);
     const bool ok = std::abs(actual.r - wanted.r) < 0.01f &&
@@ -184,7 +198,7 @@ class OrientationApp : public App {
         drawSphere();
         internal::parkWindowPass();
         Pixels window;
-        check("normal-mapped sphere window capture", grabScreen(window));
+        const bool haveWindow = captureWindow("normal-mapped sphere window capture", window);
         Fbo fbo;
         fbo.allocate(128, 128);
         fbo.begin(0, 0, 0, 1);
@@ -194,18 +208,20 @@ class OrientationApp : public App {
         pixels.allocate(128, 128, 4);
         check("normal-mapped sphere Fbo readback", fbo.readPixels(pixels.getData()));
         int changed = 0, maxDelta = 0, lit = 0;
-        for (int y = 22; y < 106; ++y) for (int x = 22; x < 106; ++x) {
+        if (haveWindow) for (int y = 22; y < 106; ++y) for (int x = 22; x < 106; ++x) {
             const auto a = pixels.getColor(x, y), b = window.getColor(x, y);
             const float delta = std::max({std::abs(a.r-b.r), std::abs(a.g-b.g), std::abs(a.b-b.b)});
             changed += delta > 2.0f/255.0f;
             maxDelta = std::max(maxDelta, int(std::round(delta * 255)));
             lit += a.r + a.g + a.b > 0.05f;
         }
-        std::printf("sphere window/Fbo: >2-level pixels=%d maxDelta=%d lit=%d\n", changed, maxDelta, lit);
-        check("derivative normal map agrees with window", changed < 20 && lit > 1000);
+        if (haveWindow) {
+            std::printf("sphere window/Fbo: >2-level pixels=%d maxDelta=%d lit=%d\n", changed, maxDelta, lit);
+            check("derivative normal map agrees with window", changed < 20 && lit > 1000);
+        }
         if (!imageDirectory.empty()) {
             check("save sphere Fbo", bool(pixels.save(imageDirectory + "/sphere-fbo.png")));
-            check("save sphere window", bool(window.save(imageDirectory + "/sphere-window.png")));
+            if (haveWindow) check("save sphere window", bool(window.save(imageDirectory + "/sphere-window.png")));
         }
         removeLight(light);
     }
@@ -303,8 +319,7 @@ class OrientationApp : public App {
                 fbo.draw(0, 0);
                 internal::parkWindowPass();
                 Pixels drawn;
-                check("Fbo draw window capture succeeds", grabScreen(drawn));
-                if (drawn.isAllocated()) {
+                if (captureWindow("Fbo draw window capture succeeds", drawn)) {
                     expect(drawn, 4, 4, Color(1, 0, 0));
                     expect(drawn, 4, 28, Color(0, 1, 0));
                 }
@@ -316,8 +331,7 @@ class OrientationApp : public App {
                     internal::ensureCurrentPass();
                     internal::parkWindowPass();
                     Pixels screen;
-                    check("window capture succeeds", grabScreen(screen));
-                    if (screen.isAllocated()) {
+                    if (captureWindow("window capture succeeds", screen)) {
                         expect(screen, 16, topAtZero ? 16 : 112, Color(1, 0, 0));
                         expect(screen, 16, topAtZero ? 112 : 16, Color(0, 1, 0));
                         expect(screen, 112, topAtZero ? 112 : 16, Color(0, 0, 0));
