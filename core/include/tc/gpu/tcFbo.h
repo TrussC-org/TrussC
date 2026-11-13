@@ -433,11 +433,8 @@ public:
     Texture& getTexture() override { diagnoseActiveSampling_(); return curColorTex_(); }
     const Texture& getTexture() const override { diagnoseActiveSampling_(); return curColorTex_(); }
 
-    // GL backends store FBO color textures bottom-to-top in memory
-    // (unlike Metal/D3D11 which are top-to-bottom). Override draw to
-    // flip V on GL so the displayed image matches user-space top-left coords.
-    // Version-pool textures take the exact same path (Texture::drawFlippedY /
-    // Texture::draw), so the GL Y-flip applies to every version equally.
+    // Native GL storage needs a V flip; canonical storage uses ordinary Texture drawing.
+    // This applies equally to every version-pool texture.
     void draw(float x, float y) const override {
         if (!hasTexture()) return;
         markDrawnThisFrame_();
@@ -484,7 +481,8 @@ private:
     internal::DebugName debugName_{internal::DebugObjectKind::Fbo, this};
     static bool needsGlYFlip() {
         sg_backend be = sg_query_backend();
-        return be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3;
+        return (be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3)
+            && !internal::fboStorageCanonical();
     }
 
     internal::RenderTarget target_;

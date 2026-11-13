@@ -184,8 +184,6 @@ bool shadowTextureViewCreated(sg_view);
 
 namespace internal {
 namespace {
-// Slice 1: tests alone opt in. Draw/readback compensation migrates in slice 2.
-bool canonicalFboStorageEnabled = false;
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
 using FramebufferParameteriMesa = void (*)(GLenum, GLenum, GLint);
 FramebufferParameteriMesa framebufferParameteriMesa = nullptr;
@@ -216,8 +214,10 @@ void initializeFboOrientation() {
         }
     }
 #endif
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
     logNotice("RenderTarget") << "Fbo orientation path: "
         << (fboStorageCanonical() ? "flip_y" : "native");
+#endif
 }
 
 void beginFboOrientation(const sg_pass& pass, TargetPassKind kind) {
@@ -271,12 +271,13 @@ void endFboOrientation() {
 
 } // namespace
 
-void setCanonicalFboStorageEnabled(bool enabled) { canonicalFboStorageEnabled = enabled; }
 bool fboStorageCanonical() {
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
-    return canonicalFboStorageEnabled && framebufferParameteriMesa && sg_isvalid();
-#else
+    return framebufferParameteriMesa && sg_isvalid();
+#elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
     return false;
+#else
+    return sg_isvalid();
 #endif
 }
 
