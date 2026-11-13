@@ -325,21 +325,42 @@ attach only when shown. The owner chose independent top-level windows: remove
 descriptor, native hints and corresponding teardown/visibility handling together,
 while preserving ordinary multiwindow lifetimes and hidden startup.
 
-### Native event context and retained TC notifications (#239, #258, #1262)
+### Native event context and retained TC notifications (#239, #258, #1262, #1398)
 
-**Classification:** MOVE to TrussC (planned) for six fields; KEEP essential for device loss and redraw kinds.
+**Classification:** MOVE to TrussC (event step 1 complete for target context;
+source/snapshot still planned); KEEP essential for device loss and redraw kinds.
 
-**Code locations:** `sapp_event` (`window_id`, `dpi_scale`, `pointer_locked`, `reliable_button_bits`, `source`, `button_snapshot`, `device_lost_reason`); `util/sokol_window_event.h`; `SAPP_EVENTTYPE_TC_DEVICE_LOST`, `SAPP_EVENTTYPE_TC_REDRAW_REQUESTED`, `SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED`.
+**Code locations:** `sapp_event` (`source`, `button_snapshot`, `device_lost_reason`);
+`sapp_tc_window_metadata`, `sapp_tc_window_read_metadata`;
+`util/sokol_window_event.h`; Runtime `WindowEventContext` and `enterWindowEvent`;
+`SAPP_EVENTTYPE_TC_DEVICE_LOST`, `SAPP_EVENTTYPE_TC_REDRAW_REQUESTED`,
+`SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED`.
 
-**Planned slice:** event 1 moves target ID/DPI/lock/reliability outside raw sapp_event; event 2 moves source/snapshot; event 3a marks surviving members.
+**Completed slice:** event 1 removes `window_id`, `dpi_scale`, `pointer_locked`
+and `reliable_button_bits` from raw `sapp_event` and their native stampers.
+Routing uses the callback's `sapp_window` and existing Window binding, without
+another identity field. Runtime snapshots target DPI, pointer-lock ownership
+and button-bit reliability through the private metadata boundary before any
+App/resize/visibility/raw callback, and passes that local context to conversion.
+Nested delivery cannot replace an outer event's coordinate/lock basis.
 
-The six extra fields currently duplicate binding context or TrussC injection
-state. Move all six to TrussC, snapshotting target context before raw conversion;
-keep `device_lost_reason` and the three TC kinds. Do not pursue byte-identical
-upstream events by removing required loss/resize/map notifications. The source
-and snapshot relocation is described by the injection feature below, not a
-second native event implementation. Later #1404 A/B restores the approved
-Window-owned injection surface and typed text/drop/ImGui coverage.
+Desktop metadata reads the addressed native record; EGL lock ownership checks
+both the lock flag and `lock_owner == w`. Button-bit reliability is the same
+platform capability formerly stamped on events (Win32/X11/Web true,
+AppKit/iOS/Android false); the frozen lock flag suppresses lost-release recovery
+on EGL/Web. The single-window query now accepts only handle zero and reports
+native DPI/dimensions and Web's actual lock state, with no DPI-1/unlocked Web
+fallback. Native injection still passes through the same send gate and Runtime
+snapshot, preserving source, private drag snapshot, order and input wakes.
+
+The original six extra fields duplicated binding context or TrussC injection
+state. Event 2 will relocate the remaining `source`/`button_snapshot` and native
+injection hook; event 3a will mark surviving members. Keep `device_lost_reason`
+and all three TC kinds: do not pursue byte-identical upstream events by removing
+required loss/resize/map notifications. The source and snapshot relocation is
+described by the injection feature below, not a second native event
+implementation. Later #1404 A/B restores the approved Window-owned injection
+surface and typed text/drop/ImGui coverage.
 
 ### Injected input provenance and private MCP drag snapshot
 
