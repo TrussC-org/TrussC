@@ -53,7 +53,7 @@ UPSTREAM = {
     "dr_wav": {"skip": "bundled in miniaudio.h; updated together with miniaudio"},
     "dr_mp3": {"skip": "bundled in miniaudio.h; updated together with miniaudio"},
     "dr_flac": {"skip": "bundled in miniaudio.h; updated together with miniaudio"},
-    # docs/SECURITY.md: tcxTls tracks the mbedTLS 3.6 LTS branch.
+    # docs/architecture/SECURITY_NOTES.md: tcxTls tracks the mbedTLS 3.6 LTS branch.
     "mbedTLS": {"series": "3.6"},
     # addons/tcxLua/README.md: sol2 does not support Lua 5.5 yet.
     "Lua": {"series": "5.4"},

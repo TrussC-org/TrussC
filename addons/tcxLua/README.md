@@ -238,7 +238,7 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 Since v0.7.7, 20 generated Lua names were removed (listed below); since v0.8.0,
 none were removed. Two handwritten Texture methods were also removed since
 v0.7.7, bringing the total to 22. Replacements marked C++ host are not Lua calls.
-See also the [C++ v0.8 migration guide](../../docs/MIGRATION_0_8.md).
+See also the [C++ v0.8 migration guide](../../docs/guides/MIGRATION_0_8.md).
 
 | Removed name(s) since v0.7.7 | Replacement / action |
 | --- | --- |
@@ -279,7 +279,7 @@ The current generators are [luagen](tools/luagen/README.md) (free functions) and
 `tools/bindgen` is legacy. Regenerate from the repository root:
 
 ```bash
-docs/reference/regenerate.sh
+docs/scripts/regenerate.sh
 ```
 
 See the [reference pipeline](../../docs/reference/README.md) for prerequisites

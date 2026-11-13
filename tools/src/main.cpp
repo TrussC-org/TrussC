@@ -4190,7 +4190,7 @@ static void printDistHelp() {
          << "project folder) go into the package as EULA.txt. The Windows installer asks\n"
          << "about shortcuts and starting at login.\n"
          << "trusscli collects the license files it finds; checking them is up to you.\n"
-         << "More: docs/DISTRIBUTION.md\n";
+         << "More: docs/guides/DISTRIBUTION.md\n";
 }
 
 static bool stdinIsTty() {

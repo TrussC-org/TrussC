@@ -28,7 +28,7 @@
 //   effect.draw();  // fills the current render target
 // Fbo sampling is top-first on Metal/D3D11/WebGPU, Mesa GL/GLES (Linux/Pi),
 // and GL/GLES with clip control. Only unsupported native GL needs #1419's V flip.
-// See docs/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+// See docs/guides/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
 //
 // =============================================================================
 

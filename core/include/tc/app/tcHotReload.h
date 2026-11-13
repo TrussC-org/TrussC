@@ -29,7 +29,7 @@
 //
 // Supported: macOS (.dylib), Linux (.so), Windows (.dll). Not supported: Wasm,
 // iOS, Android (falls back to static mode). Framework state the guest shares
-// with the host must be non-inline (docs/ARCHITECTURE.md, "One instance per
+// with the host must be non-inline (docs/architecture/README.md, "One instance per
 // process"): a Windows guest DLL has its own copy of header-inline state.
 // =============================================================================
 

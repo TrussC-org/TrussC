@@ -37,7 +37,7 @@ When a change can take more than one reasonable shape, these rules decide it.
 
 ## 2. Tech Stack
 
-Hybrid composition of native wrappers and high-quality lightweight libraries. See [BUILD_SYSTEM.md](BUILD_SYSTEM.md) for CMake details.
+Hybrid composition of native wrappers and high-quality lightweight libraries. See [BUILD_SYSTEM.md](../guides/BUILD_SYSTEM.md) for CMake details.
 
 | Category | Library / Strategy | License |
 |:---------|:-------------------|:--------|
@@ -601,11 +601,11 @@ with `mcp::setToolLevel(mcp::ToolLevel::ReadOnly)` in `setup()` (or `Control`
 for input). In default builds `TRUSSC_MCP=1` or `TRUSSC_MCP_PORT` opens
 only the loopback health endpoint. Registration alone never starts a listener.
 
-See [AI_AUTOMATION.md](AI_AUTOMATION.md) for full reference.
+See [AI_AUTOMATION.md](../guides/AI_AUTOMATION.md) for full reference.
 
 ### G. One Instance per Process (header-inline state)
 
-A hot reload build runs the core in the **host** executable and the app (plus its addons) in a **guest** shared library ([BUILD_SYSTEM.md §7](BUILD_SYSTEM.md#7-hot-reload-development)). The guest calls TrussC functions that live in the host, but it also compiles every **header-inline** function and variable it uses into itself. Whether those copies are merged with the host's depends on the platform:
+A hot reload build runs the core in the **host** executable and the app (plus its addons) in a **guest** shared library ([BUILD_SYSTEM.md §7](../guides/BUILD_SYSTEM.md#7-hot-reload-development)). The guest calls TrussC functions that live in the host, but it also compiles every **header-inline** function and variable it uses into itself. Whether those copies are merged with the host's depends on the platform:
 
 | Platform | How the guest reaches the host | Header-inline state used by the guest |
 |---|---|---|
@@ -717,7 +717,7 @@ TrussC can be extended with addons (similar to openFrameworks' ofxAddon).
 - **Core modules** (`tc::`): Built into libTrussC, always available
 - **Addons** (`tcx::`): Optional, require `addons.make` configuration
 
-See [ADDONS.md](ADDONS.md) for details on using and creating addons.
+See [ADDONS.md](../guides/ADDONS.md) for details on using and creating addons.
 
 ---
 
@@ -772,7 +772,7 @@ Argument-free Window APIs in App callbacks, owned listeners and async completion
 
 `quitOnClose` defaults to false for every Window. `setQuitOnClose(true)` requests normal application quit, allowing veto. An OS close of the last open Window or a quit-on-close Window queries process quit before closing anything. A veto keeps all Windows open. Code close skips closeRequested; last-window/quit-on-close asks exitRequested before any closure, and a veto keeps all Windows open. A non-last plain code close asks no request events; normal Window exit notification and App ending still run. App::exit also runs on replacement, destroyApp and hot reload, so it is unsuitable for expressing a window-close policy. A Window exit listener may request process quit after closure, but cannot provide the before-close veto guarantee of setQuitOnClose. Calling exitApp during Runtime shutdown does nothing.
 
-App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See MIGRATION_0_8.md for `console::start()` usage.
+App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See ../guides/MIGRATION_0_8.md for `console::start()` usage.
 
 Device classes (serial ports, cameras, MIDI, depth cameras, audio devices) share one small lifecycle convention: `setup()` / `isConnected()` / `close()` / `onDisconnect`, where `onDisconnect` fires only when the OS reports the device lost. See [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md).
 

@@ -172,7 +172,7 @@ Return an empty `StreamFreshness` for a timeout or end of playback: it keeps
 the published frame unchanged in both threaded and inline modes.
 
 **Device loss (optional, one line):** the base provides `isConnected()` and
-`onDisconnect` (see `docs/DEVICE_LIFECYCLE.md`). Where your SDK already tells
+`onDisconnect` (see `docs/architecture/DEVICE_LIFECYCLE.md`). Where your SDK already tells
 you the device is gone (a callback, a "device removed" status from capture),
 call the protected `reportLost("why")` there, from any thread. The base marks
 the camera disconnected and fires `onDisconnect` once. A backend that never

@@ -176,7 +176,7 @@ Channel numbers are **1-16** throughout.
 ## Device lifecycle
 
 `MidiIn` and `MidiOut` follow TrussC's device lifecycle
-([docs/DEVICE_LIFECYCLE.md](../../docs/DEVICE_LIFECYCLE.md)):
+([docs/architecture/DEVICE_LIFECYCLE.md](../../docs/architecture/DEVICE_LIFECYCLE.md)):
 `isConnected()`, `close()`, `setup()` and `onDisconnect`. `isOpen()` and
 `closePort()` stay as aliases.
 

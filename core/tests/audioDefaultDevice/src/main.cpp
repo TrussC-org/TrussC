@@ -199,7 +199,7 @@ bool loseDevice(AudioEngine& engine) {
     return stopped && waitFor([&] { return !engine.isConnected(); });
 }
 
-// #415: device lifecycle (docs/DEVICE_LIFECYCLE.md) of the engine.
+// #415: device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md) of the engine.
 void checkLifecycle() {
     auto& engine = AudioEngine::getInstance();
     engine.shutdown();
