@@ -1,0 +1,10 @@
+// Shared by immediate and retained glyph rendering.
+@block text_coverage
+float textCoverage(vec2 texcoord) {
+    // Unconditional derivatives; half gradients keep base-only sampling through
+    // two atlas texels per target pixel, then increase LOD continuously.
+    vec2 dx = dFdx(texcoord);
+    vec2 dy = dFdy(texcoord);
+    return textureGrad(sampler2D(tex, smp), texcoord, dx * 0.5, dy * 0.5).r;
+}
+@end

@@ -349,7 +349,7 @@ static void checkAlignedMove() {
         target.begin(0, 0, 0, 0);
         setColor(1);
         pushMatrix();
-        scale(.25f); // Font chooses the trilinear mip sampler.
+        scale(.25f); // The coverage shader selects trilinear mips.
         font.drawString(utf8(kFirstCodepoint + (i == 0 ? 0 : 16)), 48, 160);
         popMatrix();
         target.end();
@@ -427,7 +427,10 @@ public:
         check("gpu: fully covered texels have the setColor() color", wrongColor == 0,
               to_string(wrongColor) + " texels");
 
-        // Minified draws build and sample the R8 chain on the first draw.
+        check("gpu: 1:1 draws already publish the R8 mip chain",
+              sg_query_image_desc(font_.getAtlas(0)->getTexture()).num_mipmaps > 1);
+
+        // Minified draws sample the same R8 chain.
         fbo_.begin(0.0f, 0.0f, 0.0f, 0.0f);
         setColor(1.0f, 0.5f, 0.25f);
         pushMatrix();
