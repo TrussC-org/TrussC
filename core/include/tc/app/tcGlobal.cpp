@@ -30,6 +30,18 @@
 #include <windows.h>
 #endif
 #include <algorithm>
+#if defined(__linux__) && !defined(__ANDROID__)
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES
+#endif
+#if defined(SOKOL_GLCORE)
+#include <GL/glx.h>
+// Xlib's macro conflicts with scoped enum members used below.
+#undef None
+#elif defined(SOKOL_GLES3)
+#include <EGL/egl.h>
+#endif
+#endif
 #if defined(SOKOL_GLCORE)
 #include <GL/gl.h>
 #elif defined(SOKOL_GLES3) && !defined(__EMSCRIPTEN__)
@@ -170,6 +182,106 @@ bool shadowTextureViewCreated(sg_view);
 #endif
 }
 
+namespace internal {
+namespace {
+// Slice 1: tests alone opt in. Draw/readback compensation migrates in slice 2.
+bool canonicalFboStorageEnabled = false;
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+using FramebufferParameteriMesa = void (*)(GLenum, GLenum, GLint);
+FramebufferParameteriMesa framebufferParameteriMesa = nullptr;
+constexpr GLenum framebufferFlipYMesa = 0x8BBB;
+// Sokol owns one active graphics pass, including across target interruptions.
+GLuint flippedDrawFramebuffer = 0;
+std::array<GLuint, SG_MAX_COLOR_ATTACHMENTS> flippedResolveFramebuffers{};
+#endif
+
+void initializeFboOrientation() {
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+    framebufferParameteriMesa = nullptr;
+    flippedDrawFramebuffer = 0;
+    flippedResolveFramebuffers.fill(0);
+    GLint count = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+    for (GLint i = 0; i < count; ++i) {
+        const auto* extension = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, GLuint(i)));
+        if (extension && std::strcmp(extension, "GL_MESA_framebuffer_flip_y") == 0) {
+#if defined(SOKOL_GLCORE)
+            framebufferParameteriMesa = reinterpret_cast<FramebufferParameteriMesa>(
+                glXGetProcAddressARB(reinterpret_cast<const GLubyte*>("glFramebufferParameteriMESA")));
+#else
+            framebufferParameteriMesa = reinterpret_cast<FramebufferParameteriMesa>(
+                eglGetProcAddress("glFramebufferParameteriMESA"));
+#endif
+            break;
+        }
+    }
+#endif
+    logNotice("RenderTarget") << "Fbo orientation path: "
+        << (fboStorageCanonical() ? "flip_y" : "native");
+}
+
+void beginFboOrientation(const sg_pass& pass, TargetPassKind kind) {
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+    if (!fboStorageCanonical() || kind == TargetPassKind::Swapchain) return;
+    GLint drawBinding = 0, readBinding = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawBinding);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readBinding);
+    const bool flip = kind == TargetPassKind::PublicFbo;
+    auto set = [&](GLuint framebuffer) {
+        if (!framebuffer) return; // Never change the default framebuffer.
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+        framebufferParameteriMesa(GL_DRAW_FRAMEBUFFER, framebufferFlipYMesa, flip ? 1 : 0);
+    };
+    set(GLuint(drawBinding));
+    if (flip) flippedDrawFramebuffer = GLuint(drawBinding);
+    for (size_t i = 0; i < flippedResolveFramebuffers.size(); ++i) {
+        const auto view = pass.attachments.resolves[i];
+        const GLuint framebuffer = view.id ? sg_gl_query_view_info(view).msaa_resolve_frame_buffer : 0;
+        set(framebuffer);
+        if (flip) flippedResolveFramebuffers[i] = framebuffer;
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readBinding));
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawBinding));
+#else
+    (void)pass;
+    (void)kind;
+#endif
+}
+
+void endFboOrientation() {
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+    if (!flippedDrawFramebuffer) return;
+    // Keep both flags through sg_end_pass: MSAA blits need matching mappings.
+    GLint drawBinding = 0, readBinding = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawBinding);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readBinding);
+    auto reset = [&](GLuint framebuffer) {
+        if (!framebuffer) return;
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+        framebufferParameteriMesa(GL_DRAW_FRAMEBUFFER, framebufferFlipYMesa, 0);
+    };
+    reset(flippedDrawFramebuffer);
+    for (auto framebuffer : flippedResolveFramebuffers) reset(framebuffer);
+    flippedDrawFramebuffer = 0;
+    flippedResolveFramebuffers.fill(0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readBinding));
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(drawBinding));
+#endif
+}
+
+} // namespace
+
+void setCanonicalFboStorageEnabled(bool enabled) { canonicalFboStorageEnabled = enabled; }
+bool fboStorageCanonical() {
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+    return canonicalFboStorageEnabled && framebufferParameteriMesa && sg_isvalid();
+#else
+    return false;
+#endif
+}
+
+} // namespace internal
+
 namespace {
 struct GraphicsPoolSizes {
     int resources = 10000;
@@ -258,6 +370,7 @@ void setup() {
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
+    internal::initializeFboOrientation();
     internal::initializeVertexStorageBufferLimit();
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
@@ -772,6 +885,7 @@ void RenderTarget::beginPass(TargetPassStart reason) {
     // Existing parked frames still retain their original attachments.
     if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
     sg_begin_pass(&pass);
+    beginFboOrientation(pass, passKind);
     if (hasFixedPipeline) {
         const auto selected = fixedPipelineRevision
             ? selectPipeline({fixedPipelineRevision, uint64_t(fixedPipeline.role)}, [&]() -> const PipelineKey& { return fixedPipeline; }).raw
@@ -795,6 +909,7 @@ void RenderTarget::endPass() {
         // CPU clip untouched; resume/selectTarget reapplies it before drawing.
         sg_apply_scissor_rect(0, 0, width, height, true);
         sg_end_pass();
+        endFboOrientation();
         inPass = false;
     }
 }

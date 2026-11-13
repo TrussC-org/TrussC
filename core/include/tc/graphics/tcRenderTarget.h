@@ -21,6 +21,10 @@ namespace trussc { namespace internal {
 // Host-owned, atomic and readable through static destruction. Late Window
 // destruction stops before context, registry, logger or GPU access.
 bool frameworkShutdown() noexcept;
+// Internal rollout switch; set before setup / between passes only. Default OFF
+// until Fbo draw, stencil and readback compensation migrate together (slice 2).
+void setCanonicalFboStorageEnabled(bool enabled);
+bool fboStorageCanonical();
 void beginFrameworkLifetime() noexcept;
 void endFrameworkLifetime() noexcept;
 
