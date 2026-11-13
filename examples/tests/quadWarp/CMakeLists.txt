@@ -22,4 +22,3 @@ endif()
 include("${TRUSSC_DIR}/cmake/trussc_app.cmake")
 
 trussc_app()
-target_sources(${PROJECT_NAME} PRIVATE ../../../addons/tcxImGui/example-quadWarp/src/tcApp.cpp)
