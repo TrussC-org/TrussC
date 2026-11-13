@@ -49,6 +49,14 @@
 #elif defined(SOKOL_GLES3)
 #include <GLES3/gl3.h>
 #endif
+#if defined(SOKOL_GLES3) && defined(__ANDROID__)
+#include <EGL/egl.h>
+#elif defined(SOKOL_GLES3) && defined(__EMSCRIPTEN__)
+#include <emscripten/html5_webgl.h>
+#include <webgl/webgl1_ext.h>
+#elif defined(__APPLE__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+#include <dlfcn.h>
+#endif
 #include <limits>
 #include <cstring>
 #include <fstream>
@@ -193,36 +201,96 @@ GLuint flippedDrawFramebuffer = 0;
 std::array<GLuint, SG_MAX_COLOR_ATTACHMENTS> flippedResolveFramebuffers{};
 #endif
 
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+#ifdef _WIN32
+using ClipControl = void (APIENTRY *)(GLenum, GLenum);
+#else
+using ClipControl = void (*)(GLenum, GLenum);
+#endif
+ClipControl clipControl = nullptr;
+constexpr GLenum clipUpperLeft = 0x8CA2;
+constexpr GLenum clipLowerLeft = 0x8CA1;
+constexpr GLenum clipNegativeOneToOne = 0x935E;
+
+// Capability and entry point must both belong to the current context.
+bool hasGlExtension(const char* name) {
+    GLint count = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+    for (GLint i = 0; i < count; ++i) {
+        const auto* extension = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, GLuint(i)));
+        if (extension && std::strcmp(extension, name) == 0) return true;
+    }
+    return false;
+}
+#endif
+
 void initializeFboOrientation() {
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
     framebufferParameteriMesa = nullptr;
     flippedDrawFramebuffer = 0;
     flippedResolveFramebuffers.fill(0);
-    GLint count = 0;
-    glGetIntegerv(GL_NUM_EXTENSIONS, &count);
-    for (GLint i = 0; i < count; ++i) {
-        const auto* extension = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, GLuint(i)));
-        if (extension && std::strcmp(extension, "GL_MESA_framebuffer_flip_y") == 0) {
+    if (hasGlExtension("GL_MESA_framebuffer_flip_y")) {
 #if defined(SOKOL_GLCORE)
-            framebufferParameteriMesa = reinterpret_cast<FramebufferParameteriMesa>(
-                glXGetProcAddressARB(reinterpret_cast<const GLubyte*>("glFramebufferParameteriMESA")));
+        framebufferParameteriMesa = reinterpret_cast<FramebufferParameteriMesa>(
+            glXGetProcAddressARB(reinterpret_cast<const GLubyte*>("glFramebufferParameteriMESA")));
 #else
-            framebufferParameteriMesa = reinterpret_cast<FramebufferParameteriMesa>(
-                eglGetProcAddress("glFramebufferParameteriMESA"));
+        framebufferParameteriMesa = reinterpret_cast<FramebufferParameteriMesa>(
+            eglGetProcAddress("glFramebufferParameteriMESA"));
 #endif
-            break;
-        }
     }
 #endif
 #if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    logNotice("RenderTarget") << "Fbo orientation path: "
-        << (fboStorageCanonical() ? "flip_y" : "native");
+    clipControl = nullptr;
+    // Prefer Mesa's FBO mapping: it preserves native derivatives/rectangles.
+    if (!fboStorageCanonical()) {
+#if defined(__EMSCRIPTEN__)
+        if (emscripten_webgl_enable_EXT_clip_control(emscripten_webgl_get_current_context()))
+            clipControl = glClipControlEXT;
+#else
+#if defined(SOKOL_GLCORE)
+        GLint major = 0, minor = 0;
+        glGetIntegerv(GL_MAJOR_VERSION, &major);
+        glGetIntegerv(GL_MINOR_VERSION, &minor);
+        const bool supported = major > 4 || (major == 4 && minor >= 5)
+            || hasGlExtension("GL_ARB_clip_control");
+        const char* entry = "glClipControl";
+#else
+        const bool supported = hasGlExtension("GL_EXT_clip_control");
+        const char* entry = "glClipControlEXT";
+#endif
+        if (supported) {
+#if defined(_WIN32)
+            clipControl = reinterpret_cast<ClipControl>(wglGetProcAddress(entry));
+#elif defined(__APPLE__)
+            clipControl = reinterpret_cast<ClipControl>(dlsym(RTLD_DEFAULT, entry));
+#elif defined(SOKOL_GLCORE)
+            clipControl = reinterpret_cast<ClipControl>(glXGetProcAddressARB(
+                reinterpret_cast<const GLubyte*>(entry)));
+#else
+            clipControl = reinterpret_cast<ClipControl>(eglGetProcAddress(entry));
+#endif
+        }
+#endif
+    }
+    // Only the unsupported context needs action from the user; say nothing otherwise.
+    if (!fboStorageCanonical()) {
+        logNotice("RenderTarget") << "Fbo textures sample bottom-up on this GL context "
+            "(no GL_MESA_framebuffer_flip_y or clip control): flip V (uv.y = 1.0 - uv.y) when a shader samples an Fbo, "
+            "see FOR_AI_ASSISTANT.md \"Running an Fbo through your own shader\"";
+    }
 #endif
 }
 
 void beginFboOrientation(const sg_pass& pass, TargetPassKind kind) {
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    if (clipControl) {
+        clipControl(kind == TargetPassKind::PublicFbo ? clipUpperLeft : clipLowerLeft,
+                    clipNegativeOneToOne);
+        return;
+    }
+#endif
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
-    if (!fboStorageCanonical() || kind == TargetPassKind::Swapchain) return;
+    if (!framebufferParameteriMesa || kind == TargetPassKind::Swapchain) return;
     GLint drawBinding = 0, readBinding = 0;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawBinding);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readBinding);
@@ -271,11 +339,19 @@ void endFboOrientation() {
 
 } // namespace
 
+bool fboClipControlAvailable() {
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    return clipControl && sg_isvalid();
+#else
+    return false;
+#endif
+}
+
 bool fboStorageCanonical() {
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
-    return framebufferParameteriMesa && sg_isvalid();
+    return (framebufferParameteriMesa || clipControl) && sg_isvalid();
 #elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    return false;
+    return clipControl && sg_isvalid();
 #else
     return sg_isvalid();
 #endif
@@ -909,6 +985,10 @@ void RenderTarget::endPass() {
         // not restrict the attachment-wide MSAA resolve at pass end. Keep the
         // CPU clip untouched; resume/selectTarget reapplies it before drawing.
         sg_apply_scissor_rect(0, 0, width, height, true);
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        // Resolve/copies use native coordinates; clip control changes only rasterization.
+        if (clipControl) clipControl(clipLowerLeft, clipNegativeOneToOne);
+#endif
         sg_end_pass();
         endFboOrientation();
         inPass = false;
@@ -939,7 +1019,7 @@ void RenderTarget::flushLayers() {
             if (draw.layerId != layer) continue;
             if (draw.scissor) {
                 const auto& clip = *draw.scissor;
-                sg_apply_scissor_rectf(clip[0], clip[1], clip[2], clip[3], true);
+                sg_apply_scissor_rectf(clip[0], clip[1], clip[2], clip[3], rectangleOriginTopLeft());
                 appliedScissor = true;
             }
             executeDeferredShaderDraw(draw);
@@ -958,7 +1038,7 @@ void RenderTarget::flushLayers() {
     if (appliedScissor) {
         const auto& clip = currentScissor;
         sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
-                              clip.active ? clip.w : float(width), clip.active ? clip.h : float(height), true);
+                              clip.active ? clip.w : float(width), clip.active ? clip.h : float(height), rectangleOriginTopLeft());
     }
     // Shader::begin reserved a screen layer. Keep that reservation even when
     // all preceding commands have been consumed, until its owning scope closes.

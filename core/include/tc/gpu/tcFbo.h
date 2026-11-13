@@ -468,7 +468,9 @@ public:
 
     // To sample this Fbo in a shader, use getTextureView()/getSampler():
     // shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
-    // FullscreenShader needs a GL/GLES V flip: see docs/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+    // Fbo sampling is top-first on Metal/D3D11/WebGPU, Mesa GL/GLES (Linux/Pi),
+    // and GL/GLES with clip control. Only unsupported native GL needs #1419's V flip.
+    // See docs/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
     // End this Fbo before sampling it; render into a different target.
     // Access to internal resources (for advanced users).
     // Like getTexture(), these refer to the CURRENT version's texture.

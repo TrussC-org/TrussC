@@ -23,6 +23,7 @@ namespace trussc { namespace internal {
 bool frameworkShutdown() noexcept;
 // Whether public Fbo storage has logical top at texture row zero on this context.
 bool fboStorageCanonical();
+bool fboClipControlAvailable();
 void beginFrameworkLifetime() noexcept;
 void endFrameworkLifetime() noexcept;
 
@@ -426,6 +427,10 @@ struct RenderTarget {
     bool openAtDrawWarned = false; // #925: warned once that begin() outlived update()
     WindowContext* activeWindow = nullptr;
     TargetPassKind passKind = TargetPassKind::Swapchain;
+    // Upper-left clip control already maps logical Y to the storage row.
+    bool rectangleOriginTopLeft() const {
+        return !(passKind == TargetPassKind::PublicFbo && fboClipControlAvailable());
+    }
     sg_pass binding = {};
     PipelineKey fixedPipeline; // resolved again on resume
     uint64_t fixedPipelineRevision = 0;

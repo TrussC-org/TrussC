@@ -809,9 +809,24 @@ Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3),
 
 Use two float Fbos for repeated passes: sample one and render into the other
 (ping-pong). Never sample the target you are currently rendering into.
-Unlike ordinary textures, Fbo textures need a V flip on GL/GLES when sampled
-by FullscreenShader. `getTextureView()` does not apply the correction that
-`Fbo::draw()` does; use sokol-shdc's `SOKOL_GLSL` define as below on every pass.
+Fbo textures sample top-first without a V flip on Metal, D3D11, WebGPU,
+Mesa GL/GLES (Linux, Raspberry Pi), and GL/GLES with clip control. Use ordinary
+texture coordinates in your shader, including when calling `getTextureView()`.
+
+Contexts with neither `GL_MESA_framebuffer_flip_y` nor clip control are
+unsupported for this orientation: they retain native GL storage. Only on those
+contexts (for example, WebGL2 without `EXT_clip_control` or very old GL), the
+#1419 workaround still applies: flip the Fbo input with `uv.y = 1.0 - uv.y`.
+A blanket `SOKOL_GLSL` flip is incorrect on supported GL contexts. The GL/GLES
+startup Notice reports `flip_y`, `clip_control`, or `native`; there is no public
+orientation switch. `Fbo::draw()` and public readback handle the selected path.
+
+Raw sokol draws inside a TrussC public Fbo inherit its clip origin and winding.
+On the clip-control path, pass logical pixel Y unchanged and
+`origin_top_left=false` to raw viewport/scissor calls; elsewhere keep the usual
+mapping. Fragment-coordinate math still follows the underlying GL convention.
+Independently opened sokol passes are outside TrussC's public-Fbo hook.
+
 Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
 
 ```glsl
@@ -822,9 +837,6 @@ out vec2 uv;
 void main() {
     gl_Position = vec4(position, 0.0, 1.0);
     uv = texcoord0;
-    #if defined(SOKOL_GLSL)
-        uv.y = 1.0 - uv.y;
-    #endif
 }
 @end
 @fs fs
@@ -3231,7 +3243,7 @@ bool EventListener::isConnected() const  // Returns the token's recorded connect
 ```cpp
 ```
 
-### Fbo — Stores off-screen rendering results in a texture.
+### Fbo — Renders offscreen into a texture with top-first sampling on supported backends.
 
 ```cpp
 void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocates the framebuffer attachments.
@@ -3239,7 +3251,7 @@ void Fbo::begin() [+1]  // Begins rendering into the framebuffer.
 void Fbo::clear()  // Releases the framebuffer resources.
 void Fbo::clearColor(float r, float g, float b, float a)  // Clears the active framebuffer to a solid color.
 bool Fbo::copyTo(Image & image) const  // Copies the framebuffer contents into an Image.
-void Fbo::draw(float x, float y) const [+1]  // Draws the framebuffer contents onto the current target.
+void Fbo::draw(float x, float y) const [+1]  // Draws the Fbo upright using the current color and blend mode.
 void Fbo::drawStencil(float x, float y) const  // Draws the framebuffer's stencil bytes as an opaque gray image.
 void Fbo::end()  // Finishes framebuffer rendering and returns to the parent target.
 sg_image Fbo::getColorImage() const  // Returns the underlying sokol color image handle.
@@ -3247,14 +3259,14 @@ const std::string & Fbo::getDebugName() const  // Returns the Fbo's inspection n
 int Fbo::getHeight() const  // Returns the framebuffer height.
 int Fbo::getSampleCount() const  // Returns the framebuffer's MSAA sample count.
 sg_sampler Fbo::getSampler() const  // Returns the underlying sokol sampler handle.
-Texture & Fbo::getTexture() [+1]  // Returns the framebuffer's current color texture.
+Texture & Fbo::getTexture() [+1]  // Returns the resolved color texture; supported backends sample top-first.
 TextureFormat Fbo::getTextureFormat() const  // Returns the framebuffer's color texture format.
-sg_view Fbo::getTextureView() const  // Returns the underlying sokol color texture view handle.
+sg_view Fbo::getTextureView() const  // Returns the color sampling view; supported Fbo inputs need no UV flip.
 int Fbo::getWidth() const  // Returns the framebuffer width.
 bool Fbo::isActive() const  // Reports whether the framebuffer has an active rendering scope.
 bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeeded.
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a CPU RGBA8 buffer.
+bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a top-first CPU RGBA8 buffer.
 bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
 bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads the framebuffer's stencil bytes into one-channel U8 Pixels.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
@@ -3382,7 +3394,7 @@ std::string Font::wrapTextVertical(const std::string & text) const  // Insert ne
 ```cpp
 ```
 
-### FullscreenShader — Provides a shader for fullscreen post-processing effects.
+### FullscreenShader — Applies a fullscreen filter without preparing quad vertices.
 
 ```cpp
 sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Builds the pipeline descriptor for the fullscreen quad.
@@ -4651,7 +4663,7 @@ void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage u
 void Texture::bind() const  // Selects the texture for immediate-mode textured drawing.
 void Texture::clear()  // Releases the texture resources.
 void Texture::draw(float x, float y) const [+1]  // Draws the texture as a rectangle.
-void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draws the texture with its vertical direction reversed.
+void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draws a texture with its vertical texture coordinates reversed.
 void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draws a rectangular region of the texture.
 sg_view Texture::getAttachmentView() const  // Returns the sokol view used to render into the texture.
 sg_view Texture::getAttachmentViewForMip(int level) const  // Returns a color attachment view for a mip level.
