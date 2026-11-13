@@ -1,5 +1,5 @@
 // Headless depth-camera lifecycle and frame-publication regressions.
-// Also the device lifecycle rules of docs/DEVICE_LIFECYCLE.md (#415): setup()
+// Also the device lifecycle rules of docs/architecture/DEVICE_LIFECYCLE.md (#415): setup()
 // reopens, isConnected(), close() / the destructor never fire onDisconnect, and
 // a backend's reportLost() fires it once, on the main thread for Deliver::Main.
 // Built by examples/build_all.py --addon-tests-only.

@@ -60,7 +60,7 @@ pending: requests coalesce, while ImGui can spread queued input across frames.
 `redraw(2)` covers a batched press/release pair, but larger batches can need
 more frames. For reliable hover and value changes, render continuously with
 `setFps(60)` while the UI is in use. See the minimal
-[tcApp example](../../docs/FOR_AI_ASSISTANT.md#event_driven--imgui).
+[tcApp example](../../docs/guides/FOR_AI_ASSISTANT.md#event_driven--imgui).
 
 ## Vertex and index buffers / 頂点・インデックスバッファ / 정점·인덱스 버퍼
 

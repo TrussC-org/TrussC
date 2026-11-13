@@ -29,18 +29,18 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 
 | script         | role |
 |----------------|------|
-| `regenerate.sh` | macOS entry point: generate shader headers, build the structure, then run every emitter in a fixed order. |
-| `structure.js` | clang AST → structure. The id ORACLE; a failed clang parse exits non-zero. |
-| `check.js`     | CI gate: `dup` (TOML parse), `orphan` (toml key ∉ AST), `undocumented` (AST ∉ toml; soft until `--strict`). |
-| `generate.js`  | JOIN structure + prose by id → `reference-data.json` + `API_INDEX.md`. |
+| `../scripts/regenerate.sh` | macOS entry point: generate shader headers, build the structure, then run every emitter in a fixed order. |
+| `../scripts/structure.js` | clang AST → structure. The id ORACLE; a failed clang parse exits non-zero. |
+| `../scripts/check.js`     | CI gate: `dup` (TOML parse), `orphan` (toml key ∉ AST), `undocumented` (AST ∉ toml; soft until `--strict`). |
+| `../scripts/generate.js`  | JOIN structure + prose by id → `reference-data.json` + `API_INDEX.md`. |
 
 ### Emitters (downstream — consume `reference-data.json`)
 
 | script          | output |
 |-----------------|--------|
-| `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped), and refreshes its App lifetime introduction from `../ARCHITECTURE.md`. |
-| `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
-| `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. Deprecating, removing or renaming a documented API, or dropping a platform's implementation along with its `TC_PLATFORMS` entry, needs the regenerated file in the **same PR**: the committed file still calls the old API, so CI fails. Regenerate with `./regenerate.sh` on macOS. |
+| `../scripts/emit-forai.js` | injects the C++ API index into `../guides/FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped), and refreshes its App lifetime introduction from `../architecture/README.md`. |
+| `../scripts/emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../guides/TrussC_vs_openFrameworks.md` §5. Grouping/notes from `../scripts/of-mapping-config.js`. |
+| `../scripts/emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. Deprecating, removing or renaming a documented API, or dropping a platform's implementation along with its `TC_PLATFORMS` entry, needs the regenerated file in the **same PR**: the committed file still calls the old API, so CI fails. Regenerate with `../scripts/regenerate.sh` on macOS. |
 | `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (keywords / constant values / example links) + `colors.json`. |
 | `../scripts/emit-api-details.js` | the details + snippet of every entry, in TOML order, as one text file for an LLM's reference files (Gem etc.). Run by `../scripts/generateDocsForAI.sh` next to its other `.txt` files; not committed. Reads `api-reference.toml` directly. |
 
@@ -49,7 +49,7 @@ The legacy `api-definition.yaml` and its `generate-docs.js` / `mine.js` are
 `api-reference.toml`, and the few things derivable from neither live in small
 dedicated sources: `extras.json` (keywords, constant values, manual
 example links) and `colors.json` (the swatch palette, generated from
-`tcColor.h` by `scripts/gen-colors.js`).
+`tcColor.h` by `../scripts/gen-colors.js`).
 
 `api-reference.toml` is the **only** file humans edit. `reference-data.json` is
 **auto-generated — never edit it by hand** (gitignored). Regenerate:
@@ -57,8 +57,8 @@ example links) and `colors.json` (the swatch palette, generated from
 From the repository root on **macOS**, with CMake, Clang and Node.js installed:
 
 ```bash
-cd docs && npm ci && cd ..
-docs/reference/regenerate.sh
+cd docs/scripts && npm ci && cd ../..
+docs/scripts/regenerate.sh
 ```
 
 This is the regeneration command for all API outputs. It builds only the existing
@@ -67,8 +67,8 @@ and runs FOR_AI, oF, coverage, Lua free-function, Lua usertype, web, sketch API 
 sketch reference emitters in that order. Repeating it with the same inputs produces
 byte-identical files. `--shaders-only` bootstraps headers before `check.js --strict`.
 
-The oF Markdown guide is tracked at `docs/TrussC_vs_openFrameworks.md`; its JSON
-and the web/sketch outputs go to the ignored `docs/reference/build-regenerate/web/`
+The oF Markdown guide is tracked at `docs/guides/TrussC_vs_openFrameworks.md`; its JSON
+and the web/sketch outputs go to the ignored `docs/scripts/build-regenerate/web/`
 directory, so no sibling website checkout is needed. The scratch structure and
 API index also stay in `build-regenerate/`. `reference-data.json` stays gitignored.
 Linux can run the command for local checks, but its host-specific declarations
@@ -77,7 +77,7 @@ can differ; committed outputs are generated on macOS.
 The macOS `reference-check` CI job runs `check.js --strict`, regenerates, and fails
 if any tracked FOR_AI, oF Markdown, coverage or Lua output differs. It runs in the
 PR lane and merge queue. It also runs all three generator test suites with
-`CXX=clang++ node --test 'docs/reference/tests/*.test.js'`. On drift, download the `regenerated-patch` artifact,
+`CXX=clang++ node --test 'docs/scripts/tests/*.test.js'`. On drift, download the `regenerated-patch` artifact,
 apply `regenerated.patch` with `git apply`, and include those changes in the PR.
 
 ## `reference-data.json` — the canonical format
@@ -146,8 +146,8 @@ This is the whole point: one key, one prose blurb, N signatures.
   Group by `ns` to reconstruct an enum's members.
 - **`signatures: []`** for `type`/`enum`/`typedef`/`macro` (non-callable).
 - **Macro cards** live in `api-reference.toml`, in web display order. Their
-  curated `signature` string passes through `generate.js` alongside the localized
-  description/details. `structure.js` includes a macro only while its public
+  curated `signature` string passes through `../scripts/generate.js` alongside the localized
+  description/details. `../scripts/structure.js` includes a macro only while its public
   header defines it, and marks it `lua_skip: true`. Coverage and Lua emitters
   ignore this non-callable kind; FOR_AI and the web render the same cards.
 - **Bindability** (Lua): derive from the signature. `shared_ptr<BoundType>` IS
@@ -166,7 +166,7 @@ This is the whole point: one key, one prose blurb, N signatures.
 Driven by C++ namespace, not by the sidecar:
 
 - `trussc::` (direct) → **public**, included.
-- Namespaces in the `HIDDEN` set in [`structure.js`](structure.js) → hidden, excluded (the single authoritative list).
+- Namespaces in the `HIDDEN` set in [`structure.js`](../scripts/structure.js) → hidden, excluded (the single authoritative list).
 - `private` members → excluded; `protected` → kept.
 
 The sidecar never controls visibility — it only adds prose to symbols that are
@@ -195,7 +195,7 @@ runtime).
 
 They expand to `[[clang::annotate("tc:…")]]` under Clang and to nothing
 otherwise (zero ABI/runtime effect). **Implementation note:** Clang's JSON AST
-omits the annotate string, so `structure.js` recovers it from each
+omits the annotate string, so `../scripts/structure.js` recovers it from each
 `AnnotateAttr`'s source range (`offset`, or `expansionLoc.offset` for the macro
 form) — keep the macro on the same declaration it annotates.
 
@@ -203,4 +203,4 @@ form) — keep the macro on the same declaration it annotates.
 
 `reference-data.json`: 2548 symbols, 1991 documented (78%). The remaining ~527
 undocumented symbols just need prose added to `api-reference.toml` (their
-structure is already correct). `check.js` passes (orphan 0, dup OK).
+structure is already correct). `../scripts/check.js` passes (orphan 0, dup OK).

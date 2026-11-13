@@ -2,7 +2,7 @@
 // ============================================================================
 // emit-forai.js — emit the C++ API index into FOR_AI_ASSISTANT.md from the
 // canonical reference-data.json (a downstream consumer; see README.md).
-// App lifetime prose comes from the authored ARCHITECTURE.md section.
+// App lifetime prose comes from the authored docs/architecture/README.md section.
 //
 // Index policy (chosen with the user): DOCUMENTED symbols only, ONE LINE per
 // symbol (overloads collapsed, "[+N]" marks extra overloads), English desc.
@@ -18,13 +18,13 @@ const path = require('path');
 
 const argv = process.argv.slice(2);
 const argVal = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
-const DATA = argVal('--data', path.join(__dirname, 'reference-data.json'));
-const MD = argVal('--md', path.join(__dirname, '../FOR_AI_ASSISTANT.md'));
+const DATA = argVal('--data', path.join(__dirname, '../reference/reference-data.json'));
+const MD = argVal('--md', path.join(__dirname, '../guides/FOR_AI_ASSISTANT.md'));
 const START = '<!-- API-INDEX-START -->';
 const END = '<!-- API-INDEX-END -->';
 
 const data = JSON.parse(fs.readFileSync(DATA, 'utf8'));
-const cats = JSON.parse(fs.readFileSync(path.join(__dirname, 'categories.json'), 'utf8'));
+const cats = JSON.parse(fs.readFileSync(path.join(__dirname, '../reference/categories.json'), 'utf8'));
 const catName = Object.fromEntries(cats.map(c => [c.id, c.name]));
 const catOrder = Object.fromEntries(cats.map(c => [c.id, c.order]));
 
@@ -131,12 +131,16 @@ const block = header + out + '\n';
 if (argv.includes('--dry')) { process.stdout.write(block); process.exit(0); }
 
 let md = fs.readFileSync(MD, 'utf8');
+// Relative links in text copied from architecture/README.md must point from MD's folder.
+const ARCH_DIR = path.join(__dirname, '../architecture');
+const fromArch = text => text.replace(/\]\((?![a-z]+:|#|\/)([^)\s]+)\)/g, (m, target) =>
+    '](' + path.relative(path.dirname(MD), path.join(ARCH_DIR, target)).split(path.sep).join('/') + ')');
 // Keep the authored architecture as the source for this generated introduction.
 // The index below remains entirely driven by the canonical API reference data.
 const appStart = md.indexOf('## App Structure\n\n');
 if (appStart >= 0) {
     const layoutStart = md.indexOf('### File Layout', appStart);
-    const architecture = fs.readFileSync(path.join(__dirname, '../ARCHITECTURE.md'), 'utf8');
+    const architecture = fs.readFileSync(path.join(__dirname, '../architecture/README.md'), 'utf8');
     const heading = 'Window handles and App lifetimes\n-------------------------------\n\n';
     const lifetimeStart = architecture.indexOf(heading);
     if (layoutStart < 0 || lifetimeStart < 0) {
@@ -145,11 +149,11 @@ if (appStart >= 0) {
     }
     const lifetime = architecture.slice(lifetimeStart + heading.length)
         .split(/\n(?=#+ |[^\n]+\n[-=]{3,}\n)/)[0].trim();
-    md = md.slice(0, appStart) + '## App Structure\n\n' + lifetime + '\n\n' + md.slice(layoutStart);
+    md = md.slice(0, appStart) + '## App Structure\n\n' + fromArch(lifetime) + '\n\n' + md.slice(layoutStart);
 }
 
 // Refresh the preserved topic paragraphs from the same authored source.
-const authoredArchitecture = fs.readFileSync(path.join(__dirname, '../ARCHITECTURE.md'), 'utf8');
+const authoredArchitecture = fs.readFileSync(path.join(__dirname, '../architecture/README.md'), 'utf8');
 const authoredParagraphs = authoredArchitecture.split(/\n\s*\n/);
 for (const [oldPrefix, newPrefix] of [
     ['Yes — macOS, Windows and Linux X11', 'Multiple Windows are supported'],
@@ -158,7 +162,7 @@ for (const [oldPrefix, newPrefix] of [
 ]) {
     const paragraph = authoredParagraphs.find(text => text.startsWith(newPrefix));
     if (!paragraph) throw new Error('Authored Window paragraph not found: ' + newPrefix);
-    md = md.split('\n\n').map(text => text.startsWith(oldPrefix) || text.startsWith(newPrefix) ? paragraph.trim() : text).join('\n\n');
+    md = md.split('\n\n').map(text => text.startsWith(oldPrefix) || text.startsWith(newPrefix) ? fromArch(paragraph.trim()) : text).join('\n\n');
 }
 
 const a = md.indexOf(START), b = md.indexOf(END);

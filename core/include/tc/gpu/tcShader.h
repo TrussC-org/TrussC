@@ -26,7 +26,7 @@
 //   effect.setParams(params);
 //   effect.setTexture(0, source.getTextureView(), source.getSampler()); // source: Fbo
 //   effect.draw();  // fills the current render target
-// Fbo sampling needs a GL/GLES V flip: see docs/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+// Fbo sampling needs a GL/GLES V flip: see docs/guides/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
 //
 // =============================================================================
 

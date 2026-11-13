@@ -11,7 +11,7 @@
 // - Android: USB Host API (CDC-ACM devices only), JNI + usbfs.
 //   See platform/android/tcSerial_android.cpp for details and caveats.
 //
-// Device lifecycle (docs/DEVICE_LIFECYCLE.md): isConnected(), setup(),
+// Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md): isConnected(), setup(),
 // close(), onDisconnect. Device loss (e.g. a USB-serial adapter unplugged):
 // available(), readBytes(), readByte() and writeBytes() detect it, close the
 // port, log one warning and fire onDisconnect, so isConnected() turns false
