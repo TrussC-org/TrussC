@@ -58,6 +58,24 @@ bool completed = false;
 std::string mode;
 fs::path baseline, output;
 std::set<std::string> baselineScenes;
+Json accepted = Json::object();
+
+Json loadAccepted(const fs::path& path) {
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("Cannot read accepted file: " + path.string());
+    const Json entries = Json::parse(file, nullptr, false);
+    if (!entries.is_object())
+        throw std::runtime_error("Invalid accepted file (expected object): " + path.string());
+    for (const auto& entry : entries.items()) {
+        const auto& value = entry.value();
+        if (!value.is_object() || !value.contains("maxPixels") ||
+            !value["maxPixels"].is_number_integer() || value["maxPixels"] < 0 ||
+            !value.contains("reason") || !value["reason"].is_string())
+            throw std::runtime_error("Invalid accepted entry " + entry.key() +
+                ": expected non-negative integer maxPixels and string reason");
+    }
+    return entries;
+}
 
 std::set<std::string> loadBaselineScenes(const fs::path& directory) {
     const auto path = directory / "samples.json";
@@ -526,7 +544,17 @@ class RegressionApp : public App {
         check(key+" diff saved", diff.save(diffPath).ok());
         std::printf("COMPARE %s: %zu pixels over tolerance %d%s; diff=%s\n", key.c_str(), red,
             scenes[scene_].tolerance, sameSize ? "" : " (missing/unreadable/size mismatch)", diffPath.string().c_str());
-        check(key+" baseline", red == 0);
+        bool acceptedDiff = false;
+        if (sameSize && red > 0 && accepted.contains(key)) {
+            const auto limit = accepted[key]["maxPixels"].get<uint64_t>();
+            if (red <= limit) {
+                std::printf("ACCEPTED %s: %zu pixels over tolerance %d (maxPixels %llu): %s\n",
+                    key.c_str(), red, scenes[scene_].tolerance,
+                    static_cast<unsigned long long>(limit), accepted[key]["reason"].get<std::string>().c_str());
+                acceptedDiff = true;
+            }
+        }
+        check(key+" baseline", red == 0 || acceptedDiff);
     }
     void afterFrame() {
         if (completed) return;
@@ -682,13 +710,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     mode = argv[1];
     if (!((mode == "--self-check" && argc == 2) ||
-          ((mode == "--record" || mode == "--compare") && argc == 3))) {
-        std::fprintf(stderr,"Usage: renderRegression [--self-check | --record <dir> | --compare <dir>]\n"); return 2;
+          ((mode == "--record" || mode == "--compare") && argc == 3) ||
+          (mode == "--compare" && argc == 5 && std::string(argv[3]) == "--accepted"))) {
+        std::fprintf(stderr,"Usage: renderRegression [--self-check | --record <dir> | --compare <dir> [--accepted <file>]]\n"); return 2;
     }
 #if defined(__EMSCRIPTEN__)
     std::printf("SKIP: renderRegression excludes Web\n"); return 0;
 #else
     try {
+        if (argc == 5) accepted = loadAccepted(argv[4]);
         if (mode != "--self-check") {
             baseline = fs::absolute(argv[2]).lexically_normal();
             if (baseline.filename().empty()) baseline = baseline.parent_path();
