@@ -1554,7 +1554,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             (ev->button_snapshot || mouseMoveHasReliableButtonBits(delivery));
 
         // Keep this event's coordinate basis through raw-listener reentry.
-        const float dpi = delivery.dpiScale;
+        const float dpi = std::isfinite(delivery.dpiScale) && delivery.dpiScale > 0
+            ? delivery.dpiScale : ctx.dpiScale;
         const double scale = pixelPerfectMode() ? 1.0 : 1.0 / double(dpi);
         const bool locked = delivery.pointerLocked;
         const float basis = pixelPerfectMode() ? dpi : 1.0f;
@@ -2011,9 +2012,10 @@ void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, c
             const bool read = b.operations && b.operations->readMetadata
                 ? b.operations->readMetadata(handle, b.user, metadata)
                 : sapp_tc_window_read_metadata(handle, &metadata);
-            if (!read) return;
-            delivery = {metadata.dpi_scale,
-                        metadata.pointer_locked, metadata.reliable_button_bits};
+            // A failed read keeps delivering with the window's own DPI, as before
+            // step 1; desktop admission below still requires live metadata.
+            delivery = read ? WindowEventContext{metadata.dpi_scale, metadata.pointer_locked, metadata.reliable_button_bits}
+                            : WindowEventContext{WindowRequestAccess::context(*window).dpiScale, false, false};
         }
         WindowEntryScope entry(*window, false, false, false);
         if (!entry) return;

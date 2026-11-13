@@ -144,6 +144,20 @@ void lockedDelivery(Window& w,Native& original) {
     }
     internal::bindWindow(w,{original.win_id},original.operations,&original);internal::pixelPerfectMode()=false;
 }
+void zeroDeliveryDpi(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
+    clearInput(w);
+    internal::pixelPerfectMode()=false;
+    n.metadata.dpi_scale=2;
+    internal::refreshWindowMetadata(w);
+    Vec2 pos;
+    int moves=0;
+    auto moved=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){++moves;pos=e.pos;});
+    auto motion=event(SAPP_EVENTTYPE_MOUSE_MOVE,100,40);
+    internal::convertWindowEvent(&motion,w,{0,false,false});
+    check("zero delivery DPI uses window DPI without division by zero",moves==1&&pos==Vec2(50,20));
+    clearInput(w);
+}
 void pointers(Window& w, Native& n) {
     FixtureWindowScope fixture(w);
     for (bool pixels : {false,true}) {
@@ -1062,6 +1076,7 @@ int main(int argc,char** argv){
     continuationMatrix(main,mainNative);continuationMatrix(peer,peerNative);
     supersessionObservers(main,mainNative);supersessionObservers(peer,peerNative);
     std::vector<int> a,b;parity(main,mainNative,a);parity(peer,peerNative,b);check("every event type has main and secondary parity",a==b);
+    zeroDeliveryDpi(main,mainNative);zeroDeliveryDpi(peer,peerNative);
     clearInput(main);clearInput(peer);pointers(main,mainNative);pointers(peer,peerNative);
     nativeVisibilitySources(main,mainNative);nativeVisibilitySources(peer,peerNative);lockedDelivery(main,mainNative);lockedDelivery(peer,peerNative);visibility(main,mainNative,peer);visibility(peer,peerNative,main);
     clearInput(peer);injections(main,mainNative,peer);clickRecovery(main,mainNative);clickNewPress(main,mainNative);abortedClickOwnership(main,mainNative);disabledTouchInClick(main,mainNative);newestPressMatrix(main,mainNative);newestPressMatrix(peer,peerNative);touchExtremes(main,mainNative);touchExtremes(peer,peerNative);finiteExtremes(main,mainNative);finiteExtremes(peer,peerNative);nestedPointerBasis(main,mainNative);nestedPointerBasis(peer,peerNative);sourceParity(main,mainNative);sourceParity(peer,peerNative);touchIsolation(main,mainNative,peer,peerNative);closes(main,mainNative);closes(peer,peerNative);
