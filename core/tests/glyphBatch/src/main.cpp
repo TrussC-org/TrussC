@@ -26,6 +26,11 @@ void check(const char* name, bool ok) {
     std::printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
 }
+// Last line of a run: the overall verdict, so a FAIL above is never followed by PASS.
+void printVerdict(const char* what) {
+    if (failures) std::printf("%s: FAIL (%d failed)\n", what, failures);
+    else std::printf("%s: PASS\n", what);
+}
 bool sameMatrix(const Mat4& a, const Mat4& b) {
     return std::equal(a.m, a.m + 16, b.m);
 }
@@ -752,7 +757,8 @@ int runEglChecks() {
     sgl_shutdown(); sg_shutdown();
     makeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     destroyContext(display, context); terminate(display);
-    check("surfaceless GPU checks complete", completed);
+    check("surfaceless GPU checks ran to completion", completed);
+    printVerdict("surfaceless GPU checks");
     return failures ? 1 : 0;
 }
 #endif
@@ -804,7 +810,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #endif
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
         WindowSettings settings; settings.setSize(extent, extent); settings.setHighDpi(false); settings.setPipelinePoolSize(4096);
-        return tcCoreTest::runDisplayTest<GlyphApp>(settings, failures, [] { check("GPU checks complete", completed); });
+        return tcCoreTest::runDisplayTest<GlyphApp>(settings, failures, [] {
+            check("GPU checks ran to completion", completed);
+            printVerdict("GPU checks");
+        });
     }
     return failures ? 1 : 0;
 }

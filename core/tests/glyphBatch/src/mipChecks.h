@@ -99,11 +99,16 @@
 
     // Fixed steps, with raw captures for independent temporal/parity analysis.
     // Checkpoints also cover endpoints and exact policy-boundary transforms.
-    // Animation tolerances separate rounding noise from LOD splits: on Pi 5 (V3D)
-    // the two paths' vertex/UV rounding differs by up to 3 on a single frame
-    // (second difference 6), while a split LOD choice differs by 80 or more.
+    // Animation checks separate rasterization noise from LOD splits. The two
+    // paths build glyph quads differently, so vertex rounding can differ: on
+    // Pi 5 (V3D) by up to 3 inside one glyph, and on D3D11 a quad edge that lands
+    // on a pixel center covers one extra column a frame early (6 pixels, max 37).
+    // A split LOD choice changes whole glyph interiors instead (30+ pixels at
+    // this size). So a frame fails only when more than animEdgePixels pixels
+    // exceed the per-pixel tolerance; the same rule applies to the temporal check.
     static constexpr int animParityTolerance = 4;
     static constexpr int animPopTolerance = 8;
+    static constexpr int animEdgePixels = 8;
     void mipAnimation() {
         Font sample;
         sample.setGridFit(false);
@@ -114,7 +119,7 @@
             const std::vector<float> keys = sweep == 0 ? std::vector<float>{0.30f, 0.40f, 0.50f, 0.60f}
                 : sweep == 1 ? std::vector<float>{45, 60, 75} : std::vector<float>{400, 300, 200};
             std::vector<int> previous(extent * extent), older(previous.size());
-            int temporalMax = 0;
+            int temporalMax = 0, temporalWorstPixels = 0;
             for (int frame = 0; frame < 240 + int(keys.size()); ++frame) {
                 const float value = frame >= 240 ? keys[frame - 240]
                     : sweep == 0 ? 0.30f + frame * 0.00125f
@@ -146,27 +151,37 @@
                     images[path] = pixels;
                 }
                 const std::string label = std::string(sweeps[sweep]) + " frame " + std::to_string(frame);
-                compare(label.c_str(), images[0], images[1], animParityTolerance);
+                std::vector<int> errors(extent * extent);
+                int worst = 0, over = 0;
+                for (size_t i = 0; i < errors.size(); ++i) {
+                    for (int channel = 0; channel < 4; ++channel)
+                        errors[i] = std::max(errors[i], std::abs(int(images[0][i * 4 + channel]) - int(images[1][i * 4 + channel])));
+                    worst = std::max(worst, errors[i]);
+                    if (errors[i] > animParityTolerance) ++over;
+                }
+                std::printf("PIXELS %s max=%d over_tolerance_pixels=%d\n", label.c_str(), worst, over);
+                check(label.c_str(), over <= animEdgePixels);
                 // Absolute parity image isolates path differences from shared motion shimmer.
                 // Only consecutive regular frames participate; checkpoints are separate.
                 if (frame < 240) {
+                    int popPixels = 0;
                     for (size_t i = 0; i < previous.size(); ++i) {
-                        int error = 0;
-                        for (int channel = 0; channel < 4; ++channel) {
-                            const size_t offset = i * 4 + channel;
-                            error = std::max(error, std::abs(int(images[0][offset]) - int(images[1][offset])));
+                        if (frame >= 2) {
+                            const int jump = std::abs(errors[i] - 2 * previous[i] + older[i]);
+                            temporalMax = std::max(temporalMax, jump);
+                            if (jump > animPopTolerance) ++popPixels;
                         }
-                        if (frame >= 2)
-                            temporalMax = std::max(temporalMax, std::abs(error - 2 * previous[i] + older[i]));
                         older[i] = previous[i];
-                        previous[i] = error;
+                        previous[i] = errors[i];
                     }
+                    temporalWorstPixels = std::max(temporalWorstPixels, popPixels);
                 }
                 sg_commit();
                 internal::drainPendingGpuDestroys();
             }
-            std::printf("MIP_ANIM %s parity_second_difference_max=%d tolerance=%d\n", sweeps[sweep], temporalMax, animPopTolerance);
-            check("animation parity has no temporal pop", temporalMax <= animPopTolerance);
+            std::printf("MIP_ANIM %s parity_second_difference_max=%d tolerance=%d worst_frame_pixels_over=%d limit=%d\n",
+                sweeps[sweep], temporalMax, animPopTolerance, temporalWorstPixels, animEdgePixels);
+            check("animation parity has no temporal pop", temporalWorstPixels <= animEdgePixels);
             check("save animation frames", bool(output));
         }
     }

@@ -50,13 +50,17 @@ back. Additional checkpoint pairs follow: scale 0.30/0.40/0.50/0.60, rotation
 metrics; they include the exact endpoints and boundary transforms. The final
 regular scale frame is 0.59875, preserving the requested fixed step.
 
-Acceptance requires drawString/GlyphBatch parity within tolerance 4 on every
-frame, including checkpoints. No LOD pop is checked as the maximum absolute
-second temporal difference of the parity image (per-pixel maximum absolute
-RGBA-channel difference), within tolerance 8, over the 240 regular frames.
-These are looser than the static checks' 2 on purpose: on Pi 5 (V3D) the two
-paths' vertex/UV rounding differs by up to 3 on a single frame (second
-difference 6), while a split LOD choice differs by 80 or more.
+Acceptance compares drawString and GlyphBatch per pixel (maximum absolute
+RGBA-channel difference). A frame fails when more than 8 pixels differ by more
+than 4, on every frame including checkpoints. No LOD pop is checked the same
+way on the second temporal difference of that parity image over the 240 regular
+frames: a frame fails when more than 8 pixels jump by more than 8.
+The rule counts pixels instead of taking the maximum on purpose. The two paths
+build glyph quads differently, so vertex rounding can differ: on Pi 5 (V3D) by
+up to 3 inside one glyph, and on D3D11 a quad edge that lands exactly on a pixel
+center covers one extra column a frame early (6 pixels, max 37). A split LOD
+choice changes whole glyph interiors instead (30 or more pixels at this size:
+the hard-threshold build fails with 80 at half scale and 105 at 60 degrees).
 `MIP_ANIM` prints this maximum for each sweep; a failed acceptance check makes the mode fail.
 This detects path-specific policy jumps, not shimmer shared by both paths.
 Per-path second-difference max/p95 and pop-pixel counts remain diagnostics,
