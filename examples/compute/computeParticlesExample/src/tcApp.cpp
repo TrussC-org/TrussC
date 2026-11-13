@@ -1,5 +1,6 @@
 // =============================================================================
 // computeParticlesExample - Update particle positions on the GPU and draw them.
+// Particles chase the mouse; click to scatter them.
 //
 // A compute pass writes particle storage that the vertex shader then reads.
 // Vertex storage reads require GPU support; Raspberry Pi 5 V3D lacks it.
@@ -27,8 +28,17 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // x = seconds since last frame, y = particle count (threads past it do nothing)
-    step.setUniform(UB_step_params, Vec4(getDeltaTime(), count, 0, 0));
+    // the mouse in clip space (-1..1, y up), the space the particles live in
+    float mx = getMouseX() / getWindowWidth() * 2 - 1;
+    float my = 1 - getMouseY() / getWindowHeight() * 2;
+
+    // x = seconds since last frame, y = particle count (threads past it do nothing),
+    // zw = mouse position the particles are pulled toward
+    step.setUniform(UB_step_params, Vec4(getDeltaTime(), count, mx, my));
+
+    // x = kick strength (0 on frames without a click), y = random seed for this kick
+    step.setUniform(UB_kick_params, Vec4(kick, random(0, 1000000), 0, 0));
+    kick = 0;
 
     // one thread per particle: count / 64 groups x 64 threads (local_size_x in step.compute.glsl)
     step.dispatch(count / 64);
@@ -39,4 +49,10 @@ void tcApp::draw() {
 
     // 3 vertices x count instances: each instance is one particle's triangle
     points.drawVertices(3, count);
+}
+
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    // the particles live only on the GPU, so the kick itself happens in
+    // step.compute.glsl; here we only ask for one on the next update()
+    kick = 2.0f;
 }
