@@ -50,10 +50,13 @@ back. Additional checkpoint pairs follow: scale 0.30/0.40/0.50/0.60, rotation
 metrics; they include the exact endpoints and boundary transforms. The final
 regular scale frame is 0.59875, preserving the requested fixed step.
 
-Acceptance requires drawString/GlyphBatch parity within tolerance 2 on every
+Acceptance requires drawString/GlyphBatch parity within tolerance 4 on every
 frame, including checkpoints. No LOD pop is checked as the maximum absolute
 second temporal difference of the parity image (per-pixel maximum absolute
-RGBA-channel difference), also within tolerance 2, over the 240 regular frames.
+RGBA-channel difference), within tolerance 8, over the 240 regular frames.
+These are looser than the static checks' 2 on purpose: on Pi 5 (V3D) the two
+paths' vertex/UV rounding differs by up to 3 on a single frame (second
+difference 6), while a split LOD choice differs by 80 or more.
 `MIP_ANIM` prints this maximum for each sweep; a failed acceptance check makes the mode fail.
 This detects path-specific policy jumps, not shimmer shared by both paths.
 Per-path second-difference max/p95 and pop-pixel counts remain diagnostics,

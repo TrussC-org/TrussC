@@ -99,6 +99,11 @@
 
     // Fixed steps, with raw captures for independent temporal/parity analysis.
     // Checkpoints also cover endpoints and exact policy-boundary transforms.
+    // Animation tolerances separate rounding noise from LOD splits: on Pi 5 (V3D)
+    // the two paths' vertex/UV rounding differs by up to 3 on a single frame
+    // (second difference 6), while a split LOD choice differs by 80 or more.
+    static constexpr int animParityTolerance = 4;
+    static constexpr int animPopTolerance = 8;
     void mipAnimation() {
         Font sample;
         sample.setGridFit(false);
@@ -141,7 +146,7 @@
                     images[path] = pixels;
                 }
                 const std::string label = std::string(sweeps[sweep]) + " frame " + std::to_string(frame);
-                compare(label.c_str(), images[0], images[1]);
+                compare(label.c_str(), images[0], images[1], animParityTolerance);
                 // Absolute parity image isolates path differences from shared motion shimmer.
                 // Only consecutive regular frames participate; checkpoints are separate.
                 if (frame < 240) {
@@ -160,8 +165,8 @@
                 sg_commit();
                 internal::drainPendingGpuDestroys();
             }
-            std::printf("MIP_ANIM %s parity_second_difference_max=%d tolerance=2\n", sweeps[sweep], temporalMax);
-            check("animation parity has no temporal pop", temporalMax <= 2);
+            std::printf("MIP_ANIM %s parity_second_difference_max=%d tolerance=%d\n", sweeps[sweep], temporalMax, animPopTolerance);
+            check("animation parity has no temporal pop", temporalMax <= animPopTolerance);
             check("save animation frames", bool(output));
         }
     }
