@@ -1,7 +1,7 @@
 // =============================================================================
-// computeReadbackExample - Read a GPU counter synchronously.
+// computeReadbackExample - Read a GPU sum synchronously.
 //
-// A compute pass counts matching values; read() waits for the GPU result.
+// A compute pass adds 1..100 with atomicAdd; read() waits for the GPU result.
 // Synchronous storage readback is unavailable on Web; use readAsync there.
 // =============================================================================
 
@@ -9,7 +9,7 @@
 #include "sum.compute.glsl.h"
 
 void tcApp::setup() {
-    // upload the starting value (0) so the count begins from zero
+    // upload the starting value (0) so the sum begins from zero
     counter.allocate(sizeof(count), &count);
 
     compute.load(sum_values_shader_desc);

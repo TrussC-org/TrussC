@@ -6,7 +6,7 @@ project generated with trusscli accepts the same arguments.
 
 - `--self-check`: assertions against known pixel values in the registered scenes.
 - `--record <dir>`: assertions, PNGs and `samples.json` into an empty directory.
-- `--compare <dir>`: assertions, PNGs, `samples.json` and red difference overlays
+- `--compare <dir> [--accepted <file>]`: assertions, PNGs, `samples.json` and red difference overlays
   into `<dir>.compare`. A missing image for an existing scene, different size,
   removed scene, or pixel exceeding its tolerance fails. All four channels are compared.
 
@@ -52,6 +52,13 @@ The text scene uses the embedded default bitmap glyphs and an R8 coverage page.
 Tolerances live in the source table. A change to a tolerance needs an explanation
 in its PR. Intentionally changed scenes need before/after images and sampled
 values in the PR; every other changed pixel is a regression.
+
+When a PR intentionally changes pixels of an existing capture, add its printed
+capture key to `accepted.json`, e.g. `{"msaaResolve.fbo": {"maxPixels": 38,
+"reason": "Intentional sample pattern change"}}`. Only entries added or changed
+by the PR take effect. The PR body must show before/after images and sampled
+pixel values for each accepted capture. The log prints an `ACCEPTED` line with
+the reason for each one; scene tolerances remain unchanged.
 
 The PR 0 baselines intentionally include the existing FBO blend/premult, camera,
 model and GPU-point behavior that PRs 2/4 will correct. Self-checks sample stable
