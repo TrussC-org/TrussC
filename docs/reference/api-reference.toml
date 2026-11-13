@@ -11361,6 +11361,8 @@ void tcApp::draw() {
 - Call `draw()` directly to render the quad into the current window or FBO; it flushes preceding recorded layers and issues its GPU draw immediately. An unloaded shader performs no drawing.
 - The default pipeline disables blending and overwrites covered pixels; after drawing, the current target's drawing state is reapplied.
 - Quad position and texture-coordinate attributes each have two components. See `Shader` for loading, threading and GPU resource lifetime rules.
+- Only native GL/GLES contexts log a startup Notice with the V-flip workaround; supported paths log nothing, and there is no public orientation switch.
+- Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal, D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same everywhere.
 '''
 details.ja = '''
 - フルスクリーンのクアッド頂点を用意せず、`Shader` の特殊化としてポストプロセスのフィルターを実行できます。対応バックエンドの Fbo 入力は通常の UV を使います。#1419 の入力反転が必要なのは Mesa flip_y と clip control のどちらもないコンテキストだけです。バックエンド一覧は `Fbo` を参照してください。
@@ -11377,6 +11379,8 @@ void tcApp::draw() {
 - `draw()` を直接呼ぶと、現在のウィンドウまたは FBO にクアッドを描画します。それまでに記録されたレイヤーを描画してから、GPU 描画を即座に実行します。未読み込みの場合は描画しません。
 - 既定のパイプラインはブレンドを無効にし、クアッドが覆うピクセルを上書きします。描画後は現在のターゲットの描画状態を再適用します。
 - クアッドの位置とテクスチャ座標は、それぞれ 2 成分の属性です。読み込み、スレッド、GPU リソースの寿命の扱いは `Shader` を参照してください。
+- ネイティブの GL/GLES コンテキストだけが、V 反転の回避策を含む起動時の Notice を出します。対応パスはログを出さず、公開の向き切り替え設定もありません。
+- public Fbo 内では、`gl_FragCoord.y` は Metal、D3D11、WebGPU、clip control 対応の GL/GLES（NVIDIA Linux の非 Mesa デスクトップ GL や `EXT_clip_control` 対応の GLES/WebGL2 など）では上端から下向きに増え、Mesa flip_y とネイティブ GL では下端から上向きに増えます。論理的な下端に向かって増える値の `dFdy(v)` は前者で正、後者で負になるため、どの環境でも同じ動作が必要なシェーダーでは `gl_FragCoord`/`dFdy` の代わりにテクスチャ座標を使ってください。
 '''
 details.ko = '''
 - 전체 화면 쿼드 정점을 준비하지 않고 `Shader`의 특수화로 후처리 필터를 실행합니다. 지원 백엔드의 Fbo 입력에는 일반 UV를 사용합니다. #1419의 입력 반전은 Mesa flip_y와 clip control이 모두 없는 컨텍스트에서만 필요합니다. 백엔드 목록은 `Fbo`를 참조합니다.
@@ -11393,6 +11397,8 @@ void tcApp::draw() {
 - `draw()`를 직접 호출하면 현재 창이나 FBO에 쿼드를 그립니다. 앞서 기록된 레이어를 먼저 그린 뒤 GPU 그리기를 즉시 실행합니다. 로드되지 않은 셰이더는 그리지 않습니다.
 - 기본 파이프라인은 블렌딩을 비활성화하고 쿼드가 덮는 픽셀을 덮어씁니다. 그린 뒤에는 현재 타깃의 그리기 상태를 다시 적용합니다.
 - 쿼드 위치와 텍스처 좌표 속성은 각각 2성분입니다. 로드, 스레드 및 GPU 리소스 수명 규칙은 `Shader`를 참조하십시오.
+- 네이티브 GL/GLES 컨텍스트만 V 반전 우회 방법을 담은 시작 Notice를 기록합니다. 지원 경로는 로그를 기록하지 않으며 공개된 방향 전환 설정도 없습니다.
+- public Fbo 안에서 `gl_FragCoord.y`는 Metal, D3D11, WebGPU 및 clip control을 지원하는 GL/GLES(NVIDIA Linux의 비 Mesa 데스크톱 GL 또는 `EXT_clip_control`을 지원하는 GLES/WebGL2 등)에서는 위쪽에서 아래로 증가하고, Mesa flip_y와 네이티브 GL에서는 아래쪽에서 위로 증가합니다. 논리적 아래쪽으로 증가하는 값의 `dFdy(v)`는 전자에서 양수이고 후자에서 음수이므로, 모든 환경에서 같은 동작이 필요한 셰이더에서는 `gl_FragCoord`/`dFdy` 대신 텍스처 좌표를 사용합니다.
 '''
 related = ["Shader", "Fbo", "Shader::setUniform"]
 

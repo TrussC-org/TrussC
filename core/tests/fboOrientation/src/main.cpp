@@ -35,7 +35,62 @@ void expect(const Pixels& pixels, int x, int y, Color wanted) {
     if (!ok) std::printf("pixel (%d,%d) actual=(%.3f,%.3f,%.3f) wanted=(%.3f,%.3f,%.3f)\n",
         x, y, actual.r, actual.g, actual.b, wanted.r, wanted.g, wanted.b);
 }
+// Two triangles with opposite clip-space winding, both visible with culling off.
+class FacingShader : public FullscreenShader {
+    sg_pipeline_desc createPipelineDesc() override {
+        auto desc = FullscreenShader::createPipelineDesc();
+        desc.index_type = SG_INDEXTYPE_NONE;
+        desc.cull_mode = SG_CULLMODE_NONE;
+        desc.face_winding = SG_FACEWINDING_CCW;
+        return desc;
+    }
+    void createVertexBuffer() override {
+        const float vertices[] = {
+            -0.875f, 0.875f, 0, 0, -0.875f, 0.125f, 0, 0, -0.125f, 0.875f, 0, 0,
+             0.125f, 0.875f, 0, 0,  0.875f, 0.875f, 0, 0,  0.125f, 0.125f, 0, 0,
+        };
+        sg_buffer_desc desc = {};
+        desc.data = SG_RANGE(vertices);
+        vertexBuffer = sg_make_buffer(&desc);
+    }
+};
 class OrientationApp : public App {
+    void fragmentChecks(bool nativeGl) {
+        const bool clip = internal::fboClipControlAvailable();
+        const char* mode = nativeGl ? (clip ? "clip_control" :
+            (internal::fboStorageCanonical() ? "flip_y" : "native")) : "top_left_backend";
+        Fbo fbo;
+        fbo.allocate(side, side);
+        FacingShader facing;
+        check("two-sided shader loads", facing.load(orientation_facing_shader_desc));
+        fbo.begin(0, 0, 0, 1);
+        facing.draw();
+        fbo.end();
+        Pixels pixels;
+        pixels.allocate(side, side, 4);
+        check("two-sided readback", fbo.readPixels(pixels.getData()));
+        expect(pixels, 4, 4, Color(1, 0, 0));
+        expect(pixels, 20, 4, Color(0, 1, 0));
+        const auto ccw = pixels.getColor(4, 4), cw = pixels.getColor(20, 4);
+        std::printf("PROBE mode=%s facing CCW=(%.0f,%.0f) CW=(%.0f,%.0f)\n",
+            mode, ccw.r, ccw.g, cw.r, cw.g);
+
+        FullscreenShader coordinates;
+        check("coordinate shader loads", coordinates.load(orientation_coordinates_shader_desc));
+        coordinates.setParams(Vec4(side, side, 0, 0));
+        fbo.begin();
+        coordinates.draw();
+        fbo.end();
+        check("coordinate readback", fbo.readPixels(pixels.getData()));
+        const auto top = pixels.getColor(side / 2, 0), bottom = pixels.getColor(side / 2, side - 1);
+        const bool lowAtTop = !nativeGl || clip;
+        const float low = 0.5f / side, high = 1.0f - low;
+        check("fragment Y matches path", std::abs(top.r - (lowAtTop ? low : high)) < 1.0f / 255 &&
+            std::abs(bottom.r - (lowAtTop ? high : low)) < 1.0f / 255);
+        check("dFdy matches path", top.g == (lowAtTop ? 1.0f : 0.0f) && bottom.g == top.g);
+        std::printf("PROBE mode=%s FragCoord.y/height top=%.6f bottom=%.6f dFdy(v) top=%+.0f bottom=%+.0f\n",
+            mode, top.r, bottom.r, 2 * top.g - 1, 2 * bottom.g - 1);
+    }
     void rectangleChecks(FullscreenShader& shader) {
         for (int samples : {1, 4}) {
             Fbo fbo;
@@ -272,6 +327,7 @@ class OrientationApp : public App {
         }
         rectangleChecks(shader);
         windingChecks();
+        fragmentChecks(nativeGl);
         normalMapChecks();
         imguiChecks();
         completed = true;

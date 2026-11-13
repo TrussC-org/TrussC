@@ -19,3 +19,20 @@ void main() {
 }
 @end
 @program sample vs fs
+@fs facing_fs
+in vec2 uv;
+out vec4 frag_color;
+void main() {
+    frag_color = gl_FrontFacing ? vec4(1, 0, 0, 1) : vec4(0, 1, 0, 1);
+}
+@end
+@program facing vs facing_fs
+@fs coordinates_fs
+layout(binding=0) uniform probe_params { vec4 target_size; };
+in vec2 uv;
+out vec4 frag_color;
+void main() {
+    frag_color = vec4(gl_FragCoord.y / target_size.y, 0.5 + 0.5 * sign(dFdy(uv.y)), 0, 1);
+}
+@end
+@program coordinates vs coordinates_fs

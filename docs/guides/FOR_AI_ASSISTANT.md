@@ -817,14 +817,22 @@ Contexts with neither `GL_MESA_framebuffer_flip_y` nor clip control are
 unsupported for this orientation: they retain native GL storage. Only on those
 contexts (for example, WebGL2 without `EXT_clip_control` or very old GL), the
 #1419 workaround still applies: flip the Fbo input with `uv.y = 1.0 - uv.y`.
-A blanket `SOKOL_GLSL` flip is incorrect on supported GL contexts. The GL/GLES
-startup Notice reports `flip_y`, `clip_control`, or `native`; there is no public
-orientation switch. `Fbo::draw()` and public readback handle the selected path.
+A blanket `SOKOL_GLSL` flip is incorrect on supported GL contexts. Only native
+GL/GLES contexts log a startup Notice with the V-flip workaround;
+supported paths log nothing, and there is no public orientation switch.
+`Fbo::draw()` and public readback handle the selected path.
 
 Raw sokol draws inside a TrussC public Fbo inherit its clip origin and winding.
 On the clip-control path, pass logical pixel Y unchanged and
 `origin_top_left=false` to raw viewport/scissor calls; elsewhere keep the usual
-mapping. Fragment-coordinate math still follows the underlying GL convention.
+mapping.
+Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal,
+D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA
+Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa
+flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom
+is positive on the former paths and negative on the latter. Use texture
+coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same
+everywhere.
 Independently opened sokol passes are outside TrussC's public-Fbo hook.
 
 Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
