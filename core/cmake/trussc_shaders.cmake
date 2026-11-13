@@ -108,6 +108,10 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     # header in place as before.
     set(_TC_SHADER_TMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/tc_shaders/${_TC_TARGET}")
 
+    # Shared shader blocks use a separate extension so they are not compiled
+    # as programs. Rebuild consumers when an included block changes.
+    file(GLOB_RECURSE _TC_SHADER_INCLUDES CONFIGURE_DEPENDS "${_TC_SOURCE_DIR}/*.glslinc")
+
     set(_TC_SHADER_OUTPUTS "")
     foreach(_shader_src ${_TC_SHADER_SOURCES})
         get_filename_component(_shader_name ${_shader_src} NAME)
@@ -146,7 +150,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_shader_name}.h ${_shader_out}
                 WORKING_DIRECTORY ${_shader_tmp_dir}
-                DEPENDS ${_shader_src} "${_TC_SOKOL_SHDC}"
+                DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
             )
         else()
@@ -154,7 +158,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 OUTPUT ${_shader_out}
                 COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
                 WORKING_DIRECTORY ${_shader_out_dir}
-                DEPENDS ${_shader_src} "${_TC_SOKOL_SHDC}"
+                DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
             )
         endif()
