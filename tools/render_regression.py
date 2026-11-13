@@ -7,6 +7,7 @@ Use TC_BUILD_WRAPPER to put a local build guard in front of each CMake call.
 Worktrees are temporary; PNGs and samples.json remain under --output.
 """
 import argparse
+import json
 from pathlib import Path
 import os
 import shlex
@@ -36,6 +37,22 @@ def commit(ref):
 def has_harness(ref):
     return subprocess.run(['git', 'cat-file', '-e', f'{ref}:{HARNESS}/src/main.cpp'],
                           cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def accepted_at(ref):
+    path = f'{HARNESS}/accepted.json'
+    result = subprocess.run(['git', 'show', f'{ref}:{path}'], cwd=ROOT,
+                            text=True, encoding='utf-8', capture_output=True)
+    if result.returncode:
+        return {}  # Older commits may not have the list yet.
+    try:
+        accepted = json.loads(result.stdout)
+    except ValueError as error:
+        raise RuntimeError(f'Invalid accepted file at {ref}:{path}: {error}') from error
+    if not isinstance(accepted, dict):
+        raise RuntimeError(f'Invalid accepted file at {ref}:{path}: expected an object')
+    # Entries are validated by the harness (--accepted).
+    return accepted
 
 
 def build(tree, trusscli):
@@ -73,6 +90,11 @@ def compare_refs(base_ref, head_ref, output):
     if output.exists() and any(output.iterdir()):
         raise RuntimeError(f'Output must be empty: {output}')
     output.mkdir(parents=True, exist_ok=True)
+    base_accepted, head_accepted = accepted_at(merge_base), accepted_at(head)
+    accepted = {key: value for key, value in head_accepted.items()
+                if key not in base_accepted or value != base_accepted[key]}
+    accepted_path = output / 'accepted.json'
+    accepted_path.write_text(json.dumps(accepted, indent=2) + '\n', encoding='utf-8')
     # Cleanup only the detached worktrees this invocation created.
     with tempfile.TemporaryDirectory(prefix='.render-regression-', dir=ROOT) as temp:
         trees = []
@@ -90,7 +112,7 @@ def compare_refs(base_ref, head_ref, output):
             run([base_binary, '--record', output / 'base'], cwd=base_tree)
             # The binary prints per-scene counts and diff-image paths, including
             # on a failed comparison. Keep all outputs available to CI artifacts.
-            run([head_binary, '--compare', output / 'base'], cwd=head_tree)
+            run([head_binary, '--compare', output / 'base', '--accepted', accepted_path], cwd=head_tree)
         finally:
             for tree in reversed(trees):
                 run(['git', 'worktree', 'remove', '--force', tree])

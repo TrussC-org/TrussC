@@ -20,7 +20,7 @@ spec.loader.exec_module(driver)
 
 
 class DriverTests(unittest.TestCase):
-    def exercise(self, has_base=True, fail_compare=False):
+    def exercise(self, has_base=True, fail_compare=False, base_accepted=None, head_accepted=None):
         calls = []
 
         def run(command, **kwargs):
@@ -28,6 +28,10 @@ class DriverTests(unittest.TestCase):
             calls.append(words)
             if words[:2] == ['git', 'merge-base']:
                 return 'merge-base-sha'
+            if '--accepted' in words:
+                self.assertEqual(json.loads(Path(words[-1]).read_text(encoding='utf-8')),
+                                 {k: v for k, v in (head_accepted or {}).items()
+                                  if k not in (base_accepted or {}) or v != base_accepted[k]})
             if '--compare' in words and fail_compare:
                 raise subprocess.CalledProcessError(1, words)
 
@@ -36,6 +40,7 @@ class DriverTests(unittest.TestCase):
             (checkout/'tools/bin'/('trusscli.exe' if driver.sys.platform == 'win32' else 'trusscli')).touch()
             with patch.object(driver, 'ROOT', checkout), patch.object(driver, 'commit', side_effect=['base-sha','head-sha']), \
                  patch.object(driver, 'run', side_effect=run), \
+                 patch.object(driver, 'accepted_at', side_effect=[base_accepted or {}, head_accepted or {}]) as accepted, \
                  patch.object(driver, 'has_harness', return_value=has_base) as harness, \
                  patch.object(driver, 'build', side_effect=lambda tree, cli: tree/'binary'):
                 if fail_compare:
@@ -44,6 +49,8 @@ class DriverTests(unittest.TestCase):
                 else:
                     driver.compare_refs('base','head',Path(temp)/'output')
                 harness.assert_called_once_with('merge-base-sha')
+                self.assertEqual(accepted.call_args_list[0].args, ('merge-base-sha',))
+                self.assertEqual(accepted.call_args_list[1].args, ('head-sha',))
         return calls
 
     def test_merge_base_record_head_compare_and_self_check(self):
@@ -59,6 +66,29 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(modes[1][2], modes[2][2])
         removes = [c for c in calls if c[:3] == ['git','worktree','remove']]
         self.assertEqual([c[-1] for c in removes], [c[-2] for c in reversed(adds)])
+
+    def test_only_new_or_changed_accepted_entries_are_passed(self):
+        entry = {'maxPixels': 1, 'reason': 'intended'}
+        self.exercise(base_accepted={'same.screen': entry, 'changed.fbo': entry, 'reason.fbo': entry},
+                      head_accepted={'same.screen': entry,
+                                     'changed.fbo': dict(entry, maxPixels=2),
+                                     'reason.fbo': dict(entry, reason='revised rationale'),
+                                     'new.fbo': entry})
+
+    def test_accepted_commit_file_validation_and_missing_file(self):
+        with patch.object(driver.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)):
+            self.assertEqual(driver.accepted_at('old'), {})
+        entry = {'key': {'maxPixels': 1, 'reason': 'intended'}}
+        with patch.object(driver.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                [], 0, stdout=json.dumps(entry))) as show:
+            self.assertEqual(driver.accepted_at('head-sha'), entry)
+            self.assertEqual(show.call_args.args[0],
+                             ['git', 'show', 'head-sha:core/tests/renderRegression/accepted.json'])
+        for value in ('{broken', '[]'):
+            with self.subTest(value=value), patch.object(driver.subprocess, 'run',
+                    return_value=subprocess.CompletedProcess([], 0, stdout=value)):
+                with self.assertRaisesRegex(RuntimeError, 'Invalid accepted'):
+                    driver.accepted_at('head')
 
     def test_first_batch_only_checks_head(self):
         calls = self.exercise(has_base=False)
@@ -157,8 +187,9 @@ using Rgba = std::array<int,4>;
 fs::path baseline, output;
 std::string mode = "--compare";
 std::set<std::string> baselineScenes;
+Json accepted = Json::object();
 int failures = 0;
-''' + body(source, 'void check(') + body(source, 'std::set<std::string> loadBaselineScenes(') + r'''
+''' + body(source, 'void check(') + body(source, 'Json loadAccepted(') + body(source, 'std::set<std::string> loadBaselineScenes(') + r'''
 // Only the image I/O and app/GPU metadata are stand-ins. Comparison and JSON
 // loading below are the actual harness code, including assertions/save order.
 struct Status { bool value; bool ok() const { return value; } };
@@ -170,9 +201,9 @@ struct Pixels {
     unsigned char* getData() { return data.data(); }
     void allocate(int width, int height, int) { w=width; h=height; data.resize(w*h*4); }
     Status save(const fs::path& path) { std::ofstream f(path); f << w << ' ' << h; return {f.good()}; }
-    Status load(const fs::path& path) { std::ifstream f(path); return {bool(f >> w >> h)}; }
+    Status load(const fs::path& path) { std::ifstream f(path); bool ok = bool(f >> w >> h); int value = 0; if (f >> value) data[0] = value; return {ok}; }
 };
-Rgba pixel(const Pixels&, int, int) { return {0,0,0,255}; }
+Rgba pixel(const Pixels& p, int, int) { return {p.data[0],0,0,255}; }
 struct GraphicsBackend { static std::string name() { return "test"; } };
 struct Target { int sampleCount = 1; int getSampleCount() const { return sampleCount; } };
 namespace internal {
@@ -200,8 +231,9 @@ int main(int argc, char** argv) {
     baseline = argv[1]; output = argv[2];
     try {
         baselineScenes = loadBaselineScenes(baseline);
+        if (argc == 6) accepted = loadAccepted(argv[5]);
         fs::create_directories(output);
-        App app; app.sceneName = argv[3]; app.selfCheck = argc == 4;
+        App app; app.sceneName = argv[3]; app.selfCheck = argc == 4 || std::string(argv[4]) == "pass";
         Pixels px; app.capture(px, "screen", false);
     } catch (const std::exception& e) { check(e.what(), false); }
     return failures ? 1 : 0;
@@ -212,7 +244,7 @@ int main(int argc, char** argv) {
         subprocess.run([compiler, '-std=c++20', '-Wall', '-Wextra',
                         '-I'+str(ROOT/'core/include'), str(cpp), '-o', str(cls.binary)], check=True)
 
-    def exercise(self, manifest, scene='newScene', images=None, self_check=True):
+    def exercise(self, manifest, scene='newScene', images=None, self_check=True, accepted=None):
         with tempfile.TemporaryDirectory(dir=self.folder) as temp:
             baseline = Path(temp)/'base'; baseline.mkdir()
             if manifest is not None:
@@ -221,7 +253,10 @@ int main(int argc, char** argv) {
                 (baseline/(key+'.png')).write_text(contents, encoding='utf-8')
             output = Path(temp)/'head'
             args = [str(self.binary), str(baseline), str(output), scene]
-            if not self_check:
+            if accepted is not None:
+                path = Path(temp)/'accepted.json'; path.write_text(accepted, encoding='utf-8')
+                args.extend(['pass' if self_check else 'fail-self-check', str(path)])
+            elif not self_check:
                 args.append('fail-self-check')
             proc = subprocess.run(args, capture_output=True, text=True, encoding='utf-8')
             files = {p.name for p in output.iterdir()} if output.exists() else set()
@@ -283,6 +318,29 @@ int main(int argc, char** argv) {
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn('PASS oldScene.screen baseline', proc.stdout)
         self.assertNotIn('NEW ', proc.stdout)
+
+    def test_accepted_diff_limit_and_image_failures(self):
+        for limit, contents, expected in ((1, '1 1 20', True), (0, '1 1 20', False),
+                                           (100, None, False), (100, '2 1', False)):
+            with self.subTest(limit=limit, contents=contents):
+                proc, files = self.exercise('{"oldScene.screen": {}}', 'oldScene',
+                    {} if contents is None else {'oldScene.screen': contents},
+                    accepted=json.dumps({'oldScene.screen': {'maxPixels': limit, 'reason': 'intended'}}))
+                self.assertEqual(proc.returncode, 0 if expected else 1, proc.stdout)
+                self.assertEqual('ACCEPTED oldScene.screen:' in proc.stdout, expected, proc.stdout)
+                if expected:
+                    self.assertIn('1 pixels over tolerance 0 (maxPixels 1): intended', proc.stdout)
+                self.assertIn('oldScene.screen.diff.png', files)
+
+    def test_accepted_file_validation(self):
+        for value in ('{broken', '[]', '{"key": null}', '{"key": {"maxPixels": -1, "reason": "x"}}',
+                      '{"key": {"maxPixels": true, "reason": "x"}}',
+                      '{"key": {"maxPixels": 1.5, "reason": "x"}}',
+                      '{"key": {"maxPixels": 1, "reason": 2}}'):
+            with self.subTest(value=value):
+                proc, _ = self.exercise('{"oldScene.screen": {}}', accepted=value)
+                self.assertEqual(proc.returncode, 1, proc.stdout)
+                self.assertIn('Invalid accepted', proc.stdout)
 
     def test_missing_or_corrupt_manifest_fails_before_capture(self):
         for manifest in (None, '{broken', '[]', 'null', '{"badKey": {}}', '{"oldScene.screen": null}'):
