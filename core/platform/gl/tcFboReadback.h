@@ -77,6 +77,8 @@ static bool readFromGLTexture(sg_image image, int width, int height,
     if (!internal::recorderByteSize(rowBytes, size_t(height), capacity)) return false;
     return withGLReadTexture(image, width, height, reportError, [&] {
         if (!readGLPixels(0, width, height, glFormat, glType, buffer, capacity)) return false;
+        // The temporary read FBO is unflagged: canonical images read top-first.
+        if (internal::fboStorageCanonical()) return true;
         std::vector<uint8_t> row(rowBytes);
         auto* p = static_cast<uint8_t*>(buffer);
         for (int y = 0; y < height / 2; ++y) {
@@ -107,7 +109,8 @@ static bool readConvertedGLTexture(sg_image image, int width, int height,
             const int count = std::min(rows, height - y);
             if (!readGLPixels(y, width, count, format, type, chunk.data(), chunk.size() * sizeof(T))) return false;
             for (int r = 0; r < count; ++r)
-                convert(height - 1 - (y + r), chunk.data() + size_t(r) * (rowBytes / sizeof(T)));
+                convert(internal::fboStorageCanonical() ? y + r : height - 1 - (y + r),
+                        chunk.data() + size_t(r) * (rowBytes / sizeof(T)));
             y += count;
         }
         return true;

@@ -344,6 +344,8 @@ public:
 
         // Projector VP matrix (single projector, first spot with texture)
         fsp.projectorParams[0] = static_cast<float>(projectorLightIdx);
+        // Captured with the draw, including deferred replay in this public Fbo.
+        fsp.projectorParams[1] = currentTarget().rectangleOriginTopLeft() ? 0.0f : 1.0f;
         if (projectorLightIdx >= 0) {
             Mat4 pvp = activeLights[projectorLightIdx]->computeProjectorViewProj();
             Mat4 pvpT = pvp.transposed();

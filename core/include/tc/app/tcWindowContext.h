@@ -462,16 +462,16 @@ inline void applyTargetDrawingState() {
     applyTargetModelView();
     const auto& vp = target.viewport;
     sgl_viewportf(vp.active ? vp.x : 0, vp.active ? vp.y : 0,
-                  vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), true);
+                  vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), target.rectangleOriginTopLeft());
     const auto& clip = target.currentScissor;
     sgl_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
-                      clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), true);
+                      clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), target.rectangleOriginTopLeft());
     restoreCurrentPipeline();
     if (target.inPass) {
         sg_apply_viewportf(vp.active ? vp.x : 0, vp.active ? vp.y : 0,
-                          vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), true);
+                          vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), target.rectangleOriginTopLeft());
         sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
-                              clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), true);
+                              clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), target.rectangleOriginTopLeft());
     }
 }
 

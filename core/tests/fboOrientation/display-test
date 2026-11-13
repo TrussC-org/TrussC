@@ -1,0 +1,3 @@
+{test} --gpu-check
+env MESA_EXTENSION_OVERRIDE=-GL_MESA_framebuffer_flip_y {test} --gpu-check
+env MESA_EXTENSION_OVERRIDE="-GL_MESA_framebuffer_flip_y -GL_ARB_clip_control" MESA_GL_VERSION_OVERRIDE=4.3 {test} --gpu-check

@@ -138,8 +138,9 @@ void ImGuiReflector::showImage(const char* name, HasTexture& image) {
         const float w = (float)tex.getWidth(), h = (float)tex.getHeight();
         const float scale = std::min(kThumbnailBox / w, kThumbnailBox / h);
         const ImVec2 size(std::max(1.0f, w * scale), std::max(1.0f, h * scale));
-        // GL stores an Fbo's texture bottom-to-top (Fbo::draw flips it back).
+        // Match Fbo::draw on contexts retaining native GL storage.
         const bool flipV = dynamic_cast<const Fbo*>(&image) != nullptr
+            && !tc::internal::fboStorageCanonical()
             && (sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3);
         const ThumbnailHandles handles{tex.getView(), tex.getSampler()};
         ImGui::GetWindowDrawList()->AddCallback(guardThumbnail, (void*)&handles, sizeof(handles));

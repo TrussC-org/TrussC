@@ -64,7 +64,7 @@ layout(binding=1) uniform fs_params {
     vec4 lightAttenuation[MAX_LIGHTS];    // xyz=c/l/q, w=spotOuterCos
     vec4 lightSpotDir[MAX_LIGHTS];        // xyz=spot direction, w=spotInnerCos
     mat4 projectorViewProj;               // single projector VP matrix
-    vec4 projectorParams;                 // x=projectorLightIndex (-1=none), yzw=unused
+    vec4 projectorParams;                 // x=projectorLightIndex (-1=none), y=clipControlDerivativeFlip, zw=unused
     vec4 iesParams;                       // x=iesLightIndex (-1=none), y=maxVertAngle (rad), zw=unused
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
     mat4 shadowViewProj[MAX_SHADOW_LIGHTS];   // per-slot light VP for shadow depth comparison
@@ -576,6 +576,11 @@ mat3 buildTBN(vec3 N, vec3 T, float bSign, vec3 worldPos, vec2 uv) {
     vec3 dp1perp = cross(N, dp1);
     vec3 dT = dp2perp * duv1.x + dp1perp * duv2.x;
     vec3 dB = dp2perp * duv1.y + dp1perp * duv2.y;
+    // Upper-left clip control reverses dFdy; explicit tangents above are unchanged.
+    if (projectorParams.y > 0.5) {
+        dT = -dT;
+        dB = -dB;
+    }
     float invmax = inversesqrt(max(dot(dT, dT), dot(dB, dB)));
     return mat3(dT * invmax, dB * invmax, N);
 }

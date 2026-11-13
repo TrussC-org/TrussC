@@ -8845,29 +8845,59 @@ related = ["RuntimeEvents::exitRequested"]
 category = "graphics_fbo"
 keywords = ["framebuffer", "render target", "offscreen", "render texture", "of fbo"]
 of = ["ofFbo"]
-description.en = "Stores off-screen rendering results in a texture."
-description.ja = "画面外での描画結果をテクスチャに保持する。"
-description.ko = "오프스크린 렌더링 결과를 텍스처에 보관한다."
+description.en = "Renders offscreen into a texture with top-first sampling on supported backends."
+description.ja = "対応バックエンドで上の行からサンプリングできるテクスチャに、オフスクリーン描画します。"
+description.ko = "지원 백엔드에서 위쪽 행부터 샘플링하는 텍스처에 오프스크린 렌더링합니다."
 details.en = '''
-- Call `allocate()` to create the render target, draw between `begin()` and `end()`, then use `draw()` to display the result. See `Fbo::begin` for rendering state and nesting rules.
+- An offscreen render target that produces a sampleable color texture. See `Fbo::begin` for drawing state and nesting rules. Fbo textures sample top-first without a flip on Metal, D3D11, WebGPU, Mesa GL/GLES (Linux, Raspberry Pi), and GL/GLES with clip control. Contexts with neither Mesa flip_y nor clip control (such as WebGL2 without EXT_clip_control or very old GL) retain native storage and require the #1419 input-UV flip in custom shaders.
+
+Render offscreen, then display the result:
+```cpp
+void tcApp::draw() {
+    fbo.begin(0, 0, 0, 1);
+    fbo.end();
+    fbo.draw(0, 0);
+}
+```
+
 - Inherits from `HasTexture` and exposes its color texture through `getTexture()`.
 - Copying is disabled. Moving an active source, or move-assigning to an active destination, is rejected with a warning. Destroying an active Fbo logs an error and terminates the process; call `end()` before destruction.
 - Draw each Fbo from only one window within a frame; drawing the same object from multiple windows in one frame is unsupported.
 - See `Texture` for GPU resource rules, including main-thread use and resource lifetime.
 '''
 details.ja = '''
-- `allocate()` で描画先を確保し、`begin()` と `end()` の間で描画してから、`draw()` で結果を表示します。描画状態と入れ子の規則は `Fbo::begin` を参照してください。
+- サンプリング可能なカラーテクスチャを生成するオフスクリーン描画先です。描画状態と入れ子の規則は `Fbo::begin` を参照してください。 Fbo テクスチャは Metal、D3D11、WebGPU、Mesa GL/GLES（Linux、Raspberry Pi）、clip control 対応の GL/GLES で、反転せず上の行からサンプリングできます。Mesa flip_y と clip control のどちらもないコンテキスト（EXT_clip_control のない WebGL2 や非常に古い GL など）はネイティブの格納方向を保つため、独自シェーダーでは #1419 の入力 UV 反転が必要です。
+
+オフスクリーンに描画し、結果を表示します。
+```cpp
+void tcApp::draw() {
+    fbo.begin(0, 0, 0, 1);
+    fbo.end();
+    fbo.draw(0, 0);
+}
+```
+
 - `HasTexture` を継承し、`getTexture()` でカラーテクスチャを取得できます。
 - コピーはできません。アクティブな移動元からのムーブや、アクティブな移動先へのムーブ代入は警告を記録して拒否されます。アクティブな Fbo を破棄するとエラーを記録してプロセスを終了するため、破棄する前に `end()` を呼んでください。
 - 1 フレーム内では、各 Fbo を 1 つのウィンドウからだけ描画してください。同じオブジェクトを同一フレーム内で複数のウィンドウから描画することには対応していません。
 - メインスレッドでの使用やリソースの寿命など、GPU リソースの扱いは `Texture` を参照してください。
 '''
 details.ko = '''
-- `allocate()`로 렌더 타깃을 할당하고 `begin()`과 `end()` 사이에서 그린 다음 `draw()`로 결과를 표시합니다. 렌더링 상태와 중첩 규칙은 `Fbo::begin`을 참조하세요.
+- 샘플링 가능한 컬러 텍스처를 생성하는 오프스크린 렌더 타깃입니다. 렌더링 상태와 중첩 규칙은 `Fbo::begin`을 참조합니다. Fbo 텍스처는 Metal, D3D11, WebGPU, Mesa GL/GLES(Linux, Raspberry Pi), clip control을 지원하는 GL/GLES에서 반전 없이 위쪽 행부터 샘플링합니다. Mesa flip_y와 clip control이 모두 없는 컨텍스트(EXT_clip_control이 없는 WebGL2 또는 매우 오래된 GL 등)는 네이티브 저장 방향을 유지하므로 사용자 셰이더에서 #1419의 입력 UV 반전이 필요합니다.
+
+오프스크린에 그린 뒤 결과를 표시합니다.
+```cpp
+void tcApp::draw() {
+    fbo.begin(0, 0, 0, 1);
+    fbo.end();
+    fbo.draw(0, 0);
+}
+```
+
 - `HasTexture`를 상속하며 `getTexture()`로 컬러 텍스처를 제공합니다.
-- 복사할 수 없습니다. 활성 상태인 원본에서 이동하거나 활성 상태인 대상에 이동 대입하면 경고를 기록하고 거부합니다. 활성 Fbo를 파괴하면 오류를 기록하고 프로세스를 종료하므로 파괴하기 전에 `end()`를 호출하세요.
+- 복사할 수 없습니다. 활성 상태인 원본에서 이동하거나 활성 상태인 대상에 이동 대입하면 경고를 기록하고 거부합니다. 활성 Fbo를 파괴하면 오류를 기록하고 프로세스를 종료하므로 파괴하기 전에 `end()`를 호출하십시오.
 - 한 프레임에서는 각 Fbo를 하나의 윈도우에서만 그려야 합니다. 같은 객체를 한 프레임에 여러 윈도우에서 그리는 것은 지원하지 않습니다.
-- 메인 스레드 사용과 리소스 수명 등 GPU 리소스 규칙은 `Texture`를 참조하세요.
+- 메인 스레드 사용과 리소스 수명 등 GPU 리소스 규칙은 `Texture`를 참조하십시오.
 '''
 of_category = "image-texture-types"
 related = ["VideoWriter::addFrame", "VideoWriter::addFrameAt", "Texture", "FullscreenShader", "Shader"]
@@ -9045,36 +9075,50 @@ void tcApp::draw() {
 '''
 
 ["Fbo::draw"]
-description.en = "Draws the framebuffer contents onto the current target."
-description.ja = "フレームバッファの内容を現在の描画先に描画する。"
-description.ko = "프레임버퍼 내용을 현재 타깃에 그린다."
+description.en = "Draws the Fbo upright using the current color and blend mode."
+description.ja = "現在の色とブレンドモードで、Fbo を正しい上下方向で描画します。"
+description.ko = "현재 색상과 블렌드 모드로 Fbo를 올바른 상하 방향으로 그립니다."
 details.en = '''
 - `draw(x, y)` uses the attachment width and height; `draw(x, y, w, h)` scales the result to the requested size. Coordinates and dimensions use the current target's drawing coordinate system and transformations.
-- Draws the GPU texture with the current color and blend mode, handles premultiplied alpha under the default alpha blend mode, and automatically corrects the vertical orientation on GL backends. No CPU readback is performed; an unallocated Fbo draws nothing.
+
+Display the Fbo:
+```cpp
+void tcApp::draw() {
+    fbo.draw(20, 20, 128, 128);
+}
+```
+
+- Draws the GPU texture with the current color and blend mode, handles premultiplied alpha under the default alpha blend mode, and keeps the displayed result upright, including native GL contexts without Mesa flip_y or clip control. No CPU readback is performed; an unallocated Fbo draws nothing.
 - Drawing and then rendering into the same Fbo again within one frame uses separate texture versions so earlier Fbo draws retain their earlier contents. Additional versions use GPU memory; if version allocation fails, earlier draws may instead show the final contents.
 - Call after `end()`; see `Fbo::begin` for active-attachment sampling and nesting rules.
 '''
 details.ja = '''
 - `draw(x, y)` は添付画像の幅と高さで描画し、`draw(x, y, w, h)` は指定サイズに拡大・縮小して描画します。座標と寸法には現在の描画先の座標系と変換が適用されます。
-- 現在の色とブレンドモードで GPU テクスチャを描画し、既定のアルファブレンドモードでは乗算済みアルファを扱い、GL バックエンドでは上下の向きを自動補正します。CPU への読み出しは行いません。未確保の Fbo は何も描画しません。
+
+Fbo を表示します。
+```cpp
+void tcApp::draw() {
+    fbo.draw(20, 20, 128, 128);
+}
+```
+
+- 現在の色とブレンドモードで GPU テクスチャを描画し、既定のアルファブレンドモードでは乗算済みアルファを扱い、Mesa flip_y と clip control のどちらもないネイティブ GL を含め、結果を正しい上下方向で表示します。CPU への読み出しは行いません。未確保の Fbo は何も描画しません。
 - 同じフレーム内で Fbo を描画してから再びその Fbo に描き込む場合は、別のテクスチャ版を使って、先の Fbo 描画が以前の内容を保持するようにします。追加の版は GPU メモリを使い、その確保に失敗すると先の描画にも最終的な内容が表示される場合があります。
 - `end()` のあとに呼んでください。アクティブな添付画像のサンプリングと入れ子の規則は `Fbo::begin` を参照してください。
 '''
 details.ko = '''
 - `draw(x, y)`는 첨부 이미지의 너비와 높이로 그리며 `draw(x, y, w, h)`는 지정한 크기로 확대·축소하여 그립니다. 좌표와 크기에는 현재 타깃의 그리기 좌표계와 변환이 적용됩니다.
-- 현재 색상과 블렌드 모드로 GPU 텍스처를 그리며 기본 알파 블렌드 모드에서는 미리 곱한 알파를 처리하고 GL 백엔드에서는 상하 방향을 자동 보정합니다. CPU 읽기는 수행하지 않으며 할당되지 않은 Fbo는 아무것도 그리지 않습니다.
-- 같은 프레임에서 Fbo를 그린 뒤 다시 그 Fbo에 렌더링하면 별도 텍스처 버전을 사용하여 앞선 Fbo 그리기가 이전 내용을 유지하도록 합니다. 추가 버전은 GPU 메모리를 사용하며 할당에 실패하면 앞선 그리기에도 최종 내용이 표시될 수 있습니다.
-- `end()` 이후에 호출해야 합니다. 활성 첨부 이미지 샘플링과 중첩 규칙은 `Fbo::begin`을 참조하세요.
-'''
-snippet = '''
-// tcApp.h: Fbo fbo;
-void tcApp::setup() { fbo.allocate(256, 256); }
+
+Fbo를 표시합니다.
+```cpp
 void tcApp::draw() {
-    fbo.begin(0.2f, 0.4f, 0.6f);
-    fbo.end();
-    setColor(1.0f, 1.0f, 1.0f, 1.0f);
     fbo.draw(20, 20, 128, 128);
 }
+```
+
+- 현재 색상과 블렌드 모드로 GPU 텍스처를 그리며 기본 알파 블렌드 모드에서는 미리 곱한 알파를 처리하고 Mesa flip_y와 clip control이 모두 없는 네이티브 GL을 포함하여 결과를 올바른 상하 방향으로 표시합니다. CPU 읽기는 수행하지 않으며 할당되지 않은 Fbo는 아무것도 그리지 않습니다.
+- 같은 프레임에서 Fbo를 그린 뒤 다시 그 Fbo에 렌더링하면 별도 텍스처 버전을 사용하여 앞선 Fbo 그리기가 이전 내용을 유지하도록 합니다. 추가 버전은 GPU 메모리를 사용하며 할당에 실패하면 앞선 그리기에도 최종 내용이 표시될 수 있습니다.
+- `end()` 이후에 호출해야 합니다. 활성 첨부 이미지 샘플링과 중첩 규칙은 `Fbo::begin`을 참조하십시오.
 '''
 
 ["Fbo::drawStencil"]
@@ -9207,31 +9251,47 @@ details.ko = '''
 '''
 
 ["Fbo::getTexture"]
-description.en = "Returns the framebuffer's current color texture."
-description.ja = "フレームバッファの現在のカラーテクスチャを返す。"
-description.ko = "프레임버퍼의 현재 컬러 텍스처를 반환한다."
+description.en = "Returns the resolved color texture; supported backends sample top-first."
+description.ja = "解決済みのカラーテクスチャを返します。対応バックエンドでは上の行からサンプリングできます。"
+description.ko = "리졸브된 컬러 텍스처를 반환하며 지원 백엔드에서는 위쪽 행부터 샘플링합니다."
 details.en = '''
-- Returns a borrowed `Texture&`, or `const Texture&` for a const Fbo, to the current single-sample color texture, including the resolved result when MSAA is enabled. The texture is marked as using premultiplied alpha.
+- Returns a borrowed `Texture&`, or `const Texture&` for a const Fbo, to the current single-sample color texture, including the resolved result when MSAA is enabled. The texture is marked as using premultiplied alpha. Fbo textures sample top-first without a flip on Metal, D3D11, WebGPU, Mesa GL/GLES (Linux, Raspberry Pi), and GL/GLES with clip control. Contexts with neither Mesa flip_y nor clip control (such as WebGL2 without EXT_clip_control or very old GL) retain native storage and require the #1419 input-UV flip in custom shaders.
+
+Draw the stored texture directly on a supported backend:
+```cpp
+void tcApp::draw() {
+    fbo.getTexture().draw(0, 0);
+}
+```
+
 - The current texture can change when the Fbo is rendered again; obtain it again for the latest version. This provides GPU texture access without copying pixels to the CPU; see `Texture` for resource rules.
-- See `Fbo::begin` for active-attachment sampling rules. For display, `Fbo::draw` also corrects GL vertical orientation; drawing the returned Texture directly does not apply that Fbo-specific correction.
+- See `Fbo::begin` for active-attachment sampling rules. `Fbo::draw` also handles native storage; drawing the returned Texture directly uses its stored rows.
 '''
 details.ja = '''
-- 現在のシングルサンプルのカラーテクスチャを、所有権を移さず `Texture&` で返します。const Fbo では `const Texture&` を返します。MSAA 有効時は解決済みの結果で、テクスチャには乗算済みアルファを使う印が付いています。
+- 現在のシングルサンプルのカラーテクスチャを、所有権を移さず `Texture&` で返します。const Fbo では `const Texture&` を返します。MSAA 有効時は解決済みの結果で、テクスチャには乗算済みアルファを使う印が付いています。 Fbo テクスチャは Metal、D3D11、WebGPU、Mesa GL/GLES（Linux、Raspberry Pi）、clip control 対応の GL/GLES で、反転せず上の行からサンプリングできます。Mesa flip_y と clip control のどちらもないコンテキスト（EXT_clip_control のない WebGL2 や非常に古い GL など）はネイティブの格納方向を保つため、独自シェーダーでは #1419 の入力 UV 反転が必要です。
+
+対応バックエンドで格納済みのテクスチャを直接描画します。
+```cpp
+void tcApp::draw() {
+    fbo.getTexture().draw(0, 0);
+}
+```
+
 - Fbo に再び描き込むと現在のテクスチャが変わる場合があるため、最新版が必要なときは再取得してください。CPU へピクセルをコピーせずに GPU テクスチャへアクセスします。リソースの扱いは `Texture` を参照してください。
-- アクティブな添付画像のサンプリング規則は `Fbo::begin` を参照してください。表示には GL の上下方向も補正する `Fbo::draw` を使えます。返された Texture を直接描画しても、この Fbo 固有の補正は適用されません。
+- アクティブな添付画像のサンプリング規則は `Fbo::begin` を参照してください。`Fbo::draw` はネイティブの格納方向も補正します。返された Texture を直接描画すると格納済みの行を使います。
 '''
 details.ko = '''
-- 현재 단일 샘플 컬러 텍스처에 대한 소유권 없는 `Texture&`를 반환하며 const Fbo에서는 `const Texture&`를 반환합니다. MSAA가 활성화되어 있으면 리졸브된 결과이며 텍스처에는 미리 곱한 알파를 사용한다는 표시가 설정됩니다.
-- Fbo에 다시 렌더링하면 현재 텍스처가 바뀔 수 있으므로 최신 버전이 필요할 때 다시 가져와야 합니다. CPU로 픽셀을 복사하지 않고 GPU 텍스처에 접근하며 리소스 규칙은 `Texture`를 참조하세요.
-- 활성 첨부 이미지 샘플링 규칙은 `Fbo::begin`을 참조하세요. 표시할 때 `Fbo::draw`는 GL의 상하 방향도 보정하지만 반환된 Texture를 직접 그리면 이 Fbo 전용 보정은 적용되지 않습니다.
-'''
-snippet = '''
-// tcApp.h: Fbo fbo;
-void tcApp::setup() {
-    fbo.allocate(256, 256);
-    Texture& texture = fbo.getTexture();
-    texture.setFilter(TextureFilter::Linear);
+- 현재 단일 샘플 컬러 텍스처에 대한 소유권 없는 `Texture&`를 반환하며 const Fbo에서는 `const Texture&`를 반환합니다. MSAA가 활성화되어 있으면 리졸브된 결과이며 텍스처에는 미리 곱한 알파를 사용한다는 표시가 설정됩니다. Fbo 텍스처는 Metal, D3D11, WebGPU, Mesa GL/GLES(Linux, Raspberry Pi), clip control을 지원하는 GL/GLES에서 반전 없이 위쪽 행부터 샘플링합니다. Mesa flip_y와 clip control이 모두 없는 컨텍스트(EXT_clip_control이 없는 WebGL2 또는 매우 오래된 GL 등)는 네이티브 저장 방향을 유지하므로 사용자 셰이더에서 #1419의 입력 UV 반전이 필요합니다.
+
+지원 백엔드에서 저장된 텍스처를 직접 그립니다.
+```cpp
+void tcApp::draw() {
+    fbo.getTexture().draw(0, 0);
 }
+```
+
+- Fbo에 다시 렌더링하면 현재 텍스처가 바뀔 수 있으므로 최신 버전이 필요할 때 다시 가져와야 합니다. CPU로 픽셀을 복사하지 않고 GPU 텍스처에 접근하며 리소스 규칙은 `Texture`를 참조하십시오.
+- 활성 첨부 이미지 샘플링 규칙은 `Fbo::begin`을 참조하십시오. `Fbo::draw`는 네이티브 저장 방향도 보정하며 반환된 Texture를 직접 그리면 저장된 행을 사용합니다.
 '''
 
 ["Fbo::getTextureFormat"]
@@ -9325,13 +9385,22 @@ details.ko = '''
 ["Fbo::readPixels"]
 category = "graphics_fbo"
 keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a CPU RGBA8 buffer."
-description.ja = "フレームバッファの内容を CPU の RGBA8 バッファに読み出す。"
-description.ko = "프레임버퍼 내용을 CPU RGBA8 버퍼로 읽는다."
+description.en = "Reads framebuffer contents into a top-first CPU RGBA8 buffer."
+description.ja = "フレームバッファの内容を、上の行から並ぶ CPU RGBA8 バッファに読み出します。"
+description.ko = "프레임버퍼 내용을 위쪽 행부터 배치한 CPU RGBA8 버퍼로 읽습니다."
 details.en = '''
 - `readPixels(unsigned char* pixels)` requires space for `getWidth() * getHeight() * 4` bytes. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
+
+Read the completed Fbo:
+```cpp
+void tcApp::draw() {
+    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
+    fbo.readPixels(pixels.data());
+}
+```
+
 - Call after `end()`, outside every Fbo rendering scope in the current window. Calling inside any such scope logs an error and returns `false`, even when reading a different Fbo.
-- Reads mip level 0 of the current color texture, using the resolved result for MSAA. Output is tightly packed RGBA with the top row first and pixels ordered left to right; GL rows are flipped automatically, so no additional vertical flip is needed.
+- Reads mip level 0 of the current color texture, using the resolved result for MSAA. Output is tightly packed RGBA with the top row first and pixels ordered left to right; native GL rows are reversed only where needed, so no additional vertical flip is needed.
 - Always converts to RGBA8 regardless of the attachment format: values are clamped to 0–1 and quantized to 8 bits, missing G/B components in R/RG formats become 0, and missing alpha becomes 1. BGRA is reordered to RGBA; see `TextureFormat` for source formats.
 - Conversion rounds to nearest. CPU conversion rounds halfway cases up, while native desktop GL conversion may differ by at most one byte value. Use `readPixelsFloat()` to avoid the RGBA8 conversion.
 - Readback is synchronous: GPU work must complete before CPU pixels are available, which can stall rendering and require staging memory. See `Texture` for main-thread GPU resource rules.
@@ -9340,8 +9409,17 @@ details.en = '''
 '''
 details.ja = '''
 - `readPixels(unsigned char* pixels)` には `getWidth() * getHeight() * 4` バイト分の領域が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
+
+描画を終えた Fbo を読み出します。
+```cpp
+void tcApp::draw() {
+    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
+    fbo.readPixels(pixels.data());
+}
+```
+
 - `end()` のあと、現在のウィンドウのすべての Fbo 描画スコープの外で呼んでください。読み出し対象が別の Fbo でも、そのようなスコープ内ではエラーを記録して `false` を返します。
-- 現在のカラーテクスチャのミップレベル 0 を読み出し、MSAA では解決済みの結果を使います。出力は隙間のない RGBA 配列で、上の行から順に、各行は左から右へ並びます。GL の行は自動で反転するため、追加の上下反転は不要です。
+- 現在のカラーテクスチャのミップレベル 0 を読み出し、MSAA では解決済みの結果を使います。出力は隙間のない RGBA 配列で、上の行から順に、各行は左から右へ並びます。ネイティブ GL の行は必要な場合だけ反転するため、追加の上下反転は不要です。
 - 添付画像の形式にかかわらず RGBA8 に変換します。値は 0〜1 にクランプして 8 ビットに量子化し、R/RG 形式で不足する G/B は 0、アルファは 1 にします。BGRA は RGBA 順に並べ替えます。元の形式は `TextureFormat` を参照してください。
 - 最も近い値に丸めます。CPU 変換では中間値を切り上げ、デスクトップ GL のネイティブ変換との差は最大で 1 バイト値です。RGBA8 への変換を避けるには `readPixelsFloat()` を使ってください。
 - 読み出しは同期処理です。CPU ピクセルが利用可能になる前に GPU 処理の完了を待つため、描画を停止させたり作業用メモリを必要としたりします。メインスレッドでの GPU リソースの扱いは `Texture` を参照してください。
@@ -9350,25 +9428,24 @@ details.ja = '''
 '''
 details.ko = '''
 - `readPixels(unsigned char* pixels)`에는 `getWidth() * getHeight() * 4`바이트의 공간이 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
+
+그리기를 마친 Fbo를 읽습니다.
+```cpp
+void tcApp::draw() {
+    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
+    fbo.readPixels(pixels.data());
+}
+```
+
 - `end()` 이후 현재 윈도우의 모든 Fbo 렌더링 스코프 밖에서 호출해야 합니다. 다른 Fbo를 읽는 경우에도 이러한 스코프 안에서는 오류를 기록하고 `false`를 반환합니다.
-- 현재 컬러 텍스처의 밉 레벨 0을 읽으며 MSAA에서는 리졸브된 결과를 사용합니다. 출력은 빈틈없이 배치된 RGBA 배열이며 위쪽 행부터 각 행의 왼쪽에서 오른쪽 순서로 저장합니다. GL 행은 자동으로 뒤집으므로 추가 상하 반전이 필요하지 않습니다.
-- 첨부 이미지 형식과 관계없이 항상 RGBA8로 변환합니다. 값을 0–1로 제한하고 8비트로 양자화하며 R/RG 형식에 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 RGBA 순서로 재배열하며 원본 형식은 `TextureFormat`을 참조하세요.
+- 현재 컬러 텍스처의 밉 레벨 0을 읽으며 MSAA에서는 리졸브된 결과를 사용합니다. 출력은 빈틈없이 배치된 RGBA 배열이며 위쪽 행부터 각 행의 왼쪽에서 오른쪽 순서로 저장합니다. 네이티브 GL 행은 필요한 경우에만 뒤집으므로 추가 상하 반전이 필요하지 않습니다.
+- 첨부 이미지 형식과 관계없이 항상 RGBA8로 변환합니다. 값을 0–1로 제한하고 8비트로 양자화하며 R/RG 형식에 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 RGBA 순서로 재배열하며 원본 형식은 `TextureFormat`을 참조하십시오.
 - 가장 가까운 값으로 반올림합니다. CPU 변환은 중간값을 올림하며 데스크톱 GL의 네이티브 변환과는 최대 한 바이트 값만큼 차이가 날 수 있습니다. RGBA8 변환을 피하려면 `readPixelsFloat()`를 사용합니다.
-- 읽기는 동기식입니다. CPU 픽셀을 사용할 수 있으려면 GPU 작업이 완료되어야 하므로 렌더링을 멈추게 하거나 작업용 메모리가 필요할 수 있습니다. 메인 스레드의 GPU 리소스 규칙은 `Texture`를 참조하세요.
+- 읽기는 동기식입니다. CPU 픽셀을 사용할 수 있으려면 GPU 작업이 완료되어야 하므로 렌더링을 멈추게 하거나 작업용 메모리가 필요할 수 있습니다. 메인 스레드의 GPU 리소스 규칙은 `Texture`를 참조하십시오.
 - 읽기 이후에도 윈도우에 계속 그릴 수 있으며 열려 있던 윈도우 패스는 색상과 깊이를 유지하여 재개합니다.
 - WebGL2는 동기 읽기를 지원합니다. WebGPU는 지원하지 않으며 경고를 기록하고 `false`를 반환합니다.
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
-snippet = '''
-// tcApp.h: Fbo fbo;
-void tcApp::setup() { fbo.allocate(256, 256); }
-void tcApp::draw() {
-    fbo.begin(0.2f, 0.4f, 0.6f);
-    fbo.end();
-    vector<unsigned char> pixels(256 * 256 * 4);
-    bool ok = fbo.readPixels(pixels.data());
-}
-'''
 
 ["Fbo::readPixelsFloat"]
 category = "graphics_fbo"
@@ -11266,32 +11343,62 @@ related = ["FpsSettings::drawFps", "FpsSettings::synced", "setIndependentFps", "
 
 ["FullscreenShader"]
 keywords = ["postprocess", "effect", "quad", "filter"]
-description.en = "Provides a shader for fullscreen post-processing effects."
-description.ja = "フルスクリーンのポストプロセス用シェーダーを提供する。"
-description.ko = "전체 화면 후처리용 셰이더를 제공한다."
+description.en = "Applies a fullscreen filter without preparing quad vertices."
+description.ja = "クアッド頂点を用意せず、フルスクリーンのフィルターを実行します。"
+description.ko = "쿼드 정점을 준비하지 않고 전체 화면 필터를 실행합니다."
 details.en = '''
-- Inherits `Shader` loading and texture binding, but uses a fullscreen quad with two-component position and two-component texture coordinates.
+- Use this `Shader` specialization for post-processing without assembling fullscreen quad vertices. Fbo inputs use ordinary UVs on supported backends; only contexts with neither Mesa flip_y nor clip control need the #1419 input flip. See `Fbo` for the backend list.
+
+Bind the Fbo and draw the filter:
+```cpp
+void tcApp::draw() {
+    shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    shader.draw();
+}
+```
+
 - Call `setParams()` before `draw()` to copy a parameter structure; `draw()` uploads those bytes to uniform block slot 0. Stored `setUniform()` values are not applied by this draw method.
-- Use inherited `setTexture()` to bind source textures; `draw()` applies these bindings without requiring a subclass.
 - Call `draw()` directly to render the quad into the current window or FBO; it flushes preceding recorded layers and issues its GPU draw immediately. An unloaded shader performs no drawing.
 - The default pipeline disables blending and overwrites covered pixels; after drawing, the current target's drawing state is reapplied.
-- Threading and GPU resource lifetime rules are described under `Shader`.
+- Quad position and texture-coordinate attributes each have two components. See `Shader` for loading, threading and GPU resource lifetime rules.
+- Only native GL/GLES contexts log a startup Notice with the V-flip workaround; supported paths log nothing, and there is no public orientation switch.
+- Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal, D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same everywhere.
 '''
 details.ja = '''
-- `Shader` の読み込みとテクスチャ設定を継承し、2 成分の位置と 2 成分のテクスチャ座標を持つフルスクリーンクアッドを使用します。
+- フルスクリーンのクアッド頂点を用意せず、`Shader` の特殊化としてポストプロセスのフィルターを実行できます。対応バックエンドの Fbo 入力は通常の UV を使います。#1419 の入力反転が必要なのは Mesa flip_y と clip control のどちらもないコンテキストだけです。バックエンド一覧は `Fbo` を参照してください。
+
+Fbo を割り当て、フィルターを描画します。
+```cpp
+void tcApp::draw() {
+    shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    shader.draw();
+}
+```
+
 - `draw()` の前に `setParams()` を呼び、パラメータ構造体をコピーしてください。`draw()` はそのバイト列を uniform ブロックのスロット 0 に送ります。この描画メソッドでは、`setUniform()` に保存した値は適用しません。
-- 入力テクスチャは継承した `setTexture()` で設定できます。派生クラスを作らなくても `draw()` が設定を適用します。
 - `draw()` を直接呼ぶと、現在のウィンドウまたは FBO にクアッドを描画します。それまでに記録されたレイヤーを描画してから、GPU 描画を即座に実行します。未読み込みの場合は描画しません。
 - 既定のパイプラインはブレンドを無効にし、クアッドが覆うピクセルを上書きします。描画後は現在のターゲットの描画状態を再適用します。
-- スレッドと GPU リソースの寿命の扱いは `Shader` を参照してください。
+- クアッドの位置とテクスチャ座標は、それぞれ 2 成分の属性です。読み込み、スレッド、GPU リソースの寿命の扱いは `Shader` を参照してください。
+- ネイティブの GL/GLES コンテキストだけが、V 反転の回避策を含む起動時の Notice を出します。対応パスはログを出さず、公開の向き切り替え設定もありません。
+- public Fbo 内では、`gl_FragCoord.y` は Metal、D3D11、WebGPU、clip control 対応の GL/GLES（NVIDIA Linux の非 Mesa デスクトップ GL や `EXT_clip_control` 対応の GLES/WebGL2 など）では上端から下向きに増え、Mesa flip_y とネイティブ GL では下端から上向きに増えます。論理的な下端に向かって増える値の `dFdy(v)` は前者で正、後者で負になるため、どの環境でも同じ動作が必要なシェーダーでは `gl_FragCoord`/`dFdy` の代わりにテクスチャ座標を使ってください。
 '''
 details.ko = '''
-- `Shader`의 로드와 텍스처 바인딩을 상속하며 2성분 위치와 2성분 텍스처 좌표를 갖는 전체 화면 쿼드를 사용합니다.
+- 전체 화면 쿼드 정점을 준비하지 않고 `Shader`의 특수화로 후처리 필터를 실행합니다. 지원 백엔드의 Fbo 입력에는 일반 UV를 사용합니다. #1419의 입력 반전은 Mesa flip_y와 clip control이 모두 없는 컨텍스트에서만 필요합니다. 백엔드 목록은 `Fbo`를 참조합니다.
+
+Fbo를 바인딩하고 필터를 그립니다.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    shader.draw();
+}
+```
+
 - `draw()` 전에 `setParams()`를 호출하여 매개변수 구조체를 복사합니다. `draw()`는 해당 바이트를 uniform 블록 슬롯 0에 업로드합니다. 이 그리기 메서드는 `setUniform()`으로 저장한 값을 적용하지 않습니다.
-- 입력 텍스처는 상속한 `setTexture()`로 바인딩할 수 있습니다. 하위 클래스를 만들지 않아도 `draw()`가 이 바인딩을 적용합니다.
 - `draw()`를 직접 호출하면 현재 창이나 FBO에 쿼드를 그립니다. 앞서 기록된 레이어를 먼저 그린 뒤 GPU 그리기를 즉시 실행합니다. 로드되지 않은 셰이더는 그리지 않습니다.
 - 기본 파이프라인은 블렌딩을 비활성화하고 쿼드가 덮는 픽셀을 덮어씁니다. 그린 뒤에는 현재 타깃의 그리기 상태를 다시 적용합니다.
-- 스레드와 GPU 리소스 수명 규칙은 `Shader`를 참조하세요.
+- 쿼드 위치와 텍스처 좌표 속성은 각각 2성분입니다. 로드, 스레드 및 GPU 리소스 수명 규칙은 `Shader`를 참조하십시오.
+- 네이티브 GL/GLES 컨텍스트만 V 반전 우회 방법을 담은 시작 Notice를 기록합니다. 지원 경로는 로그를 기록하지 않으며 공개된 방향 전환 설정도 없습니다.
+- public Fbo 안에서 `gl_FragCoord.y`는 Metal, D3D11, WebGPU 및 clip control을 지원하는 GL/GLES(NVIDIA Linux의 비 Mesa 데스크톱 GL 또는 `EXT_clip_control`을 지원하는 GLES/WebGL2 등)에서는 위쪽에서 아래로 증가하고, Mesa flip_y와 네이티브 GL에서는 아래쪽에서 위로 증가합니다. 논리적 아래쪽으로 증가하는 값의 `dFdy(v)`는 전자에서 양수이고 후자에서 음수이므로, 모든 환경에서 같은 동작이 필요한 셰이더에서는 `gl_FragCoord`/`dFdy` 대신 텍스처 좌표를 사용합니다.
 '''
 related = ["Shader", "Fbo", "Shader::setUniform"]
 
@@ -33439,36 +33546,49 @@ void tcApp::draw() {
 ["Texture::drawFlippedY"]
 category = "graphics_texture"
 keywords = ["flip", "vertical", "upside"]
-description.en = "Draws the texture with its vertical direction reversed."
-description.ja = "テクスチャを上下反転して描画する。"
-description.ko = "텍스처를 상하 반전하여 그린다."
+description.en = "Draws a texture with its vertical texture coordinates reversed."
+description.ja = "テクスチャ座標を上下反転して描画します。"
+description.ko = "텍스처 좌표를 상하 반전하여 그립니다."
 details.en = '''
 - `drawFlippedY(x, y, w, h)` draws the entire texture with its vertical texture coordinates reversed; it does not modify the stored pixels.
+
+Draw with the vertical coordinates reversed:
+```cpp
+void tcApp::draw() {
+    texture.drawFlippedY(20, 20, 256, 256);
+}
+```
+
 - Position and size use the current drawing coordinates, and color, transform, blending, and binding behavior follow `Texture::draw`; an unallocated texture draws nothing.
-- `Fbo::draw` already applies this reversal when required by an OpenGL backend. See `Texture` for GPU resource rules.
+- `Fbo::draw` already applies this reversal only on native GL contexts without Mesa flip_y or clip control. See `Texture` for GPU resource rules.
 '''
 details.ja = '''
 - `drawFlippedY(x, y, w, h)` は垂直方向のテクスチャ座標を逆にして全体を描画します。保存されているピクセルは変更しません。
+
+上下の座標を反転して描画します。
+```cpp
+void tcApp::draw() {
+    texture.drawFlippedY(20, 20, 256, 256);
+}
+```
+
 - 位置と大きさは現在の描画座標で指定します。色、変換、ブレンド、バインドの動作は `Texture::draw` と同じで、未確保の場合は何も描画しません。
-- `Fbo::draw` は OpenGL バックエンドで必要な場合にこの反転を適用します。GPU リソースの扱いは `Texture` を参照してください。
+- `Fbo::draw` は Mesa flip_y と clip control のどちらもないネイティブ GL でのみこの反転を適用します。GPU リソースの扱いは `Texture` を参照してください。
 '''
 details.ko = '''
 - `drawFlippedY(x, y, w, h)`는 수직 텍스처 좌표를 뒤집어 전체 텍스처를 그립니다. 저장된 픽셀은 변경하지 않습니다.
-- 위치와 크기는 현재 그리기 좌표로 지정합니다. 색, 변환, 블렌딩, 바인딩 동작은 `Texture::draw`와 같으며, 할당되지 않았으면 아무것도 그리지 않습니다.
-- `Fbo::draw`는 OpenGL 백엔드에서 필요한 경우 이미 이 반전을 적용합니다. GPU 리소스 규칙은 `Texture`를 참조하세요.
-'''
-related = ["Texture::draw", "Fbo::draw", "Texture"]
-snippet = '''
-// tcApp.h: Texture texture;
-void tcApp::setup() {
-    Pixels pixels;
-    if (pixels.load("image.png")) texture.allocate(pixels);
-}
+
+상하 좌표를 반전하여 그립니다.
+```cpp
 void tcApp::draw() {
-    setColor(1.0f);
     texture.drawFlippedY(20, 20, 256, 256);
 }
+```
+
+- 위치와 크기는 현재 그리기 좌표로 지정합니다. 색, 변환, 블렌딩, 바인딩 동작은 `Texture::draw`와 같으며, 할당되지 않았으면 아무것도 그리지 않습니다.
+- `Fbo::draw`는 Mesa flip_y와 clip control이 모두 없는 네이티브 GL에서만 이미 이 반전을 적용합니다. GPU 리소스 규칙은 `Texture`를 참조하십시오.
 '''
+related = ["Texture::draw", "Fbo::draw", "Texture"]
 
 ["Texture::drawSubsection"]
 category = "addon_tcxlut"
@@ -58217,20 +58337,47 @@ details.ko = '''
 '''
 
 ["Fbo::getTextureView"]
-description.en = "Returns the underlying sokol color texture view handle."
-description.ja = "内部の sokol カラーテクスチャビューハンドルを返す。"
-description.ko = "내부 sokol 컬러 텍스처 뷰 핸들을 반환한다."
+description.en = "Returns the color sampling view; supported Fbo inputs need no UV flip."
+description.ja = "カラーのサンプリング用ビューを返します。対応する Fbo 入力には UV 反転が不要です。"
+description.ko = "컬러 샘플링 뷰를 반환하며 지원되는 Fbo 입력에는 UV 반전이 필요하지 않습니다."
 details.en = '''
-- Returns the current color texture's sampling `sg_view` handle for advanced interoperation, including the resolved texture when MSAA is enabled.
+- Returns the current color texture's sampling `sg_view` handle for advanced interoperation, including the resolved texture when MSAA is enabled. Fbo inputs use ordinary UVs on supported backends; only contexts with neither Mesa flip_y nor clip control need the #1419 input flip. See `Fbo` for the backend list.
+
+Bind the Fbo and draw the filter:
+```cpp
+void tcApp::draw() {
+    shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    shader.draw();
+}
+```
+
 - Does not transfer ownership. The handle can change as texture versions change; see `Fbo::getTexture` for texture access and `Texture` for GPU resource lifetime rules.
 '''
 details.ja = '''
-- 高度な連携処理向けに、現在のカラーテクスチャのサンプリング用 `sg_view` ハンドルを返します。MSAA 有効時は解決済みテクスチャのビューです。
+- 高度な連携処理向けに、現在のカラーテクスチャのサンプリング用 `sg_view` ハンドルを返します。MSAA 有効時は解決済みテクスチャのビューです。 対応バックエンドの Fbo 入力は通常の UV を使います。#1419 の入力反転が必要なのは Mesa flip_y と clip control のどちらもないコンテキストだけです。バックエンド一覧は `Fbo` を参照してください。
+
+Fbo を割り当て、フィルターを描画します。
+```cpp
+void tcApp::draw() {
+    shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    shader.draw();
+}
+```
+
 - 所有権は移りません。テクスチャの版が変わるとハンドルも変わる場合があります。テクスチャへのアクセスは `Fbo::getTexture` を、GPU リソースの寿命は `Texture` を参照してください。
 '''
 details.ko = '''
-- 고급 연동을 위해 현재 컬러 텍스처의 샘플링용 `sg_view` 핸들을 반환하며 MSAA가 활성화되어 있으면 리졸브된 텍스처의 뷰입니다.
-- 소유권은 이전하지 않습니다. 텍스처 버전이 바뀌면 핸들도 바뀔 수 있으며 텍스처 접근은 `Fbo::getTexture`를, GPU 리소스 수명 규칙은 `Texture`를 참조하세요.
+- 고급 연동을 위해 현재 컬러 텍스처의 샘플링용 `sg_view` 핸들을 반환하며 MSAA가 활성화되어 있으면 리졸브된 텍스처의 뷰입니다. 지원 백엔드의 Fbo 입력에는 일반 UV를 사용합니다. #1419의 입력 반전은 Mesa flip_y와 clip control이 모두 없는 컨텍스트에서만 필요합니다. 백엔드 목록은 `Fbo`를 참조합니다.
+
+Fbo를 바인딩하고 필터를 그립니다.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    shader.draw();
+}
+```
+
+- 소유권은 이전하지 않습니다. 텍스처 버전이 바뀌면 핸들도 바뀔 수 있으며 텍스처 접근은 `Fbo::getTexture`를, GPU 리소스 수명 규칙은 `Texture`를 참조하십시오.
 '''
 
 ["Fbo::getSampler"]

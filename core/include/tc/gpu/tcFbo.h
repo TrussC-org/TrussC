@@ -433,11 +433,8 @@ public:
     Texture& getTexture() override { diagnoseActiveSampling_(); return curColorTex_(); }
     const Texture& getTexture() const override { diagnoseActiveSampling_(); return curColorTex_(); }
 
-    // GL backends store FBO color textures bottom-to-top in memory
-    // (unlike Metal/D3D11 which are top-to-bottom). Override draw to
-    // flip V on GL so the displayed image matches user-space top-left coords.
-    // Version-pool textures take the exact same path (Texture::drawFlippedY /
-    // Texture::draw), so the GL Y-flip applies to every version equally.
+    // Native GL storage needs a V flip; canonical storage uses ordinary Texture drawing.
+    // This applies equally to every version-pool texture.
     void draw(float x, float y) const override {
         if (!hasTexture()) return;
         markDrawnThisFrame_();
@@ -471,7 +468,9 @@ public:
 
     // To sample this Fbo in a shader, use getTextureView()/getSampler():
     // shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
-    // FullscreenShader needs a GL/GLES V flip: see docs/guides/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+    // Fbo sampling is top-first on Metal/D3D11/WebGPU, Mesa GL/GLES (Linux/Pi),
+    // and GL/GLES with clip control. Only unsupported native GL needs #1419's V flip.
+    // See docs/guides/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
     // End this Fbo before sampling it; render into a different target.
     // Access to internal resources (for advanced users).
     // Like getTexture(), these refer to the CURRENT version's texture.
@@ -484,7 +483,8 @@ private:
     internal::DebugName debugName_{internal::DebugObjectKind::Fbo, this};
     static bool needsGlYFlip() {
         sg_backend be = sg_query_backend();
-        return be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3;
+        return (be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3)
+            && !internal::fboStorageCanonical();
     }
 
     internal::RenderTarget target_;

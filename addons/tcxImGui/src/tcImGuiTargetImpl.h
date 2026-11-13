@@ -29,6 +29,12 @@ void applyPipeline(sg_pipeline pipeline) {
     appliedPipeline = pipeline;
     sg_apply_pipeline(pipeline);
 }
+void applyViewport(int x, int y, int w, int h, bool originTopLeft) {
+    sg_apply_viewport(x, y, w, h, originTopLeft && tc::internal::currentTarget().rectangleOriginTopLeft());
+}
+void applyScissor(int x, int y, int w, int h, bool originTopLeft) {
+    sg_apply_scissor_rect(x, y, w, h, originTopLeft && tc::internal::currentTarget().rectangleOriginTopLeft());
+}
 void applyBindings(const sg_bindings* bindings);
 void releasePipeline(sg_pipeline) {} // target cache owns the pipelines
 void releaseProgram(sg_shader shader) {
@@ -43,6 +49,8 @@ void releaseProgram(sg_shader shader) {
 #define sg_destroy_shader tcx::imgui::detail::releaseProgram
 #define sg_apply_bindings tcx::imgui::detail::applyBindings
 #define sg_apply_pipeline tcx::imgui::detail::applyPipeline
+#define sg_apply_viewport tcx::imgui::detail::applyViewport
+#define sg_apply_scissor_rect tcx::imgui::detail::applyScissor
 #define sapp_keyboard_shown tcx::imgui::detail::keyboardShown
 #define sapp_show_keyboard tcx::imgui::detail::showKeyboard
 #define SOKOL_IMGUI_IMPL
@@ -55,6 +63,8 @@ void releaseProgram(sg_shader shader) {
 #undef sg_destroy_shader
 #undef sg_apply_bindings
 #undef sg_apply_pipeline
+#undef sg_apply_viewport
+#undef sg_apply_scissor_rect
 #include "tcImGuiTarget.h"
 
 namespace tcx::imgui::detail {
@@ -180,12 +190,12 @@ void renderTargetFrame(simgui_tc_context context) {
     const auto& viewport = target.viewport;
     sg_apply_viewport(int(viewport.x), int(viewport.y),
         viewport.active ? int(viewport.w) : target.width,
-        viewport.active ? int(viewport.h) : target.height, true);
+        viewport.active ? int(viewport.h) : target.height, target.rectangleOriginTopLeft());
     const auto& scissor = target.currentScissor;
     sg_apply_scissor_rect(scissor.active ? int(scissor.x) : 0,
         scissor.active ? int(scissor.y) : 0,
         scissor.active ? int(scissor.w) : target.width,
-        scissor.active ? int(scissor.h) : target.height, true);
+        scissor.active ? int(scissor.h) : target.height, target.rectangleOriginTopLeft());
 }
 void destroyTargetContext(simgui_tc_context context) {
     auto found = frames.find(context.ptr);

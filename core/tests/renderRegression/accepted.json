@@ -1,1 +1,10 @@
-{}
+{
+  "cpuNormalMirror.fbo": {"maxPixels": 1, "reason": "y-down rasterization in GL Fbos rounds one interpolated shading value by 1 LSB"},
+  "cpuNormalNonUniform.fbo": {"maxPixels": 1, "reason": "y-down rasterization in GL Fbos rounds one interpolated shading value by 1 LSB"},
+  "cpuNormalRotated.fbo": {"maxPixels": 1, "reason": "y-down rasterization in GL Fbos rounds one interpolated shading value by 1 LSB"},
+  "msaaInterrupted.fbo": {"maxPixels": 120, "reason": "4x MSAA samples in GL Fbos now use the y-down pattern of Metal/D3D11; edge pixels move by one sample"},
+  "msaaResolve.fbo": {"maxPixels": 38, "reason": "4x MSAA samples in GL Fbos now use the y-down pattern and tie rule of Metal/D3D11; edge pixels move by one sample"},
+  "pbrNormalMirror.fbo": {"maxPixels": 1, "reason": "y-down rasterization in GL Fbos rounds one interpolated shading value by 1 LSB"},
+  "pbrNormalTangent.fbo": {"maxPixels": 1, "reason": "y-down rasterization in GL Fbos rounds one interpolated shading value by 1 LSB"},
+  "pbrNormalUniformSphere.fbo": {"maxPixels": 1, "reason": "y-down rasterization in GL Fbos rounds one interpolated shading value by 1 LSB"}
+}

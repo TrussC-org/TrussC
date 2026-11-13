@@ -622,7 +622,7 @@ inline void intersectRect(float x1, float y1, float w1, float h1,
 namespace internal {
     inline void setScissorPixels(float x, float y, float w, float h) {
         currentWindowContext().currentTarget->currentScissor = {x, y, w, h, true};
-        sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
+        sgl_scissor_rectf(x, y, w, h, currentTarget().rectangleOriginTopLeft());
     }
 }
 
@@ -635,7 +635,7 @@ inline void setScissor(float x, float y, float w, float h) {
 // Reset scissor to the active target attachment
 inline void resetScissor() {
     internal::currentWindowContext().currentTarget->currentScissor.active = false;
-    sgl_scissor_rect(0, 0, internal::currentTarget().width, internal::currentTarget().height, true);
+    sgl_scissor_rect(0, 0, internal::currentTarget().width, internal::currentTarget().height, internal::currentTarget().rectangleOriginTopLeft());
 }
 
 // Save scissor to stack and set new range (intersection with current range).
@@ -677,7 +677,7 @@ inline void popScissor() {
 
     if (internal::currentWindowContext().currentTarget->currentScissor.active) {
         sgl_scissor_rectf(internal::currentWindowContext().currentTarget->currentScissor.x, internal::currentWindowContext().currentTarget->currentScissor.y,
-                          internal::currentWindowContext().currentTarget->currentScissor.w, internal::currentWindowContext().currentTarget->currentScissor.h, true);
+                          internal::currentWindowContext().currentTarget->currentScissor.w, internal::currentWindowContext().currentTarget->currentScissor.h, internal::currentTarget().rectangleOriginTopLeft());
     } else {
         resetScissor();
     }
