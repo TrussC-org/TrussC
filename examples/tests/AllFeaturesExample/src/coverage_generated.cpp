@@ -316,10 +316,18 @@ static void cover_math_general() {
     (void)frequencyToBin(af::val<float>(), af::val<int>(), af::val<int>());
     (void)ifft(af::val<std::vector<std::complex<float>>>());
     (void)isPowerOfTwo(af::val<int>());
+    (void)mean(af::val<std::span<const float>>());
+    (void)minMax(af::val<std::span<const float>>());
+    (void)mse(af::val<std::span<const float>>(), af::val<std::span<const float>>());
     (void)nextPowerOfTwo(af::val<int>());
+    (void)rms(af::val<std::span<const float>>());
+    (void)sigmoid(af::val<float>());
     (void)sign(af::val<float>());
     (void)sq(af::val<float>());
+    (void)stddev(af::val<std::span<const float>>());
+    (void)sum(af::val<std::span<const float>>());
     (void)toComplex(af::val<const std::vector<float>>());
+    (void)variance(af::val<std::span<const float>>());
     (void)windowFunction(af::val<WindowType>(), af::val<int>(), af::val<int>());
     (void)wrap(af::val<float>(), af::val<float>(), af::val<float>());
 }
@@ -336,6 +344,7 @@ static void cover_math_geometry() {
 static void cover_math_interpolation() {
     (void)clamp(af::val<float>(), af::val<float>(), af::val<float>());
     (void)remap(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    (void)smoothstep(af::val<float>(), af::val<float>(), af::val<float>());
 }
 
 static void cover_math_random() {
@@ -351,6 +360,8 @@ static void cover_math_random() {
     (void)random();
     (void)random(af::val<float>());
     (void)random(af::val<float>(), af::val<float>());
+    (void)randomGaussian(af::val<float>(), af::val<float>());
+    (void)randomGaussian();
     (void)randomInt(af::val<int>());
     (void)randomInt(af::val<int>(), af::val<int>());
     (void)randomSeed(af::val<unsigned int>());
@@ -4776,6 +4787,12 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoPlayer>().getResyncThreshold();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getRotation();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getRotationDeg();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoPlayer>().getSpeed();

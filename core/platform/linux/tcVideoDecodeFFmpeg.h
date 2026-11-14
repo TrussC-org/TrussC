@@ -4,9 +4,30 @@
 extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/display.h>
 }
 
+#include "tc/video/internal/tcVideoRotation.h"
+
 namespace trussc::internal {
+
+inline VideoRotation videoStreamRotation(const AVStream* stream) {
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 30, 100)
+    const auto* side = av_packet_side_data_get(stream->codecpar->coded_side_data,
+        stream->codecpar->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX);
+    const uint8_t* data = side ? side->data : nullptr;
+    const size_t bytes = side ? side->size : 0;
+#else
+    size_t bytes = 0;
+    const uint8_t* data = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, &bytes);
+#endif
+    if (!data || bytes < 9 * sizeof(int32_t)) return {};
+    int32_t matrix[9];
+    std::memcpy(matrix, data, sizeof(matrix));
+    // ISO display matrices map the encoded X/Y axes to the display axes.
+    return VideoRotation::fromMatrix(matrix[0], matrix[1], matrix[3], matrix[4]);
+}
+
 
 // Configure these before open/probe; duration is deliberately unrestricted.
 inline bool openVideoInput(AVFormatContext** context, const char* path, VideoDecodeStatus& status) {

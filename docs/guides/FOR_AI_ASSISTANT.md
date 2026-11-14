@@ -2398,8 +2398,10 @@ int getYear()  // Returns the current year.
 float fbm(float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) [+1]  // Combines Perlin noise layers into fractal Brownian motion noise.
 float noise(float x) [+6]  // Returns Perlin noise mapped around a midpoint of 0.5.
 float random() [+2]  // Returns a uniformly distributed random floating-point value.
+float randomGaussian(float mean, float stddev) [+1]  // Returns a normally distributed float, with mean 0 and standard deviation 1 by default.
 int randomInt(int max) [+1]  // Returns a uniformly distributed random integer.
 void randomSeed(unsigned int seed)  // Sets the random number generator seed.
+void shuffle(std::vector<T> & values)  // Shuffles a vector in place using the shared random engine.
 float signedNoise(float x) [+6]  // Returns signed Perlin noise.
 ```
 
@@ -2409,6 +2411,7 @@ float signedNoise(float x) [+6]  // Returns signed Perlin noise.
 float clamp(float value, float min, float max)  // Limits a value to a range.
 float lerp(float a, float b, float t) [std]  // Linearly interpolates between two numeric values.
 float remap(float value, float inMin, float inMax, float outMin, float outMax)  // Maps a value linearly from one range to another.
+float smoothstep(float edge0, float edge1, float x)  // Returns a clamped cubic transition between two edges, as in GLSL.
 ```
 
 ### Math - Trigonometry
@@ -2449,14 +2452,22 @@ void ifft(std::vector<std::complex<float>> & data)  // Transforms a complex spec
 bool isPowerOfTwo(int n)  // Tests whether an integer is a positive power of two.
 float log(float x) [std]  // Returns the natural logarithm of a value.
 float max(float a, float b) [std]  // Returns the greater of two values.
+float mean(std::span<const float> values)  // Returns the arithmetic mean of the values.
 float min(float a, float b) [std]  // Returns the lesser of two values.
+std::pair<float, float> minMax(std::span<const float> values)  // Returns the minimum and maximum as a pair of floats.
+float mse(std::span<const float> a, std::span<const float> b)  // Returns the mean squared difference between two inputs.
 int nextPowerOfTwo(int n)  // Returns the smallest positive power of two at least as large as a value.
 float pow(float x, float y) [std]  // Returns a base raised to an exponent.
+float rms(std::span<const float> values)  // Returns the root mean square of the values.
 float round(float x) [std]  // Rounds a number to the nearest integer value.
+float sigmoid(float x)  // Returns the scalar logistic function, 1 / (1 + exp(-x)).
 float sign(float value)  // Returns the sign of a value.
 float sq(float value)  // Returns the square of a value.
 float sqrt(float x) [std]  // Returns the square root of a value.
+float stddev(std::span<const float> values)  // Returns population standard deviation, the square root of variance.
+float sum(std::span<const float> values)  // Returns the sum of the values.
 std::vector<std::complex<float>> toComplex(const std::vector<float> & real)  // Converts real samples to complex samples with zero imaginary parts.
+float variance(std::span<const float> values)  // Returns population variance, dividing the squared deviations by the number of values.
 float windowFunction(WindowType type, int i, int n)  // Returns a window coefficient for a sample.
 float wrap(float value, float min, float max)  // Wraps a value around a repeating range.
 ```
@@ -4986,6 +4997,8 @@ unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // 
 unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
 unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
 float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
+float VideoPlayer::getRotation() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in radians.
+int VideoPlayer::getRotationDeg() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in degrees.
 int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.
