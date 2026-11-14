@@ -86,6 +86,75 @@ void clearValues() {
     fbo.end();
     check("color clears preserve stencil", bytesEqual(fbo, 255));
 }
+void colorClearIgnoresDesc() {
+    constexpr int width = 64, height = 48;
+    Fbo fbo;
+    fbo.allocate(width, height);
+    for (bool screen : {true, false}) {
+        for (const auto desc : {StencilDesc::inside(7), StencilDesc::shape(9)}) {
+            std::printf("CLEAR %s %s\n", screen ? "screen" : "Fbo", desc.write ? "shape(9)" : "inside(7)");
+            resetStyle();
+            if (!screen) fbo.begin();
+            setupScreenOrtho();
+            disableDepthTest();
+            setBlendMode(BlendMode::Disabled);
+            clear(1, 0, 0);
+            clearStencil();
+            setStencilDesc(StencilDesc::shape(7));
+            drawRect(0, 0, width / 2, height);
+            setStencilDesc(desc);
+            // Pending mask geometry forces the screen's clear-quad path.
+            clear(0, 1, 0);
+            check("color clear preserves descriptor", getStencilDesc() == desc);
+            auto capture = [&] {
+                if (!screen) {
+                    fbo.end();
+                    return readColor(fbo);
+                }
+                // Same flush/park/capture path as stencilRoundTrip's display test.
+                internal::ensureCurrentPass();
+                internal::parkWindowPass();
+                Pixels pixels;
+                check("screen clear readback", grabScreen(pixels));
+                return pixels;
+            };
+            const auto cleared = capture();
+            bool green = cleared.getWidth() == width && cleared.getHeight() == height;
+            for (int i = 0; i < width * height && green; ++i) {
+                const auto* p = cleared.getData() + i * 4;
+                green &= p[0] == 0 && p[1] == 255 && p[2] == 0 && p[3] == 255;
+            }
+            check("color clear erases the whole target under user descriptor", green);
+            if (!screen) {
+                Pixels bytes;
+                bool exact = fbo.readStencil(bytes);
+                for (int y = 0; y < height && exact; ++y)
+                    for (int x = 0; x < width; ++x)
+                        exact &= bytes.getData()[y * width + x] == (x < width / 2 ? 7 : 0);
+                check("color clear preserves exact stencil bytes", exact);
+                fbo.begin();
+                setupScreenOrtho();
+            }
+            // Encode exact stencil equality into color for screen readback.
+            setStencilDesc(StencilDesc::inside(7));
+            setColor(0, 0, 1);
+            drawRect(0, 0, width, height);
+            setStencilDesc(StencilDesc::inside(0));
+            setColor(1, 0, 0);
+            drawRect(0, 0, width, height);
+            const auto probed = capture();
+            bool retained = probed.getWidth() == width && probed.getHeight() == height;
+            for (int y = 0; y < height && retained; ++y)
+                for (int x = 0; x < width; ++x) {
+                    const auto* p = probed.getData() + (y * width + x) * 4;
+                    retained &= p[0] == (x < width / 2 ? 0 : 255) && p[1] == 0 &&
+                        p[2] == (x < width / 2 ? 255 : 0) && p[3] == 255;
+                }
+            check("color clear retains stencil 7 in shape and 0 outside", retained);
+            resetStyle();
+        }
+    }
+}
 void cycling() {
     Fbo fbo;
     fbo.allocate(8, 4, 1, TextureFormat::RGBA16F);
@@ -393,6 +462,7 @@ class StencilApp : public App {
     int frame = 0;
     void draw() override {
         if (frame++ == 0) {
+            colorClearIgnoresDesc();
             compatibilityWrappers();
             clearValues();
             ordering();

@@ -3278,8 +3278,8 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     desc.depth.pixel_format = hasDepth ? depthFormat : SG_PIXELFORMAT_NONE;
     if (!hasDepth) { desc.depth.compare = SG_COMPAREFUNC_ALWAYS; desc.depth.write_enabled = false; desc.stencil.enabled = false; }
     // Pipeline misses only: cached default draws do no extra stencil work.
-    // The clear owns its raster state and must ignore the user's mask/color flag.
-    if (stencilDescKey && request.role != PipelineRole::StencilClear)
+    // Clear recipes own their raster state and must ignore the user descriptor.
+    if (stencilDescKey && request.role != PipelineRole::StencilClear && request.role != PipelineRole::Clear)
         applyStencilDesc(desc, stencilDescKey);
     // Normalize defaults before field-wise encoding (never hash padded structs).
     const auto normalized = sg_query_pipeline_defaults(&desc);
