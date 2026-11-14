@@ -192,6 +192,9 @@ static void reportWebVideoStorageError(internal::VideoDecodeStatus& status) {
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     webLoadResult_ = LoadResult::success();
+    // HTMLVideoElement exposes already oriented pictures, but no stream matrix.
+    rotationDeg_ = 0; // stream rotation is unavailable in HTMLVideoElement
+
     decodeStatus_ = std::make_shared<internal::VideoDecodeStatus>();
     const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     std::string pathStr = internal::pathToUtf8(path);

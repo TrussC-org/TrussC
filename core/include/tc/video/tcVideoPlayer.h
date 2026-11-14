@@ -75,6 +75,11 @@ public:
     // Load / Close
     // =========================================================================
 
+    /// Clockwise stream display rotation. Frames use this orientation.
+    /// Web cannot expose stream metadata and returns zero.
+    float getRotation() const { return float(rotationDeg_) * (TAU / 360.0f); }
+    int getRotationDeg() const { return rotationDeg_; }
+
     /// Linux: stream audio by default. Set false before load() to preload
     /// the whole track for sample-accurate loops and seeks. Changing this
     /// setting applies to the next load(). Native OS players ignore it.
@@ -119,7 +124,7 @@ public:
 #else
             // These backends own main-thread/GPU state. Keep their existing
             // blocking load path, but run it in a later resource-load pass.
-            ready.result = loadInternal(ready.path);
+            ready.result = loadInternal(ready.path, &ready);
 #endif
         });
         const auto text = internal::pathToDisplayUtf8(path);
@@ -166,6 +171,8 @@ private:
         auto entry = internal::checkLoadFile(resolvedPath, "VideoPlayer", isUrl);
         if (!entry) return entry;
 
+        rotationDeg_ = 0;
+
         // Platform-specific load
 #ifdef __APPLE__
         const bool opened = prepared ? loadPreparedPlatform(resolvedPath, prepared->asset.get())
@@ -199,16 +206,16 @@ private:
         // Create texture(s) for per-frame updates
         if (width_ > 0 && height_ > 0) {
             if (nv12Mode_) {
-                textureY_.allocate(width_,     height_,     1,                  TextureUsage::Stream);
-                textureUV_.allocate(width_ / 2, height_ / 2, TextureFormat::RG8, TextureUsage::Stream);
+                textureY_.allocate(nv12Width_,     nv12Height_,     1,                  TextureUsage::Stream);
+                textureUV_.allocate(nv12Width_ / 2, nv12Height_ / 2, TextureFormat::RG8, TextureUsage::Stream);
                 // Prime the textures with the neutral-chroma CPU buffers
                 // (Y=0, UV=128) set up in loadPlatform(). Without this, the
                 // GPU textures contain uninitialized data and the BT.601
                 // shader renders a green flash on the first frame (Y=0,
                 // U=0, V=0 → RGB (0, 135, 0)).
                 if (pixelsY_ && pixelsUV_) {
-                    textureY_.loadData(pixelsY_,  width_,     height_,     1);
-                    textureUV_.loadData(pixelsUV_, width_ / 2, height_ / 2, 2);
+                    textureY_.loadData(pixelsY_,  nv12Width_,     nv12Height_,     1);
+                    textureUV_.loadData(pixelsUV_, nv12Width_ / 2, nv12Height_ / 2, 2);
                 }
             } else {
                 texture_.allocate(width_, height_, 4, TextureUsage::Stream);
@@ -271,6 +278,7 @@ private:
         if (pixelsY_) { delete[] pixelsY_; pixelsY_ = nullptr; }
         if (pixelsUV_){ delete[] pixelsUV_; pixelsUV_ = nullptr; }
         nv12Mode_ = false;
+        nv12Width_ = nv12Height_ = 0;
         nv12ShaderHandle_ = nullptr;  // deleted in closePlatform()
 
         initialized_ = false;
@@ -287,6 +295,7 @@ private:
         done_ = false;
         width_ = 0;
         height_ = 0;
+        rotationDeg_ = 0;
         sourcePath_.clear();
         auto warningStatus = decodeStatus_;
         if (warningStatus) warningStatus->warn();
@@ -313,9 +322,9 @@ public:
         if (hasNewFramePlatform()) {
             std::lock_guard<std::mutex> lock(mutex_);
             if (nv12Mode_) {
-                if (pixelsY_ && pixelsUV_ && width_ > 0 && height_ > 0) {
-                    textureY_.loadData(pixelsY_,  width_,     height_,     1);
-                    textureUV_.loadData(pixelsUV_, width_ / 2, height_ / 2, 2);
+                if (pixelsY_ && pixelsUV_ && nv12Width_ > 0 && nv12Height_ > 0) {
+                    textureY_.loadData(pixelsY_,  nv12Width_,     nv12Height_,     1);
+                    textureUV_.loadData(pixelsUV_, nv12Width_ / 2, nv12Height_ / 2, 2);
                     markFrameNew();
                 }
             } else {
@@ -578,11 +587,12 @@ private:
     // Pixel data (RGBA)
     unsigned char* pixels_ = nullptr;
 
-    // NV12 (CUDA HW decode) planes — Linux only, non-null when nv12Mode_ is set
+    // NV12 hardware planes use encoded dimensions; public dimensions are display-oriented.
     unsigned char* pixelsY_  = nullptr;
     unsigned char* pixelsUV_ = nullptr;
     Texture textureY_;
     Texture textureUV_;
+    int nv12Width_ = 0, nv12Height_ = 0;
     bool  nv12Mode_       = false;
     bool  autoPoster_     = true;   // extract-and-show a poster on load/play
     bool  posterActive_   = false;  // poster currently on texture_ (until live)
@@ -599,6 +609,7 @@ private:
     // HW decode preference (default on; Linux backend honors this)
     bool useHwAccel_ = true;
     bool audioStreaming_ = true;
+    int rotationDeg_ = 0;
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
@@ -633,6 +644,8 @@ private:
         textureY_  = std::move(other.textureY_);
         textureUV_ = std::move(other.textureUV_);
         nv12Mode_        = other.nv12Mode_;
+        nv12Width_ = other.nv12Width_;
+        nv12Height_ = other.nv12Height_;
         autoPoster_      = other.autoPoster_;
         posterActive_    = other.posterActive_;
         posterPx_        = std::move(other.posterPx_);
@@ -642,6 +655,8 @@ private:
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         audioStreaming_ = other.audioStreaming_;
+        rotationDeg_ = other.rotationDeg_;
+        other.rotationDeg_ = 0;
         platformHandle_  = other.platformHandle_;
         decodeStatus_ = std::move(other.decodeStatus_);
         sourcePath_      = std::move(other.sourcePath_);
@@ -652,6 +667,7 @@ private:
         other.posterUploadPending_ = false;
         other.texUploadFrame_      = ~0ull;
         other.nv12Mode_        = false;
+        other.nv12Width_ = other.nv12Height_ = 0;
         other.nv12ShaderHandle_ = nullptr;
         other.initialized_     = false;
         other.platformHandle_  = nullptr;
@@ -792,7 +808,7 @@ public:
     /// @return true on success
     static bool extractFrame(const fs::path& path, Pixels& outPixels,
                              float timeSec, float* outDuration = nullptr) try {
-        return extractFramePlatform(path, outPixels, timeSec, outDuration);
+        return extractFramePlatform(path, outPixels, timeSec, outDuration, {});
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -806,7 +822,7 @@ public:
     /// @return true on success
     static bool extractKeyFrame(const fs::path& path, Pixels& outPixels,
                                 float timeSec, float* outDuration = nullptr) try {
-        return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
+        return extractKeyFramePlatform(path, outPixels, timeSec, outDuration, {});
     } catch (const std::bad_alloc&) {
         return false;
     }

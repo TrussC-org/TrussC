@@ -4778,6 +4778,12 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<const VideoPlayer>().getResyncThreshold();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getRotation();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getRotationDeg();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoPlayer>().getSpeed();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)

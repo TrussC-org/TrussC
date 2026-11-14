@@ -40457,9 +40457,10 @@ void tcApp::draw() {
 ["VideoPlayer::extractFrame"]
 keywords = ["thumbnail", "snapshot", "grab", "single frame", "poster", "exact frame"]
 description.en = "Extracts a video frame at a specified time."
-description.ja = "指定した時刻の動画フレームを抽出する。"
-description.ko = "지정한 시각의 비디오 프레임을 추출한다."
+description.ja = "指定した時刻の動画フレームを抽出します。"
+description.ko = "지정한 시각의 비디오 프레임을 추출합니다."
 details.en = '''
+- Returns display-oriented frames, matching playback and posters. Static and instance Pixels/Image overloads apply the stream rotation.
 - `VideoPlayer::extractFrame(path, output, timeSec, outDuration)` opens a separate decoder synchronously; the instance form `player.extractFrame(output, timeSec, outDuration)` uses `getPath()` and returns `false` if it is empty.
 - `timeSec` is in seconds. Negative values become zero; values beyond a known positive duration become `duration * 0.1f`. A non-null `outDuration` receives the duration in seconds and may be written even if extraction later fails.
 - Returns `true` when a frame is extracted into RGBA U8 `Pixels`; opening or decoding failures return `false`. Static paths are passed directly to the decoder, so use `getDataPath()` when resolving a data-directory path.
@@ -40469,6 +40470,7 @@ details.en = '''
 - Each call opens a fresh decode context, so use these helpers for still images rather than continuous playback; use `load()`, `play()`, and `update()` for playback, or `extractKeyFrame()` for a faster approximate thumbnail.
 '''
 details.ja = '''
+- 再生とポスターに一致する表示向きのフレームを返します。静的版とインスタンス版の Pixels/Image はストリームの回転を適用します。
 - `VideoPlayer::extractFrame(path, output, timeSec, outDuration)` は独立したデコーダを同期的に開きます。インスタンス版の `player.extractFrame(output, timeSec, outDuration)` は `getPath()` を使用し、パスが空の場合は `false` を返します。
 - `timeSec` の単位は秒です。負の値はゼロになり、既知の正の動画長を超える値は `duration * 0.1f` になります。`outDuration` が null でなければ動画長を秒単位で格納し、その後の抽出が失敗しても値が書き込まれている場合があります。
 - RGBA U8 の `Pixels` にフレームを抽出できた場合は `true` を返し、ファイルを開けない場合やデコードに失敗した場合は `false` を返します。静的版のパスはデコーダへ直接渡すため、データディレクトリ内のパスを解決する場合は `getDataPath()` を使用してください。
@@ -40478,13 +40480,14 @@ details.ja = '''
 - 呼び出すたびにデコードコンテキストを開くため、連続再生ではなく静止画の取得に使用してください。再生には `load()`、`play()`、`update()` を使用し、高速な近似サムネイルには `extractKeyFrame()` を使用してください。
 '''
 details.ko = '''
+- 재생 및 포스터와 일치하는 표시 방향의 프레임을 반환합니다. 정적 및 인스턴스 Pixels/Image 오버로드는 스트림 회전을 적용합니다.
 - `VideoPlayer::extractFrame(path, output, timeSec, outDuration)`은 별도의 디코더를 동기적으로 엽니다. 인스턴스 형태인 `player.extractFrame(output, timeSec, outDuration)`은 `getPath()`를 사용하며 경로가 비어 있으면 `false`를 반환합니다.
 - `timeSec`의 단위는 초입니다. 음수는 0이 되고, 알려진 양의 재생 시간을 초과하는 값은 `duration * 0.1f`가 됩니다. `outDuration`이 null이 아니면 재생 시간을 초 단위로 저장하며, 이후 추출에 실패해도 값이 기록되어 있을 수 있습니다.
-- RGBA U8 `Pixels`에 프레임을 추출하면 `true`를 반환하고, 파일 열기나 디코딩에 실패하면 `false`를 반환합니다. 정적 형태의 경로는 디코더에 직접 전달하므로 데이터 디렉터리의 경로를 해석하려면 `getDataPath()`를 사용하세요.
+- RGBA U8 `Pixels`에 프레임을 추출하면 `true`를 반환하고, 파일 열기나 디코딩에 실패하면 `false`를 반환합니다. 정적 형태의 경로는 디코더에 직접 전달하므로 데이터 디렉터리의 경로를 해석하려면 `getDataPath()`를 사용합니다.
 - macOS와 iOS는 시간 허용 오차를 0으로 요청합니다. Linux와 Windows는 뒤로 탐색한 후 앞으로 디코딩하여 타임스탬프가 목표 시각에 도달한 첫 프레임을 선택합니다. 목표에 도달하지 못한 채 정상적으로 스트림 끝에 도달하면 Windows는 마지막으로 디코딩한 샘플을 유지합니다. Linux는 목표에 도달하지 못하고 디코딩이 소진되면 `false`를 반환합니다.
-- `Pixels` 오버로드는 독립된 디코딩 컨텍스트를 사용하고 GPU에 접근하지 않으므로 출력 저장 공간을 분리하면 백그라운드 스레드에서 실행할 수 있습니다. 인스턴스 오버로드를 실행하는 동안 인스턴스와 소스 경로를 변경하지 마세요.
+- `Pixels` 오버로드는 독립된 디코딩 컨텍스트를 사용하고 GPU에 접근하지 않으므로 출력 저장 공간을 분리하면 백그라운드 스레드에서 실행할 수 있습니다. 인스턴스 오버로드를 실행하는 동안 인스턴스와 소스 경로를 변경하지 않아야 합니다.
 - 두 형태 모두 `Image`를 받을 수 있으며 이미지를 할당하고 추출한 픽셀을 텍스처에 업로드합니다. 이 오버로드는 메인 스레드에서 호출해야 합니다. 할당 또는 업로드에 실패하면 `false`를 반환하고 Image는 비워집니다(지워집니다). 파일 열기나 디코딩 실패는 Image를 변경하지 않습니다.
-- 호출할 때마다 새 디코딩 컨텍스트를 열므로 연속 재생이 아닌 정지 이미지 추출에 사용하세요. 재생에는 `load()`, `play()`, `update()`를 사용하고 빠른 근사 썸네일에는 `extractKeyFrame()`을 사용하세요.
+- 호출할 때마다 새 디코딩 컨텍스트를 열므로 연속 재생이 아닌 정지 이미지 추출에 사용합니다. 재생에는 `load()`, `play()`, `update()`를 사용하고 빠른 근사 썸네일에는 `extractKeyFrame()`을 사용합니다.
 '''
 related = ["Pixels", "Image", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
 platform_note.en = '''
@@ -40509,9 +40512,10 @@ void tcApp::setup() {
 ["VideoPlayer::extractKeyFrame"]
 keywords = ["thumbnail", "snapshot", "keyframe", "fast", "single frame", "poster", "I-frame"]
 description.en = "Extracts an approximate frame using a backward keyframe seek."
-description.ja = "キーフレームへの後方シークで近似フレームを抽出する。"
-description.ko = "키프레임으로 뒤로 탐색하여 근사 프레임을 추출한다."
+description.ja = "キーフレームへの後方シークで近似フレームを抽出します。"
+description.ko = "키프레임으로 뒤로 탐색하여 근사 프레임을 추출합니다."
 details.en = '''
+- Returns display-oriented frames, matching playback and posters. Static and instance Pixels/Image overloads apply the stream rotation.
 - If Image allocation or upload fails, returns `false`: On failure the Image is left empty (cleared). Opening or decoding failures leave it unchanged.
 - Requests a frame at or before `timeSec` for fast thumbnails and scrub previews; the returned time is approximate.
 - Linux and Windows return the first decoded frame after a backward seek instead of decoding forward to the target; macOS and iOS allow an earlier frame with no forward time tolerance.
@@ -40519,6 +40523,7 @@ details.en = '''
 - Static and instance forms accept either `Pixels` or `Image`. See `VideoPlayer::extractFrame` for signatures, seconds, out-of-range handling, return values, path resolution, threading, GPU upload, and the cost of opening a decoder per call.
 '''
 details.ja = '''
+- 再生とポスターに一致する表示向きのフレームを返します。静的版とインスタンス版の Pixels/Image はストリームの回転を適用します。
 - Image の確保またはアップロードに失敗すると `false` を返し、Image は空になります（クリアされます）。ファイルを開く処理やデコードの失敗では変更しません。
 - 高速なサムネイルやスクラブプレビュー用に、`timeSec` 以前のフレームを要求します。返されるフレームの時刻は近似です。
 - Linux と Windows は指定時刻まで前進デコードせず、後方シーク後に最初にデコードしたフレームを返します。macOS と iOS は指定時刻より後の許容誤差をゼロにし、それ以前のフレームを許可します。
@@ -40526,11 +40531,12 @@ details.ja = '''
 - 静的版とインスタンス版は、どちらも `Pixels` または `Image` を受け取ります。シグネチャ、秒単位の指定、範囲外の時刻、戻り値、パス解決、スレッド、GPU アップロード、呼び出しごとにデコーダを開くコストは `VideoPlayer::extractFrame` を参照してください。
 '''
 details.ko = '''
+- 재생 및 포스터와 일치하는 표시 방향의 프레임을 반환합니다. 정적 및 인스턴스 Pixels/Image 오버로드는 스트림 회전을 적용합니다.
 - Image 할당 또는 업로드에 실패하면 `false`를 반환하고 Image는 비워집니다(지워집니다). 파일 열기나 디코딩 실패는 Image를 변경하지 않습니다.
 - 빠른 썸네일과 스크럽 미리보기를 위해 `timeSec` 이전 또는 같은 시각의 프레임을 요청합니다. 반환되는 프레임의 시각은 근사값입니다.
 - Linux와 Windows는 목표 시각까지 앞으로 디코딩하지 않고 뒤로 탐색한 후 처음 디코딩한 프레임을 반환합니다. macOS와 iOS는 이후 시각의 허용 오차를 0으로 설정하고 이전 프레임을 허용합니다.
 - 빠른 추출에 실패하면 정확한 추출로 다시 시도합니다. 시각이 0이면 이후 목표 시각을 찾는 전진 디코딩 없이 비디오의 시작 부분을 사용합니다.
-- 정적 형태와 인스턴스 형태 모두 `Pixels` 또는 `Image`를 받습니다. 시그니처, 초 단위 지정, 범위 밖 시각 처리, 반환값, 경로 해석, 스레드, GPU 업로드, 호출마다 디코더를 여는 비용은 `VideoPlayer::extractFrame`을 참조하세요.
+- 정적 형태와 인스턴스 형태 모두 `Pixels` 또는 `Image`를 받습니다. 시그니처, 초 단위 지정, 범위 밖 시각 처리, 반환값, 경로 해석, 스레드, GPU 업로드, 호출마다 디코더를 여는 비용은 `VideoPlayer::extractFrame`을 참조합니다.
 '''
 related = ["Pixels", "Image", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::getPath"]
 platform_note.en = '''
@@ -40742,19 +40748,19 @@ description.en = "Returns a pointer to the RGBA pixel buffer."
 description.ja = "RGBA ピクセルバッファへのポインタを返す。"
 description.ko = "RGBA 픽셀 버퍼의 포인터를 반환한다."
 details.en = '''
-- Returns tightly packed RGBA U8 data with four bytes per pixel; the non-const overload permits editing, and the const overload returns a const pointer. Returns `nullptr` when no RGBA buffer exists, including Linux NV12 playback.
+- Returns tightly packed RGBA U8 data with four bytes per pixel; the non-const overload permits editing, and the const overload returns a const pointer. Returns `nullptr` when no RGBA buffer exists, including Linux NV12 hardware playback, rotated or not.
 - The buffer can exist before a live frame arrives and initially contains zeros; an automatic poster may fill it before playback.
 - The player owns all pointers returned by `getPixels()`, `getPixelsY()`, and `getPixelsUV()`. Do not free them or access them concurrently with buffer updates; copy data that must survive a later update, resize, reload, or `close()`.
 - Editing CPU data does not immediately update the GPU texture.
 '''
 details.ja = '''
-- 1 ピクセルあたり 4 バイトで隙間なく並んだ RGBA U8 データを返します。非 const 版は編集可能で、const 版は const ポインタを返します。Linux の NV12 再生など、RGBA バッファがない場合は `nullptr` を返します。
+- 1 ピクセルあたり 4 バイトで隙間なく並んだ RGBA U8 データを返します。非 const 版は編集可能で、const 版は const ポインタを返します。回転の有無にかかわらず Linux の NV12 ハードウェア再生など、RGBA バッファがない場合は `nullptr` を返します。
 - バッファはライブフレームの到着前から存在する場合があり、初期値はゼロです。自動ポスターによって再生前に画像が格納される場合があります。
 - `getPixels()`、`getPixelsY()`、`getPixelsUV()` が返すポインタはプレイヤーが所有します。解放したり、バッファの更新と同時にアクセスしたりしないでください。後の更新、サイズ変更、再読み込み、`close()` を超えて保持するデータはコピーしてください。
 - CPU 上のデータを編集しても、GPU テクスチャには直ちに反映されません。
 '''
 details.ko = '''
-- 픽셀당 4바이트로 빈틈없이 배열된 RGBA U8 데이터를 반환합니다. 비 const 오버로드는 편집할 수 있고 const 오버로드는 const 포인터를 반환합니다. Linux의 NV12 재생 등 RGBA 버퍼가 없으면 `nullptr`를 반환합니다.
+- 픽셀당 4바이트로 빈틈없이 배열된 RGBA U8 데이터를 반환합니다. 비 const 오버로드는 편집할 수 있고 const 오버로드는 const 포인터를 반환합니다. 회전 여부와 관계없이 Linux의 NV12 하드웨어 재생 등 RGBA 버퍼가 없으면 `nullptr`를 반환합니다.
 - 버퍼는 실시간 프레임이 도착하기 전부터 존재할 수 있으며 초기값은 0입니다. 자동 포스터가 재생 전에 이미지를 채울 수 있습니다.
 - `getPixels()`, `getPixelsY()`, `getPixelsUV()`가 반환하는 포인터는 플레이어가 소유합니다. 해제하거나 버퍼 갱신과 동시에 접근하지 마세요. 이후 갱신, 크기 변경, 다시 로드, `close()`를 넘어 유지할 데이터는 복사해야 합니다.
 - CPU 데이터를 편집해도 GPU 텍스처에 즉시 반영되지 않습니다.
@@ -40768,15 +40774,15 @@ description.en = "Returns a pointer to the interleaved NV12 chroma plane."
 description.ja = "NV12 のインターリーブ色差プレーンへのポインタを返す。"
 description.ko = "NV12의 인터리브 색차 평면 포인터를 반환한다."
 details.en = '''
-- Returns mutable U8 data containing alternating U and V bytes for Linux NV12 playback, with two bytes per chroma sample at half the video width and height; returns `nullptr` otherwise.
+- Returns mutable U8 data containing alternating U and V bytes for Linux NV12 playback, with two bytes per chroma sample at half the encoded video width and height; returns `nullptr` otherwise.
 - The plane is initially filled with `128` for neutral chroma. See `VideoPlayer::getPixels` for ownership, lifetime, and access requirements.
 '''
 details.ja = '''
-- Linux の NV12 再生で、U と V のバイトが交互に並ぶ変更可能な U8 データを返します。幅と高さは動画の半分で、色差サンプルあたり 2 バイトです。それ以外の場合は `nullptr` を返します。
+- Linux の NV12 再生で、U と V のバイトが交互に並ぶ変更可能な U8 データを返します。幅と高さはエンコードされた動画の半分で、色差サンプルあたり 2 バイトです。それ以外の場合は `nullptr` を返します。
 - プレーンの初期値は中立の色差を表す `128` です。所有権、有効期間、アクセスの要件は `VideoPlayer::getPixels` を参照してください。
 '''
 details.ko = '''
-- Linux의 NV12 재생에서 U와 V 바이트가 번갈아 배열된 수정 가능한 U8 데이터를 반환합니다. 너비와 높이는 비디오의 절반이며 색차 샘플당 2바이트입니다. 그 외에는 `nullptr`를 반환합니다.
+- Linux의 NV12 재생에서 U와 V 바이트가 번갈아 배열된 수정 가능한 U8 데이터를 반환합니다. 너비와 높이는 인코딩된 비디오의 절반이며 색차 샘플당 2바이트입니다. 그 외에는 `nullptr`를 반환합니다.
 - 평면의 초기값은 중립 색차를 나타내는 `128`입니다. 소유권, 유효 기간, 접근 요구 사항은 `VideoPlayer::getPixels`를 참조하세요.
 '''
 related = ["VideoPlayer::getPixelsY"]
@@ -40788,15 +40794,15 @@ description.en = "Returns a pointer to the NV12 luma plane."
 description.ja = "NV12 の輝度プレーンへのポインタを返す。"
 description.ko = "NV12의 휘도 평면 포인터를 반환한다."
 details.en = '''
-- Returns mutable U8 luma data for Linux NV12 playback, with one byte per pixel at the full video width and height; returns `nullptr` otherwise.
+- Returns mutable U8 luma data for Linux NV12 playback, with one byte per pixel at the full encoded video width and height; returns `nullptr` otherwise.
 - The plane is initially filled with zero. See `VideoPlayer::getPixels` for ownership, lifetime, and access requirements.
 '''
 details.ja = '''
-- Linux の NV12 再生で、変更可能な U8 の輝度データを返します。幅と高さは動画と同じで、1 ピクセルあたり 1 バイトです。それ以外の場合は `nullptr` を返します。
+- Linux の NV12 再生で、変更可能な U8 の輝度データを返します。幅と高さはエンコードされた動画と同じで、1 ピクセルあたり 1 バイトです。それ以外の場合は `nullptr` を返します。
 - プレーンの初期値はゼロです。所有権、有効期間、アクセスの要件は `VideoPlayer::getPixels` を参照してください。
 '''
 details.ko = '''
-- Linux의 NV12 재생에서 수정 가능한 U8 휘도 데이터를 반환합니다. 너비와 높이는 비디오와 같으며 픽셀당 1바이트입니다. 그 외에는 `nullptr`를 반환합니다.
+- Linux의 NV12 재생에서 수정 가능한 U8 휘도 데이터를 반환합니다. 너비와 높이는 인코딩된 비디오와 같으며 픽셀당 1바이트입니다. 그 외에는 `nullptr`를 반환합니다.
 - 평면의 초기값은 0입니다. 소유권, 유효 기간, 접근 요구 사항은 `VideoPlayer::getPixels`를 참조하세요.
 '''
 related = ["VideoPlayer::getPixelsUV"]
@@ -41127,17 +41133,20 @@ related = ["VideoPlayerBase::setCurrentTime"]
 category = "video"
 keywords = ["resolution", "size", "pixels", "dimension"]
 description.en = "Returns the video height."
-description.ja = "動画の高さを返す。"
-description.ko = "비디오의 높이를 반환한다."
+description.ja = "動画の高さを返します。"
+description.ko = "비디오의 높이를 반환합니다."
 details.en = '''
+- Standard VideoPlayer reports the display-oriented size (90/270 degrees swap width and height). HAP ignores rotation metadata.
 - Returns the stored video height in pixels as a `float`, independently of the drawing size.
 - The initial value is `0`; closing a loaded `VideoPlayer` resets it to `0`.
 '''
 details.ja = '''
+- 標準 VideoPlayer は表示向きのサイズを返します（90/270 度では幅と高さを交換します）。HAP は回転メタデータを無視します。
 - 保存されている動画の高さをピクセル単位の `float` で返します。描画サイズには依存しません。
 - 初期値は `0` です。読み込み済みの `VideoPlayer` を閉じると `0` に戻ります。
 '''
 details.ko = '''
+- 표준 VideoPlayer는 표시 방향의 크기를 반환합니다(90/270도에서는 너비와 높이가 바뀝니다). HAP은 회전 메타데이터를 무시합니다.
 - 저장된 비디오 높이를 픽셀 단위의 `float`로 반환하며 그리기 크기와는 관계가 없습니다.
 - 초기값은 `0`입니다. 로드된 `VideoPlayer`를 닫으면 `0`으로 돌아갑니다.
 '''
@@ -41223,17 +41232,20 @@ details.ko = '''
 category = "video"
 keywords = ["resolution", "size", "pixels", "dimension"]
 description.en = "Returns the video width."
-description.ja = "動画の幅を返す。"
-description.ko = "비디오의 너비를 반환한다."
+description.ja = "動画の幅を返します。"
+description.ko = "비디오의 너비를 반환합니다."
 details.en = '''
+- Standard VideoPlayer reports the display-oriented size (90/270 degrees swap width and height). HAP ignores rotation metadata.
 - Returns the stored video width in pixels as a `float`, independently of the drawing size.
 - The initial value is `0`; closing a loaded `VideoPlayer` resets it to `0`.
 '''
 details.ja = '''
+- 標準 VideoPlayer は表示向きのサイズを返します（90/270 度では幅と高さを交換します）。HAP は回転メタデータを無視します。
 - 保存されている動画の幅をピクセル単位の `float` で返します。描画サイズには依存しません。
 - 初期値は `0` です。読み込み済みの `VideoPlayer` を閉じると `0` に戻ります。
 '''
 details.ko = '''
+- 표준 VideoPlayer는 표시 방향의 크기를 반환합니다(90/270도에서는 너비와 높이가 바뀝니다). HAP은 회전 메타데이터를 무시합니다.
 - 저장된 비디오 너비를 픽셀 단위의 `float`로 반환하며 그리기 크기와는 관계가 없습니다.
 - 초기값은 `0`입니다. 로드된 `VideoPlayer`를 닫으면 `0`으로 돌아갑니다.
 '''
@@ -67900,3 +67912,45 @@ details.en = "Excludes advance, line metrics, atlas padding and oversampling/fil
 details.ja = "送り幅、行メトリクス、アトラスの余白、オーバーサンプリングやフィルターの余白を含みません。Y は下向きで、ベースラインより上の部分は負の Y になります。Rect::getCenter で矩形の基準点、Vec2(box.width / 2, box.height / 2) で半サイズを取得できます。未読み込みや空の輪郭では空の Rect を返し、未収録文字は Font の .notdef に置き換えます。この計測はグリフのラスタライズや転送を行いません。"
 details.ko = "전진 폭, 행 메트릭, 아틀라스 여백 및 오버샘플링/필터 여백을 제외합니다. Y는 아래쪽이며 기준선 위 부분은 음수 Y입니다. Rect::getCenter는 사각형 기준점을, Vec2(box.width / 2, box.height / 2)는 절반 크기를 제공합니다. 로드되지 않은 폰트나 빈 윤곽은 빈 Rect를 반환하며 없는 글리프는 Font의 .notdef로 대체합니다. 이 측정은 글리프를 래스터화하거나 업로드하지 않습니다."
 related = ["GlyphBatch::setAlignToInk", "Font::getGlyphPath", "Rect"]
+
+["VideoPlayer::getRotation"]
+category = "video"
+description.en = "Returns the stream display rotation in radians."
+description.ja = "ストリームの表示回転角をラジアンで返します。"
+description.ko = "스트림의 표시 회전각을 라디안으로 반환합니다."
+details.en = '''
+Clockwise rotation needed to display the encoded frame: `0`, `TAU/4`, `TAU/2`, or `3*TAU/4`. Frames already use this orientation. Returns zero before load and after close. Reflections are decomposed as a source horizontal flip followed by this rotation. Linux and Apple apply only this quarter turn and the reflection; other matrix parts such as scale or shear are ignored. Web cannot expose stream rotation and returns zero; playback follows browser orientation. HAP is unchanged and ignores rotation metadata.
+'''
+details.ja = '''
+符号化画像を表示向きにする時計回りの回転です。値は `0`、`TAU/4`、`TAU/2`、`3*TAU/4` です。フレームはこの表示向きになっています。読み込み前とクローズ後はゼロです。鏡像は元画像の左右反転とその後の回転に分解します。Linux と Apple はこの直角回転と鏡像だけを適用し、拡大縮小やせん断など行列の他の成分は無視します。Web は回転メタデータを取得できずゼロを返し、再生はブラウザーの表示向きに従います。HAP は変更せず、回転メタデータを無視します。
+'''
+details.ko = '''
+인코딩된 프레임을 표시 방향으로 만드는 시계 방향 회전이며 `0`, `TAU/4`, `TAU/2`, `3*TAU/4` 중 하나입니다. 프레임은 이미 이 표시 방향을 따릅니다. 로드 전과 닫은 후에는 0입니다. 반사는 원본의 좌우 반전 후 회전으로 분해합니다. Linux와 Apple은 이 직각 회전과 반사만 적용하며, 확대/축소나 전단 같은 행렬의 다른 성분은 무시합니다. Web은 스트림 회전을 읽을 수 없어 0을 반환하며 재생은 브라우저의 표시 방향을 따릅니다. HAP은 변경되지 않으며 회전 메타데이터를 무시합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    video.load("phone.mp4");
+    float rotation = video.getRotation();
+}
+'''
+
+["VideoPlayer::getRotationDeg"]
+category = "video"
+description.en = "Returns the stream display rotation in degrees."
+description.ja = "ストリームの表示回転角を度で返します。"
+description.ko = "스트림의 표시 회전각을 도 단위로 반환합니다."
+details.en = '''
+Returns `0`, `90`, `180`, or `270`, clockwise, describing the rotation applied to frames. See `getRotation()` for reflection and platform limitations.
+'''
+details.ja = '''
+フレームに適用する回転として、時計回りの `0`、`90`、`180`、`270` を返します。鏡像とプラットフォームの制限は `getRotation()` を参照してください。
+'''
+details.ko = '''
+프레임에 적용하는 회전으로 시계 방향 `0`, `90`, `180`, `270`을 반환합니다. 반사 및 플랫폼 제한은 `getRotation()`을 참조합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    video.load("phone.mp4");
+    int degrees = video.getRotationDeg();
+}
+'''
