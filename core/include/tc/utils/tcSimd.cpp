@@ -206,9 +206,18 @@ HWY_AFTER_NAMESPACE();
 #endif // !TRUSSC_SIMD_SCALAR
 
 #if TRUSSC_SIMD_SCALAR || HWY_ONCE
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC spills Highway's Vec wrappers: SIMD runs at 0.33–0.61x of scalar on MSVC 14.50.
+#define TRUSSC_SIMD_SCALAR_REDUCTIONS 1
+#else
+#define TRUSSC_SIMD_SCALAR_REDUCTIONS TRUSSC_SIMD_SCALAR
+#endif
+
 namespace trussc::simd {
 const char* targetName() {
-#if TRUSSC_SIMD_SCALAR
+#if defined(_MSC_VER) && !defined(__clang__)
+    return "scalar (MSVC guard)";
+#elif TRUSSC_SIMD_SCALAR
     return "SCALAR";
 #else
     return hwy::TargetName(hwy::DispatchedTarget());
@@ -358,49 +367,49 @@ void yuyvToRgba(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels) 
 #endif
 }
 float sum(const float* values, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::sum(values, count);
 #else
     return HWY_DYNAMIC_DISPATCH(Sum)(values, count);
 #endif
 }
 float mean(const float* values, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::mean(values, count);
 #else
     return HWY_DYNAMIC_DISPATCH(Mean)(values, count);
 #endif
 }
 float variance(const float* values, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::variance(values, count);
 #else
     return HWY_DYNAMIC_DISPATCH(Variance)(values, count);
 #endif
 }
 float stddev(const float* values, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::stddev(values, count);
 #else
     return HWY_DYNAMIC_DISPATCH(Stddev)(values, count);
 #endif
 }
 std::pair<float, float> minMax(const float* values, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::minMax(values, count);
 #else
     return HWY_DYNAMIC_DISPATCH(MinMax)(values, count);
 #endif
 }
 float rms(const float* values, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::rms(values, count);
 #else
     return HWY_DYNAMIC_DISPATCH(Rms)(values, count);
 #endif
 }
 float mse(const float* a, const float* b, std::size_t count) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_REDUCTIONS
     return scalar::mse(a, b, count);
 #else
     return HWY_DYNAMIC_DISPATCH(Mse)(a, b, count);
