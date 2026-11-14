@@ -37,6 +37,12 @@ def generate(source):
     shared = (Path(__file__).resolve().parents[2] / 'include/sokol/util/sokol_window_native.h').read_text(encoding='utf-8')
     helpers = ''.join(body(shared, 'static inline bool ' + name + '(') for name in
                       ('_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'))
+    metadata = body(source, 'extern "C" bool sapp_tc_window_read_metadata(')
+    metadata = metadata.replace('extern "C" ', '').replace('sapp_tc_window_read_metadata(', 'readMetadata(')
+    metadata = metadata.replace('sapp_tc_window_visible(', 'visible(')
+    # Select the production EGL branch even when this SDK-free fixture runs on macOS/Win32.
+    metadata = metadata.replace('#if defined(__APPLE__) && TARGET_OS_OSX', '#if 0')
+    metadata = metadata.replace('#elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__) && defined(SOKOL_GLES3)', '#elif 1')
     code = r'''
 namespace nativeFixture {
 struct NativeRecord {
@@ -107,19 +113,24 @@ void cover(Record* w,bool covered){Event input{};input.xvisibility.state=covered
 ''' + body(source, 'if (w && w->trust_hidden_signals && ev->xvisibility.state >= VisibilityUnobscured') + r'''}
 }
 namespace xi2 {
-// Xlib stubs supply a raw cookie. Parsing, packet construction, lock stamping,
+// Xlib stubs supply a raw cookie. Parsing, packet construction, lock metadata,
 // native delivery gate and host conversion are production code.
 using Window=unsigned long;
 struct Record:tcCoreTest::InjectedWindow {
     using tcCoreTest::InjectedWindow::InjectedWindow;
     float mouse_x=20,mouse_y=30,mouse_dx=0,mouse_dy=0;Window xwin=1;
     unsigned frame_count=0;
+    sapp_pixel_format color_format=SAPP_PIXELFORMAT_RGBA8,depth_format=SAPP_PIXELFORMAT_DEPTH;
+    bool trust_hidden_signals=true,iconified=false,occluded=false;
+    double frame_duration=1.0/60,refresh_period=1.0/60;
 };
 using _sapp_tc_window_t=Record;
 struct {bool mouse_locked=true;Record* lock_owner=nullptr;int display=0;
     struct{bool available=true;int major_opcode=55;}xi;struct{Record* main=nullptr;}app;
 }_sapp_tc;
 Record* _sapp_tc_lookup(sapp_window h){auto* w=_sapp_tc.lock_owner;return w&&h.id==w->win_id?w:nullptr;}
+bool visible(sapp_window){return true;}
+bool _sapp_tc_native_hidden(const Record*){return false;}
 constexpr int GenericEvent=1,XI_RawMotion=17;
 struct XIRawEvent{struct{int mask_len=1;unsigned char* mask;}valuators;double* raw_values;};
 struct XEvent{int type=GenericEvent;struct{int extension=55,evtype=XI_RawMotion;void* data=nullptr;}xcookie;};
@@ -130,12 +141,13 @@ bool XIMaskIsSet(unsigned char* mask,int bit){return *mask&(1u<<bit);}
 using std::isfinite;
 uint32_t _sapp_tc_x11_mods(unsigned){return 0;}
 #define SOKOL_GLES3 1
-''' + body(source[source.rindex('/*-- event plumbing ---'):], 'static void _sapp_tc_send(') + '\n#undef SOKOL_GLES3\n'
+''' + metadata + body(source[source.rindex('/*-- event plumbing ---'):], 'static void _sapp_tc_send(') + '\n#undef SOKOL_GLES3\n'
     code += body(source, 'static void _sapp_tc_x11_mouse_event(')
     code += 'void process(XEvent* ev){\n' + body(source[source.index('static void _sapp_tc_x11_process_event(XEvent* ev) {'):], 'if (ev->type == GenericEvent) {') + '}\n'
     code += r'''
 void motion(Record& w,double dx,double dy){
     _sapp_tc.lock_owner=&w;_sapp_tc.app.main=&w;_sapp_tc.mouse_locked=true;
+    w.operations.readMetadata=[](sapp_window handle,void*,sapp_tc_window_metadata& out){return readMetadata(handle,&out);};
     unsigned char mask=3;double values[]={dx,dy};XIRawEvent raw{{1,&mask},values};XEvent e;e.xcookie.data=&raw;process(&e);
 }
 }

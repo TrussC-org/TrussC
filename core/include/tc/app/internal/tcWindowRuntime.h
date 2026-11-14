@@ -108,8 +108,14 @@ private:
 };
 void windowEvent(const sapp_event*, sapp_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
-void enterWindowEvent(const sapp_event*, sapp_window, void*) noexcept;
-void convertWindowEvent(const sapp_event*, Window&);
+// Frozen at native entry before any App or raw callback. Routing stays in the binding.
+struct WindowEventContext {
+    float dpiScale;
+    bool pointerLocked;
+    bool reliableButtonBits;
+};
+void enterWindowEvent(const sapp_event*, sapp_window, void*, const WindowEventContext* = nullptr) noexcept;
+void convertWindowEvent(const sapp_event*, Window&, const WindowEventContext&);
 const char* eventEntryName(const sapp_event*, bool);
 void dispatchWindowEventForTests(const sapp_event*, Window&);
 void dispatchWindowDisplayEventForTests(const sapp_event*, Window&);

@@ -57,7 +57,7 @@ if os.environ.get('TC_EVENT_CONVERTER_MUTATIONS'):
       ('dpi_previous_basis','runtime','ctx.lastPointerX = ctx.pointerLogicalX * basis;','ctx.lastPointerX = ctx.pointerLogicalX;'),
       ('leave_real_anchor','runtime','ctx.mouseX = ctx.mouseY = -1.0f;','ctx.mouseX = ctx.mouseY = ctx.lastPointerX = ctx.lastPointerY = -1.0f;'),
       ('enter_jump','runtime','case SAPP_EVENTTYPE_MOUSE_ENTER:\n            case SAPP_EVENTTYPE_MOUSE_MOVE: {','case SAPP_EVENTTYPE_MOUSE_ENTER: break;\n            case SAPP_EVENTTYPE_MOUSE_MOVE: {'),
-      ('locked_recovery','runtime','ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && !ev->pointer_locked &&\n            (ev->button_snapshot || mouseMoveHasReliableButtonBits(ev))','ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && (ev->button_snapshot || ev->reliable_button_bits)'),
+      ('locked_recovery','runtime','ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && !delivery.pointerLocked &&\n            (ev->button_snapshot || mouseMoveHasReliableButtonBits(delivery))','ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && (ev->button_snapshot || delivery.reliableButtonBits)'),
       ('release_real_position','runtime','Vec2(ctx.lastPointerX, ctx.lastPointerY);\n            args.button','Vec2(ctx.mouseX, ctx.mouseY);\n            args.button'),
       ('snapshot_held','runtime','ctx.pressedMouseButtons |= bit;\n                            ctx.mouseButton','/* omit snapshot ledger */\n                            ctx.mouseButton'),
       ('snapshot_fabricates_press','runtime','ctx.snapshotMouseButtons |= bit;','ctx.snapshotMouseButtons |= bit; MouseEventArgs press; window.events().mousePressed.notify(press);'),
@@ -155,7 +155,7 @@ if os.environ.get('TC_EVENT_CONVERTER_MUTATIONS'):
       ('mac_draw_policy_visibility','const bool suspended = _sapp_tc_native_hidden(w);','const bool suspended = !w->draw_while_hidden && _sapp_tc_native_hidden(w);'),
       ('mac_detail_order','_sapp_tc_send_type(w, detail);','_sapp_tc_mac_update_suspension(w); _sapp_tc_send_type(w, detail);'),
       ('xi2_native_relative','if (XIMaskIsSet(raw->valuators.mask, 0)) main->mouse_dx = (float)*values++;','if (XIMaskIsSet(raw->valuators.mask, 0)) { main->mouse_dx = 0; ++values; }'),
-      ('xi2_lock_stamp','ev->pointer_locked = _sapp_tc.mouse_locked && _sapp_tc.lock_owner == w;','ev->pointer_locked = false;'),
+      ('xi2_lock_snapshot','out->pointer_locked = _sapp_tc.mouse_locked && _sapp_tc.lock_owner == w;','out->pointer_locked = false;'),
     ]
     for name,old,new in nativeEdits:
         assert native.count(old)==1,(name,native.count(old))

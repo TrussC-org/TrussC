@@ -110,10 +110,8 @@ static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event
     const bool busy = w->in_tick;
     w->in_tick = true;
     event->frame_count = frame;
-    event->window_id = id;
     event->window_width = w->win_width; event->window_height = w->win_height;
     event->framebuffer_width = w->fb_width; event->framebuffer_height = w->fb_height;
-    event->dpi_scale = w->dpi_scale;
     if (_sapp_tc_event_wakes(event->type)) w->input_delivered = w->wake_on_input;
     _sapp_tc_event_result result{true, false};
     try { w->desc.event_cb(event, {id}, w->desc.user_data); }
@@ -125,17 +123,15 @@ static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event
 // Adapt the single-window ports' existing state to the same delivery gate.
 // The local record is only a view of that state; it owns no native resources.
 template<class State>
-static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input,
-                                          bool locked, bool reliable) noexcept {
+static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input) noexcept {
     struct Client {
         uint32_t win_id = 0;
         sapp_window_desc desc{};
         bool ready, in_tick = false, input_delivered = false, wake_on_input = false;
         bool (*events_enabled)() = nullptr;
         int win_width, win_height, fb_width, fb_height;
-        float dpi_scale;
     } client{0, {}, !state.cleanup_called, false, false, false, nullptr,
-        state.window_width, state.window_height, state.framebuffer_width, state.framebuffer_height, state.dpi_scale};
+        state.window_width, state.window_height, state.framebuffer_width, state.framebuffer_height};
     client.desc.user_data = &state;
     if (state.desc.event_cb || state.desc.event_userdata_cb) {
         client.desc.event_cb = [](const sapp_event* event, sapp_window, void* user) {
@@ -145,7 +141,6 @@ static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input,
         };
     }
     sapp_event event = *input;
-    event.pointer_locked = locked; event.reliable_button_bits = reliable;
     _sapp_tc_deliver_event(&client, &event, state.frame_count,
         [&](sapp_window handle) { return handle.id == 0 ? &client : nullptr; });
     const bool consumed = state.event_consumed;

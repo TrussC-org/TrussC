@@ -118,7 +118,7 @@ void lockedDelivery(Window& w,Native& original) {
         n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,20,30));
         auto motion=[&](float dx,float dy){
             if(useXi2)nativeFixture::xi2::motion(n,dx,dy);
-            else{auto e=event(SAPP_EVENTTYPE_MOUSE_MOVE,999,888);e.pointer_locked=true;e.mouse_dx=dx;e.mouse_dy=dy;n.send(e);}
+            else{auto e=event(SAPP_EVENTTYPE_MOUSE_MOVE,999,888);n.pointerLocked=true;e.mouse_dx=dx;e.mouse_dy=dy;n.send(e);n.pointerLocked=false;}
         };
         motion(8,-4);
         const Vec2 expectedPos(pixels?20:10,pixels?30:15),expectedDelta(pixels?8:4,pixels?-4:-2);
@@ -144,6 +144,20 @@ void lockedDelivery(Window& w,Native& original) {
     }
     internal::bindWindow(w,{original.win_id},original.operations,&original);internal::pixelPerfectMode()=false;
 }
+void zeroDeliveryDpi(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
+    clearInput(w);
+    internal::pixelPerfectMode()=false;
+    n.metadata.dpi_scale=2;
+    internal::refreshWindowMetadata(w);
+    Vec2 pos;
+    int moves=0;
+    auto moved=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){++moves;pos=e.pos;});
+    auto motion=event(SAPP_EVENTTYPE_MOUSE_MOVE,100,40);
+    internal::convertWindowEvent(&motion,w,{0,false,false});
+    check("zero delivery DPI uses window DPI without division by zero",moves==1&&pos==Vec2(50,20));
+    clearInput(w);
+}
 void pointers(Window& w, Native& n) {
     FixtureWindowScope fixture(w);
     for (bool pixels : {false,true}) {
@@ -165,7 +179,7 @@ void pointers(Window& w, Native& n) {
         auto move=event(SAPP_EVENTTYPE_MOUSE_MOVE,220,100,SAPP_MODIFIER_LMB); move.mouse_dx=999;move.mouse_dy=-999;
         n.send(move);
         check("DPI change converts previous position before subtracting",pos==Vec2(pixels?220:110,pixels?100:50)&&delta==Vec2(pixels?20:10,pixels?20:10));
-        auto locked=event(SAPP_EVENTTYPE_MOUSE_MOVE,999,888);locked.pointer_locked=true;locked.mouse_dx=8;locked.mouse_dy=-4;
+        auto locked=event(SAPP_EVENTTYPE_MOUSE_MOVE,999,888);n.pointerLocked=true;locked.mouse_dx=8;locked.mouse_dy=-4;
         n.send(locked);
         check("locked pointer fixes position and uses scaled relative delta",pos==Vec2(pixels?220:110,pixels?100:50)&&delta==Vec2(pixels?8:4,pixels?-4:-2)&&releases==0);
         n.pointerLocked=true;
@@ -187,7 +201,7 @@ void pointers(Window& w, Native& n) {
         clearInput(w); n.metadata.dpi_scale=1.5f;
         n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,100.1f,40.1f));n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,100.1f,40.1f));
         check("same position at fractional DPI has exactly zero delta",delta==Vec2(0,0));n.metadata.dpi_scale=2;
-        clearInput(w); auto firstLocked=event(SAPP_EVENTTYPE_MOUSE_MOVE,20,30);firstLocked.pointer_locked=true;firstLocked.mouse_dx=50;n.send(firstLocked);
+        clearInput(w); auto firstLocked=event(SAPP_EVENTTYPE_MOUSE_MOVE,20,30);n.pointerLocked=true;firstLocked.mouse_dx=50;n.send(firstLocked);n.pointerLocked=false;
         check("first locked event also has zero delta",delta==Vec2(0,0));
         clearInput(w); n.send(event(SAPP_EVENTTYPE_MOUSE_LEAVE)); n.send(event(SAPP_EVENTTYPE_MOUSE_ENTER,20,30));
         check("initial leave cannot create position anchor",delta==Vec2(0,0));
@@ -321,7 +335,7 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
         auto& b=internal::WindowRequestAccess::binding(w);b.lastDeliveredHidden=false;
         int rawCount=0,typed=0;bool rawFirst=true;
         std::vector<EventListener> listeners;
-        listeners.push_back(w.events().rawEvent.listen([&](const sapp_event& e){++rawCount;check("native target source and dimensions",e.window_id==n.win_id&&e.source==SAPP_EVENTSOURCE_REAL&&e.frame_count==123&&e.dpi_scale==n.metadata.dpi_scale&&e.framebuffer_width==n.metadata.fb_width);check("input wake precedes callback",!_sapp_tc_event_wakes(e.type)||n.input_delivered);}));
+        listeners.push_back(w.events().rawEvent.listen([&](const sapp_event& e){++rawCount;check("native target source and dimensions",internal::currentWindowCtx()==&internal::WindowRequestAccess::context(w)&&internal::WindowRequestAccess::binding(w).handle.id==n.win_id&&e.source==SAPP_EVENTSOURCE_REAL&&e.frame_count==123&&internal::WindowRequestAccess::binding(w).metadata.dpi_scale==n.metadata.dpi_scale&&e.framebuffer_width==n.metadata.fb_width);check("input wake precedes callback",!_sapp_tc_event_wakes(e.type)||n.input_delivered);}));
         const bool processEvent = type == SAPP_EVENTTYPE_QUIT_REQUESTED || type == SAPP_EVENTTYPE_TC_DEVICE_LOST || type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED;
         auto notify=[&](auto&){rawFirst &= rawCount == (processEvent ? 0 : 1); ++typed;};
         listeners.push_back(w.events().keyPressed.listen(notify));listeners.push_back(w.events().keyReleased.listen(notify));
@@ -372,7 +386,7 @@ void injections(Window& w,Native& n,Window& peer) {
     clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=2;
     internal::currentWindowCtx()=&trussc::internal::WindowRequestAccess::context(peer);mcp::setToolLevel(mcp::ToolLevel::Control);
     Vec2 pos,delta;int raw=0,press=0,release=0,chars=0;bool injected=true;std::shared_ptr<App> oldApp;
-    auto r=w.events().rawEvent.listen([&](const sapp_event& e){++raw;if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN)check("MCP raw press has held button bit",e.modifiers&SAPP_MODIFIER_LMB);if(e.type==SAPP_EVENTTYPE_MOUSE_UP)check("MCP raw release clears button bit",!(e.modifiers&SAPP_MODIFIER_LMB));injected&=e.source==SAPP_EVENTSOURCE_INJECTED&&e.window_id==n.win_id;if(e.type==SAPP_EVENTTYPE_CHAR)++chars;});
+    auto r=w.events().rawEvent.listen([&](const sapp_event& e){++raw;if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN)check("MCP raw press has held button bit",e.modifiers&SAPP_MODIFIER_LMB);if(e.type==SAPP_EVENTTYPE_MOUSE_UP)check("MCP raw release clears button bit",!(e.modifiers&SAPP_MODIFIER_LMB));injected&=e.source==SAPP_EVENTSOURCE_INJECTED&&internal::currentWindowCtx()==&internal::WindowRequestAccess::context(w)&&internal::WindowRequestAccess::binding(w).handle.id==n.win_id;if(e.type==SAPP_EVENTTYPE_CHAR)++chars;});
     auto m=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){pos=e.pos;delta=e.delta;});
     auto d=w.events().mouseDragged.listen([&](MouseDragEventArgs& e){pos=e.pos;delta=e.delta;});
     auto p=w.events().mousePressed.listen([&](MouseEventArgs& e){++press;check("temporary click modifiers held through callback",!e.shift||isShiftPressed());});
@@ -865,13 +879,13 @@ void touchExtremes(Window& w, Native& n) {
     clearInput(w);internal::pixelPerfectMode()=true;n.metadata.dpi_scale=1.4f;
     n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,e.touches[0].pos_x,20));
     check("FLT_MAX pixel mouse at fractional DPI preserves input",pos==Vec2(e.touches[0].pos_x,20)&&trussc::internal::WindowRequestAccess::context(w).lastPointerX==e.touches[0].pos_x);
-    auto relative=event(SAPP_EVENTTYPE_MOUSE_MOVE,e.touches[0].pos_x,20,SAPP_MODIFIER_LMB);relative.pointer_locked=true;relative.mouse_dx=e.touches[0].pos_x;
+    auto relative=event(SAPP_EVENTTYPE_MOUSE_MOVE,e.touches[0].pos_x,20,SAPP_MODIFIER_LMB);relative.mouse_dx=e.touches[0].pos_x;
     Vec2 relativeDelta;auto drag=w.events().mouseDragged.listen([&](MouseDragEventArgs& packet){relativeDelta=packet.delta;});
-    n.send(relative);
+    n.pointerLocked=true;n.send(relative);n.pointerLocked=false;
     check("FLT_MAX pixel locked relative at fractional DPI preserves input",relativeDelta==Vec2(e.touches[0].pos_x,0)&&trussc::internal::WindowRequestAccess::context(w).lastPointerX==e.touches[0].pos_x);
     clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=.5f;
     n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,10,20));raw=touch=mouse=0;
-    const float anchor=trussc::internal::WindowRequestAccess::context(w).lastPointerX;n.send(relative);
+    const float anchor=trussc::internal::WindowRequestAccess::context(w).lastPointerX;n.pointerLocked=true;n.send(relative);n.pointerLocked=false;
     check("unrepresentable locked relative rejects before callbacks and state",raw==0&&touch==0&&mouse==0&&trussc::internal::WindowRequestAccess::context(w).lastPointerX==anchor&&trussc::internal::WindowRequestAccess::context(w).pressedMouseButtons==1);
     drag.disconnect();e.touches[0].pos_x=extreme;internal::pixelPerfectMode()=true;
     // The mapped primary action, including its old anchor, must pass before any callback.
@@ -938,6 +952,34 @@ void nestedPointerBasis(Window& w, Native& n) {
     check("raw reentry cannot overflow the recovery anchor before position validation",releases==0&&trussc::internal::WindowRequestAccess::context(w).pointerBasis==.5f&&std::isfinite(trussc::internal::WindowRequestAccess::context(w).lastPointerX));
     extreme.disconnect();clearInput(w);
     internal::pixelPerfectMode()=false;
+    // AppKit/mobile-style unreliable moves keep the press even if a raw
+    // callback changes the native capability, DPI and pointer-lock state.
+    n.metadata.dpi_scale=1.5f;n.metadata.reliable_button_bits=false;n.pointerLocked=false;releases=0;
+    n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,30,45));
+    Vec2 observedPosition,observedDelta;
+    auto drag=w.events().mouseDragged.listen([&](MouseDragEventArgs& e){observedPosition=e.pos;observedDelta=e.delta;});
+    auto changed=w.events().rawEvent.listen([&](const sapp_event& e){if(e.type==SAPP_EVENTTYPE_MOUSE_MOVE){n.metadata.dpi_scale=3;n.metadata.reliable_button_bits=true;n.pointerLocked=true;}});
+    n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,60,90));changed.disconnect();
+    check("delivery freezes target DPI lock and unreliable button bits before raw callbacks",releases==0&&observedPosition==Vec2(40,60)&&observedDelta==Vec2(20,30));
+    n.pointerLocked=false;n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,120,180));
+    check("next reliable unlocked delivery recovers the missing release once",releases==1);
+    clearInput(w);
+    struct ResizeApp:LockedApp {
+        std::function<void()> resize;
+        void windowResized(int,int)override{if(resize)resize();}
+    };
+    for(bool locked:{false,true}) {
+        n.metadata.dpi_scale=1.5f;n.metadata.reliable_button_bits=false;n.pointerLocked=false;
+        n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,30,45));
+        auto app=internal::makeConstructedApp<ResizeApp>();
+        bool resized=false;
+        app->resize=[&]{if(resized)return;resized=true;n.metadata.dpi_scale=3;n.pointerLocked=false;n.metadata.reliable_button_bits=true;internal::refreshWindowMetadata(w);};
+        // Leave attachment pending: its initial resize runs inside event entry.
+        internal::WindowRequestAccess::attachCandidate(w,app);n.pointerLocked=locked;
+        auto motion=event(SAPP_EVENTTYPE_MOUSE_MOVE,60,90);motion.mouse_dx=6;motion.mouse_dy=3;n.send(motion);
+        check("snapshot precedes entry resize callbacks and metadata publication",resized&&app->releases==0&&app->drags==1&&app->pos==(locked?Vec2(20,30):Vec2(40,60))&&app->delta==(locked?Vec2(4,2):Vec2(20,30)));
+        w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);clearInput(w);
+    }
 }
 void sourceParity(Window& w, Native& n) {
     FixtureWindowScope fixture(w);
@@ -1034,6 +1076,7 @@ int main(int argc,char** argv){
     continuationMatrix(main,mainNative);continuationMatrix(peer,peerNative);
     supersessionObservers(main,mainNative);supersessionObservers(peer,peerNative);
     std::vector<int> a,b;parity(main,mainNative,a);parity(peer,peerNative,b);check("every event type has main and secondary parity",a==b);
+    zeroDeliveryDpi(main,mainNative);zeroDeliveryDpi(peer,peerNative);
     clearInput(main);clearInput(peer);pointers(main,mainNative);pointers(peer,peerNative);
     nativeVisibilitySources(main,mainNative);nativeVisibilitySources(peer,peerNative);lockedDelivery(main,mainNative);lockedDelivery(peer,peerNative);visibility(main,mainNative,peer);visibility(peer,peerNative,main);
     clearInput(peer);injections(main,mainNative,peer);clickRecovery(main,mainNative);clickNewPress(main,mainNative);abortedClickOwnership(main,mainNative);disabledTouchInClick(main,mainNative);newestPressMatrix(main,mainNative);newestPressMatrix(peer,peerNative);touchExtremes(main,mainNative);touchExtremes(peer,peerNative);finiteExtremes(main,mainNative);finiteExtremes(peer,peerNative);nestedPointerBasis(main,mainNative);nestedPointerBasis(peer,peerNative);sourceParity(main,mainNative);sourceParity(peer,peerNative);touchIsolation(main,mainNative,peer,peerNative);closes(main,mainNative);closes(peer,peerNative);
