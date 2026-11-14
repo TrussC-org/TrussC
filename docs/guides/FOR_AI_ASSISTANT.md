@@ -2808,9 +2808,9 @@ void console::stop()  // Disables command delivery from standard input.
 ### graphics
 
 ```cpp
-bool beginStencil()  // Compatibility query for stencil attachment availability; no ownership or state change.
+bool beginStencil() ⚠️deprecated  // Deprecated attachment query; leaves stencil unchanged and may lose its desc across Style resets. Removed in v0.9.
 void clearStencil(uint8_t value = 0)  // Replaces the entire stencil attachment with a byte, without a begin call.
-void endStencil()  // Compatibility helper that clears stencil to 0 and resets the descriptor.
+void endStencil() ⚠️deprecated  // Deprecated helper that clears stencil to 0 and resets the desc; Style resets can drop the desc before end. Removed in v0.9.
 BlendDesc getCustomBlendDesc()  // Returns a copy of the custom blend slot, regardless of the active mode.
 int getHeight()  // Returns the current drawing target's height.
 Mat4 getProjectionMatrix()  // Returns the current drawing target's camera projection matrix.
@@ -4535,7 +4535,7 @@ LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1) 
 ### StencilDesc — Sets stencil comparison, writing and color output for drawing; the default leaves stencil unchanged.
 
 ```cpp
-StencilDesc StencilDesc::drawOnce()  // Creates a value-1 NotEqual descriptor that writes passing fragments.
+StencilDesc StencilDesc::drawOnce()  // Prevents self-overlapping translucent or additive fills and strokes from double-blending; requires clearStencil and a stencil attachment.
 StencilDesc StencilDesc::inside(uint8_t value = 1, uint8_t mask = 255)  // Creates a read-only stencil descriptor that draws where the masked reference and stored byte match.
 StencilDesc StencilDesc::outside(uint8_t value = 1, uint8_t mask = 255)  // Creates a read-only stencil descriptor that draws where the masked reference and stored byte differ.
 StencilDesc StencilDesc::shape(uint8_t value = 1, uint8_t mask = 255)  // Creates a stencil-writing descriptor with color output disabled.

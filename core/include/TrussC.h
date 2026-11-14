@@ -504,9 +504,13 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
-// Compatibility entry points pending the begin/end removal decision.
+// Compatibility entry points retained for one release; new code uses StencilDesc.
 // begin only reports attachment availability; end clears to 0 and resets the desc.
+[[deprecated("Use setStencilDesc/clearStencil/resetStencilDesc instead; begin/end may not work correctly with Style because resetStyle/popStyle and the Node reset around each node's draw can drop the desc between them. Will be removed in v0.9")]]
+TC_LUA_SKIP
 bool beginStencil();
+[[deprecated("Use setStencilDesc/clearStencil/resetStencilDesc instead; begin/end may not work correctly with Style because resetStyle/popStyle and the Node reset around each node's draw can drop the desc between them. Will be removed in v0.9")]]
+TC_LUA_SKIP
 void endStencil();
 // Full-target, colorless byte clear, independent of StencilDesc and scissor.
 void clearStencil(uint8_t value = 0);

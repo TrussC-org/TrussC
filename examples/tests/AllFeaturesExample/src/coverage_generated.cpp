@@ -81,9 +81,7 @@ static void cover_font() {
 }
 
 static void cover_graphics() {
-    (void)beginStencil();
     (void)clearStencil(af::val<uint8_t>());
-    (void)endStencil();
     (void)getCustomBlendDesc();
     (void)getHeight();
     (void)getProjectionMatrix();

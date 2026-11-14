@@ -26,6 +26,40 @@ Pixels readColor(const Fbo& fbo) {
     check("color readback", fbo.readPixels(pixels.getData()));
     return pixels;
 }
+// Only this compatibility test calls the deprecated wrappers.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+void compatibilityWrappers() {
+    Fbo fbo;
+    fbo.allocate(4, 4);
+    fbo.begin();
+    clearStencil(73);
+    setStencilDesc(StencilDesc::inside(73));
+    check("begin wrapper reports attachment and preserves desc", beginStencil() &&
+        getStencilDesc() == StencilDesc::inside(73));
+    fbo.end();
+    check("begin wrapper preserves stored bytes", bytesEqual(fbo, 73));
+    fbo.begin();
+    endStencil();
+    check("end wrapper resets desc", getStencilDesc() == StencilDesc{});
+    auto& target = internal::currentTarget();
+    const auto depthFormat = target.depthFormat;
+    target.depthFormat = SG_PIXELFORMAT_NONE;
+    check("begin wrapper reports missing attachment", !beginStencil());
+    target.depthFormat = depthFormat;
+    fbo.end();
+    check("end wrapper clears stored bytes", bytesEqual(fbo, 0));
+}
+#ifdef _MSC_VER
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
 void clearValues() {
     Fbo fbo;
     fbo.allocate(7, 5);
@@ -359,6 +393,7 @@ class StencilApp : public App {
     int frame = 0;
     void draw() override {
         if (frame++ == 0) {
+            compatibilityWrappers();
             clearValues();
             ordering();
             depthPreservation();

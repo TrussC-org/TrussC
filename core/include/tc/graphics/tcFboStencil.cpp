@@ -195,7 +195,7 @@ bool beginStencil() {
 }
 
 void endStencil() {
-    clearStencil();
+    clearStencil(0);
     resetStencilDesc();
 }
 

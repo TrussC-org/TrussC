@@ -45224,43 +45224,46 @@ related = ["setup", "exitApp", "App", "Node"]
 ["beginStencil"]
 category = "graphics"
 keywords = ["stencil", "mask", "style"]
-description.en = "Compatibility query for stencil attachment availability; no ownership or state change."
-description.ja = "互換用の stencil 添付画像有無の問い合わせです。所有権や状態を変更しません。"
-description.ko = "호환용 스텐실 첨부 유무 조회입니다. 소유권이나 상태를 바꾸지 않습니다."
+description.en = "Deprecated attachment query; leaves stencil unchanged and may lose its desc across Style resets. Removed in v0.9."
+description.ja = "非推奨の添付画像有無の問い合わせです。stencil は変更せず、Style のリセットで desc が失われる場合があります。v0.9 で削除します。"
+description.ko = "사용을 권장하지 않는 첨부 유무 조회입니다. 스텐실은 변경하지 않으며 Style 초기화로 desc가 사라질 수 있습니다. v0.9에서 제거합니다."
 details.en = '''
-- Compatibility query for stencil attachment availability; no ownership or state change. Pending removal decision. New code uses StencilDesc and clearStencil directly; repeated begin calls simply return availability.
+- Returns whether the current target has a stencil attachment; changes neither stencil bytes nor the desc. Deprecated: may not work correctly with Style because `resetStyle`/`popStyle` and the Node reset around each node's draw can drop the desc between begin and end. Use `setStencilDesc` / `clearStencil` / `resetStencilDesc` instead; will be removed in v0.9.
 
-Use in the draw callback:
+Use the replacement API in the draw callback:
 ```cpp
 void tcApp::draw() {
-    clearStencil();
-    setStencilDesc(StencilDesc::shape());
+    clearStencil(0);
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
 }
 ```
 '''
 details.ja = '''
-- 互換用の stencil 添付画像有無の問い合わせです。所有権や状態を変更しません。 削除判断は保留中です。新規コードでは StencilDesc と clearStencil を直接使います。繰り返し呼んでも添付画像の有無を返すだけです。
+- 現在の描画先に stencil 添付画像があるかを返します。stencil の値も desc も変更しません。 非推奨です。`resetStyle`/`popStyle` と各ノードの draw 前後の Node によるリセットで begin と end の間に desc が失われるため、Style と組み合わせると正しく動作しない場合があります。代わりに `setStencilDesc` / `clearStencil` / `resetStencilDesc` を使います。v0.9 で削除します。
 
-draw 内で使います。
+draw 内では代替 API を使います。
 ```cpp
 void tcApp::draw() {
-    clearStencil();
-    setStencilDesc(StencilDesc::shape());
+    clearStencil(0);
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
 }
 ```
 '''
 details.ko = '''
-- 호환용 스텐실 첨부 유무 조회입니다. 소유권이나 상태를 바꾸지 않습니다. 삭제 결정은 보류 중입니다. 새 코드는 StencilDesc와 clearStencil을 직접 사용합니다. 반복 호출해도 첨부 유무만 반환합니다.
+- 현재 타깃에 스텐실 첨부가 있는지 반환합니다. 스텐실 바이트와 desc를 모두 변경하지 않습니다. 사용을 권장하지 않습니다. `resetStyle`/`popStyle`과 각 노드 draw 전후의 Node 초기화가 begin과 end 사이에서 desc를 없앨 수 있어 Style과 함께 사용하면 올바르게 작동하지 않을 수 있습니다. 대신 `setStencilDesc` / `clearStencil` / `resetStencilDesc`를 사용합니다. v0.9에서 제거합니다.
 
-draw에서 사용합니다.
+draw에서 대체 API를 사용합니다.
 ```cpp
 void tcApp::draw() {
-    clearStencil();
-    setStencilDesc(StencilDesc::shape());
+    clearStencil(0);
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
 }
 ```
 '''
-related = ["StencilDesc", "setStencilDesc", "clearStencil"]
+related = ["StencilDesc", "setStencilDesc", "clearStencil", "resetStencilDesc"]
 
 ["clearStencil"]
 category = "graphics"
@@ -45306,43 +45309,43 @@ related = ["StencilDesc", "setStencilDesc", "clearStencil"]
 ["endStencil"]
 category = "graphics"
 keywords = ["stencil", "mask", "style"]
-description.en = "Compatibility helper that clears stencil to 0 and resets the descriptor."
-description.ja = "stencil を 0 でクリアし、設定を既定に戻す互換ヘルパーです。"
-description.ko = "스텐실을 0으로 지우고 설정을 기본값으로 되돌리는 호환 도우미입니다."
+description.en = "Deprecated helper that clears stencil to 0 and resets the desc; Style resets can drop the desc before end. Removed in v0.9."
+description.ja = "非推奨の互換ヘルパーです。stencil を 0 でクリアして desc を既定に戻しますが、end 前の Style リセットで desc が失われる場合があります。v0.9 で削除します。"
+description.ko = "사용을 권장하지 않는 호환 도우미입니다. 스텐실을 0으로 지우고 desc를 초기화하지만 end 전의 Style 초기화로 desc가 사라질 수 있습니다. v0.9에서 제거합니다."
 details.en = '''
-- Compatibility helper that clears stencil to 0 and resets the descriptor. Pending removal decision. There is no ownership or saved state to restore. New code calls clearStencil and resetStencilDesc directly.
+- Calls `clearStencil(0)` then `resetStencilDesc()`. Deprecated: may not work correctly with Style because `resetStyle`/`popStyle` and the Node reset around each node's draw can drop the desc between begin and end. Use `setStencilDesc` / `clearStencil` / `resetStencilDesc` instead; will be removed in v0.9.
 
-Use in the draw callback:
+Use the replacement API in the draw callback:
 ```cpp
 void tcApp::draw() {
-    clearStencil();
+    clearStencil(0);
     resetStencilDesc();
 }
 ```
 '''
 details.ja = '''
-- stencil を 0 でクリアし、設定を既定に戻す互換ヘルパーです。 削除判断は保留中です。所有権や復元する保存状態はありません。新規コードでは clearStencil と resetStencilDesc を直接呼びます。
+- `clearStencil(0)` の後に `resetStencilDesc()` を呼びます。 非推奨です。`resetStyle`/`popStyle` と各ノードの draw 前後の Node によるリセットで begin と end の間に desc が失われるため、Style と組み合わせると正しく動作しない場合があります。代わりに `setStencilDesc` / `clearStencil` / `resetStencilDesc` を使います。v0.9 で削除します。
 
-draw 内で使います。
+draw 内では代替 API を使います。
 ```cpp
 void tcApp::draw() {
-    clearStencil();
+    clearStencil(0);
     resetStencilDesc();
 }
 ```
 '''
 details.ko = '''
-- 스텐실을 0으로 지우고 설정을 기본값으로 되돌리는 호환 도우미입니다. 삭제 결정은 보류 중입니다. 소유권이나 복원할 저장 상태는 없습니다. 새 코드는 clearStencil과 resetStencilDesc를 직접 호출합니다.
+- `clearStencil(0)` 다음에 `resetStencilDesc()`를 호출합니다. 사용을 권장하지 않습니다. `resetStyle`/`popStyle`과 각 노드 draw 전후의 Node 초기화가 begin과 end 사이에서 desc를 없앨 수 있어 Style과 함께 사용하면 올바르게 작동하지 않을 수 있습니다. 대신 `setStencilDesc` / `clearStencil` / `resetStencilDesc`를 사용합니다. v0.9에서 제거합니다.
 
-draw에서 사용합니다.
+draw에서 대체 API를 사용합니다.
 ```cpp
 void tcApp::draw() {
-    clearStencil();
+    clearStencil(0);
     resetStencilDesc();
 }
 ```
 '''
-related = ["StencilDesc", "setStencilDesc", "clearStencil"]
+related = ["StencilDesc", "setStencilDesc", "clearStencil", "resetStencilDesc"]
 
 ["clear"]
 category = "graphics_color"
@@ -67985,6 +67988,19 @@ void tcApp::draw() {
 }
 ```
 
+- Translucent or additive fills and strokes double-blend where they overlap themselves, such as the center of a pentagram drawn with `drawFill` or a stroke's joins. With `clearStencil`, `StencilDesc::drawOnce()` draws each pixel once; a stencil attachment is required.
+
+Draw each pixel once with the current fill/stroke and color:
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
+}
+```
+
+- This fixes drawing only. Physics shapes built from the same overlapping fill triangles, such as tcxBox2d compound bodies, still count the overlap in their mass; that is separate and is not solved here.
+
 - All eight bits belong to the application. mask controls both comparison and replacement; unmasked bits survive. Comparison uses masked value against masked stored byte. A passing fragment replaces bits only when write is true and depth also passes. colorWrite=false suppresses color, independently of depth. No automatic draw-once, reserved bits or ImGui exception.
 - Node::drawTree resets Style before and after each node draw. Every node starts with the default desc: a parent inside() does not clip children. Stored stencil values survive these resets.
 - Without a stencil attachment a non-default desc warns once per target and drawing uses the default state, including color output. Fbo bytes persist across frames and color/depth clears; screen persistence is not guaranteed. Fbo entry and return carry the current desc like blend state.
@@ -68009,6 +68025,19 @@ void tcApp::draw() {
 }
 ```
 
+- 半透明や加算合成の塗り・線は、自分自身と重なる部分で二重に合成されます。例えば `drawFill` で描く五芒星の中心や線の結合部です。`clearStencil` と `StencilDesc::drawOnce()` を使うと各ピクセルを一度だけ描きます。stencil 添付画像が必要です。
+
+現在の塗り・線と色で各ピクセルを一度だけ描きます。
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
+}
+```
+
+- これは描画だけを修正します。同じ重なった塗りの三角形から作る物理形状（tcxBox2d の複合ボディなど）は、重なりを質量に重複して数えます。これは別の問題であり、ここでは解決しません。
+
 - 全 8 ビットをアプリが使えます。mask は比較と置換の両方に使い、対象外のビットを保持します。マスク後の value と保存値を比較します。write が true で stencil と深度の両方を通過したフラグメントだけがビットを置換します。colorWrite=false は深度とは独立に色出力を止めます。自動 draw-once・予約ビット・ImGui の特例はありません。
 - Node::drawTree は各ノードの draw の前後に Style をリセットします。子も既定の desc から始まるため、親の inside() は子に適用されません。書き込んだ stencil 値はリセット後も残ります。
 - stencil 添付画像がない場合、既定以外の desc は描画先ごとに一度警告し、色出力を含め既定の状態で描画します。Fbo の値はフレームや色・深度クリアをまたいで残りますが、画面の保持は保証しません。Fbo の開始・終了ではブレンド状態と同様に現在の desc を引き継ぎます。
@@ -68032,6 +68061,19 @@ void tcApp::draw() {
     resetStencilDesc();
 }
 ```
+
+- 반투명 또는 가산 합성 채우기와 선은 스스로 겹치는 부분에서 두 번 합성됩니다. 예를 들어 `drawFill`로 그린 오각별의 중심이나 선의 연결부가 있습니다. `clearStencil`과 `StencilDesc::drawOnce()`를 사용하면 각 픽셀을 한 번만 그립니다. 스텐실 첨부가 필요합니다.
+
+현재 채우기·선 및 색상으로 각 픽셀을 한 번만 그립니다.
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
+}
+```
+
+- 이 기능은 그리기만 수정합니다. 같은 겹치는 채우기 삼각형으로 만든 물리 도형(예: tcxBox2d 복합 바디)은 여전히 겹침을 질량에 중복 계산합니다. 이는 별개의 문제이며 여기서는 해결하지 않습니다.
 
 - 8비트 모두 앱 소유입니다. mask는 비교와 교체에 함께 쓰이며 마스크 밖 비트는 보존합니다. 마스크된 value를 저장된 바이트와 비교합니다. write가 true이고 스텐실과 깊이 검사를 통과한 조각만 비트를 교체합니다. colorWrite=false는 깊이와 별개로 색상 출력을 막습니다. 자동 draw-once, 예약 비트, ImGui 예외는 없습니다.
 - Node::drawTree는 각 노드 draw 전후에 Style을 초기화합니다. 각 노드는 기본 desc로 시작하므로 부모의 inside()는 자식에 적용되지 않습니다. 기록된 스텐실 값은 초기화 후에도 남습니다.
@@ -68169,11 +68211,11 @@ related = ["StencilDesc", "setStencilDesc", "clearStencil"]
 ["StencilDesc::drawOnce"]
 category = "graphics"
 keywords = ["stencil", "mask", "style"]
-description.en = "Creates a value-1 NotEqual descriptor that writes passing fragments."
-description.ja = "通過したフラグメントを書き込む、値 1・NotEqual の設定を作ります。"
-description.ko = "통과한 조각을 기록하는 값 1, NotEqual 설정을 만듭니다."
+description.en = "Prevents self-overlapping translucent or additive fills and strokes from double-blending; requires clearStencil and a stencil attachment."
+description.ja = "半透明や加算合成の塗り・線の自己重複による二重合成を防ぎます。clearStencil と stencil 添付画像が必要です。"
+description.ko = "반투명 또는 가산 합성 채우기·선의 자기 겹침으로 인한 이중 합성을 막습니다. clearStencil과 스텐실 첨부가 필요합니다."
 details.en = '''
-- Creates a value-1 NotEqual descriptor that writes passing fragments. Prevents repeated color contributions within one stroke. For multiple strokes, change value through 1..255 and clearStencil after every 255 strokes before reusing values. The reference is baked into pipelines; many values and draw modes can exceed the default pool. Set WindowSettings::setPipelinePoolSize before runApp for large combinations.
+- Translucent or additive fills and strokes double-blend where they overlap themselves, such as the center of a pentagram drawn with `drawFill` or a stroke's joins. With `clearStencil`, `StencilDesc::drawOnce()` draws each pixel once; a stencil attachment is required.
 
 Apply the template:
 ```cpp
@@ -68183,9 +68225,12 @@ void tcApp::draw() {
     drawRect(20, 20, 100, 100);
 }
 ```
+
+- This fixes drawing only. Physics shapes built from the same overlapping fill triangles, such as tcxBox2d compound bodies, still count the overlap in their mass; that is separate and is not solved here.
+- Creates a value-1 NotEqual descriptor that writes passing fragments. Prevents repeated color contributions within one stroke. For multiple strokes, change value through 1..255 and clearStencil after every 255 strokes before reusing values. The reference is baked into pipelines; many values and draw modes can exceed the default pool. Set WindowSettings::setPipelinePoolSize before runApp for large combinations.
 '''
 details.ja = '''
-- 通過したフラグメントを書き込む、値 1・NotEqual の設定を作ります。 1 ストローク内の色の重なりを防ぎます。複数ストロークでは value を 1〜255 で変え、値を再利用する前に 255 ストロークごとに clearStencil します。参照値はパイプラインに焼き込むため、値や描画モードの組み合わせが多い場合は runApp 前に WindowSettings::setPipelinePoolSize でプールを増やします。
+- 半透明や加算合成の塗り・線は、自分自身と重なる部分で二重に合成されます。例えば `drawFill` で描く五芒星の中心や線の結合部です。`clearStencil` と `StencilDesc::drawOnce()` を使うと各ピクセルを一度だけ描きます。stencil 添付画像が必要です。
 
 テンプレートを適用します。
 ```cpp
@@ -68195,9 +68240,12 @@ void tcApp::draw() {
     drawRect(20, 20, 100, 100);
 }
 ```
+
+- これは描画だけを修正します。同じ重なった塗りの三角形から作る物理形状（tcxBox2d の複合ボディなど）は、重なりを質量に重複して数えます。これは別の問題であり、ここでは解決しません。
+- 通過したフラグメントを書き込む、値 1・NotEqual の設定を作ります。 1 ストローク内の色の重なりを防ぎます。複数ストロークでは value を 1〜255 で変え、値を再利用する前に 255 ストロークごとに clearStencil します。参照値はパイプラインに焼き込むため、値や描画モードの組み合わせが多い場合は runApp 前に WindowSettings::setPipelinePoolSize でプールを増やします。
 '''
 details.ko = '''
-- 통과한 조각을 기록하는 값 1, NotEqual 설정을 만듭니다. 한 스트로크 안에서 색상이 중복되는 것을 막습니다. 여러 스트로크에서는 value를 1..255로 바꾸고 재사용 전 255스트로크마다 clearStencil을 호출합니다. 참조 값은 파이프라인에 고정되므로 값과 그리기 모드 조합이 많으면 runApp 전 WindowSettings::setPipelinePoolSize로 풀을 늘립니다.
+- 반투명 또는 가산 합성 채우기와 선은 스스로 겹치는 부분에서 두 번 합성됩니다. 예를 들어 `drawFill`로 그린 오각별의 중심이나 선의 연결부가 있습니다. `clearStencil`과 `StencilDesc::drawOnce()`를 사용하면 각 픽셀을 한 번만 그립니다. 스텐실 첨부가 필요합니다.
 
 템플릿을 적용합니다.
 ```cpp
@@ -68207,6 +68255,9 @@ void tcApp::draw() {
     drawRect(20, 20, 100, 100);
 }
 ```
+
+- 이 기능은 그리기만 수정합니다. 같은 겹치는 채우기 삼각형으로 만든 물리 도형(예: tcxBox2d 복합 바디)은 여전히 겹침을 질량에 중복 계산합니다. 이는 별개의 문제이며 여기서는 해결하지 않습니다.
+- 통과한 조각을 기록하는 값 1, NotEqual 설정을 만듭니다. 한 스트로크 안에서 색상이 중복되는 것을 막습니다. 여러 스트로크에서는 value를 1..255로 바꾸고 재사용 전 255스트로크마다 clearStencil을 호출합니다. 참조 값은 파이프라인에 고정되므로 값과 그리기 모드 조합이 많으면 runApp 전 WindowSettings::setPipelinePoolSize로 풀을 늘립니다.
 '''
 related = ["StencilDesc", "clearStencil"]
 

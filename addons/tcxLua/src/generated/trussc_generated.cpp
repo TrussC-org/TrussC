@@ -59,7 +59,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("beginLines", []() { return trussc::beginLines(); });
     lua->set_function("beginShadowPass", [](trussc::Light & light) { return trussc::beginShadowPass(light); });
     lua->set_function("beginShape", []() { return trussc::beginShape(); });
-    lua->set_function("beginStencil", []() { return trussc::beginStencil(); });
     lua->set_function("beginStroke", []() { return trussc::beginStroke(); });
     lua->set_function("binToFrequency", [](int bin, int fftSize, int sampleRate) { return trussc::binToFrequency(bin, fftSize, sampleRate); });
     lua->set_function("bindCursorImage", sol::overload(
@@ -299,7 +298,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::endShape(); },
         [](bool close) { return trussc::endShape(close); }
     ));
-    lua->set_function("endStencil", []() { return trussc::endStencil(); });
     lua->set_function("endStroke", sol::overload(
         []() { return trussc::endStroke(); },
         [](bool close) { return trussc::endStroke(close); }
