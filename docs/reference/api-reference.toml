@@ -67919,13 +67919,13 @@ description.en = "Returns the stream display rotation in radians."
 description.ja = "ストリームの表示回転角をラジアンで返します。"
 description.ko = "스트림의 표시 회전각을 라디안으로 반환합니다."
 details.en = '''
-Clockwise rotation needed to display the encoded frame: `0`, `TAU/4`, `TAU/2`, or `3*TAU/4`. Frames already use this orientation. Returns zero before load and after close. Reflections are decomposed as a source horizontal flip followed by this rotation. Linux and Apple apply only this quarter turn and the reflection; other matrix parts such as scale or shear are ignored. Web cannot expose stream rotation and returns zero; playback follows browser orientation. Windows ignores a mirrored matrix: frames stay unflipped and the rotation reads zero. HAP is unchanged and ignores rotation metadata.
+Clockwise rotation needed to display the encoded frame: `0`, `TAU/4`, `TAU/2`, or `3*TAU/4`. Frames already use this orientation. Returns zero before load and after close. Reflections are decomposed as a source horizontal flip followed by this rotation. Linux and Apple apply only this quarter turn and the reflection; other matrix parts such as scale or shear are ignored. Web cannot expose stream rotation and returns zero; playback follows browser orientation. Windows ignores a mirrored matrix: frames stay unflipped and the rotation reads zero. HAP is unchanged and ignores rotation metadata. On the Linux software-decode path, rotated clips cost extra CPU per frame (about half a core at 1080p30 on a Raspberry Pi 5); to avoid it, re-encode the clip upright once, e.g. `ffmpeg -i in.mp4 -c:a copy out.mp4`, which applies the rotation while decoding and writes an unrotated file.
 '''
 details.ja = '''
-符号化画像を表示向きにする時計回りの回転です。値は `0`、`TAU/4`、`TAU/2`、`3*TAU/4` です。フレームはこの表示向きになっています。読み込み前とクローズ後はゼロです。鏡像は元画像の左右反転とその後の回転に分解します。Linux と Apple はこの直角回転と鏡像だけを適用し、拡大縮小やせん断など行列の他の成分は無視します。Web は回転メタデータを取得できずゼロを返し、再生はブラウザーの表示向きに従います。Windows は鏡像の行列を無視するため、フレームは反転されず回転はゼロになります。HAP は変更せず、回転メタデータを無視します。
+符号化画像を表示向きにする時計回りの回転です。値は `0`、`TAU/4`、`TAU/2`、`3*TAU/4` です。フレームはこの表示向きになっています。読み込み前とクローズ後はゼロです。鏡像は元画像の左右反転とその後の回転に分解します。Linux と Apple はこの直角回転と鏡像だけを適用し、拡大縮小やせん断など行列の他の成分は無視します。Web は回転メタデータを取得できずゼロを返し、再生はブラウザーの表示向きに従います。Windows は鏡像の行列を無視するため、フレームは反転されず回転はゼロになります。HAP は変更せず、回転メタデータを無視します。Linux のソフトウェアデコードでは、回転した動画はフレームごとに CPU を余分に使います（Raspberry Pi 5 の 1080p30 で約 0.5 コア）。避けるには一度だけ正立に再エンコードします。例: `ffmpeg -i in.mp4 -c:a copy out.mp4`（デコード時に回転を適用し、回転なしのファイルを書き出します）。
 '''
 details.ko = '''
-인코딩된 프레임을 표시 방향으로 만드는 시계 방향 회전이며 `0`, `TAU/4`, `TAU/2`, `3*TAU/4` 중 하나입니다. 프레임은 이미 이 표시 방향을 따릅니다. 로드 전과 닫은 후에는 0입니다. 반사는 원본의 좌우 반전 후 회전으로 분해합니다. Linux와 Apple은 이 직각 회전과 반사만 적용하며, 확대/축소나 전단 같은 행렬의 다른 성분은 무시합니다. Web은 스트림 회전을 읽을 수 없어 0을 반환하며 재생은 브라우저의 표시 방향을 따릅니다. Windows는 반사 행렬을 무시하므로 프레임은 반전되지 않고 회전은 0입니다. HAP은 변경되지 않으며 회전 메타데이터를 무시합니다.
+인코딩된 프레임을 표시 방향으로 만드는 시계 방향 회전이며 `0`, `TAU/4`, `TAU/2`, `3*TAU/4` 중 하나입니다. 프레임은 이미 이 표시 방향을 따릅니다. 로드 전과 닫은 후에는 0입니다. 반사는 원본의 좌우 반전 후 회전으로 분해합니다. Linux와 Apple은 이 직각 회전과 반사만 적용하며, 확대/축소나 전단 같은 행렬의 다른 성분은 무시합니다. Web은 스트림 회전을 읽을 수 없어 0을 반환하며 재생은 브라우저의 표시 방향을 따릅니다. Windows는 반사 행렬을 무시하므로 프레임은 반전되지 않고 회전은 0입니다. HAP은 변경되지 않으며 회전 메타데이터를 무시합니다. Linux 소프트웨어 디코딩에서는 회전된 동영상이 프레임마다 CPU를 추가로 사용합니다(Raspberry Pi 5의 1080p30에서 약 0.5코어). 피하려면 한 번만 똑바로 다시 인코딩합니다. 예: `ffmpeg -i in.mp4 -c:a copy out.mp4`(디코딩할 때 회전을 적용하고 회전 없는 파일을 씁니다).
 '''
 snippet = '''
 void tcApp::setup() {
