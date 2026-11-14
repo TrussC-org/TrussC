@@ -638,8 +638,6 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
             return {};
         }
         ComPtr<IMFMediaBuffer> buffer;
-        // A contiguous copy keeps rows tightly packed; a 2D buffer's pitch can be
-        // wider than width * 4 (e.g. 1472 bytes for a 360 px rotated frame).
         hr = sample->ConvertToContiguousBuffer(&buffer);
         if (FAILED(hr)) return {};
 
