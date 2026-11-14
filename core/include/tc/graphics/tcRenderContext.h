@@ -336,7 +336,6 @@ public:
         style_.blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         style_.customBlendDesc = internal::currentTarget().customBlendDesc;
         style_.customBlendId = internal::currentTarget().customBlendId;
-        style_.stencilDesc = internal::currentTarget().stencilDesc;
         style_.stencilDescKey = internal::currentTarget().requestedStencilDescKey;
         styleStack_.push_back(style_);
     }
@@ -465,7 +464,6 @@ public:
     }
 
     void setStencilDesc(const StencilDesc& desc) {
-        style_.stencilDesc = desc;
         auto& target = internal::currentTarget();
         target.setStencilDesc(desc);
         style_.stencilDescKey = target.requestedStencilDescKey;
@@ -476,11 +474,11 @@ private:
     void applyBlend(BlendMode mode) {
         auto& target = internal::currentTarget();
         if (target.requestedStencilDescKey != style_.stencilDescKey)
-            target.setStencilDesc(style_.stencilDesc);
-        internal::currentTarget().currentBlendMode = mode;
-        internal::currentTarget().customBlendDesc = style_.customBlendDesc;
-        internal::currentTarget().customBlendId = style_.customBlendId;
-        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled, style_.customBlendId);
+            target.setStencilDescKey(style_.stencilDescKey);
+        target.currentBlendMode = mode;
+        target.customBlendDesc = style_.customBlendDesc;
+        target.customBlendId = style_.customBlendId;
+        target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled, style_.customBlendId);
         internal::loadPipeline(internal::active2D(mode));
     }
 public:
@@ -1147,7 +1145,6 @@ private:
         // Mirror of internal::currentWindowContext().currentTarget->currentBlendMode. blend state itself lives outside the
         // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
         // restore it explicitly rather than via this field's value alone.
-        StencilDesc stencilDesc;
         uint32_t stencilDescKey = 0;
         BlendMode blend = BlendMode::Alpha;
         BlendDesc customBlendDesc;

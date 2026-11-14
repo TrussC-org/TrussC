@@ -3217,9 +3217,8 @@ void RenderTargetResources::release() {
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
     context = {}; contextFailed = false;
 }
-void RenderTarget::setStencilDesc(const StencilDesc& desc) {
-    stencilDesc = desc;
-    requestedStencilDescKey = internal::stencilDescKey(desc);
+void RenderTarget::setStencilDescKey(uint32_t key) {
+    requestedStencilDescKey = key;
     stencilDescKey = requestedStencilDescKey;
     if (stencilDescKey && !hasStencil()) {
         stencilDescKey = 0;

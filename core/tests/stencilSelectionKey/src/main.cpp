@@ -65,5 +65,16 @@ TC_CORE_TEST_MAIN() {
         }
     }
     check("packed fields apply all comparisons, masks, write and color combinations", raster);
+    bool roundTrip = true;
+    for (unsigned value = 0; value < 256; ++value) {
+        for (unsigned mask = 0; mask < 256; ++mask) {
+            for (unsigned flags = 0; flags < 32; ++flags) {
+                const StencilDesc desc{uint8_t(value), StencilTest(flags & 7),
+                    bool(flags & 8), uint8_t(mask), bool(flags & 16)};
+                roundTrip &= stencilDescFromKey(stencilDescKey(desc)) == desc;
+            }
+        }
+    }
+    check("packed descriptor round trips every field combination", roundTrip);
     return failures ? 1 : 0;
 }

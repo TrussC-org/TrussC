@@ -382,6 +382,10 @@ constexpr uint32_t stencilDescKey(const StencilDesc& desc) {
         (uint32_t(desc.write) << 11) | (uint32_t(desc.mask ^ 0xFFu) << 12) |
         (uint32_t(!desc.colorWrite) << 20);
 }
+constexpr StencilDesc stencilDescFromKey(uint32_t key) {
+    return {uint8_t(key), StencilTest((key >> 8) & 7u), bool(key & (1u << 11)),
+        uint8_t((key >> 12) ^ 0xFFu), !(key & (1u << 20))};
+}
 inline void applyStencilDesc(sg_pipeline_desc& pipeline, uint32_t key) {
     auto& stencil = pipeline.stencil;
     stencil.enabled = true;
@@ -487,13 +491,16 @@ struct RenderTarget {
     uint32_t customBlendId = blendDescId(BlendDesc{});
     bool depthTestEnabled = false;
 
-    StencilDesc stencilDesc;
     uint32_t requestedStencilDescKey = 0; // Retained even without an attachment.
     uint32_t stencilDescKey = 0; // Effective state: zero without a stencil attachment.
     bool warnedStencilDesc = false;
     bool warnedStencilClear = false;
     bool hasStencil() const { return hasDepth && depthFormat == SG_PIXELFORMAT_DEPTH_STENCIL; }
-    void setStencilDesc(const StencilDesc& desc);
+    void setStencilDescKey(uint32_t key);
+    void setStencilDesc(const StencilDesc& desc) {
+        const auto key = internal::stencilDescKey(desc);
+        if (requestedStencilDescKey != key) setStencilDescKey(key);
+    }
 
     std::vector<DeferredPbrDraw> deferredPbrDraws;
     std::vector<DeferredPointDraw> deferredPointDraws;
@@ -541,7 +548,8 @@ struct RenderTarget {
         customBlendDesc = previous.customBlendDesc;
         customBlendId = previous.customBlendId;
         depthTestEnabled = previous.depthTestEnabled;
-        setStencilDesc(previous.stencilDesc);
+        if (requestedStencilDescKey != previous.requestedStencilDescKey)
+            setStencilDescKey(previous.requestedStencilDescKey);
     }
 };
 // Immutable recipe between reset() calls. Last-selection handles never pin a

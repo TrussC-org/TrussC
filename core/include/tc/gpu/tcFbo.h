@@ -282,7 +282,6 @@ public:
             return;
         }
         stencilCache_.reset();
-        target_.stencilDesc = {};
         target_.requestedStencilDescKey = target_.stencilDescKey = 0;
         target_.warnedStencilDesc = target_.warnedStencilClear = false;
         // Also release partial allocations, before allocated_ is published.

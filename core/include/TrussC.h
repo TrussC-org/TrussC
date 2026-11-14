@@ -768,10 +768,11 @@ inline void setStencilDesc(const StencilDesc& desc) {
 }
 inline StencilDesc getStencilDesc() {
     auto* target = internal::drawingApiTarget();
-    return target ? target->stencilDesc : StencilDesc{};
+    return target ? internal::stencilDescFromKey(target->requestedStencilDescKey) : StencilDesc{};
 }
 inline void resetStencilDesc() {
-    setStencilDesc({});
+    if (internal::currentTarget().requestedStencilDescKey != 0)
+        setStencilDesc({});
 }
 
 // Restore current blend mode pipeline (use after temporary pipeline changes)
