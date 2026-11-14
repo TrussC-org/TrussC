@@ -3155,7 +3155,7 @@ static bool _sgl_grow_context_pool(void) {
 
     char msg[128];
     snprintf(msg, sizeof(msg), "context pool full, grown %d -> %d contexts (sgl_desc_t.context_pool_size sets the start)", old_num, new_num);
-    _sgl_log_msg(SGL_LOGITEM_CONTEXT_POOL_GROWN, 2, msg, __LINE__);
+    _sgl_log_msg(SGL_LOGITEM_CONTEXT_POOL_GROWN, 3, msg, __LINE__);
     return true;
 }
 

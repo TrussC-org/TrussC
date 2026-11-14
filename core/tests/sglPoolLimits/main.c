@@ -48,13 +48,13 @@ static void check(const char* name, bool ok) {
     if (!ok) ++g_fail;
 }
 
-static int g_growth_warnings = 0;
+static int g_growth_notices = 0;
 static unsigned g_growth_sizes = 0;
 static void grow_logger(const char* tag, uint32_t level, uint32_t item,
                         const char* message, uint32_t line, const char* filename,
                         void* user_data) {
-    if (item == SGL_LOGITEM_CONTEXT_POOL_GROWN && level == 2 && message) {
-        ++g_growth_warnings;
+    if (item == SGL_LOGITEM_CONTEXT_POOL_GROWN && level == 3 && message) {
+        ++g_growth_notices;
         if (strstr(message, "2 -> 4 contexts")) g_growth_sizes |= 1;
         if (strstr(message, "4 -> 8 contexts")) g_growth_sizes |= 2;
     }
@@ -155,7 +155,7 @@ static void test_failed_pipeline_rollback(void) {
 // (c) context_pool_size = 2 (the default context plus one).
 static void test_context_pool_grow(void) {
     sg_setup(&(sg_desc){ .logger.func = slog_func });
-    g_growth_warnings = 0;
+    g_growth_notices = 0;
     g_growth_sizes = 0;
     sgl_setup(&(sgl_desc_t){ .context_pool_size = 2, .logger.func = grow_logger });
 
@@ -170,8 +170,8 @@ static void test_context_pool_grow(void) {
         if (more[i].id == SG_INVALID_ID) all_valid = false;
     }
     check("(c) 4 contexts besides the default with a pool of 2 (grows)", all_valid);
-    check("(c) each grow warns with the new size (also in Release)",
-          g_growth_warnings == 2 && g_growth_sizes == 3);
+    check("(c) each grow reports info with the new size (also in Release)",
+          g_growth_notices == 2 && g_growth_sizes == 3);
     check("(c) current context still set after the grow",
           a.id != SG_INVALID_ID && sgl_get_context().id == a.id && !sgl_error().no_context);
     push_tri();

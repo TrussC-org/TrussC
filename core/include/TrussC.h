@@ -2407,7 +2407,7 @@ struct RuntimeSettings {
 
     // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
     // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
-    // the ring grows (with a warning log) when a frame overflows it,
+    // the ring grows (with a notice log) when a frame overflows it,
     // so a sufficient reservation only skips the one-time grow hitch. Every
     // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
     // 8k draw calls per frame). Vulkan does NOT auto-grow: there an

@@ -11,7 +11,7 @@ struct WGPUBufferImpl { std::vector<uint8_t> bytes; int references = 1; };
 struct WGPUBindGroupImpl { WGPUBuffer buffer; };
 namespace {
 bool rejectBuffer = false, rejectGroup = false, rejectAllocation = false;
-int liveBuffers = 0, errors = 0, warnings = 0, failures = 0;
+int liveBuffers = 0, errors = 0, warnings = 0, growthNotices = 0, failures = 0;
 WGPUBuffer boundBuffer = nullptr;
 std::array<uint32_t, 2> boundOffsets{};
 struct Draw { WGPUBuffer buffer; std::array<uint32_t, 2> offsets; int value; };
@@ -62,9 +62,15 @@ void wgpuComputePassEncoderDispatchWorkgroups(WGPUComputePassEncoder, uint32_t, 
 #define SOKOL_IMPL
 #include "sokol_gfx.h"
 namespace {
-void logger(const char*, uint32_t level, uint32_t, const char*, uint32_t, const char*, void*) {
+void logger(const char*, uint32_t level, uint32_t item, const char*, uint32_t, const char*, void*) {
     if (level <= 1) ++errors;
     if (level == 2) ++warnings;
+#if !defined(TC_WEBGPU_BASELINE)
+    if (level == 3 && item == SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN) ++growthNotices;
+#else
+    (void)item;
+    (void)growthNotices;
+#endif
 }
 void* allocate(size_t size, void*) { return rejectAllocation ? nullptr : std::malloc(size); }
 void deallocate(void* ptr, void*) { std::free(ptr); }
@@ -132,7 +138,7 @@ int main() {
         recorded.clear();
     }
 #if !defined(TC_WEBGPU_BASELINE)
-    check(errors == 0 && warnings == 1, "one growth warning and no normal errors");
+    check(errors == 0 && warnings == 0 && growthNotices == 1, "one growth info and no normal warnings/errors");
     for (int fault = 0; fault < 4; ++fault) {
         auto& u = _sg.wgpu.uniform;
         WGPUBuffer previousBuffer = u.buf; uint8_t* previousStaging = u.staging;
