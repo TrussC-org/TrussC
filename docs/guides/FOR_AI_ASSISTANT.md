@@ -172,7 +172,7 @@ setFps(EVENT_DRIVEN);  // Redraw only on demand
 setIndependentFps(60, EVENT_DRIVEN);   // call redraw() on every visible change
 ```
 
-On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that do not report covering (e.g. labwc/Xwayland), expect one ~1 s pause per covered window that takes the pacing role. A native swap taking at least 100 ms marks that window as stalled and prefers a window that has not stalled, so pacing settles on an uncovered visible window if one exists. If all visible windows have stalled, the current pacer stays in place. Hide/show or a fast swap while pacing clears that window’s stall flag.
 
 ## Drawing
 

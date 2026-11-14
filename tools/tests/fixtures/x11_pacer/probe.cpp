@@ -26,7 +26,7 @@ struct _sapp_tc_window_t {
     bool ready=false,constructing=false,in_tick=false,is_main=false,skip_present=false,last_tick_presented=false;
     bool close_requested=false,input_delivered=false,surface_resize_pending=false,fullscreen_requested=false,wake_on_input=false;
     bool iconified=false,occluded=false;
-    bool swap_interval_pending=false;
+    bool swap_interval_pending=false, pacing_stalled=false;
     uint32_t win_id=0; int drawable=0,swap_interval=0,requested_swap_interval=1,pacing_ticks=0;
     int frame_count=0,visibility_op=0,color_format=0,depth_format=0,fb_width=64,fb_height=64;
     float dpi_scale=1; size_t title_limit=0; char* title=nullptr;
@@ -44,7 +44,7 @@ struct {
             bool (*_tc_callbacks_active)()=nullptr; } desc;
     } app;
 } _sapp_tc;
-static double clockValue=10,refresh=1.0/60,work=0;
+static double clockValue=10,refresh=1.0/60,work=0,forcedSwap=-1,activation=0;
 static int currentDrawable=0,turns=0,turnLimit=12,swaps[5]{},nativeIntervals[5]{};
 static bool trace=false,fast=false,ignoreIntervalTwo=false;
 static std::vector<int> order;
@@ -67,10 +67,11 @@ int mesaInterval(int value) { nativeInterval(1,currentDrawable,value); return 0;
 int glXGetCurrentDrawable() { return currentDrawable; }
 int glXGetCurrentContext() { return 1; }
 int glXMakeCurrent(int,int drawable,int) { currentDrawable=drawable;record("current",drawable);return 1; }
-int eglMakeCurrent(int,int drawable,int,int) { return glXMakeCurrent(1,drawable,1); }
+int eglMakeCurrent(int,int drawable,int,int) { clockValue+=activation; return glXMakeCurrent(1,drawable,1); }
 int eglSwapInterval(int,int value) { nativeInterval(1,currentDrawable,value);return 1; }
 void nativeSwap(int drawable) {
     record("swap",drawable,nativeIntervals[drawable]); ++swaps[drawable];
+    if (forcedSwap>=0) { clockValue+=forcedSwap; return; }
     clockValue+=fast?.00005:refresh*(ignoreIntervalTwo && nativeIntervals[drawable]>1 ? 1 : nativeIntervals[drawable]);
 }
 void glXSwapBuffers(int,int drawable) { nativeSwap(drawable); }
@@ -128,7 +129,7 @@ static void reset() {
     _sapp_tc={};_sapp_tc.SwapIntervalEXT=nativeInterval;_sapp_tc.SwapIntervalMESA=mesaInterval;
     _sapp_tc.app.desc._tc_after_turn=afterTurn;clockValue=10;refresh=1.0/60;turns=0;work=0;currentDrawable=0;
     std::fill(std::begin(swaps),std::end(swaps),0);std::fill(std::begin(nativeIntervals),std::end(nativeIntervals),0);
-    intervalCalls.clear();order.clear();nativeCalls.clear();ignoreIntervalTwo=false;
+    intervalCalls.clear();order.clear();nativeCalls.clear();ignoreIntervalTwo=false;forcedSwap=-1;activation=0;
 }
 static _sapp_tc_window_t* create(int interval=1,bool hidden=false) {
     _sapp_tc_native_desc d;d.swap_interval=interval;d.window.hidden=hidden;d.window.tick_cb=tick;
@@ -172,6 +173,74 @@ int main(int argc,char** argv) {
         return 0;
     }
 #if CURRENT
+    // #1367: synthetic durations exercise production tick + native role changes.
+    // Start at zero so the exact threshold is representable by the same double.
+    for (double duration : {.099, .100, 1.0}) {
+        reset();auto* first=create(2);auto* second=create();
+        clockValue=0;forcedSwap=duration;intervalCalls.clear();
+        _sapp_tc_x11_tick(first);
+        const bool stalled=duration>=.100;
+        check("stall threshold",_sapp_tc.pacer.id==(stalled ? 2u : 1u));
+        check("stall demote/promote once",intervalCalls==(stalled ?
+            std::vector<std::string>{"1:0","2:1"} : std::vector<std::string>{}));
+        if(stalled) check("new pacer history reset",second->last_present==0 && !second->last_tick_presented && second->earliest_next==0 && second->wake_on_input);
+        forcedSwap=0;
+        for(int i=0;i<4;++i) { _sapp_tc_x11_tick(first);_sapp_tc_x11_tick(second); }
+        check("fast old follower does not reclaim role",_sapp_tc.pacer.id==(stalled ? 2u : 1u));
+        if(stalled) {
+            // A slow follower never moves the role; callback work is not swap time.
+            forcedSwap=1;_sapp_tc_x11_tick(first);
+            check("slow follower ignored",_sapp_tc.pacer.id==2);
+            forcedSwap=0;work=1;_sapp_tc_x11_tick(second);work=0;
+            check("slow render work ignored",_sapp_tc.pacer.id==2);
+            // With both windows stalled, retain the current pacer.
+            forcedSwap=1;_sapp_tc_x11_tick(second);
+            check("all stalled retain current pacer",_sapp_tc.pacer.id==2);
+            forcedSwap=0;_sapp_tc_x11_tick(second);
+            check("fast pacer clears its stall",!second->pacing_stalled);
+        }
+    }
+    for(bool hidden : {false,true}) {
+        reset();auto* first=create();
+        if(hidden) create(1,true);
+        forcedSwap=1;_sapp_tc_x11_tick(first);
+        check("no visible alternative unchanged",_sapp_tc.pacer.id==1 && first->swap_interval==1 && first->pacing_stalled);
+        if(hidden) _sapp_tc.windows[1]->desc.hidden=false;
+        else create();
+        check("new visible window preferred after single stall",_sapp_tc_x11_update_pacer()!=first);
+    }
+    // Two covered pacing windows must not starve a third visible window.
+    reset();auto* coveredA=create();auto* coveredB=create();auto* visibleC=create();
+    forcedSwap=1;_sapp_tc_x11_tick(coveredA);
+    check("first covered stall promotes B",_sapp_tc.pacer.id==coveredB->win_id);
+    _sapp_tc_x11_tick(coveredB);
+    check("second covered stall settles on C",_sapp_tc.pacer.id==visibleC->win_id);
+    forcedSwap=0;
+    for(int i=0;i<4;++i) {
+        _sapp_tc_x11_tick(coveredA);
+        _sapp_tc_x11_tick(coveredB);
+        _sapp_tc_x11_tick(visibleC);
+        check("visible C retains role",_sapp_tc_x11_update_pacer()==visibleC);
+    }
+    forcedSwap=1;_sapp_tc_x11_tick(visibleC);
+    check("three stalled retain C",_sapp_tc_x11_update_pacer()==visibleC);
+#if defined(SOKOL_GLES3)
+    reset();auto* active=create();create();
+    activation=1;forcedSwap=0;_sapp_tc_x11_tick(active);
+    check("one second activation is not a swap stall",_sapp_tc.pacer.id==active->win_id && !active->pacing_stalled);
+#endif
+    reset();auto* original=create();auto* replacement=create();
+    forcedSwap=1;_sapp_tc_x11_tick(original);forcedSwap=0;
+    replacement->iconified=true;
+    check("replacement iconify normal handoff",_sapp_tc_x11_update_pacer()==original);
+    replacement->iconified=false;original->desc.hidden=true;_sapp_tc_x11_update_pacer();
+    original->desc.hidden=false;
+    check("old hide/show resets stall preference",_sapp_tc_x11_update_pacer()==original);
+    forcedSwap=1;_sapp_tc_x11_tick(original);forcedSwap=0;
+    sapp_destroy_window({replacement->win_id});
+    check("replacement close normal handoff",_sapp_tc_x11_update_pacer()==original);
+    std::puts("covered pacer synthetic swap durations: PASS");
+    reset();
     auto* first=create(2);auto* second=create();auto* third=create();
     intervalCalls.clear();
     check("steady role",_sapp_tc_x11_update_pacer()==first && intervalCalls.empty());

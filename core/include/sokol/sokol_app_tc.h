@@ -9246,7 +9246,12 @@ sapp_swapchain sapp_acquire_swapchain(void) {
     effectively visible, ready window holds the blocking native vsync interval
     requested by that window. Followers swap at interval 0 and follow its
     refresh-rate presents or periodic timers. When the pacer hides or closes,
-    its role moves to the next visible window. Hidden windows never swap and
+    its role moves to the next visible window. [TrussC #1367] A swap >= 100 ms
+    also hands off, remembering stalls per window and preferring unstalled
+    windows. If all visible windows have stalled, the current pacer stays.
+    Compositors without cover reports (labwc/Xwayland) cause one ~1 s pause
+    per covered pacing window before settling on an uncovered visible window.
+    Hidden windows never swap and
     use base-refresh timers, whether or not the client draws while hidden.
     GLX self-heals to timers if swaps stop blocking; EGL retains its existing
     visible-pacer skipped-present deadline. The shared X11 fd wait wakes for
@@ -9347,6 +9352,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     int requested_swap_interval;
     int pacing_ticks;
     bool swap_interval_pending; // defer hidden-surface demotion until its next visible swap
+    bool pacing_stalled; // [TrussC #1367] prefer windows whose pacing swaps have not stalled
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
@@ -11861,12 +11867,14 @@ static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
 #endif
 }
 
-static void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
+static void _sapp_tc_x11_swap(_sapp_tc_window_t* w, double* swap_start = nullptr) {
 #if defined(SOKOL_GLES3)
     // A callback may have activated another window; present this window's surface.
     if (!_sapp_tc_x11_make_current(w)) return;
+    if (swap_start) *swap_start = _sapp_tc_now();
     eglSwapBuffers(_sapp_tc.egl_display, w->drawable);
 #else
+    if (swap_start) *swap_start = _sapp_tc_now();
     glXSwapBuffers(_sapp_tc.display, w->drawable);
 #endif
 }
@@ -12485,13 +12493,26 @@ static bool _sapp_tc_x11_window_due(_sapp_tc_window_t* w, double now) {
 // [TrussC #997] Slots are reused; win_id retains creation order. This scan
 // changes native state only on a role change, preserving steady single-window
 // activation, interval N and refresh sampling exactly.
+// A close requested during a stalled frame can promote that window for one
+// tick before its deferred close.
 static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {
     _sapp_tc_window_t* next = nullptr;
+    _sapp_tc_window_t* stalled = nullptr;
     for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
-        if (!w || !w->ready || w->constructing || !w->drawable || _sapp_tc_native_hidden(w)) continue;
+        if (!w) continue;
+        const bool hidden = _sapp_tc_native_hidden(w);
+        // [TrussC #1367] Hide/show restores the normal creation-order rule.
+        if (hidden) w->pacing_stalled = false;
+        if (!w->ready || w->constructing || !w->drawable || hidden) continue;
+        if (w->pacing_stalled) {
+            // Keep the current pacer if all eligible windows have stalled.
+            if (!stalled || w->win_id == _sapp_tc.pacer.id) stalled = w;
+            continue;
+        }
         if (!next || w->win_id < next->win_id) next = w;
     }
+    if (!next) next = stalled; // No unstalled alternative: retain native pacing.
     if (_sapp_tc.pacer.id == (next ? next->win_id : 0)) return next;
     _sapp_tc_x11_surface_scope restore_surface;
     const auto apply_interval = [](_sapp_tc_window_t* w, int interval) {
@@ -12612,6 +12633,8 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (_sapp_tc_lookup(handle) != w) return;
     ++w->frame_count;
     bool presented = false;
+    double swap_start = -1.0;
+    bool watch_swap = false;
     // [TrussC #997] Reconcile callback-driven hides before any native swap.
     _sapp_tc_x11_update_pacer();
     if (!w->skip_present && !_sapp_tc_native_hidden(w)) {
@@ -12619,16 +12642,28 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
             _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
             w->swap_interval_pending = false;
         }
-        _sapp_tc_x11_swap(w);
+        // [TrussC #1367] Time only the pacing swap, not callback/render work.
+        watch_swap = w->swap_interval > 0 && _sapp_tc.window_slots > 1;
+        _sapp_tc_x11_swap(w, watch_swap ? &swap_start : nullptr);
         presented = true;
     }
     w->skip_present = false;
     w->last_tick_presented = presented;
+    const double now = w->swap_interval > 0 ? _sapp_tc_now() : 0.0;
+    // 100 ms separates a compositor stall from normal refresh/interval jitter.
+    constexpr double _sapp_tc_x11_stalled_swap_seconds = 0.100;
+    if (watch_swap && swap_start >= 0.0) {
+        w->pacing_stalled = now - swap_start >= _sapp_tc_x11_stalled_swap_seconds;
+        if (w->pacing_stalled) {
+            // labwc 0.9.2/Xwayland on Pi 5: covered pacer swaps wait ~1 s, followers do not.
+            // [TrussC #1367] We'd like to remove this hitch, e.g. watch Present MSC on our own windows.
+            _sapp_tc_x11_update_pacer();
+        }
+    }
     if (w->swap_interval == 0) {
         _sapp_tc_x11_pace_periodic(w, _sapp_tc_native_hidden(w) ? _sapp_tc.hidden_refresh_period : _sapp_tc.refresh_period);
         return;
     }
-    const double now = _sapp_tc_now();
 #if defined(SOKOL_GLES3)
     if (!presented) {
         w->earliest_next = frame_start + 0.0166 * (double)w->swap_interval;

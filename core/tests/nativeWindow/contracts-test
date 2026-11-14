@@ -42,6 +42,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Window xwin;
     bool fullscreen_requested;
     int requested_swap_interval;
+    bool pacing_stalled=false;
     bool swap_interval_pending;
     int pacing_ticks;
     bool surface_resize_pending=false;
@@ -176,7 +177,9 @@ static void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
 static void _sapp_tc_x11_app_event(_sapp_tc_window_t*, sapp_event_type) {}
 static void _sapp_tc_x11_pace(_sapp_tc_window_t*, double) {}
 static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t*, double) {}
-static void _sapp_tc_x11_swap(_sapp_tc_window_t* w) { ++presents; presented = (uintptr_t)w->drawable; }
+static void _sapp_tc_x11_swap(_sapp_tc_window_t* w, double* swap_start = nullptr) {
+    if (swap_start) *swap_start = _sapp_tc_now();
+    ++presents; presented = (uintptr_t)w->drawable; }
 static void _sapp_tc_log(const sapp_logger*, int, uint32_t, int, const char*, const char*) {}
 '''
 # Use the production surface type declaration when the guard covers both backends.

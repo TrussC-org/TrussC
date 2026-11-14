@@ -46,7 +46,7 @@ struct Descriptor {
 struct _sapp_tc_window_t {
     unsigned win_id=717; bool constructing=false,surface_resize_pending=false,ready=true,in_tick=false,is_main=true,cancel_tick=false;
     bool native_closed=false,closed_pending=false,draw_admitted=false; int callback_depth=0,frame_drawable=0;
-    bool close_requested=false,input_delivered=false,wake_on_input=true,credit_held=false,waitable_ready=true;
+    bool pacing_stalled=false,close_requested=false,input_delivered=false,wake_on_input=true,credit_held=false,waitable_ready=true;
     struct { double last=0; } timing;
     int swap_interval=1, visibility_op=0; double last_present=0;
     int drawable=1,swap_chain=1; void* frame_wait=nullptr; double earliest_next=0;

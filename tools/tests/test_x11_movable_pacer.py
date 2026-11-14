@@ -29,7 +29,12 @@ def main():
     source = Path(os.environ.get('TC_X11_PACING_HEADER', ROOT / 'core/include/sokol/sokol_app_tc.h')).read_text(encoding='utf-8')
     markers = [line for line in before.splitlines() if line.startswith('static ') and line.endswith('{')]
     # Helper ordering matches the snapshot; the role selector is new.
-    current = '\n\n'.join(body(source, marker) for marker in markers)
+    functions = []
+    for marker in markers:
+        if marker.startswith('static void _sapp_tc_x11_swap('):
+            marker = 'static void _sapp_tc_x11_swap(_sapp_tc_window_t* w, double* swap_start = nullptr) {'
+        functions.append(body(source, marker))
+    current = '\n\n'.join(functions)
     insertion = 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'
     current = current.replace(insertion, body(source, 'static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {') + '\n' + insertion)
     template = (FIXTURES / 'probe.cpp').read_text(encoding='utf-8')
