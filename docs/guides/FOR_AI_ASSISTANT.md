@@ -172,7 +172,7 @@ setFps(EVENT_DRIVEN);  // Redraw only on demand
 setIndependentFps(60, EVENT_DRIVEN);   // call redraw() on every visible change
 ```
 
-On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize it to hand pacing to another window. Known issue #1367.
 
 ## Drawing
 

@@ -12470,6 +12470,11 @@ static bool _sapp_tc_x11_window_due(_sapp_tc_window_t* w, double now) {
 // [TrussC #997] Slots are reused; win_id retains creation order. This scan
 // changes native state only on a role change, preserving steady single-window
 // activation, interval N and refresh sampling exactly.
+// [TrussC #1367] Known issue: on compositors that throttle covered windows
+// (labwc 0.9.2/Xwayland on Pi 5), a covered pacer drops every window to ~1 Hz.
+// The ~1 s block is in eglMakeCurrent re-binding the pacer surface (DRI3 waits
+// for a free back buffer), not in the swap; changing that surface's interval
+// to hand off the role blocked ~3 s. No hand-off is attempted; see #1367.
 static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {
     _sapp_tc_window_t* next = nullptr;
     for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
