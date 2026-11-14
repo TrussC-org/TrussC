@@ -1,6 +1,9 @@
 // Only this TU includes Highway. Web keeps the scalar path until SIMD128
 // is approved; other architectures can use the same explicit fallback.
 #include "tcSimd.h"
+#include <cmath>
+#include <algorithm>
+#include <limits>
 
 #ifndef TRUSSC_SIMD_SCALAR
 #if !defined(__EMSCRIPTEN__) && !defined(__ARM_BIG_ENDIAN) && \
@@ -34,6 +37,89 @@ HWY_BEFORE_NAMESPACE();
 namespace trussc::simd {
 namespace HWY_NAMESPACE {
 namespace hn = hwy::HWY_NAMESPACE;
+
+// Modes: sum, centered squared sum, and pairwise squared difference sum.
+// Promote before arithmetic to avoid float overflow and cancellation.
+template <int Mode>
+double Reduce(const float* a, const float* b, std::size_t count, double center) {
+#if HWY_HAVE_FLOAT64
+    const hn::ScalableTag<double> d;
+    const hn::Rebind<float, decltype(d)> df;
+    const std::size_t lanes = hn::Lanes(d);
+    auto total = hn::Zero(d);
+    std::size_t i = 0;
+    for (; count - i >= lanes; i += lanes) {
+        auto value = hn::PromoteTo(d, hn::LoadU(df, a + i));
+        if constexpr (Mode == 1) value = hn::Sub(value, hn::Set(d, center));
+        if constexpr (Mode == 2) value = hn::Sub(value, hn::PromoteTo(d, hn::LoadU(df, b + i)));
+        if constexpr (Mode != 0) value = hn::Mul(value, value);
+        total = hn::Add(total, value);
+    }
+    double result = hn::ReduceSum(d, total);
+#else
+    std::size_t i = 0;
+    double result = 0.0;
+#endif
+    for (; i < count; ++i) {
+        double value = a[i];
+        if constexpr (Mode == 1) value -= center;
+        if constexpr (Mode == 2) value -= double(b[i]);
+        if constexpr (Mode != 0) value *= value;
+        result += value;
+    }
+    return result;
+}
+
+float Sum(const float* values, std::size_t count) {
+    return static_cast<float>(Reduce<0>(values, nullptr, count, 0.0));
+}
+float Mean(const float* values, std::size_t count) {
+    return count ? static_cast<float>(Reduce<0>(values, nullptr, count, 0.0) / count) : 0.0f;
+}
+double PopulationVariance(const float* values, std::size_t count) {
+    if (!count) return 0.0;
+    const double center = Reduce<0>(values, nullptr, count, 0.0) / count;
+    return Reduce<1>(values, nullptr, count, center) / count;
+}
+float Variance(const float* values, std::size_t count) {
+    return static_cast<float>(PopulationVariance(values, count));
+}
+float Stddev(const float* values, std::size_t count) {
+    return static_cast<float>(std::sqrt(PopulationVariance(values, count)));
+}
+float Rms(const float* values, std::size_t count) {
+    return count ? static_cast<float>(std::sqrt(Reduce<1>(values, nullptr, count, 0.0) / count)) : 0.0f;
+}
+float Mse(const float* a, const float* b, std::size_t count) {
+    return count ? static_cast<float>(Reduce<2>(a, b, count, 0.0) / count) : 0.0f;
+}
+std::pair<float, float> MinMax(const float* values, std::size_t count) {
+    if (!count) return {0.0f, 0.0f};
+    const hn::ScalableTag<float> d;
+    const std::size_t lanes = hn::Lanes(d);
+    auto lowest = hn::Set(d, values[0]);
+    auto highest = lowest;
+    auto nanMask = hn::IsNaN(lowest);
+    std::size_t i = 0;
+    for (; count - i >= lanes; i += lanes) {
+        const auto value = hn::LoadU(d, values + i);
+        nanMask = hn::Or(nanMask, hn::IsNaN(value));
+        lowest = hn::Min(lowest, value);
+        highest = hn::Max(highest, value);
+    }
+    bool hasNaN = !hn::AllFalse(d, nanMask);
+    float lo = hn::ReduceMin(d, lowest), hi = hn::ReduceMax(d, highest);
+    for (; i < count; ++i) {
+        hasNaN |= std::isnan(values[i]);
+        lo = std::min(lo, values[i]);
+        hi = std::max(hi, values[i]);
+    }
+    if (hasNaN) {
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        return {nan, nan};
+    }
+    return {lo, hi};
+}
 
 void Swizzle(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels,
              bool forceAlpha) {
@@ -107,6 +193,59 @@ HWY_AFTER_NAMESPACE();
 #if TRUSSC_SIMD_SCALAR || HWY_ONCE
 namespace trussc::simd {
 namespace scalar {
+namespace {
+double total(const float* values, std::size_t count) {
+    double result = 0.0;
+    for (std::size_t i = 0; i < count; ++i) result += values[i];
+    return result;
+}
+double populationVariance(const float* values, std::size_t count) {
+    if (!count) return 0.0;
+    const double center = total(values, count) / count;
+    double result = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double delta = double(values[i]) - center;
+        result += delta * delta;
+    }
+    return result / count;
+}
+} // namespace
+float sum(const float* values, std::size_t count) { return static_cast<float>(total(values, count)); }
+float mean(const float* values, std::size_t count) {
+    return count ? static_cast<float>(total(values, count) / count) : 0.0f;
+}
+float variance(const float* values, std::size_t count) {
+    return static_cast<float>(populationVariance(values, count));
+}
+float stddev(const float* values, std::size_t count) {
+    return static_cast<float>(std::sqrt(populationVariance(values, count)));
+}
+float rms(const float* values, std::size_t count) {
+    if (!count) return 0.0f;
+    double result = 0.0;
+    for (std::size_t i = 0; i < count; ++i) result += double(values[i]) * values[i];
+    return static_cast<float>(std::sqrt(result / count));
+}
+float mse(const float* a, const float* b, std::size_t count) {
+    if (!count) return 0.0f;
+    double result = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double delta = double(a[i]) - double(b[i]);
+        result += delta * delta;
+    }
+    return static_cast<float>(result / count);
+}
+std::pair<float, float> minMax(const float* values, std::size_t count) {
+    if (!count) return {0.0f, 0.0f};
+    float lo = values[0], hi = values[0];
+    for (std::size_t i = 0; i < count; ++i) {
+        if (std::isnan(values[i])) return {values[i], values[i]};
+        lo = std::min(lo, values[i]);
+        hi = std::max(hi, values[i]);
+    }
+    return {lo, hi};
+}
+
 void bgraToRgba(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels,
                 bool forceAlpha) {
     for (std::size_t i = 0; i < pixels; ++i) {
@@ -170,6 +309,13 @@ void yuyvToRgba(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels) 
 #if !TRUSSC_SIMD_SCALAR
 HWY_EXPORT(Swizzle);
 HWY_EXPORT(Yuyv);
+HWY_EXPORT(Sum);
+HWY_EXPORT(Mean);
+HWY_EXPORT(Variance);
+HWY_EXPORT(Stddev);
+HWY_EXPORT(MinMax);
+HWY_EXPORT(Rms);
+HWY_EXPORT(Mse);
 #endif
 void bgraToRgba(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels, bool forceAlpha) {
 #if TRUSSC_SIMD_SCALAR
@@ -186,6 +332,55 @@ void yuyvToRgba(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels) 
     scalar::yuyvToRgba(src, dst, pixels);
 #else
     HWY_DYNAMIC_DISPATCH(Yuyv)(src, dst, pixels);
+#endif
+}
+float sum(const float* values, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::sum(values, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(Sum)(values, count);
+#endif
+}
+float mean(const float* values, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::mean(values, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(Mean)(values, count);
+#endif
+}
+float variance(const float* values, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::variance(values, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(Variance)(values, count);
+#endif
+}
+float stddev(const float* values, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::stddev(values, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(Stddev)(values, count);
+#endif
+}
+std::pair<float, float> minMax(const float* values, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::minMax(values, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(MinMax)(values, count);
+#endif
+}
+float rms(const float* values, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::rms(values, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(Rms)(values, count);
+#endif
+}
+float mse(const float* a, const float* b, std::size_t count) {
+#if TRUSSC_SIMD_SCALAR
+    return scalar::mse(a, b, count);
+#else
+    return HWY_DYNAMIC_DISPATCH(Mse)(a, b, count);
 #endif
 }
 } // namespace trussc::simd
