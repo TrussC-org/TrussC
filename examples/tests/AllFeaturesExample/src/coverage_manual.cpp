@@ -24,6 +24,9 @@ void* volatile af::sink = nullptr;
 namespace {
 
 void coverTemplates() {
+    std::vector<int> cards{1, 2, 3};
+    shuffle(cards);
+
     Tween<float> tw;
     tw.from(0.0f).to(1.0f).duration(1.0f).ease(EaseType::Cubic).loop(1).yoyo().delay(0.0f);
     tw.start();

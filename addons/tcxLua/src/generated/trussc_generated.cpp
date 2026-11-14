@@ -631,6 +631,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float max) { return trussc::random(max); },
         [](float min, float max) { return trussc::random(min, max); }
     ));
+    lua->set_function("randomGaussian", sol::overload(
+        [](float mean, float stddev) { return trussc::randomGaussian(mean, stddev); },
+        []() { return trussc::randomGaussian(); }
+    ));
     lua->set_function("randomInt", sol::overload(
         [](int max) { return trussc::randomInt(max); },
         [](int min, int max) { return trussc::randomInt(min, max); }
@@ -824,6 +828,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("showCursor", []() { return trussc::showCursor(); });
     lua->set_function("shutdownAudio", []() { return trussc::shutdownAudio(); });
+    lua->set_function("sigmoid", [](float x) { return trussc::sigmoid(x); });
     lua->set_function("sign", [](float value) { return trussc::sign(value); });
     lua->set_function("signedNoise", sol::overload(
         [](float x) { return trussc::signedNoise(x); },
@@ -837,6 +842,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("sin", [](float x) { return std::sin(x); });
     lua->set_function("sleepMicros", [](int micros) { return trussc::sleepMicros(micros); });
     lua->set_function("sleepMillis", [](int millis) { return trussc::sleepMillis(millis); });
+    lua->set_function("smoothstep", [](float edge0, float edge1, float x) { return trussc::smoothstep(edge0, edge1, x); });
     lua->set_function("splitString", sol::overload(
         [](const std::string & source, const std::string & delimiter) { return trussc::splitString(source, delimiter); },
         [](const std::string & source, const std::string & delimiter, bool ignoreEmpty) { return trussc::splitString(source, delimiter, ignoreEmpty); },
