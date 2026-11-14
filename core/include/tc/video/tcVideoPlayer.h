@@ -75,11 +75,6 @@ public:
     // Load / Close
     // =========================================================================
 
-    /// Clockwise stream display rotation. Frames use this orientation.
-    /// Web cannot expose stream metadata and returns zero.
-    float getRotation() const { return float(rotationDeg_) * (TAU / 360.0f); }
-    int getRotationDeg() const { return rotationDeg_; }
-
     /// Linux: stream audio by default. Set false before load() to preload
     /// the whole track for sample-accurate loops and seeks. Changing this
     /// setting applies to the next load(). Native OS players ignore it.
@@ -124,7 +119,7 @@ public:
 #else
             // These backends own main-thread/GPU state. Keep their existing
             // blocking load path, but run it in a later resource-load pass.
-            ready.result = loadInternal(ready.path, &ready);
+            ready.result = loadInternal(ready.path);
 #endif
         });
         const auto text = internal::pathToDisplayUtf8(path);
@@ -422,6 +417,11 @@ public:
     // =========================================================================
     // Properties
     // =========================================================================
+
+    /// Clockwise stream display rotation. Frames use this orientation.
+    /// Web cannot expose stream metadata and returns zero.
+    float getRotation() const { return float(rotationDeg_) * (TAU / 360.0f); }
+    int getRotationDeg() const { return rotationDeg_; }
 
     float getDuration() const override {
         if (!initialized_) return 0.0f;
@@ -808,7 +808,7 @@ public:
     /// @return true on success
     static bool extractFrame(const fs::path& path, Pixels& outPixels,
                              float timeSec, float* outDuration = nullptr) try {
-        return extractFramePlatform(path, outPixels, timeSec, outDuration, {});
+        return extractFramePlatform(path, outPixels, timeSec, outDuration);
     } catch (const std::bad_alloc&) {
         return false;
     }
@@ -822,7 +822,7 @@ public:
     /// @return true on success
     static bool extractKeyFrame(const fs::path& path, Pixels& outPixels,
                                 float timeSec, float* outDuration = nullptr) try {
-        return extractKeyFramePlatform(path, outPixels, timeSec, outDuration, {});
+        return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
     } catch (const std::bad_alloc&) {
         return false;
     }
