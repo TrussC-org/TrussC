@@ -9123,69 +9123,94 @@ void tcApp::draw() {
 
 ["Fbo::drawStencil"]
 category = "graphics_fbo"
-keywords = ["stencil", "debug", "gray", "preview"]
-description.en = "Draws the framebuffer's stencil bytes as an opaque gray image."
-description.ja = "フレームバッファの stencil 値を不透明なグレー画像として描画します。"
-description.ko = "프레임버퍼의 스텐실 값을 불투명한 회색 이미지로 그립니다."
+keywords = ["stencil", "mask", "style"]
+description.en = "Draws ended single-sample Fbo stencil bytes as an opaque gray image for debugging."
+description.ja = "end 後のシングルサンプル Fbo の stencil 値をデバッグ用の不透明なグレー画像で描きます。"
+description.ko = "종료된 단일 샘플 Fbo의 스텐실 바이트를 디버깅용 불투명 회색 이미지로 그립니다."
 details.en = '''
-- `drawStencil(x, y)` reconstructs all eight stencil bits into a cached R8 Fbo using the internal eight-draw path, then draws at attachment size with nearest sampling. Each byte is displayed as gray `value / 255`; no CPU readback is needed. It preserves the source color and stencil.
-- Uses the current target's coordinates, transformations, depth test and scissor. The preview is opaque and ignores the current tint and blend mode; the tint, blend mode and pipeline are restored afterward. Like other image draws, it leaves texturing off, so call `bind()` again on a texture you were drawing with. Repeated calls refresh the capture and reuse the cache.
-- Only allocated, ended, owned single-sample Fbos are supported. Unallocated, active or MSAA sources warn and draw nothing. There is no main-target/free-function form in this slice.
-- The snippet uses the internal round-trip test fixture to write an ended R8 pattern into stencil; `writeGray` is not a public application API. Use `beginStencil` and `clearStencil` for uniform public byte clearing. Geometry writing and main-target capture are later slices.
+- Draws ended single-sample Fbo stencil bytes as an opaque gray image for debugging. Requires an allocated, ended, owned single-sample Fbo; unavailable for main targets or MSAA. Preserves source color and stencil.
+
+Inspect an ended member Fbo:
+```cpp
+void tcApp::draw() {
+    fbo.drawStencil(0, 0);
+}
+```
+
+- Uses a cached eight-draw R8 reconstruction and nearest sampling; gray is value/255. No CPU readback. Uses current coordinates, depth, scissor and StencilDesc; ignores tint and blend. Unavailable sources warn and draw nothing.
 '''
 details.ja = '''
-- `drawStencil(x, y)` は内部の 8 回描画の処理で stencil の全 8 ビットをキャッシュした R8 Fbo に復元し、添付画像と同じサイズで最近傍サンプリングして描画します。各バイトを `value / 255` のグレーで表示し、CPU への読み出しは行いません。元の色と stencil は保持します。
-- 現在の描画先の座標、変換、深度テスト、scissor を使います。プレビューは不透明で、現在の色とブレンドモードを使いません。色、ブレンドモード、パイプラインは呼び出し後に復元します。ほかの画像の描画と同じく、テクスチャは無効のままになるので、使っていたテクスチャは `bind()` し直してください。繰り返し呼び出すとキャッシュを再利用して内容を更新します。
-- 確保済みで `end()` 後の、所有するシングルサンプル Fbo のみ対応します。未確保、アクティブ、MSAA の場合は警告して描画しません。この段階ではメイン描画先や自由関数の形式はありません。
-- 使用例は内部の往復テスト用処理で、描画済みの R8 パターンを stencil に書き込みます。`writeGray` は公開アプリ API ではありません。一様なバイト値のクリアには公開 API の `beginStencil` と `clearStencil` を使います。形状の書き込みとメイン描画先の取得は後の段階で扱います。
+- end 後のシングルサンプル Fbo の stencil 値をデバッグ用の不透明なグレー画像で描きます。 確保済みで end 後の所有するシングルサンプル Fbo が必要です。メイン描画先・MSAA は非対応です。元の色と stencil を保持します。
+
+メンバーの end 後の Fbo を調べます。
+```cpp
+void tcApp::draw() {
+    fbo.drawStencil(0, 0);
+}
+```
+
+- キャッシュした R8 に 8 回の描画で復元し、最近傍で value/255 のグレーを表示します。CPU 読み出しはありません。現在の座標・深度・scissor・StencilDesc を使い、色とブレンド設定は使いません。取得できない場合は警告して描画しません。
 '''
 details.ko = '''
-- `drawStencil(x, y)`는 내부의 8회 그리기 경로로 스텐실의 전체 8비트를 캐시된 R8 Fbo에 복원하고 첨부 이미지 크기로 최근접 샘플링하여 그립니다. 각 바이트를 `value / 255` 회색으로 표시하며 CPU로 읽지 않습니다. 원본 색상과 스텐실을 보존합니다.
-- 현재 타깃의 좌표, 변환, 깊이 테스트와 scissor를 사용합니다. 미리보기는 불투명하며 현재 색상과 블렌드 모드를 사용하지 않습니다. 색상, 블렌드 모드, 파이프라인은 호출 후 복원합니다. 다른 이미지 그리기와 마찬가지로 텍스처는 비활성 상태로 남으므로, 사용하던 텍스처는 `bind()`를 다시 호출하세요. 반복 호출하면 캐시를 재사용하고 캡처를 갱신합니다.
-- 할당되었고 `end()`가 끝난 소유 단일 샘플 Fbo만 지원합니다. 미할당, 활성 또는 MSAA 소스는 경고하고 그리지 않습니다. 이 단계에는 메인 타깃이나 자유 함수 형식이 없습니다.
-- 예제는 내부 왕복 테스트용 처리로 렌더링이 끝난 R8 패턴을 스텐실에 기록합니다. `writeGray`는 공개 애플리케이션 API가 아닙니다. 균일한 바이트 값 지우기에는 공개 API인 `beginStencil`과 `clearStencil`을 사용합니다. 도형 쓰기와 메인 타깃 캡처는 이후 단계에서 다룹니다.
+- 종료된 단일 샘플 Fbo의 스텐실 바이트를 디버깅용 불투명 회색 이미지로 그립니다. 할당되어 종료된 소유 단일 샘플 Fbo가 필요합니다. 메인 타깃과 MSAA는 지원하지 않습니다. 원본 색상과 스텐실을 보존합니다.
+
+멤버인 종료된 Fbo를 확인합니다.
+```cpp
+void tcApp::draw() {
+    fbo.drawStencil(0, 0);
+}
+```
+
+- 캐시된 R8에 8번 그려 복원하고 최근접 샘플링으로 value/255 회색을 표시합니다. CPU 읽기는 없습니다. 현재 좌표, 깊이, scissor, StencilDesc를 따르고 색조와 블렌드는 무시합니다. 사용할 수 없는 소스는 경고하고 그리지 않습니다.
 '''
-snippet = '''
-// gray: ended R8 pattern; fbo: equally sized, ended, single-sample Fbo
-internal::FboStencilAccess::writeGray(gray, fbo); // internal test fixture
-fbo.drawStencil(0, 0);
-Pixels values;
-if (fbo.readStencil(values)) values.save("stencil.png");
-'''
-related = ["Fbo::readStencil", "Pixels::save"]
+related = ["StencilDesc", "clearStencil", "Fbo::readStencil"]
 
 ["Fbo::readStencil"]
 category = "graphics_fbo"
-keywords = ["stencil", "debug", "readback", "png"]
-description.en = "Reads the framebuffer's stencil bytes into one-channel U8 Pixels."
-description.ja = "フレームバッファの stencil 値を 1 チャンネル U8 の Pixels に読み出します。"
-description.ko = "프레임버퍼의 스텐실 값을 1채널 U8 Pixels로 읽습니다."
+keywords = ["stencil", "mask", "style"]
+description.en = "Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging."
+description.ja = "end 後のシングルサンプル Fbo の stencil 値をデバッグ用の 1 チャンネル U8 Pixels に読み出します。"
+description.ko = "종료된 단일 샘플 Fbo의 스텐실 바이트를 디버깅용 1채널 U8 Pixels로 읽습니다."
 details.en = '''
-- `bool readStencil(Pixels& pixels) const` uses the same cached R8 reconstruction as `drawStencil`, then the existing Fbo color readback. On success it replaces `pixels` with top-left, one-channel U8 bytes and returns `true`. On failure it returns `false` and leaves `pixels` unchanged. The source color and stencil are preserved.
-- Call after `end()` on all active Fbos. Unallocated, active and MSAA sources are refused with a warning. Main-target capture is unavailable. GPU readback synchronizes work and is intended for debugging.
-- Save through `pixels.save("stencil.png")`; the existing PNG writer stores the channel bytes without gamma remapping. WebGL2 uses existing GL readback; WebGPU synchronous readback is unsupported and returns `false` (a later slice adds asynchronous readback).
-- The snippet's `writeGray` is an internal test fixture, not a public stencil-writing API; `gray` contains an ended R8 pattern. Use `beginStencil` and `clearStencil` for uniform clearing while owned.
+- Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging. Requires an allocated, ended, owned single-sample Fbo; unavailable for main targets or MSAA. Preserves source color and stencil.
+
+Inspect an ended member Fbo:
+```cpp
+void tcApp::draw() {
+    Pixels values;
+    fbo.readStencil(values);
+}
+```
+
+- Call after end() on all active Fbos. Success replaces pixels with top-left U8 bytes; failure returns false and leaves pixels unchanged. Unsupported sources warn. Readback synchronizes GPU work. pixels.save stores PNG bytes without gamma remapping. WebGPU synchronous readback is unsupported.
 '''
 details.ja = '''
-- `bool readStencil(Pixels& pixels) const` は `drawStencil` と同じキャッシュした R8 への復元処理と、既存の Fbo カラー読み出しを使います。成功すると `pixels` を左上原点の 1 チャンネル U8 バイト列に置き換えて `true` を返します。失敗すると `false` を返し、`pixels` は変更しません。元の色と stencil は保持します。
-- すべてのアクティブな Fbo の `end()` 後に呼んでください。未確保、アクティブ、MSAA の場合は警告して拒否します。メイン描画先の取得には対応しません。GPU の読み出しは処理を同期するため、デバッグ用です。
-- `pixels.save("stencil.png")` で保存します。既存の PNG ライターはガンマ変換をせずにチャンネルのバイトを保存します。WebGL2 は既存の GL 読み出しを使います。WebGPU の同期読み出しは非対応で `false` を返します。非同期読み出しは後の段階で扱います。
-- 使用例の `writeGray` は内部テスト用で、公開の stencil 書き込み API ではありません。`gray` には描画済みの R8 パターンを用意します。所有中の一様なクリアには `beginStencil` と `clearStencil` を使います。
+- end 後のシングルサンプル Fbo の stencil 値をデバッグ用の 1 チャンネル U8 Pixels に読み出します。 確保済みで end 後の所有するシングルサンプル Fbo が必要です。メイン描画先・MSAA は非対応です。元の色と stencil を保持します。
+
+メンバーの end 後の Fbo を調べます。
+```cpp
+void tcApp::draw() {
+    Pixels values;
+    fbo.readStencil(values);
+}
+```
+
+- すべてのアクティブな Fbo の end() 後に呼びます。成功時は左上原点の U8 バイトに置き換え、失敗時は false を返し pixels を保持します。非対応の描画元には警告します。GPU と同期します。pixels.save はガンマ変換なしで PNG を保存します。WebGPU の同期読み出しは非対応です。
 '''
 details.ko = '''
-- `bool readStencil(Pixels& pixels) const`는 `drawStencil`과 같은 캐시된 R8 복원 경로와 기존 Fbo 색상 읽기를 사용합니다. 성공하면 `pixels`를 왼쪽 위 원점의 1채널 U8 바이트로 교체하고 `true`를 반환합니다. 실패하면 `false`를 반환하며 `pixels`를 변경하지 않습니다. 원본 색상과 스텐실을 보존합니다.
-- 모든 활성 Fbo에서 `end()`를 호출한 뒤 사용합니다. 미할당, 활성 또는 MSAA 소스는 경고하고 거부합니다. 메인 타깃 캡처는 지원하지 않습니다. GPU 읽기는 작업을 동기화하므로 디버깅용입니다.
-- `pixels.save("stencil.png")`로 저장합니다. 기존 PNG 작성기는 감마 변환 없이 채널 바이트를 저장합니다. WebGL2는 기존 GL 읽기를 사용합니다. WebGPU의 동기 읽기는 지원하지 않으며 `false`를 반환합니다. 비동기 읽기는 이후 단계에서 다룹니다.
-- 예제의 `writeGray`는 내부 테스트용이며 공개 스텐실 쓰기 API가 아닙니다. `gray`에는 렌더링이 끝난 R8 패턴을 준비합니다. 소유 중인 균일한 지우기에는 `beginStencil`과 `clearStencil`을 사용합니다.
+- 종료된 단일 샘플 Fbo의 스텐실 바이트를 디버깅용 1채널 U8 Pixels로 읽습니다. 할당되어 종료된 소유 단일 샘플 Fbo가 필요합니다. 메인 타깃과 MSAA는 지원하지 않습니다. 원본 색상과 스텐실을 보존합니다.
+
+멤버인 종료된 Fbo를 확인합니다.
+```cpp
+void tcApp::draw() {
+    Pixels values;
+    fbo.readStencil(values);
+}
+```
+
+- 활성 Fbo 모두의 end() 후 호출합니다. 성공하면 왼쪽 위 원점의 U8 바이트로 바꾸며 실패하면 false를 반환하고 pixels를 보존합니다. 지원하지 않는 소스는 경고합니다. GPU 작업과 동기화합니다. pixels.save는 감마 변환 없이 PNG를 저장합니다. WebGPU 동기 읽기는 지원하지 않습니다.
 '''
-snippet = '''
-// gray: ended R8 pattern; fbo: equally sized, ended, single-sample Fbo
-internal::FboStencilAccess::writeGray(gray, fbo); // internal test fixture
-fbo.drawStencil(0, 0);
-Pixels values;
-if (fbo.readStencil(values)) values.save("stencil.png");
-'''
-related = ["Fbo::drawStencil", "Fbo::readPixels", "Pixels::save"]
+related = ["StencilDesc", "clearStencil", "Fbo::drawStencil"]
 
 ["Fbo::end"]
 category = "graphics_fbo"
@@ -45197,94 +45222,127 @@ details.ko = '''
 related = ["setup", "exitApp", "App", "Node"]
 
 ["beginStencil"]
-category = "graphics_fbo"
-keywords = ["stencil", "ownership", "mask"]
-description.en = "Borrows all eight stencil bits on the current drawing target."
-description.ja = "現在の描画先の stencil の全 8 ビットを借り受けます。"
-description.ko = "현재 그리기 타깃의 스텐실 전체 8비트를 빌립니다."
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Compatibility query for stencil attachment availability; no ownership or state change."
+description.ja = "互換用の stencil 添付画像有無の問い合わせです。所有権や状態を変更しません。"
+description.ko = "호환용 스텐실 첨부 유무 조회입니다. 소유권이나 상태를 바꾸지 않습니다."
 details.en = '''
-- Returns `true` on success without clearing stored bytes. Pair `endStencil()` only with a successful begin, while that target is current. Ownership is independent per target and may span Fbo end/begin calls and frames. Fbo allocation initializes stencil to zero; reallocation resets ownership.
-- Returns `false` with a warning when there is no stencil attachment, the target is already owned, or a framework stencil clip scope is active. There is no shared user mode.
-- While owned, values are plain bytes 0–255. Framework stencil clipping and draw-once are suspended; scissor still works. Slice 2a provides uniform clearing; geometry writing and value testing come later.
-- endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values. It restores saved semantic state, without restoring previous pixels. Fbo bytes persist across frames and color/depth clears; screen persistence is not guaranteed.
+- Compatibility query for stencil attachment availability; no ownership or state change. Pending removal decision. New code uses StencilDesc and clearStencil directly; repeated begin calls simply return availability.
+
+Use in the draw callback:
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::shape());
+}
+```
 '''
 details.ja = '''
-- 保存済みの値をクリアせず、成功時に `true` を返します。成功した場合だけ、その描画先が現在の描画先である間に `endStencil()` を呼びます。所有権は描画先ごとに独立し、Fbo の end/begin やフレームをまたいで保持できます。Fbo の確保時に stencil をゼロで初期化し、再確保時に所有権をリセットします。
-- stencil 添付画像がない場合、すでに所有中の場合、フレームワークの stencil クリップスコープが有効な場合は、警告して `false` を返します。ユーザー用の共有モードはありません。
-- 所有中の値は 0〜255 の通常のバイト値です。フレームワークの stencil クリップと draw-once は停止しますが、scissor は使えます。2a では一様なクリアを提供し、形状の書き込みと値のテストは後の段階で追加します。
-- endStencil は stencil を 0 に戻します。値が必要な場合は、endStencil の前に readStencil で読み取ってください。保存した意味上の状態を復元しますが、以前のピクセル値は復元しません。Fbo の値はフレームや色・深度のクリアをまたいで保持しますが、画面の保持は保証しません。
+- 互換用の stencil 添付画像有無の問い合わせです。所有権や状態を変更しません。 削除判断は保留中です。新規コードでは StencilDesc と clearStencil を直接使います。繰り返し呼んでも添付画像の有無を返すだけです。
+
+draw 内で使います。
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::shape());
+}
+```
 '''
 details.ko = '''
-- 저장된 값을 지우지 않고 성공 시 `true`를 반환합니다. 성공한 경우에만 해당 타깃이 현재 타깃일 때 `endStencil()`을 호출합니다. 소유권은 타깃별로 독립적이며 Fbo의 end/begin 호출과 프레임을 넘어 유지할 수 있습니다. Fbo 할당 시 스텐실을 0으로 초기화하고 재할당 시 소유권을 초기화합니다.
-- 스텐실 첨부 이미지가 없거나 이미 소유 중이거나 프레임워크 스텐실 클립 스코프가 활성화된 경우 경고하고 `false`를 반환합니다. 사용자 공유 모드는 없습니다.
-- 소유 중인 값은 0~255의 일반 바이트 값입니다. 프레임워크 스텐실 클립과 draw-once는 중단되지만 scissor는 작동합니다. 2a는 균일한 지우기를 제공하며 도형 쓰기와 값 테스트는 이후 단계에서 추가합니다.
-- endStencil은 스텐실을 0으로 되돌립니다. 값이 필요하면 endStencil 전에 readStencil로 읽어야 합니다. 저장한 의미상 상태를 복원하지만 이전 픽셀 값은 복원하지 않습니다. Fbo 값은 프레임과 색상·깊이 지우기를 넘어 유지하지만 화면의 지속성은 보장하지 않습니다.
+- 호환용 스텐실 첨부 유무 조회입니다. 소유권이나 상태를 바꾸지 않습니다. 삭제 결정은 보류 중입니다. 새 코드는 StencilDesc와 clearStencil을 직접 사용합니다. 반복 호출해도 첨부 유무만 반환합니다.
+
+draw에서 사용합니다.
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::shape());
+}
+```
 '''
-snippet = '''
-canvas.begin();
-if (beginStencil()) { clearStencil(5); endStencil(); }
-canvas.end();
-'''
-related = ["clearStencil", "endStencil", "Fbo::readStencil"]
+related = ["StencilDesc", "setStencilDesc", "clearStencil"]
 
 ["clearStencil"]
-category = "graphics_fbo"
-keywords = ["stencil", "clear", "byte"]
-description.en = "Replaces all stencil bytes with a plain value while owned."
-description.ja = "所有中の stencil の全バイトを通常の値で置き換えます。"
-description.ko = "소유 중인 스텐실의 모든 바이트를 일반 값으로 바꿉니다."
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Replaces the entire stencil attachment with a byte, without a begin call."
+description.ja = "開始呼び出しなしで stencil 添付画像全体を指定バイトに置き換えます。"
+description.ko = "시작 호출 없이 스텐실 첨부 전체를 지정한 바이트로 바꿉니다."
 details.en = '''
-- `clearStencil(value = 0)` requires successful `beginStencil()` on the current target. Outside ownership, every call warns and does nothing.
-- Replaces all eight bits over the full attachment with a value 0–255. Earlier drawing finishes first; later drawing follows the clear. Color and depth are preserved. Transforms, viewport and scissor do not restrict the clear, and drawing state is restored afterward.
-- See `beginStencil` for target lifetime and handback behavior.
+- Replaces the entire stencil attachment with a byte, without a begin call. Defaults to 0. Submits earlier drawing first and preserves color/depth. Ignores transforms, viewport, scissor and StencilDesc (including mask); restores drawing state. Without an attachment, warns once per target and does nothing.
+
+Use in the draw callback:
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+}
+```
 '''
 details.ja = '''
-- `clearStencil(value = 0)` は現在の描画先での `beginStencil()` の成功を必要とします。所有していない場合は呼び出すたびに警告し、何も変更しません。
-- 添付画像全体の全 8 ビットを 0〜255 の値で置き換えます。それまでの描画を先に実行し、以降の描画はクリアの後に実行します。色と深度を保持します。変換、viewport、scissor はクリア範囲を制限せず、描画状態は呼び出し後に復元します。
-- 描画先の寿命と返却時の動作は `beginStencil` を参照してください。
+- 開始呼び出しなしで stencil 添付画像全体を指定バイトに置き換えます。 既定値は 0 です。それまでの描画を先に実行し、色・深度を保持します。変換・viewport・scissor・StencilDesc の mask などに制限されず、描画状態を復元します。添付画像がなければ描画先ごとに一度警告して何もしません。
+
+draw 内で使います。
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+}
+```
 '''
 details.ko = '''
-- `clearStencil(value = 0)`은 현재 타깃에서 `beginStencil()`이 성공해야 합니다. 소유권이 없으면 호출할 때마다 경고하고 아무것도 변경하지 않습니다.
-- 첨부 이미지 전체의 8비트를 0~255 값으로 바꿉니다. 이전 그리기를 먼저 실행하며 이후 그리기는 지우기 뒤에 실행합니다. 색상과 깊이를 보존합니다. 변환, viewport, scissor는 지우기 영역을 제한하지 않으며 호출 후 그리기 상태를 복원합니다.
-- 타깃 수명과 반환 동작은 `beginStencil`을 참조합니다.
+- 시작 호출 없이 스텐실 첨부 전체를 지정한 바이트로 바꿉니다. 기본값은 0입니다. 이전 그리기를 먼저 제출하고 색상·깊이를 보존합니다. 변환, viewport, scissor, StencilDesc의 mask 등에 제한되지 않으며 그리기 상태를 복원합니다. 첨부가 없으면 타깃마다 한 번 경고하고 아무것도 하지 않습니다.
+
+draw에서 사용합니다.
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+}
+```
 '''
-snippet = '''
-canvas.begin();
-if (beginStencil()) { clearStencil(5); endStencil(); }
-canvas.end();
-'''
-related = ["beginStencil", "endStencil", "clear"]
+related = ["StencilDesc", "setStencilDesc", "clearStencil"]
 
 ["endStencil"]
-category = "graphics_fbo"
-keywords = ["stencil", "restore", "ownership"]
-description.en = "Returns the whole stencil to 0, ends ownership and restores the saved framework state."
-description.ja = "stencil 全体を 0 に戻して所有権を返却し、保存したフレームワークの状態を復元します。"
-description.ko = "스텐실 전체를 0으로 되돌리고 소유권을 반환하며 저장한 프레임워크 상태를 복원합니다."
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Compatibility helper that clears stencil to 0 and resets the descriptor."
+description.ja = "stencil を 0 でクリアし、設定を既定に戻す互換ヘルパーです。"
+description.ko = "스텐실을 0으로 지우고 설정을 기본값으로 되돌리는 호환 도우미입니다."
 details.en = '''
-- Call on the target with a successful `beginStencil()`. An unmatched call warns and does nothing.
-- endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
-- Submits earlier drawing, zeroes all eight stencil bits with a colorless draw using write mask `0xFF`, then restores saved semantic state. No pixel snapshot is restored.
-- See `beginStencil` for the complete ownership rules.
+- Compatibility helper that clears stencil to 0 and resets the descriptor. Pending removal decision. There is no ownership or saved state to restore. New code calls clearStencil and resetStencilDesc directly.
+
+Use in the draw callback:
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    resetStencilDesc();
+}
+```
 '''
 details.ja = '''
-- `beginStencil()` が成功した描画先で呼びます。対応する開始がない場合は警告し、何もしません。
-- endStencil は stencil を 0 に戻します。値が必要な場合は、endStencil の前に readStencil で読み取ってください。
-- それまでの描画を実行し、書き込みマスク `0xFF` で色を書かずに stencil の全 8 ビットをゼロにしてから、保存した意味上の状態を復元します。ピクセルのスナップショットは復元しません。
-- 所有権の全規則は `beginStencil` を参照してください。
+- stencil を 0 でクリアし、設定を既定に戻す互換ヘルパーです。 削除判断は保留中です。所有権や復元する保存状態はありません。新規コードでは clearStencil と resetStencilDesc を直接呼びます。
+
+draw 内で使います。
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    resetStencilDesc();
+}
+```
 '''
 details.ko = '''
-- `beginStencil()`이 성공한 타깃에서 호출합니다. 대응하는 시작이 없으면 경고하고 아무것도 하지 않습니다.
-- endStencil은 스텐실을 0으로 되돌립니다. 값이 필요하면 endStencil 전에 readStencil로 읽어야 합니다.
-- 이전 그리기를 실행하고 쓰기 마스크 `0xFF`로 색상을 쓰지 않으면서 스텐실 전체 8비트를 0으로 지운 뒤 저장한 의미상 상태를 복원합니다. 픽셀 스냅샷은 복원하지 않습니다.
-- 전체 소유권 규칙은 `beginStencil`을 참조합니다.
+- 스텐실을 0으로 지우고 설정을 기본값으로 되돌리는 호환 도우미입니다. 삭제 결정은 보류 중입니다. 소유권이나 복원할 저장 상태는 없습니다. 새 코드는 clearStencil과 resetStencilDesc를 직접 호출합니다.
+
+draw에서 사용합니다.
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    resetStencilDesc();
+}
+```
 '''
-snippet = '''
-canvas.begin();
-if (beginStencil()) { clearStencil(5); endStencil(); }
-canvas.end();
-'''
-related = ["beginStencil", "clearStencil"]
+related = ["StencilDesc", "setStencilDesc", "clearStencil"]
 
 ["clear"]
 category = "graphics_color"
@@ -67900,3 +67958,488 @@ details.en = "Excludes advance, line metrics, atlas padding and oversampling/fil
 details.ja = "送り幅、行メトリクス、アトラスの余白、オーバーサンプリングやフィルターの余白を含みません。Y は下向きで、ベースラインより上の部分は負の Y になります。Rect::getCenter で矩形の基準点、Vec2(box.width / 2, box.height / 2) で半サイズを取得できます。未読み込みや空の輪郭では空の Rect を返し、未収録文字は Font の .notdef に置き換えます。この計測はグリフのラスタライズや転送を行いません。"
 details.ko = "전진 폭, 행 메트릭, 아틀라스 여백 및 오버샘플링/필터 여백을 제외합니다. Y는 아래쪽이며 기준선 위 부분은 음수 Y입니다. Rect::getCenter는 사각형 기준점을, Vec2(box.width / 2, box.height / 2)는 절반 크기를 제공합니다. 로드되지 않은 폰트나 빈 윤곽은 빈 Rect를 반환하며 없는 글리프는 Font의 .notdef로 대체합니다. 이 측정은 글리프를 래스터화하거나 업로드하지 않습니다."
 related = ["GlyphBatch::setAlignToInk", "Font::getGlyphPath", "Rect"]
+
+["StencilDesc"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Sets stencil comparison, writing and color output for drawing; the default leaves stencil unchanged."
+description.ja = "描画の stencil 比較・書き込み・色出力を指定します。既定では stencil を変更しません。"
+description.ko = "그리기의 스텐실 비교, 쓰기, 색상 출력을 지정합니다. 기본값은 스텐실을 변경하지 않습니다."
+details.en = '''
+- Use StencilDesc for geometry masks or opt-in draw-once. It is Style state, saved by pushStyle/popStyle and reset by resetStyle/resetStencilDesc. Only drawing and clearing change the stored bytes; a stencil attachment is required.
+
+Write a circle mask:
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::shape());
+    drawCircle(100, 100, 60);
+}
+```
+
+Draw subsequent content inside that mask:
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(0, 0, 200, 200);
+    resetStencilDesc();
+}
+```
+
+- All eight bits belong to the application. mask controls both comparison and replacement; unmasked bits survive. Comparison uses masked value against masked stored byte. A passing fragment replaces bits only when write is true and depth also passes. colorWrite=false suppresses color, independently of depth. No automatic draw-once, reserved bits or ImGui exception.
+- Node::drawTree resets Style before and after each node draw. Every node starts with the default desc: a parent inside() does not clip children. Stored stencil values survive these resets.
+- Without a stencil attachment a non-default desc warns once per target and drawing uses the default state, including color output. Fbo bytes persist across frames and color/depth clears; screen persistence is not guaranteed. Fbo entry and return carry the current desc like blend state.
+'''
+details.ja = '''
+- StencilDesc は形状マスクや明示的な draw-once に使います。Style の状態として pushStyle/popStyle で保存・復元し、resetStyle/resetStencilDesc で既定に戻します。保存した値を変えるのは描画とクリアだけです。stencil 添付画像が必要です。
+
+円のマスクを書きます。
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::shape());
+    drawCircle(100, 100, 60);
+}
+```
+
+以降の内容をマスクの内側に描きます。
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(0, 0, 200, 200);
+    resetStencilDesc();
+}
+```
+
+- 全 8 ビットをアプリが使えます。mask は比較と置換の両方に使い、対象外のビットを保持します。マスク後の value と保存値を比較します。write が true で stencil と深度の両方を通過したフラグメントだけがビットを置換します。colorWrite=false は深度とは独立に色出力を止めます。自動 draw-once・予約ビット・ImGui の特例はありません。
+- Node::drawTree は各ノードの draw の前後に Style をリセットします。子も既定の desc から始まるため、親の inside() は子に適用されません。書き込んだ stencil 値はリセット後も残ります。
+- stencil 添付画像がない場合、既定以外の desc は描画先ごとに一度警告し、色出力を含め既定の状態で描画します。Fbo の値はフレームや色・深度クリアをまたいで残りますが、画面の保持は保証しません。Fbo の開始・終了ではブレンド状態と同様に現在の desc を引き継ぎます。
+'''
+details.ko = '''
+- StencilDesc는 도형 마스크나 명시적인 draw-once에 사용합니다. Style 상태로 pushStyle/popStyle이 저장·복원하고 resetStyle/resetStencilDesc가 초기화합니다. 저장된 바이트는 그리기와 지우기로만 바뀝니다. 스텐실 첨부가 필요합니다.
+
+원 마스크를 기록합니다.
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::shape());
+    drawCircle(100, 100, 60);
+}
+```
+
+이후 내용을 마스크 안쪽에 그립니다.
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(0, 0, 200, 200);
+    resetStencilDesc();
+}
+```
+
+- 8비트 모두 앱 소유입니다. mask는 비교와 교체에 함께 쓰이며 마스크 밖 비트는 보존합니다. 마스크된 value를 저장된 바이트와 비교합니다. write가 true이고 스텐실과 깊이 검사를 통과한 조각만 비트를 교체합니다. colorWrite=false는 깊이와 별개로 색상 출력을 막습니다. 자동 draw-once, 예약 비트, ImGui 예외는 없습니다.
+- Node::drawTree는 각 노드 draw 전후에 Style을 초기화합니다. 각 노드는 기본 desc로 시작하므로 부모의 inside()는 자식에 적용되지 않습니다. 기록된 스텐실 값은 초기화 후에도 남습니다.
+- 스텐실 첨부가 없으면 기본값이 아닌 desc에 대해 타깃마다 한 번 경고하고 색상 출력을 포함한 기본 상태로 그립니다. Fbo 값은 프레임과 색상·깊이 지우기를 넘어 유지되지만 화면의 지속성은 보장하지 않습니다. Fbo 시작과 종료 시 블렌드 상태처럼 현재 desc를 이어받습니다.
+'''
+related = ["setStencilDesc", "clearStencil", "StencilDesc::drawOnce", "StencilDesc::shape", "StencilDesc::inside", "StencilDesc::outside", "Node"]
+
+
+["setStencilDesc"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Applies one stencil descriptor to subsequent drawing as Style state."
+description.ja = "以降の描画に使う stencil 設定を Style の状態として適用します。"
+description.ko = "이후 그리기에 사용할 스텐실 설정을 Style 상태로 적용합니다."
+details.en = '''
+- Applies one stencil descriptor to subsequent drawing as Style state. Affects shapes, text, textures, Mesh, custom Shader, PBR and points. Without an attachment, warns once per target and draws with default state.
+
+Use in the draw callback:
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(0, 0, 200, 200);
+}
+```
+'''
+details.ja = '''
+- 以降の描画に使う stencil 設定を Style の状態として適用します。 図形・文字・テクスチャ・Mesh・独自 Shader・PBR・点に適用します。添付画像がなければ描画先ごとに一度警告し、既定の状態で描画します。
+
+draw 内で使います。
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(0, 0, 200, 200);
+}
+```
+'''
+details.ko = '''
+- 이후 그리기에 사용할 스텐실 설정을 Style 상태로 적용합니다. 도형, 텍스트, 텍스처, Mesh, 사용자 Shader, PBR, 점에 적용합니다. 첨부가 없으면 타깃마다 한 번 경고하고 기본 상태로 그립니다.
+
+draw에서 사용합니다.
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(0, 0, 200, 200);
+}
+```
+'''
+related = ["StencilDesc", "setStencilDesc", "clearStencil"]
+
+
+["getStencilDesc"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Returns the current stencil Style descriptor."
+description.ja = "現在の Style の stencil 設定を返します。"
+description.ko = "현재 Style의 스텐실 설정을 반환합니다."
+details.en = '''
+- Returns the current stencil Style descriptor. Returns the requested descriptor, including on a target without stencil, where drawing uses the default instead.
+
+Use in the draw callback:
+```cpp
+void tcApp::draw() {
+    auto saved = getStencilDesc();
+    setStencilDesc(saved);
+}
+```
+'''
+details.ja = '''
+- 現在の Style の stencil 設定を返します。 stencil のない描画先でも、要求した設定を返します。その場合の描画には既定値を使います。
+
+draw 内で使います。
+```cpp
+void tcApp::draw() {
+    auto saved = getStencilDesc();
+    setStencilDesc(saved);
+}
+```
+'''
+details.ko = '''
+- 현재 Style의 스텐실 설정을 반환합니다. 스텐실이 없는 타깃에서도 요청된 설정을 반환합니다. 이때 실제 그리기는 기본값을 사용합니다.
+
+draw에서 사용합니다.
+```cpp
+void tcApp::draw() {
+    auto saved = getStencilDesc();
+    setStencilDesc(saved);
+}
+```
+'''
+related = ["StencilDesc", "setStencilDesc", "clearStencil"]
+
+
+["resetStencilDesc"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Restores the default stencil descriptor without clearing stored bytes or other Style state."
+description.ja = "保存値や Style の他の状態を変えずに stencil 設定を既定に戻します。"
+description.ko = "저장된 바이트나 다른 Style 상태를 바꾸지 않고 스텐실 설정을 기본값으로 되돌립니다."
+details.en = '''
+- Restores the default stencil descriptor without clearing stored bytes or other Style state. Default means Always, value 0, write=false, mask=0xFF and colorWrite=true. Use clearStencil to erase stored values.
+
+Use in the draw callback:
+```cpp
+void tcApp::draw() {
+    resetStencilDesc();
+    drawRect(0, 0, 200, 200);
+}
+```
+'''
+details.ja = '''
+- 保存値や Style の他の状態を変えずに stencil 設定を既定に戻します。 既定値は Always、value 0、write=false、mask=0xFF、colorWrite=true です。保存値を消すには clearStencil を使います。
+
+draw 内で使います。
+```cpp
+void tcApp::draw() {
+    resetStencilDesc();
+    drawRect(0, 0, 200, 200);
+}
+```
+'''
+details.ko = '''
+- 저장된 바이트나 다른 Style 상태를 바꾸지 않고 스텐실 설정을 기본값으로 되돌립니다. 기본값은 Always, value 0, write=false, mask=0xFF, colorWrite=true입니다. 저장된 값을 지우려면 clearStencil을 사용합니다.
+
+draw에서 사용합니다.
+```cpp
+void tcApp::draw() {
+    resetStencilDesc();
+    drawRect(0, 0, 200, 200);
+}
+```
+'''
+related = ["StencilDesc", "setStencilDesc", "clearStencil"]
+
+
+["StencilDesc::drawOnce"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Creates a value-1 NotEqual descriptor that writes passing fragments."
+description.ja = "通過したフラグメントを書き込む、値 1・NotEqual の設定を作ります。"
+description.ko = "통과한 조각을 기록하는 값 1, NotEqual 설정을 만듭니다."
+details.en = '''
+- Creates a value-1 NotEqual descriptor that writes passing fragments. Prevents repeated color contributions within one stroke. For multiple strokes, change value through 1..255 and clearStencil after every 255 strokes before reusing values. The reference is baked into pipelines; many values and draw modes can exceed the default pool. Set WindowSettings::setPipelinePoolSize before runApp for large combinations.
+
+Apply the template:
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ja = '''
+- 通過したフラグメントを書き込む、値 1・NotEqual の設定を作ります。 1 ストローク内の色の重なりを防ぎます。複数ストロークでは value を 1〜255 で変え、値を再利用する前に 255 ストロークごとに clearStencil します。参照値はパイプラインに焼き込むため、値や描画モードの組み合わせが多い場合は runApp 前に WindowSettings::setPipelinePoolSize でプールを増やします。
+
+テンプレートを適用します。
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ko = '''
+- 통과한 조각을 기록하는 값 1, NotEqual 설정을 만듭니다. 한 스트로크 안에서 색상이 중복되는 것을 막습니다. 여러 스트로크에서는 value를 1..255로 바꾸고 재사용 전 255스트로크마다 clearStencil을 호출합니다. 참조 값은 파이프라인에 고정되므로 값과 그리기 모드 조합이 많으면 runApp 전 WindowSettings::setPipelinePoolSize로 풀을 늘립니다.
+
+템플릿을 적용합니다.
+```cpp
+void tcApp::draw() {
+    clearStencil();
+    setStencilDesc(StencilDesc::drawOnce());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+related = ["StencilDesc", "clearStencil"]
+
+
+["StencilDesc::shape"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Creates a stencil-writing descriptor with color output disabled."
+description.ja = "色出力を止め、stencil を書き込む設定を作ります。"
+description.ko = "색상 출력을 막고 스텐실을 기록하는 설정을 만듭니다."
+details.en = '''
+- Creates a stencil-writing descriptor with color output disabled. shape(value=1, mask=0xFF) uses Always and write=true. Unmasked bits survive; depth testing still applies.
+
+Apply the template:
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::shape());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ja = '''
+- 色出力を止め、stencil を書き込む設定を作ります。 shape(value=1, mask=0xFF) は Always・write=true です。マスク外のビットを保持し、深度テストにも従います。
+
+テンプレートを適用します。
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::shape());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ko = '''
+- 색상 출력을 막고 스텐실을 기록하는 설정을 만듭니다. shape(value=1, mask=0xFF)는 Always, write=true입니다. 마스크 밖 비트를 보존하고 깊이 검사도 따릅니다.
+
+템플릿을 적용합니다.
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::shape());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+related = ["StencilDesc", "clearStencil"]
+
+
+["StencilDesc::inside"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Creates a read-only stencil descriptor that draws where the masked reference and stored byte match."
+description.ja = "マスク後の参照値と保存値が等しい場所に描く、stencil を変更しない設定を作ります。"
+description.ko = "마스크된 참조 값과 저장 값이 같은 곳에 그리는 읽기 전용 설정을 만듭니다."
+details.en = '''
+- Creates a read-only stencil descriptor that draws where the masked reference and stored byte match. inside(value=1, mask=0xFF) uses Equal, write=false and colorWrite=true.
+
+Apply the template:
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ja = '''
+- マスク後の参照値と保存値が等しい場所に描く、stencil を変更しない設定を作ります。 inside(value=1, mask=0xFF) は Equal・write=false・colorWrite=true です。
+
+テンプレートを適用します。
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ko = '''
+- 마스크된 참조 값과 저장 값이 같은 곳에 그리는 읽기 전용 설정을 만듭니다. inside(value=1, mask=0xFF)는 Equal, write=false, colorWrite=true입니다.
+
+템플릿을 적용합니다.
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::inside());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+related = ["StencilDesc", "clearStencil"]
+
+
+["StencilDesc::outside"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Creates a read-only stencil descriptor that draws where the masked reference and stored byte differ."
+description.ja = "マスク後の参照値と保存値が異なる場所に描く、stencil を変更しない設定を作ります。"
+description.ko = "마스크된 참조 값과 저장 값이 다른 곳에 그리는 읽기 전용 설정을 만듭니다."
+details.en = '''
+- Creates a read-only stencil descriptor that draws where the masked reference and stored byte differ. outside(value=1, mask=0xFF) uses NotEqual, write=false and colorWrite=true.
+
+Apply the template:
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::outside());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ja = '''
+- マスク後の参照値と保存値が異なる場所に描く、stencil を変更しない設定を作ります。 outside(value=1, mask=0xFF) は NotEqual・write=false・colorWrite=true です。
+
+テンプレートを適用します。
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::outside());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+details.ko = '''
+- 마스크된 참조 값과 저장 값이 다른 곳에 그리는 읽기 전용 설정을 만듭니다. outside(value=1, mask=0xFF)는 NotEqual, write=false, colorWrite=true입니다.
+
+템플릿을 적용합니다.
+```cpp
+void tcApp::draw() {
+    setStencilDesc(StencilDesc::outside());
+    drawRect(20, 20, 100, 100);
+}
+```
+'''
+related = ["StencilDesc", "clearStencil"]
+
+
+["StencilDesc::value"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Reference byte used for comparison and replacement; defaults to 0."
+description.ja = "比較と置換に使う参照バイトです。既定値は 0 です。"
+description.ko = "비교와 교체에 쓰는 참조 바이트입니다. 기본값은 0입니다."
+details.en = '''
+- Reference byte used for comparison and replacement; defaults to 0.
+'''
+details.ja = '''
+- 比較と置換に使う参照バイトです。既定値は 0 です。
+'''
+details.ko = '''
+- 비교와 교체에 쓰는 참조 바이트입니다. 기본값은 0입니다.
+'''
+related = ["StencilDesc"]
+
+
+["StencilDesc::test"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Comparison of masked value against the masked stored byte; defaults to Always."
+description.ja = "マスク後の value を保存値と比較する方法です。既定値は Always です。"
+description.ko = "마스크된 value와 저장된 바이트의 비교 방법입니다. 기본값은 Always입니다."
+details.en = '''
+- Comparison of masked value against the masked stored byte; defaults to Always.
+'''
+details.ja = '''
+- マスク後の value を保存値と比較する方法です。既定値は Always です。
+'''
+details.ko = '''
+- 마스크된 value와 저장된 바이트의 비교 방법입니다. 기본값은 Always입니다.
+'''
+related = ["StencilDesc"]
+
+
+["StencilDesc::write"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Replaces masked stencil bits on stencil/depth pass when true; defaults to false."
+description.ja = "true のとき stencil と深度を通過した場所のビットを置換します。既定値は false です。"
+description.ko = "true이면 스텐실·깊이 검사를 통과한 곳의 비트를 교체합니다. 기본값은 false입니다."
+details.en = '''
+- Replaces masked stencil bits on stencil/depth pass when true; defaults to false.
+'''
+details.ja = '''
+- true のとき stencil と深度を通過した場所のビットを置換します。既定値は false です。
+'''
+details.ko = '''
+- true이면 스텐실·깊이 검사를 통과한 곳의 비트를 교체합니다. 기본값은 false입니다.
+'''
+related = ["StencilDesc"]
+
+
+["StencilDesc::mask"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Shared 8-bit comparison and write mask; defaults to 0xFF."
+description.ja = "比較と書き込みに共通の 8 ビットマスクです。既定値は 0xFF です。"
+description.ko = "비교와 쓰기에 공통으로 사용하는 8비트 마스크입니다. 기본값은 0xFF입니다."
+details.en = '''
+- Shared 8-bit comparison and write mask; defaults to 0xFF.
+'''
+details.ja = '''
+- 比較と書き込みに共通の 8 ビットマスクです。既定値は 0xFF です。
+'''
+details.ko = '''
+- 비교와 쓰기에 공통으로 사용하는 8비트 마스크입니다. 기본값은 0xFF입니다.
+'''
+related = ["StencilDesc"]
+
+
+["StencilDesc::colorWrite"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Enables color output independently of stencil/depth writes; defaults to true."
+description.ja = "stencil・深度の書き込みとは独立した色出力の有効指定です。既定値は true です。"
+description.ko = "스텐실·깊이 쓰기와 별개로 색상 출력을 활성화합니다. 기본값은 true입니다."
+details.en = '''
+- Enables color output independently of stencil/depth writes; defaults to true.
+'''
+details.ja = '''
+- stencil・深度の書き込みとは独立した色出力の有効指定です。既定値は true です。
+'''
+details.ko = '''
+- 스텐실·깊이 쓰기와 별개로 색상 출력을 활성화합니다. 기본값은 true입니다.
+'''
+related = ["StencilDesc"]
+
+
+["StencilTest"]
+category = "graphics"
+keywords = ["stencil", "mask", "style"]
+description.en = "Selects the comparison between masked reference and stored stencil bytes."
+description.ja = "マスク後の参照値と保存済み stencil 値の比較を選びます。"
+description.ko = "마스크된 참조 값과 저장된 스텐실 바이트의 비교를 선택합니다."
+details.en = '''
+- Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always. StencilDesc defaults to Always.
+'''
+details.ja = '''
+- Never・Less・Equal・LessEqual・Greater・NotEqual・GreaterEqual・Always です。StencilDesc の既定値は Always です。
+'''
+details.ko = '''
+- Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always입니다. StencilDesc 기본값은 Always입니다.
+'''
+related = ["StencilDesc::test"]

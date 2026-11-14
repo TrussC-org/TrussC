@@ -189,6 +189,34 @@ struct BlendDesc {
     }
 };
 
+// Comparison of the masked reference value with the masked stored byte.
+enum class StencilTest : uint8_t {
+    Always, Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual
+};
+TC_ENUM_LABELS(StencilTest, "Always", "Never", "Less", "Equal", "LessEqual", "Greater", "NotEqual", "GreaterEqual")
+
+struct StencilDesc {
+    uint8_t value = 0;
+    StencilTest test = StencilTest::Always;
+    bool write = false;
+    uint8_t mask = 0xFF; // Shared comparison and write mask; other bits survive.
+    bool colorWrite = true;
+    bool operator==(const StencilDesc&) const = default;
+
+    static constexpr StencilDesc drawOnce() {
+        return {1, StencilTest::NotEqual, true};
+    }
+    static constexpr StencilDesc shape(uint8_t value = 1, uint8_t mask = 0xFF) {
+        return {value, StencilTest::Always, true, mask, false};
+    }
+    static constexpr StencilDesc inside(uint8_t value = 1, uint8_t mask = 0xFF) {
+        return {value, StencilTest::Equal, false, mask};
+    }
+    static constexpr StencilDesc outside(uint8_t value = 1, uint8_t mask = 0xFF) {
+        return {value, StencilTest::NotEqual, false, mask};
+    }
+};
+
 // ---------------------------------------------------------------------------
 // Texture filter
 // ---------------------------------------------------------------------------
@@ -476,12 +504,11 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
-// Borrow all eight stencil bits on the current target. Pair end only with a
-// successful begin. Ownership may span Fbo activations; end on that target.
+// Compatibility entry points pending the begin/end removal decision.
+// begin only reports attachment availability; end clears to 0 and resets the desc.
 bool beginStencil();
-// Return the whole stencil to 0 and restore the framework's saved state; readStencil before this to keep the values.
 void endStencil();
-// Full-target, colorless clear to a plain byte. Warns outside ownership.
+// Full-target, colorless byte clear, independent of StencilDesc and scissor.
 void clearStencil(uint8_t value = 0);
 
 // Clear screen (transparent black)
@@ -729,6 +756,18 @@ inline BlendDesc getCustomBlendDesc() {
 // Reset to default blend mode (Alpha)
 inline void resetBlendMode() {
     setBlendMode(BlendMode::Alpha);
+}
+
+// Stencil is ordinary Style state; reset changes state, never stored bytes.
+inline void setStencilDesc(const StencilDesc& desc) {
+    getDefaultContext().setStencilDesc(desc);
+}
+inline StencilDesc getStencilDesc() {
+    auto* target = internal::drawingApiTarget();
+    return target ? target->stencilDesc : StencilDesc{};
+}
+inline void resetStencilDesc() {
+    setStencilDesc({});
 }
 
 // Restore current blend mode pipeline (use after temporary pipeline changes)

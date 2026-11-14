@@ -81,13 +81,19 @@ static void cover_font() {
 }
 
 static void cover_graphics() {
+    (void)beginStencil();
+    (void)clearStencil(af::val<uint8_t>());
+    (void)endStencil();
     (void)getCustomBlendDesc();
     (void)getHeight();
     (void)getProjectionMatrix();
     (void)getSize();
+    (void)getStencilDesc();
     (void)getViewMatrix();
     (void)getWidth();
+    (void)resetStencilDesc();
     (void)setCustomBlendDesc(af::val<const BlendDesc>());
+    (void)setStencilDesc(af::val<const StencilDesc>());
 }
 
 static void cover_graphics_3d_setup() {
@@ -145,12 +151,6 @@ static void cover_graphics_color() {
     (void)setColorOKLCH(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)setColorOKLab(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)srgbToLinear(af::val<float>());
-}
-
-static void cover_graphics_fbo() {
-    (void)beginStencil();
-    (void)clearStencil(af::val<uint8_t>());
-    (void)endStencil();
 }
 
 static void cover_graphics_lighting() {
@@ -3792,6 +3792,21 @@ struct Cover_SoundStream : af::Scope<SoundStream> {
     }
 };
 
+struct Cover_StencilDesc : af::Scope<StencilDesc> {
+    ~Cover_StencilDesc(); // Never instantiated.
+    static void run() {
+        (void)af::val<StencilDesc>().colorWrite;
+        (void)af::val<StencilDesc>().drawOnce();
+        (void)af::val<StencilDesc>().inside(af::val<uint8_t>(), af::val<uint8_t>());
+        (void)af::val<StencilDesc>().mask;
+        (void)af::val<StencilDesc>().outside(af::val<uint8_t>(), af::val<uint8_t>());
+        (void)af::val<StencilDesc>().shape(af::val<uint8_t>(), af::val<uint8_t>());
+        (void)af::val<StencilDesc>().test;
+        (void)af::val<StencilDesc>().value;
+        (void)af::val<StencilDesc>().write;
+    }
+};
+
 struct Cover_StorageBuffer : af::Scope<StorageBuffer> {
     ~Cover_StorageBuffer(); // Never instantiated.
     static void run() {
@@ -5253,7 +5268,6 @@ void af::coverGenerated() {
     af_generated::cover_graphics_backend();
     af_generated::cover_graphics_camera();
     af_generated::cover_graphics_color();
-    af_generated::cover_graphics_fbo();
     af_generated::cover_graphics_lighting();
     af_generated::cover_graphics_shader();
     af_generated::cover_graphics_shapes();
@@ -5396,6 +5410,7 @@ void af::coverGenerated() {
     af_generated::Cover_SoundBuffer::run();
     af_generated::Cover_SoundSource::run();
     af_generated::Cover_SoundStream::run();
+    af_generated::Cover_StencilDesc::run();
     af_generated::Cover_StorageBuffer::run();
     af_generated::Cover_StrokeMesh::run();
     af_generated::Cover_TcpClient::run();

@@ -450,6 +450,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getSize", []() { return trussc::getSize(); });
     lua->set_function("getSokolMemoryAllocs", []() { return trussc::getSokolMemoryAllocs(); });
     lua->set_function("getSokolMemoryBytes", []() { return trussc::getSokolMemoryBytes(); });
+    lua->set_function("getStencilDesc", []() { return trussc::getStencilDesc(); });
     lua->set_function("getStrokeCap", []() { return trussc::getStrokeCap(); });
     lua->set_function("getStrokeJoin", []() { return trussc::getStrokeJoin(); });
     lua->set_function("getStrokeWeight", []() { return trussc::getStrokeWeight(); });
@@ -652,6 +653,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("resetElapsedTimeCounter", []() { return trussc::resetElapsedTimeCounter(); });
     lua->set_function("resetMatrix", []() { return trussc::resetMatrix(); });
     lua->set_function("resetScissor", []() { return trussc::resetScissor(); });
+    lua->set_function("resetStencilDesc", []() { return trussc::resetStencilDesc(); });
     lua->set_function("resetStyle", []() { return trussc::resetStyle(); });
     lua->set_function("rotate", sol::overload(
         [](float radians) { return trussc::rotate(radians); },
@@ -768,6 +770,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setPointStyle", [](trussc::PointStyle s) { return trussc::setPointStyle(s); });
     lua->set_function("setResourceLoadConcurrency", [](int count) { return trussc::setResourceLoadConcurrency(count); });
     lua->set_function("setScissor", [](float x, float y, float w, float h) { return trussc::setScissor(x, y, w, h); });
+    lua->set_function("setStencilDesc", [](const trussc::StencilDesc & desc) { return trussc::setStencilDesc(desc); });
     lua->set_function("setStrokeCap", [](trussc::StrokeCap cap) { return trussc::setStrokeCap(cap); });
     lua->set_function("setStrokeJoin", [](trussc::StrokeJoin join) { return trussc::setStrokeJoin(join); });
     lua->set_function("setStrokeWeight", [](float weight) { return trussc::setStrokeWeight(weight); });

@@ -3217,7 +3217,20 @@ void RenderTargetResources::release() {
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
     context = {}; contextFailed = false;
 }
+void RenderTarget::setStencilDesc(const StencilDesc& desc) {
+    stencilDesc = desc;
+    requestedStencilDescKey = internal::stencilDescKey(desc);
+    stencilDescKey = requestedStencilDescKey;
+    if (stencilDescKey && !hasStencil()) {
+        stencilDescKey = 0;
+        if (!warnedStencilDesc) {
+            warnedStencilDesc = true;
+            logWarning("Stencil") << "StencilDesc requires a stencil attachment; drawing with default state";
+        }
+    }
+}
 sgl_pipeline RenderTarget::immediatePipeline(ImmediateSelection selection) {
+    selection.stencilDescKey = stencilDescKey;
     auto& bundle = resources();
     if (!sg_isvalid() || !bundle.context.id) return {};
     if (selection.blend == BlendMode::Custom) {
@@ -3264,6 +3277,10 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     desc.sample_count = std::max(1, sampleCount);
     desc.depth.pixel_format = hasDepth ? depthFormat : SG_PIXELFORMAT_NONE;
     if (!hasDepth) { desc.depth.compare = SG_COMPAREFUNC_ALWAYS; desc.depth.write_enabled = false; desc.stencil.enabled = false; }
+    // Pipeline misses only: cached default draws do no extra stencil work.
+    // The clear owns its raster state and must ignore the user's mask/color flag.
+    if (stencilDescKey && request.role != PipelineRole::StencilClear)
+        applyStencilDesc(desc, stencilDescKey);
     // Normalize defaults before field-wise encoding (never hash padded structs).
     const auto normalized = sg_query_pipeline_defaults(&desc);
     const auto key = canonicalPipeline(request, normalized);
