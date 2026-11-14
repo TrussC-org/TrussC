@@ -25,28 +25,64 @@ struct VideoRotation {
     bool swapsSize() const { return degrees == 90 || degrees == 270; }
     bool active() const { return degrees != 0 || mirrored; }
     void size(int& width, int& height) const { if (swapsSize()) std::swap(width, height); }
-    // Non-overlapping tightly packed RGBA buffers, admitted by the caller.
-    void apply(const uint8_t* source, uint8_t* target, int width, int height) const {
-        const int outputWidth = swapsSize() ? height : width;
-        // Small tiles keep transposed source and destination rows in cache.
-        for (int tileY = 0; tileY < height;) {
-            const int rowEnd = tileY + (height - tileY > 32 ? 32 : height - tileY);
-            for (int tileX = 0; tileX < width;) {
-                const int columnEnd = tileX + (width - tileX > 32 ? 32 : width - tileX);
-                for (int y = tileY; y < rowEnd; ++y) {
-                    for (int x = tileX; x < columnEnd; ++x) {
-                        const int reflectedX = mirrored ? width - 1 - x : x;
-                        int dx = reflectedX, dy = y;
-                        if (degrees == 90) { dx = height - 1 - y; dy = reflectedX; }
-                        else if (degrees == 180) { dx = width - 1 - reflectedX; dy = height - 1 - y; }
-                        else if (degrees == 270) { dx = y; dy = width - 1 - reflectedX; }
-                        std::memcpy(target + (size_t(dy) * outputWidth + dx) * 4,
-                                    source + (size_t(y) * width + x) * 4, 4);
+    // Pixel copies may alias byte buffers and need no alignment beyond a byte.
+#if defined(__GNUC__) || defined(__clang__)
+    typedef uint32_t Pixel __attribute__((__may_alias__, __aligned__(1)));
+#else
+    using Pixel = uint32_t;
+#endif
+    template<bool ReverseX, bool ReverseY>
+    static void transpose(const Pixel* source, Pixel* target, int width, int height) {
+        // Bound both row working sets; edge tiles also handle small/odd frames.
+        constexpr int tileSize = 16;
+        for (int tileX = 0; tileX < width;) {
+            const int xEnd = tileX + (width - tileX > tileSize ? tileSize : width - tileX);
+            for (int tileY = 0; tileY < height;) {
+                const int yEnd = tileY + (height - tileY > tileSize ? tileSize : height - tileY);
+                for (int x = tileX; x < xEnd; ++x) {
+                    Pixel* row = target + size_t(ReverseX ? width - 1 - x : x) * height;
+                    for (int y = tileY; y < yEnd; ++y) {
+                        row[ReverseY ? height - 1 - y : y] = source[size_t(y) * width + x];
                     }
                 }
-                tileX = columnEnd;
+                tileY = yEnd;
             }
-            tileY = rowEnd;
+            tileX = xEnd;
+        }
+    }
+    // Non-overlapping tightly packed RGBA buffers, admitted by the caller.
+    void apply(const uint8_t* source, uint8_t* target, int width, int height) const {
+        const auto* input = reinterpret_cast<const Pixel*>(source);
+        auto* output = reinterpret_cast<Pixel*>(target);
+        if (degrees == 90) {
+            if (mirrored) transpose<true, true>(input, output, width, height);
+            else transpose<false, true>(input, output, width, height);
+        } else if (degrees == 270) {
+            if (mirrored) transpose<false, false>(input, output, width, height);
+            else transpose<true, false>(input, output, width, height);
+        } else if (degrees == 180) {
+            if (mirrored) {
+                for (int y = 0; y < height; ++y) {
+                    std::memcpy(output + size_t(height - 1 - y) * width,
+                                input + size_t(y) * width, size_t(width) * 4);
+                }
+            } else {
+                for (int y = 0; y < height; ++y) {
+                    const Pixel* row = input + size_t(y) * width;
+                    Pixel* destination = output + size_t(height - 1 - y) * width;
+                    for (int x = 0; x < width; ++x) destination[width - 1 - x] = row[x];
+                }
+            }
+        } else if (mirrored) {
+            for (int y = 0; y < height; ++y) {
+                const Pixel* row = input + size_t(y) * width;
+                Pixel* destination = output + size_t(y) * width;
+                for (int x = 0; x < width; ++x) destination[width - 1 - x] = row[x];
+            }
+        } else {
+            for (int y = 0; y < height; ++y) {
+                std::memcpy(output + size_t(y) * width, input + size_t(y) * width, size_t(width) * 4);
+            }
         }
     }
 };
