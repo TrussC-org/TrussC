@@ -745,6 +745,18 @@ helpers only with reachability proof; exported JavaScript bridges are live.
 Device gates belong to those later implementation slices: iOS, Android,
 WebGL2/WebGPU, plus desktop compile/link isolation. This ledger changes no layer.
 
+**Implemented helper slice (sokol cleanup):** iOS/Android/Web now follow upstream's
+shared clock/timing/state/helper layout above the platform implementations,
+guarded out of every desktop backend. One timing type and the five
+`_sapp_tc_timing_*` functions, `_sapp_tc_desc_defaults`, `_sapp_tc_clear`,
+`_sapp_tc_malloc`, `_sapp_tc_malloc_clear`, `_sapp_tc_free`,
+`_sapp_tc_roundf_gzero`, `_sapp_tc_strcpy_range` and `_sapp_tc_strcpy` replace
+three identical copies each. The identical `_sapp_tc_int64_muldiv` helper is
+also shared by the two native singleton clocks (excluded on Web). Platform
+clock adapters and state remain selected per platform; defaults retain their
+existing backend conditionals. Public API, init/event/callback bridges and
+desktop multiwindow code are unchanged.
+
 ### Unused window geometry/sample-count wrappers
 
 **Classification:** DELETE unused (planned).
