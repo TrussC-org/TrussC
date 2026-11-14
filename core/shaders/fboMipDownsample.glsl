@@ -90,8 +90,32 @@ in vec2 uv;
 out vec4 frag_color;
 
 void main() {
-    frag_color = textureLod(sampler2D(srcTex, srcSmp), uv, sourceMip.x);
+    vec2 sourceUV = vec2(uv.x, mix(uv.y, 1.0 - uv.y, sourceMip.y));
+    frag_color = textureLod(sampler2D(srcTex, srcSmp), sourceUV, sourceMip.x);
 }
 @end
 
 @program blit vs blit_fs
+
+// Font atlas coverage is linear data. Match the existing CPU 2x2 R8 box
+// average (including integer rounding); the color Fbo filter above uses gamma.
+@fs coverage_fs
+layout(binding=0) uniform texture2D srcTex;
+layout(binding=0) uniform sampler srcSmp;
+layout(binding=0) uniform mip_params { vec4 sourceMip; };
+in vec2 uv;
+out vec4 frag_color;
+void main() {
+    int lod = int(sourceMip.x);
+    ivec2 size = textureSize(sampler2D(srcTex, srcSmp), lod);
+    vec2 sourceUV = vec2(uv.x, mix(uv.y, 1.0 - uv.y, sourceMip.y));
+    ivec2 p = max(ivec2(sourceUV * vec2(size)) - ivec2(1), ivec2(0));
+    ivec2 limit = size - ivec2(1);
+    float a = floor(texelFetch(sampler2D(srcTex, srcSmp), p, lod).r * 255.0 + 0.5);
+    float b = floor(texelFetch(sampler2D(srcTex, srcSmp), min(p + ivec2(1, 0), limit), lod).r * 255.0 + 0.5);
+    float c = floor(texelFetch(sampler2D(srcTex, srcSmp), min(p + ivec2(0, 1), limit), lod).r * 255.0 + 0.5);
+    float d = floor(texelFetch(sampler2D(srcTex, srcSmp), min(p + ivec2(1, 1), limit), lod).r * 255.0 + 0.5);
+    frag_color = vec4(floor((a + b + c + d + 2.0) * 0.25) / 255.0, 0.0, 0.0, 1.0);
+}
+@end
+@program coverage_downsample vs coverage_fs

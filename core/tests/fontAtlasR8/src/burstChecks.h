@@ -78,12 +78,13 @@ public:
         const int padding = int(lround(glyph->getV0() * page->getHeight()));
         const int glyphWidth = int(lround((glyph->getU1() - glyph->getU0()) * page->getWidth()));
         const int glyphHeight = int(lround((glyph->getV1() - glyph->getV0()) * page->getHeight()));
-        const int cellWidth = (glyphWidth + 2 + 15) / 16 * 16;
-        const int cellHeight = (glyphHeight + 4 + 15) / 16 * 16;
-        const int capacity = (1 + (page->getWidth() - padding - glyphWidth - 2) / cellWidth) *
-                             (1 + (page->getHeight() - padding - glyphHeight - 2) / cellHeight);
-        const int unalignedCapacity = ((page->getWidth() - 2) / (glyphWidth + 2)) *
-            (1 + (page->getHeight() - 2 - glyphHeight - 2) / (glyphHeight + 4));
+        const int gap = std::max(2, (std::max(glyphWidth, glyphHeight) + 7) / 8);
+        const int cellWidth = (glyphWidth + gap + 15) / 16 * 16;
+        const int cellHeight = (glyphHeight + gap + 15) / 16 * 16;
+        const int capacity = (1 + (page->getWidth() - padding - glyphWidth - gap) / cellWidth) *
+                             (1 + (page->getHeight() - padding - glyphHeight - gap) / cellHeight);
+        const int unalignedCapacity = ((page->getWidth() - 2) / (glyphWidth + gap)) *
+            (1 + (page->getHeight() - 2 - glyphHeight - gap) / (glyphHeight + gap));
         bool aligned = true;
         for (int i = 0; i < completed; ++i) {
             const auto* g = manager->getOrLoadGlyph(kFirstCodepoint + stride * i);
@@ -109,7 +110,9 @@ public:
               after.alive - before.alive == images.size());
         check("burst: one mip rebuild per dirty page", mipRebuilds == (mipmaps_ ? int(font_.getAtlasCount()) : 0));
         check("burst: live images bounded by pages, not drawString calls", images.size() <= font_.getAtlasCount());
-        check("burst: atlas image bytes below 128 MiB", liveBytes < 128u * 1024 * 1024);
+        // Size-dependent gaps increase storage; uploads must still be bounded by pages.
+        const size_t pageMipBytes = images.empty() ? 0 : images.begin()->second;
+        check("burst: atlas image bytes bounded by admitted pages", liveBytes <= sanePages * pageMipBytes);
         vector<unsigned char> px(size_t(3680) * 3680 * 4);
         check("burst: Fbo readback", fbo_.readPixels(px.data()));
         int strokes = 0, counters = 0;

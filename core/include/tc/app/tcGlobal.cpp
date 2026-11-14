@@ -1296,6 +1296,23 @@ void internal::endGpuFrame() {
     // Retire submitted resources while preserving typed dependencies of every
     // still-unconsumed recording, including suspended foreign targets.
     internal::drainPendingGpuDestroys();
+    // Compaction starts GPU passes, so wait for every window and nested
+    // target to finish. A foreign window may still have an unconsumed prefix.
+    try {
+        auto idle = [](internal::WindowContext& window) {
+            return window.targetsClosed || (window.targetStack.size() <= 1 &&
+                !window.swapchainTarget.inPass && !window.swapchainTarget.openShaderScopes &&
+                !internal::hasPendingRecording(window.swapchainTarget));
+        };
+        bool canCompact = idle(internal::nonWindowContext());
+        for (auto* window : internal::openWindows()) {
+            auto& context = internal::WindowRequestAccess::context(*window);
+            if (!idle(context)) canCompact = false;
+        }
+        if (canCompact) internal::SharedFontCache::getInstance().compactAtlases();
+    } catch (const std::bad_alloc&) {
+        // Optional maintenance must not fail a submitted frame. Retry later.
+    }
 }
 
 void present() {

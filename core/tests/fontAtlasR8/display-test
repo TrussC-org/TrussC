@@ -2,3 +2,5 @@
 {test} --midpass-check
 {test} --burst-check
 {test} --burst-check --per-glyph
+{test} --compact-check
+{test} --compact-orientation-check

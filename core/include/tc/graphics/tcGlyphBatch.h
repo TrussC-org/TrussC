@@ -8,6 +8,7 @@ namespace trussc {
 namespace internal {
 sg_shader glyphBatchShader();
 sg_buffer glyphBatchIndices(size_t quads);
+struct FontAtlasCompactionTestAccess;
 }
 
 // Retained glyph quads. Record model transforms; draw applies the active camera
@@ -76,9 +77,10 @@ public:
 
     void draw() { draw(Mat4::identity()); }
     void draw(const Mat4& transform) {
-        if (!activeRuns_ || !sg_isvalid()) return;
+        if (placements_.empty() || !sg_isvalid()) return;
         auto* target = internal::drawingApiTarget();
         if (!target || !font_.atlasManager_) return;
+        refreshAtlas();
         font_.initResources();
         // Request mips before recording; dirty pages are published once at the
         // target flush, before any recorded draw replays.
@@ -143,11 +145,13 @@ public:
         }
     }
     void clear() {
+        placements_.clear();
         activeRuns_ = 0;
         for (auto& run : runs_) { run.vertices.clear(); run.dirty = true; }
     }
 
 private:
+    friend struct internal::FontAtlasCompactionTestAccess;
     struct Vertex { Vec4 position; Vec2 texcoord; Color color; };
     struct Buffers {
         sg_buffer vertices{}, staging{};
@@ -216,7 +220,25 @@ private:
             return true;
         }
     };
+    struct Placement { Font::PlacedGlyph placed; Mat4 matrix; Color color; };
+    std::vector<Placement> placements_;
+    uint64_t atlasGeneration_ = 0;
+    void refreshAtlas() {
+        const auto generation = font_.atlasManager_->getAtlasGeneration();
+        if (generation == atlasGeneration_) return;
+        activeRuns_ = 0;
+        for (auto& run : runs_) { run.vertices.clear(); run.dirty = true; }
+        for (const auto& placement : placements_) appendVertices(placement.placed, placement.matrix, placement.color);
+        atlasGeneration_ = generation;
+    }
     void append(const Font::PlacedGlyph& placed, const Mat4& matrix, const Color& color) {
+        refreshAtlas();
+        const auto* glyph = font_.atlasManager_->getOrLoadGlyph(placed.codepoint);
+        if (!glyph || !glyph->isValid() || glyph->getWidth() <= 0 || glyph->getHeight() <= 0) return;
+        placements_.push_back({placed, matrix, color});
+        appendVertices(placed, matrix, color);
+    }
+    void appendVertices(const Font::PlacedGlyph& placed, const Mat4& matrix, const Color& color) {
         const auto* glyph = font_.atlasManager_->getOrLoadGlyph(placed.codepoint);
         if (!glyph || !glyph->isValid() || glyph->getWidth() <= 0 || glyph->getHeight() <= 0) return;
         const size_t index = glyph->getAtlasIndex();

@@ -3330,6 +3330,7 @@ FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  
 ```cpp
 Vec2 Font::calcAlignOffset(const std::string & text, Direction h, Direction v) const  // Calculate a text alignment offset.
 void Font::clearAtlas()  // Clears the font's cached glyphs and atlas pages.
+void Font::compactAtlas()  // Schedules a merge of frozen font atlas pages.
 void Font::drawString(const std::string & text, float x, float y) const [+1]  // Draws text with the loaded font.
 void Font::drawStringInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draws pre-wrapped text with horizontal glyph layout.
 void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text with vertical glyph layout.

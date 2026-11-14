@@ -10271,9 +10271,11 @@ related = ["CoreEvents::focusChanged", "Window::isFocused", "App::windowFocusCha
 keywords = ["typeface", "ttf", "of true type font"]
 of = ["ofTrueTypeFont"]
 description.en = "Provides TrueType font rendering and text layout."
-description.ja = "TrueType フォントによる文字描画とテキストの配置を行う。"
-description.ko = "트루타입 폰트로 텍스트를 렌더링하고 배치한다."
+description.ja = "TrueType フォントによる文字描画とテキストの配置を行います。"
+description.ko = "트루타입 폰트로 텍스트를 렌더링하고 배치합니다."
 details.en = '''
+- Four frozen atlas pages below the GPU size limit merge automatically after rendering; use `compactAtlas()` to schedule a merge of two or more.
+- Glyphs keep a small gap so mipmapped text stays clean down to small sizes. For perfectly clean, heavily minified text, draw into an Fbo and scale it. Large rasterized sizes use more atlas memory.
 - Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Use `load(nameOrPath, size, faceIndex = 0)` to load a font file or system font name, and check the returned `LoadResult` for success; see `Font::load` for path resolution, collection faces, and Web URL loading.
 - `drawString` draws UTF-8 text using the current drawing color, and `getStringPath` returns its vector outlines; without a loaded font, drawing does nothing and the returned path is empty.
@@ -10286,6 +10288,8 @@ details.en = '''
 - Destroying a Font does not evict its atlas from the shared cache; reloading with a different cache key releases the previous cached atlas if no other Font uses it.
 '''
 details.ja = '''
+- GPU 上限未満の固定済みアトラスページが4枚になると描画後に自動で結合します。`compactAtlas()` では2枚以上の結合を予約できます。
+- グリフの間に小さな余白を設け、小さいサイズまでミップマップ付きの文字をきれいに保ちます。大きく縮小しても完全にきれいに表示したい場合は、文字を Fbo に描いてから縮小してください。大きなサイズでラスタライズすると、アトラスのメモリ使用量が増えます。
 - 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - `load(nameOrPath, size, faceIndex = 0)` でフォントファイルまたはシステムフォント名を読み込み、戻り値の `LoadResult` で成功を確認します。パスの解決、コレクション内の書体、Web の URL 読み込みについては `Font::load` を参照してください。
 - `drawString` は現在の描画色で UTF-8 テキストを描画し、`getStringPath` はそのベクター輪郭を返します。フォントが読み込まれていない場合、描画は何も行わず、返されるパスは空になります。
@@ -10298,6 +10302,8 @@ details.ja = '''
 - Font を破棄しても、アトラスは共有キャッシュから削除されません。異なるキャッシュキーで読み直すと、ほかの Font が使用していない場合に以前のアトラスがキャッシュから解放されます。
 '''
 details.ko = '''
+- GPU 한도 미만의 고정 아틀라스 페이지 4개는 렌더링 후 자동 병합합니다. `compactAtlas()`로 2개 이상의 병합을 예약할 수 있습니다.
+- 글리프 사이에 작은 간격을 두어 밉맵 텍스트를 작은 크기까지 깨끗하게 유지합니다. 크게 축소해도 완전히 깨끗한 텍스트가 필요하면 Fbo에 그린 뒤 축소합니다. 큰 크기로 래스터화하면 아틀라스 메모리를 더 사용합니다.
 - 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - `load(nameOrPath, size, faceIndex = 0)`로 폰트 파일이나 시스템 폰트 이름을 로드하고 반환된 `LoadResult`로 성공 여부를 확인합니다. 경로 해석, 컬렉션 내 서체, Web URL 로드는 `Font::load`를 참조합니다.
 - `drawString`은 현재 그리기 색상으로 UTF-8 텍스트를 그리며, `getStringPath`는 텍스트의 벡터 윤곽선을 반환합니다. 로드된 폰트가 없으면 그리기는 아무 작업도 하지 않고 반환되는 경로는 비어 있습니다.
@@ -58471,16 +58477,19 @@ description.en = "Returns a glyph atlas page for inspection."
 description.ja = "確認用にグリフのアトラスページを返す。"
 description.ko = "확인용 글리프 아틀라스 페이지를 반환한다."
 details.en = '''
+- Automatic or scheduled compaction can change page indices and invalidate borrowed pointers at a frame boundary. Reacquire inspection pointers on the next draw.
 - Returns a borrowed `const internal::AtlasState*`, or `nullptr` if no font is loaded. A loaded font does not check the index; require `index < getAtlasCount()` before calling.
 - Pages store glyph coverage in the R channel of an R8 texture. Drawing a page view with the normal texture pipeline displays it in red; font drawing uses a coverage pipeline instead.
 - This accessor does not upload textures. Adding glyphs may invalidate page pointers, and atlas updates may replace GPU images and views; reacquire them after changes. Clearing or releasing the owning atlas also invalidates them.
 '''
 details.ja = '''
+- 自動結合や予約した結合により、フレーム末尾にページのインデックスが変わり、取得済みポインタが無効になる場合があります。次の描画時に確認用ポインタを取得し直してください。
 - 所有権を渡さずに `const internal::AtlasState*` を返し、フォントが未読み込みなら `nullptr` を返します。読み込み済みの場合はインデックスを検査しないため、呼び出す前に `index < getAtlasCount()` を確認してください。
 - ページは R8 テクスチャの R チャンネルにグリフのカバレッジを保存します。ページのビューを通常のテクスチャ用パイプラインで描くと赤く表示されます。フォント描画ではカバレッジ用パイプラインを使います。
 - この取得処理ではテクスチャをアップロードしません。グリフの追加でページへのポインタが無効になる場合があり、アトラスの更新で GPU 画像やビューが置き換わる場合もあります。変更後は取得し直してください。所有元のアトラスのクリアや解放でも無効になります。
 '''
 details.ko = '''
+- 자동 병합이나 예약된 병합은 프레임 끝에서 페이지 인덱스를 바꾸고 빌린 포인터를 무효화할 수 있다. 다음 그리기에서 확인용 포인터를 다시 가져온다.
 - 소유권을 넘기지 않는 `const internal::AtlasState*`를 반환하며, 폰트가 로드되지 않았으면 `nullptr`를 반환합니다. 로드된 폰트는 인덱스를 검사하지 않으므로 호출 전에 `index < getAtlasCount()`를 확인해야 합니다.
 - 페이지는 R8 텍스처의 R 채널에 글리프 커버리지를 저장합니다. 페이지 뷰를 일반 텍스처 파이프라인으로 그리면 빨갛게 표시됩니다. 폰트 그리기는 커버리지 파이프라인을 사용합니다.
 - 이 접근자는 텍스처를 업로드하지 않습니다. 글리프를 추가하면 페이지 포인터가 무효화될 수 있고, 아틀라스를 갱신하면 GPU 이미지와 뷰가 교체될 수 있으므로 변경 후 다시 가져와야 합니다. 소유 아틀라스를 지우거나 해제해도 무효화됩니다.
@@ -67900,3 +67909,34 @@ details.en = "Excludes advance, line metrics, atlas padding and oversampling/fil
 details.ja = "送り幅、行メトリクス、アトラスの余白、オーバーサンプリングやフィルターの余白を含みません。Y は下向きで、ベースラインより上の部分は負の Y になります。Rect::getCenter で矩形の基準点、Vec2(box.width / 2, box.height / 2) で半サイズを取得できます。未読み込みや空の輪郭では空の Rect を返し、未収録文字は Font の .notdef に置き換えます。この計測はグリフのラスタライズや転送を行いません。"
 details.ko = "전진 폭, 행 메트릭, 아틀라스 여백 및 오버샘플링/필터 여백을 제외합니다. Y는 아래쪽이며 기준선 위 부분은 음수 Y입니다. Rect::getCenter는 사각형 기준점을, Vec2(box.width / 2, box.height / 2)는 절반 크기를 제공합니다. 로드되지 않은 폰트나 빈 윤곽은 빈 Rect를 반환하며 없는 글리프는 Font의 .notdef로 대체합니다. 이 측정은 글리프를 래스터화하거나 업로드하지 않습니다."
 related = ["GlyphBatch::setAlignToInk", "Font::getGlyphPath", "Rect"]
+
+["Font::compactAtlas"]
+description.en = "Schedules a merge of frozen font atlas pages."
+description.ja = "固定済みのフォントアトラスページの結合を予約します。"
+description.ko = "고정된 폰트 아틀라스 페이지의 병합을 예약합니다."
+details.en = '''
+- Call on the main thread. The merge runs at an end-of-frame boundary after all windows and targets have flushed; this call does not merge immediately.
+- Glyphs keep a small gap so mipmapped text stays clean down to small sizes. For perfectly clean, heavily minified text, draw into an Fbo and scale it. Large rasterized sizes use more atlas memory.
+- Copies existing glyph bytes with aligned placement and builds mipmaps on the GPU. The page receiving new glyphs stays separate. Frozen pages already at the GPU limit are excluded.
+- Four eligible pages trigger automatic merging. This method also allows merging two or three pages. Pages that cannot fit together become several pages, each a power of two up to the GPU limit capped at 8192.
+- Shared Font copies see the same atlas change. Recorded draws retain old pages; GlyphBatch refreshes its vertices on its next draw.
+'''
+details.ja = '''
+- メインスレッドで呼びます。すべてのウィンドウと描画先のフラッシュ後、フレーム末尾に結合します。この呼び出しでは即座に結合しません。
+- グリフの間に小さな余白を設け、小さいサイズまでミップマップ付きの文字をきれいに保ちます。大きく縮小しても完全にきれいに表示したい場合は、文字を Fbo に描いてから縮小してください。大きなサイズでラスタライズすると、アトラスのメモリ使用量が増えます。
+- 配置の整列を保って既存のグリフのバイトをコピーし、GPU でミップマップを生成します。新しいグリフを受け取るページは別に保ちます。GPU 上限サイズの固定ページは対象外です。
+- 対象ページが4枚になると自動で結合します。このメソッドでは2〜3枚も結合できます。収まらない場合は複数枚に分け、各ページは GPU 上限（最大8192）までの2の累乗サイズになります。
+- Font のコピーはアトラスの変更を共有します。記録済み描画は旧ページを保持し、GlyphBatch は次の描画時に頂点を更新します。
+'''
+details.ko = '''
+- 메인 스레드에서 호출합니다. 모든 창과 렌더링 대상의 플러시가 끝난 프레임 끝에서 병합하며, 호출 즉시 병합하지 않습니다.
+- 글리프 사이에 작은 간격을 두어 밉맵 텍스트를 작은 크기까지 깨끗하게 유지합니다. 크게 축소해도 완전히 깨끗한 텍스트가 필요하면 Fbo에 그린 뒤 축소합니다. 큰 크기로 래스터화하면 아틀라스 메모리를 더 사용합니다.
+- 정렬된 배치를 유지하며 기존 글리프 바이트를 복사하고 GPU에서 밉맵을 생성합니다. 새 글리프를 받는 페이지는 별도로 유지합니다. GPU 최대 크기의 고정 페이지는 제외합니다.
+- 대상 페이지가 4개이면 자동 병합합니다. 이 메서드는 2~3개도 병합합니다. 한 페이지에 들어가지 않으면 여러 페이지로 나누며, 각 크기는 GPU 한도(최대 8192) 이내의 2의 거듭제곱입니다.
+- Font 복사본은 아틀라스 변경을 공유합니다. 기록된 그리기는 이전 페이지를 유지하고 GlyphBatch는 다음 그리기에서 정점을 갱신합니다.
+'''
+snippet = '''
+void tcApp::update() {
+    font.compactAtlas();
+}
+'''

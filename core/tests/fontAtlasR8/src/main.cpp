@@ -27,8 +27,13 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
+#include "compactAccess.h"
 
 #include <chrono>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sys/resource.h>
+#include <GL/gl.h>
+#endif
 #include <map>
 #include <cstdint>
 #include <cstdio>
@@ -311,7 +316,7 @@ static void checkPageSizing() {
     int expected = 256;
     // Raster scale = 256/800 * 3; aligned cells include filter + padding.
     while (expected * 2 <= gpuLimit &&
-           ((expected - 16) / 976) * ((expected - 16) / 784) < 32) expected *= 2;
+           ((expected - 16) / 1088) * ((expected - 16) / 896) < 32) expected *= 2;
     printf("FONT_SIZING physical_size=256 oversample=3 gpu_max=%d expected=%d page=%dx%d\n",
            sg_query_limits().max_image_size_2d, expected,
            mgr.getAtlas(0).getWidth(), mgr.getAtlas(0).getHeight());
@@ -464,6 +469,7 @@ private:
     Fbo fbo_;
 };
 
+#include "compactChecks.h"
 #include "midpassChecks.h"
 bool g_burstPerGlyph = false;
 #include "burstChecks.h"
@@ -471,17 +477,23 @@ bool g_burstPerGlyph = false;
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    const bool compactBenchmark = argc > 1 && strcmp(argv[1], "--compact-benchmark") == 0;
+    const bool compactBenchmarkGpu = argc > 1 && strcmp(argv[1], "--compact-benchmark-gpu") == 0;
+    if (compactBenchmark) { benchmarkCompaction(false); return g_fail ? 1 : 0; }
+    compactOrientationOnly = argc > 1 && strcmp(argv[1], "--compact-orientation-check") == 0;
+    const bool compactCheck = compactOrientationOnly || (argc > 1 && strcmp(argv[1], "--compact-check") == 0);
     const bool midpassCheck = argc > 1 && strcmp(argv[1], "--midpass-check") == 0;
     const bool burstCheck = argc > 1 && strcmp(argv[1], "--burst-check") == 0;
-    const bool gpuCheck = burstCheck || midpassCheck || (argc > 1 && strcmp(argv[1], "--gpu-check") == 0);
+    const bool gpuCheck = compactBenchmarkGpu || compactCheck || burstCheck || midpassCheck || (argc > 1 && strcmp(argv[1], "--gpu-check") == 0);
     if (!gpuCheck) {
         checkCpuPages();
+        checkCompactionCpu();
         printf("fontAtlasR8: %s\n", g_fail == 0 ? "OK" : "FAIL");
         return g_fail == 0 ? 0 : 1;
     }
 
     g_burstPerGlyph = burstCheck && argc > 2 && strcmp(argv[2], "--per-glyph") == 0;
-    const Bytes font = makeSquareFont(midpassCheck || burstCheck, g_burstPerGlyph);
+    const Bytes font = makeSquareFont(midpassCheck || burstCheck || compactCheck, g_burstPerGlyph);
     g_fontPath = (filesystem::temp_directory_path() / "fontAtlasR8_square.ttf").string();
     {
         ofstream f(g_fontPath, ios::binary);
@@ -490,6 +502,16 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings;
     settings.setSize(kCols * kCell, kRows * kCell);
     settings.setHighDpi(false);
+    if (compactBenchmarkGpu) {
+        return tcCoreTest::runDisplayTest<CompactBenchmarkApp>(settings, g_fail, [] { filesystem::remove(g_fontPath); });
+    }
+    if (compactCheck) {
+        settings.setSize(256, 192);
+        return tcCoreTest::runDisplayTest<CompactCheckApp>(settings, g_fail, [] {
+            filesystem::remove(g_fontPath);
+            check("compaction display checks completed", compactCompleted);
+        });
+    }
     if (burstCheck) {
         settings.setSize(256, 192);
         return tcCoreTest::runDisplayTest<BurstCheckApp>(settings, g_fail, [] {

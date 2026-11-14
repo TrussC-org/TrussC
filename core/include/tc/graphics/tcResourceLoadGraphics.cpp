@@ -214,8 +214,9 @@ size_t FontAtlasManager::createNewAtlas() {
     const double boxWidth = std::ceil(bx1 * rasterScale) - std::floor(bx0 * rasterScale);
     const double boxHeight = std::ceil(by1 * rasterScale) - std::floor(by0 * rasterScale);
     const double height = std::max(boxHeight, std::ceil(double(ascent_ - descent_) * oversample_));
-    const double cellWidth = std::max(16.0, std::ceil((boxWidth + oversample_ - 1 + GLYPH_PADDING) / 16) * 16);
-    const double cellHeight = std::max(16.0, std::ceil((height + oversample_ - 1 + 2 * GLYPH_PADDING) / 16) * 16);
+    const int gap = glyphGap(int(std::min(std::max(boxWidth, height) + oversample_ - 1, double(maxAtlasSize_))));
+    const double cellWidth = std::max(16.0, std::ceil((boxWidth + oversample_ - 1 + gap) / 16) * 16);
+    const double cellHeight = std::max(16.0, std::ceil((height + oversample_ - 1 + gap) / 16) * 16);
     const int inset = alignGlyphOffset(GLYPH_PADDING);
     // Reserve about 32 cells before packing; later CPU growth is still allowed
     // until the first recorded draw seals the page's dimensions.
@@ -231,6 +232,240 @@ size_t FontAtlasManager::createNewAtlas() {
 
     atlases_.push_back(std::move(page));
     return atlases_.size() - 1;
+}
+
+// Repack existing glyph bytes at aligned offsets. Zero-filled aligned cells
+// keep the mip-averaging phase through L4 without retaining old page slack.
+void FontAtlasManager::processCompaction() {
+    try {
+        // A font can be prepared before GPU setup, with a CPU fallback limit.
+        const int mergeLimit = sg_isvalid() ? atlasLimit() : maxAtlasSize_;
+        int cap = INITIAL_ATLAS_SIZE;
+        while (cap <= mergeLimit / 2) cap *= 2;
+        size_t candidates = 0;
+        for (const auto& page : atlases_)
+            if (page->frozen_ && page->width_ < cap) ++candidates;
+        if (candidates < (compactRequested_ ? 2u : 4u)) {
+            compactRequested_ = false;
+            return;
+        }
+        compactRequested_ = false;
+        std::vector<bool> eligible(atlases_.size(), false);
+        for (size_t i = 0; i < atlases_.size(); ++i)
+            eligible[i] = atlases_[i]->frozen_ && atlases_[i]->width_ < cap;
+        struct Move { uint32_t codepoint; size_t source; int x, y, width, height; };
+        std::vector<Move> moves;
+        for (const auto& entry : glyphs_) {
+            const auto& glyph = entry.second;
+            if (!glyph.valid_ || !eligible[glyph.atlasIndex_]) continue;
+            const auto& page = *atlases_[glyph.atlasIndex_];
+            const int x = int(std::lround(glyph.u0_ * page.width_));
+            const int y = int(std::lround(glyph.v0_ * page.height_));
+            const int width = int(std::lround(glyph.u1_ * page.width_)) - x;
+            const int height = int(std::lround(glyph.v1_ * page.height_)) - y;
+            if (width == 0 || height == 0) continue; // Spaces need no atlas cell.
+            moves.push_back({entry.first, glyph.atlasIndex_, x, y, width, height});
+        }
+        if (moves.empty()) return;
+        std::sort(moves.begin(), moves.end(), [](const Move& a, const Move& b) {
+            if (a.height != b.height) return a.height > b.height;
+            if (a.width != b.width) return a.width > b.width;
+            return a.codepoint < b.codepoint;
+        });
+        struct Placement { size_t move; int x, y; };
+        auto pack = [&](int side, size_t first, size_t last, std::vector<Placement>& packed) {
+            packed.clear();
+            int x = alignGlyphOffset(GLYPH_PADDING), y = x, row = 0;
+            size_t i = first;
+            for (; i < last; ++i) {
+                const auto& glyph = moves[i];
+                const int gap = glyphGap(std::max(glyph.width, glyph.height));
+                if (x + glyph.width + gap > side) {
+                    x = alignGlyphOffset(GLYPH_PADDING);
+                    y = alignGlyphOffset(y + row);
+                    row = 0;
+                }
+                if (x + glyph.width + gap > side ||
+                    y + glyph.height + gap > side) break;
+                packed.push_back({i, x, y});
+                x = alignGlyphOffset(x + glyph.width + gap);
+                row = std::max(row, glyph.height + gap);
+            }
+            return i;
+        };
+        std::vector<std::shared_ptr<AtlasState>> replacement;
+        auto glyphs = glyphs_;
+        std::vector<Placement> packed;
+        // Copy and UV remapping accept any source region, including a whole
+        // frozen page. Packing policy only chooses those regions and offsets.
+        auto copyRegion = [](const AtlasState& source, AtlasState& destination,
+                             int x, int y, int width, int height, int dx, int dy) {
+            for (int row = 0; row < height; ++row)
+                std::memcpy(destination.pixels_.data() + size_t(dy + row) * destination.width_ + dx,
+                    source.pixels_.data() + size_t(y + row) * source.width_ + x, width);
+        };
+        auto remapGlyph = [](GlyphInfo& glyph, const AtlasState& source,
+                             const AtlasState& destination, size_t index, int dx, int dy) {
+            glyph.atlasIndex_ = index;
+            glyph.u0_ = (glyph.u0_ * source.width_ + dx) / destination.width_;
+            glyph.u1_ = (glyph.u1_ * source.width_ + dx) / destination.width_;
+            glyph.v0_ = (glyph.v0_ * source.height_ + dy) / destination.height_;
+            glyph.v1_ = (glyph.v1_ * source.height_ + dy) / destination.height_;
+        };
+        size_t first = 0;
+        while (first < moves.size()) {
+            const size_t last = pack(cap, first, moves.size(), packed);
+            if (last == first) return; // Preserve the old atlas if packing fails.
+            int side = INITIAL_ATLAS_SIZE;
+            while (side < cap && pack(side, first, last, packed) != last) side *= 2;
+            if (pack(side, first, last, packed) != last) return;
+            auto page = std::make_shared<AtlasState>();
+            page->width_ = page->height_ = side;
+            page->pixels_.resize(size_t(side) * side, 0);
+            page->sealed_ = page->frozen_ = page->compacted_ = true;
+            page->mipmaps_ = wantMipmaps_;
+            for (const auto& destination : packed) {
+                const auto& move = moves[destination.move];
+                const auto& source = *atlases_[move.source];
+                copyRegion(source, *page, move.x, move.y, move.width, move.height, destination.x, destination.y);
+                auto& glyph = glyphs.at(move.codepoint);
+                remapGlyph(glyph, source, *page, replacement.size(), destination.x - move.x, destination.y - move.y);
+            }
+            replacement.push_back(std::move(page));
+            first = last;
+        }
+        if (replacement.size() >= candidates) return; // Do not increase the page count.
+        std::vector<size_t> indices(atlases_.size());
+        for (size_t i = 0; i < atlases_.size(); ++i) if (!eligible[i]) {
+            indices[i] = replacement.size();
+            replacement.push_back(atlases_[i]);
+        }
+        for (const auto& entry : glyphs_) {
+            const auto& glyph = entry.second;
+            if (!glyph.valid_) continue;
+            auto& destination = glyphs.at(entry.first);
+            if (!eligible[glyph.atlasIndex_]) {
+                destination.atlasIndex_ = indices[glyph.atlasIndex_];
+            } else if (glyph.u0_ == glyph.u1_ || glyph.v0_ == glyph.v1_) {
+                destination.atlasIndex_ = 0;
+                destination.u0_ = destination.v0_ = destination.u1_ = destination.v1_ = 0;
+            }
+        }
+        // Allocate all CPU state before GPU work and publish only on success.
+        struct MergeScratch {
+            sg_image image{};
+            ~MergeScratch() { deferGpuDestroy(image); }
+        } scratch;
+        if (sg_isvalid()) for (auto& page : replacement)
+            if (page->compacted_ && !page->textureValid_ && !uploadCompactedAtlas(*page, scratch.image)) return;
+        atlases_.swap(replacement);
+        glyphs_.swap(glyphs);
+        ++atlasGeneration_;
+    } catch (const std::bad_alloc&) {
+        logWarning("Font") << "atlas compaction deferred: out of memory";
+        compactRequested_ = true;
+    }
+}
+
+// Reuse Fbo pass resources and GL whole-image LOD handling, with a linear
+// coverage filter matching the CPU mip chain for immutable R8 snapshots.
+bool FontAtlasManager::uploadCompactedAtlas(AtlasState& atlas, sg_image& scratch) {
+    if (!sg_query_pixelformat(SG_PIXELFORMAT_R8).render) return false;
+    Fbo::ensureSharedMip(TextureFormat::R8);
+    auto& shared = Fbo::getSharedMip(TextureFormat::R8);
+    if (!shared.ready) return false;
+    if (!shared.coverageShader.id) {
+        shared.coverageShader = sg_make_shader(tc_fbomip_coverage_downsample_shader_desc(sg_query_backend()));
+        if (!internalShaderReady(shared.coverageShader, "Font atlas mipmap")) return false;
+        sg_pipeline_desc pipeline{};
+        pipeline.shader = shared.coverageShader;
+        pipeline.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
+        pipeline.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+        pipeline.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
+        shared.coverageRecipe.reset(PipelineKey::raw(PipelineRole::Mip, pipeline));
+    }
+    if (sg_query_shader_state(shared.coverageShader) != SG_RESOURCESTATE_VALID) return false;
+    struct ScratchImages {
+        sg_image upload{};
+        ~ScratchImages() { deferGpuDestroy(upload); }
+    } temporary;
+    struct ScratchViews {
+        sg_view source{}, attachment{};
+        ~ScratchViews() { deferGpuDestroy(source); deferGpuDestroy(attachment); }
+    };
+    sg_image_desc desc{};
+    desc.width = atlas.width_;
+    desc.height = atlas.height_;
+    desc.pixel_format = SG_PIXELFORMAT_R8;
+    desc.data = {atlas.pixels_.data(), atlas.pixels_.size()};
+    const sg_image upload = temporary.upload = sg_make_image(&desc);
+    desc.data = {};
+    if (atlas.mipmaps_) for (int side = atlas.width_; side > 1; side /= 2) ++desc.num_mipmaps;
+    // The zero-initialized descriptor's default is one mip, but explicit
+    // arithmetic needs to count mip 0 as well.
+    ++desc.num_mipmaps;
+    desc.usage.color_attachment = true;
+    atlas.texture_ = sg_make_image(&desc);
+    if (desc.num_mipmaps > 1) {
+        auto scratchDesc = desc;
+        scratchDesc.width = std::max(1, desc.width / 2);
+        scratchDesc.height = std::max(1, desc.height / 2);
+        --scratchDesc.num_mipmaps;
+        const auto existing = sg_query_image_desc(scratch);
+        if (existing.width != scratchDesc.width || existing.height != scratchDesc.height) {
+            deferGpuDestroy(scratch);
+            scratch = sg_make_image(&scratchDesc);
+        }
+    }
+    bool valid = sg_query_image_state(upload) == SG_RESOURCESTATE_VALID &&
+        sg_query_image_state(atlas.texture_) == SG_RESOURCESTATE_VALID &&
+        (desc.num_mipmaps == 1 || sg_query_image_state(scratch) == SG_RESOURCESTATE_VALID);
+    auto drawLevel = [&](sg_image source, int sourceLevel, sg_image destination, int level,
+                         int width, int height, bool downsample) {
+        ScratchViews views;
+        sg_view_desc viewDesc{};
+        viewDesc.texture.image = source;
+        viewDesc.texture.mip_levels = {sourceLevel, 1};
+        const sg_view sourceView = views.source = sg_make_view(&viewDesc);
+        viewDesc = {};
+        viewDesc.color_attachment.image = destination;
+        viewDesc.color_attachment.mip_level = level;
+        const sg_view attachment = views.attachment = sg_make_view(&viewDesc);
+        bool ok = sg_query_view_state(sourceView) == SG_RESOURCESTATE_VALID &&
+            sg_query_view_state(attachment) == SG_RESOURCESTATE_VALID;
+        if (ok) {
+            sg_pass pass{};
+            pass.attachments.colors[0] = attachment;
+            pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+            TargetPassScope scope(pass, width, height, SG_PIXELFORMAT_R8);
+            ok = scope.active() && Fbo::applyMipPipeline_(downsample ? shared.coverageRecipe : shared.blitRecipe);
+            if (ok) {
+                sg_bindings bindings{};
+                bindings.vertex_buffers[0] = shared.vbuf;
+                bindings.views[VIEW_tc_fbomip_srcTex] = sourceView;
+                bindings.samplers[SMP_tc_fbomip_srcSmp] = shared.sampler;
+                sg_apply_bindings(&bindings);
+                Fbo::applyMipSource_(sourceLevel, true);
+                sg_draw(0, 4, 1);
+            }
+        }
+        return ok;
+    };
+    if (valid) valid = drawLevel(upload, 0, atlas.texture_, 0, atlas.width_, atlas.height_, false);
+    for (int level = 1; valid && level < desc.num_mipmaps; ++level) {
+        const int width = std::max(1, atlas.width_ >> level);
+        const int height = std::max(1, atlas.height_ >> level);
+        valid = drawLevel(atlas.texture_, level - 1, scratch, level - 1, width, height, true) &&
+            drawLevel(scratch, level - 1, atlas.texture_, level, width, height, false);
+    }
+    if (valid) {
+        sg_view_desc viewDesc{};
+        viewDesc.texture.image = atlas.texture_;
+        atlas.view_ = sg_make_view(&viewDesc);
+        valid = sg_query_view_state(atlas.view_) == SG_RESOURCESTATE_VALID;
+    }
+    atlas.textureValid_ = valid;
+    return valid;
 }
 
 std::shared_ptr<FontAtlasManager> SharedFontCache::publishPrepared(

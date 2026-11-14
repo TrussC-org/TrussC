@@ -72,9 +72,9 @@ static Bytes boxGlyph(int x0, int y0, int x1, int y1) {
     return b;
 }
 
-static Bytes makeFont() {
-    const vector<Bytes> glyphs = {Bytes{}, boxGlyph(0, -200, 1000, 800),
-                                  boxGlyph(0, -200, 2000, 800), boxGlyph(0, 0, 100, 100)};
+static Bytes makeFont(bool tall = false) {
+    const vector<Bytes> glyphs = {Bytes{}, boxGlyph(0, -200, tall ? 2000 : 1000, 800),
+                                  boxGlyph(0, -200, 2000, tall ? 3800 : 800), boxGlyph(0, 0, 100, 100)};
     Bytes glyf, loca;
     for (auto& g : glyphs) { put32(loca, (uint32_t)glyf.size()); glyf.insert(glyf.end(), g.begin(), g.end()); }
     put32(loca, (uint32_t)glyf.size());
@@ -83,7 +83,7 @@ static Bytes makeFont() {
     put32(head, 0x00010000); put32(head, 0x00010000); put32(head, 0); put32(head, 0x5F0F3CF5);
     put16(head, 0); put16(head, 1000);
     for (int i = 0; i < 16; i++) head.push_back(0);
-    put16(head, 0); put16(head, (uint16_t)-200); put16(head, 2000); put16(head, 800);  // bbox
+    put16(head, 0); put16(head, (uint16_t)-200); put16(head, 2000); put16(head, tall ? 3800 : 800);  // bbox
     put16(head, 0); put16(head, 8); put16(head, 2);
     put16(head, 1);  // long loca
     put16(head, 0);
@@ -291,6 +291,38 @@ static void checkLoweredInteger(const Bytes& font) {
     check("lowered oversampling: no further warning", g_warnings - before == 1);
 }
 
+// At oversampling 2 the 2001 x 4001 bitmap fits, but its 501-texel gap does not.
+static void checkGapAtPageEdge() {
+    const Bytes font = makeFont(true);
+    internal::FontAtlasManager m;
+    const int before = g_warnings;
+    m.setOversample(2);
+    const bool ok = m.setupFromMemory(font.data(), font.size(), 500);
+    check("gap at edge: loads without a raster-size warning", ok && g_warnings == before);
+    if (!ok) return;
+    m.getOrLoadGlyph('A');
+    const internal::GlyphInfo* g = m.getOrLoadGlyph('W');
+    check("gap at edge: tall glyph is valid", g && g->isValid());
+    if (!g || !g->isValid()) return;
+    float tw = 0, th = 0;
+    texelSize(m, g, tw, th);
+    check("gap at edge: keeps main's oversampling 2",
+          approxEq(tw, 2001.0f, 0.1f) && approxEq(th, 4001.0f, 0.1f),
+          "texels " + to_string(tw) + " x " + to_string(th));
+    const auto& page = m.getAtlas(g->getAtlasIndex());
+    const float bottom = g->getV1() * page.getHeight();
+    check("gap at edge: bitmap fits with nonnegative slack smaller than its gap",
+          g->getU0() >= 0 && g->getV0() >= 0 && g->getU1() <= 1 &&
+          bottom <= page.getHeight() && page.getHeight() - bottom < 501 &&
+          th + 501 > page.getHeight());
+    check("gap at edge: separate page from the earlier glyph", m.getAtlasCount() == 2);
+    const size_t memory = m.getMemoryUsage();
+    for (int i = 0; i < 300; ++i) m.getOrLoadGlyph('W');
+    check("gap at edge: repeated lookups keep page count and memory bounded",
+          m.getAtlasCount() == 2 && m.getMemoryUsage() == memory);
+    check("gap at edge: no raster-size warning after placement", g_warnings == before);
+}
+
 // 20000 px at oversampling 1: raster scale below 1.
 static void checkBelowOne(const Bytes& font) {
     const int fontSize = 20000;
@@ -321,6 +353,7 @@ TC_CORE_TEST_MAIN() {
     checkFits(font);
     checkAbovePageLimit(font);
     checkLoweredInteger(font);
+    checkGapAtPageEdge();
     checkBelowOne(font);
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

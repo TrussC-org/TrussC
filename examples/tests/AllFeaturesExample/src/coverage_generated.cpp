@@ -1609,6 +1609,7 @@ struct Cover_Font : af::Scope<Font> {
     static void run() {
         (void)Font();
         (void)af::val<Font>().clearAtlas();
+        (void)af::val<Font>().compactAtlas();
         (void)af::val<const Font>().drawString(af::val<const std::string>(), af::val<float>(), af::val<float>());
         (void)af::val<const Font>().drawString(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>());
         (void)af::val<Font>().enableWrap(af::val<bool>());

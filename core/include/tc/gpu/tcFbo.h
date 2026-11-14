@@ -16,6 +16,7 @@ namespace trussc {
 
 // Forward declaration
 class Fbo;
+namespace internal { class FontAtlasManager; }
 
 namespace internal {
 
@@ -41,7 +42,8 @@ struct FboSharedMipResources {
     bool ready = false;   // both shaders usable (internalShaderReady)
     sg_shader shader = {};
     sg_shader blitShader = {};
-    PipelineRecipe mipRecipe, blitRecipe;
+    sg_shader coverageShader = {}; // Lazy linear R8 font-atlas filter.
+    PipelineRecipe mipRecipe, blitRecipe, coverageRecipe;
     sg_buffer vbuf = {};
     sg_sampler sampler = {};
     bool initialized = false;
@@ -480,6 +482,7 @@ public:
 
 private:
     friend struct internal::FboStencilAccess;
+    friend class internal::FontAtlasManager;
     internal::DebugName debugName_{internal::DebugObjectKind::Fbo, this};
     static bool needsGlYFlip() {
         sg_backend be = sg_query_backend();
@@ -684,12 +687,15 @@ private:
 
     // GL without native texture views binds the entire image: its shader LOD
     // must remain relative to the image rather than to the requested view.
-    static void applyMipSource_(int level) {
+    static void applyMipSource_(int level, bool preserveStorageRows = false) {
         const auto backend = sg_query_backend();
         const bool wholeImage = (backend == SG_BACKEND_GLCORE || backend == SG_BACKEND_GLES3)
             && !sg_query_features().gl_texture_views;
         tc_fbomip_mip_params_t params = {};
         params.sourceMip[0] = wholeImage ? float(level) : 0.0f;
+        // Fixed passes use native attachment orientation (beginFboOrientation).
+        // Raw atlas copies must address the same storage row on both sides.
+        params.sourceMip[1] = preserveStorageRows && sg_query_features().origin_top_left ? 1.0f : 0.0f;
         sg_apply_uniforms(UB_tc_fbomip_mip_params, SG_RANGE(params));
     }
 
