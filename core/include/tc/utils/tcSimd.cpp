@@ -27,6 +27,7 @@
 #define HWY_TARGET_INCLUDE "tc/utils/tcSimd.cpp"
 #include "hwy/foreach_target.h"
 #include "hwy/highway.h"
+#include "hwy/per_target.h"
 // targets.cc references VectorBytes even on x86 in unoptimized builds.
 // Include its per-target implementation during our existing target pass.
 #include "hwy/per_target.cc"
@@ -46,14 +47,28 @@ double Reduce(const float* a, const float* b, std::size_t count, double center) 
     const hn::ScalableTag<double> d;
     const hn::Rebind<float, decltype(d)> df;
     const std::size_t lanes = hn::Lanes(d);
-    auto total = hn::Zero(d);
-    std::size_t i = 0;
-    for (; count - i >= lanes; i += lanes) {
-        auto value = hn::PromoteTo(d, hn::LoadU(df, a + i));
+    const auto loadValue = [&](std::size_t index) {
+        auto value = hn::PromoteTo(d, hn::LoadU(df, a + index));
         if constexpr (Mode == 1) value = hn::Sub(value, hn::Set(d, center));
-        if constexpr (Mode == 2) value = hn::Sub(value, hn::PromoteTo(d, hn::LoadU(df, b + i)));
+        if constexpr (Mode == 2) value = hn::Sub(value, hn::PromoteTo(d, hn::LoadU(df, b + index)));
         if constexpr (Mode != 0) value = hn::Mul(value, value);
-        total = hn::Add(total, value);
+        return value;
+    };
+    auto total0 = hn::Zero(d);
+    auto total1 = hn::Zero(d);
+    auto total2 = hn::Zero(d);
+    auto total3 = hn::Zero(d);
+    std::size_t i = 0;
+    // Independent sums hide addition latency on targets with few double lanes.
+    for (; count - i >= 4 * lanes; i += 4 * lanes) {
+        total0 = hn::Add(total0, loadValue(i));
+        total1 = hn::Add(total1, loadValue(i + lanes));
+        total2 = hn::Add(total2, loadValue(i + 2 * lanes));
+        total3 = hn::Add(total3, loadValue(i + 3 * lanes));
+    }
+    auto total = hn::Add(hn::Add(total0, total1), hn::Add(total2, total3));
+    for (; count - i >= lanes; i += lanes) {
+        total = hn::Add(total, loadValue(i));
     }
     double result = hn::ReduceSum(d, total);
 #else
@@ -192,6 +207,14 @@ HWY_AFTER_NAMESPACE();
 
 #if TRUSSC_SIMD_SCALAR || HWY_ONCE
 namespace trussc::simd {
+const char* targetName() {
+#if TRUSSC_SIMD_SCALAR
+    return "SCALAR";
+#else
+    return hwy::TargetName(hwy::DispatchedTarget());
+#endif
+}
+
 namespace scalar {
 namespace {
 double total(const float* values, std::size_t count) {

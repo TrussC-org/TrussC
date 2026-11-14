@@ -6,6 +6,9 @@
 
 namespace trussc::simd {
 
+// Name of the target selected for the dispatched kernels.
+const char* targetName();
+
 // Packed 4-byte pixels. src == dst is supported; other overlap is not.
 // forceAlpha replaces alpha with 255; otherwise alpha is preserved.
 // A zero count does not access either pointer (nullptr is allowed).

@@ -183,6 +183,7 @@ template <typename F> double measure(F fn) {
     return chrono::duration<double, std::micro>(chrono::steady_clock::now() - begin).count() / iterations;
 }
 void benchmark() {
+    std::printf("Highway target: %s\n", simd::targetName());
     vector<float> a(1000000), b(a.size());
     for (size_t i = 0; i < a.size(); ++i) { a[i] = float(int(i % 2001) - 1000) / 32; b[i] = -a[i] / 2; }
     using Kernel = float (*)(const float*, size_t);
@@ -208,8 +209,10 @@ void benchmark() {
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     helpers();
     minMaxSpecialValues();
-    // Covers float/double lanes and lanes +/-1 for scalar, SSE, AVX2, AVX512 and NEON.
-    for (size_t count : {0u, 1u, 2u, 3u, 4u, 5u, 7u, 8u, 9u, 15u, 16u, 17u, 31u, 32u, 33u, 65u, 1000000u})
+    // Covers float/double lanes and four-vector boundaries for scalar, SSE,
+    // AVX2, AVX512 and NEON (double lanes = 1, 2, 4, 8), including 8*lanes+3.
+    for (size_t count : {0u, 1u, 2u, 3u, 4u, 5u, 7u, 8u, 9u, 11u, 15u, 16u, 17u,
+                         19u, 31u, 32u, 33u, 35u, 65u, 67u, 1000000u})
         for (int pattern = 0; pattern < 4; ++pattern)
             for (size_t offset : {0u, 1u}) statistics(count, pattern, offset);
     for (size_t j = 0; j < names.size(); ++j) std::printf("max float error %s: absolute=%.9g scaled=%.9g\n", names[j], maxError[j], maxRelativeError[j]);
