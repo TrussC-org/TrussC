@@ -223,6 +223,14 @@ size_t FontAtlasManager::createNewAtlas() {
     while (atlas.width_ * 2 <= maxAtlasSize_ &&
            std::floor((atlas.width_ - inset) / cellWidth) *
            std::floor((atlas.width_ - inset) / cellHeight) < 32) atlas.width_ *= 2;
+    const double oldCellWidth = std::max(16.0, std::ceil((boxWidth + oversample_ - 1 + GLYPH_PADDING) / 16) * 16);
+    const double oldCellHeight = std::max(16.0, std::ceil((height + oversample_ - 1 + 2 * GLYPH_PADDING) / 16) * 16);
+    int oldSide = INITIAL_ATLAS_SIZE;
+    while (oldSide * 2 <= maxAtlasSize_ &&
+           std::floor((oldSide - inset) / oldCellWidth) *
+           std::floor((oldSide - inset) / oldCellHeight) < 32) oldSide *= 2;
+    // Don't let the gap alone double the first page.
+    if (atlas.width_ == oldSide * 2) atlas.width_ /= 2;
     atlas.height_ = atlas.width_;
     atlas.currentX_ = inset;
     atlas.currentY_ = inset;
