@@ -24,14 +24,16 @@ This tests lazy recording and finished-owner capture, rather than public
 grabScreen() admission (covered by captureSubmission and screenshotContract).
 This multi-present synthetic window probe is GL-only because Metal retains one
 drawable per app tick.
-Without `--record`, Linux GLCORE expects 687 assertions per mode. Linux GLES3
-expects 622: 51 fewer for the secondary-window SKIP and 14 fewer for the existing
-GL-only lazy-resize SKIP. Float-format targets (RGBA16F/RGBA32F) are read with
+Without `--record`, the NV12 rotation run recorded 851 passing assertions per
+mode on Linux GLCORE. Linux GLES3 omits 51 secondary-window assertions and
+14 existing GL-only lazy-resize assertions. Float-format targets (RGBA16F/RGBA32F) are read with
 readPixelsFloat(): GLES3 cannot read a float attachment as unsigned bytes.
 The dummy suite also forces buffer growth after each rebuild and verifies that
 releaseSglBuffers clears all three CPU capacities and the GPU vertex buffer.
 NV12 uses generated planes through the actual VideoPlayer draw routing; no
-codec, video clock, camera or NVDEC device is needed.
+codec, video clock, camera or NVDEC device is needed. Non-square planes cover
+0/90/180/270 degrees with and without source reflection, comparing marker
+positions against CPU-oriented RGBA in an offset, scaled display rectangle.
 
 `--record` writes a separate pipeline manifest of PNGs. Its `blend-after-end.after`
 image has lazy and active rows, each with RGB (192,64,64) in both rectangles.

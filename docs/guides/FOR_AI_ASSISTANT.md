@@ -4997,6 +4997,8 @@ unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // 
 unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
 unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
 float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
+float VideoPlayer::getRotation() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in radians.
+int VideoPlayer::getRotationDeg() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in degrees.
 int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.

@@ -87,6 +87,10 @@ public:
     void nextFrame();
     void previousFrame();
 
+    internal::VideoRotation rotation_;
+    int encodedWidth_ = 0, encodedHeight_ = 0;
+    std::vector<uint8_t> rotationBuffer_;
+
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
 
@@ -344,9 +348,14 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         }
     }
 
+    rotation_ = internal::videoStreamRotation(videoStream);
+
     // Get video properties
     width_ = codecCtx_->width;
     height_ = codecCtx_->height;
+    encodedWidth_ = width_;
+    encodedHeight_ = height_;
+    rotation_.size(width_, height_);
     size_t openedBytes = 0;
     if (!internal::VideoDecodeLimits::rgba(width_, height_, openedBytes)) {
         status_->reject(openedBytes, 0); return false;
@@ -601,8 +610,8 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
                 if (front.isNV12) {
                     unsigned char* yBuf  = player->getPixelsY();
                     unsigned char* uvBuf = player->getPixelsUV();
-                    if (yBuf  && front.pixels.size()   == size_t(width_) * height_ &&
-                        uvBuf && front.pixelsUV.size() == size_t(width_) * height_ / 2) {
+                    if (yBuf  && front.pixels.size()   == size_t(encodedWidth_) * encodedHeight_ &&
+                        uvBuf && front.pixelsUV.size() == size_t(encodedWidth_) * encodedHeight_ / 2) {
                         memcpy(yBuf,  front.pixels.data(),   front.pixels.size());
                         memcpy(uvBuf, front.pixelsUV.data(), front.pixelsUV.size());
                         hasNewFrame_ = true;
@@ -900,27 +909,31 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         double pts = frame_->pts == AV_NOPTS_VALUE ? 0.0 : frame_->pts * av_q2d(timeBase_);
         // Keep the presentation dimensions stable across stream changes. Scale
         // the actual admitted input dimensions, rather than reading old rows.
-        const size_t outputBytes = nv12Mode_ ? size_t(width_) * height_ * 3 / 2
+        const size_t outputBytes = nv12Mode_ ? size_t(encodedWidth_) * encodedHeight_ * 3 / 2
                                              : size_t(width_) * height_ * 4;
         FrameData data;
         data.pts = pts;
         data.isNV12 = nv12Mode_;
-        data.pixels.resize(nv12Mode_ ? size_t(width_) * height_ : outputBytes);
-        if (nv12Mode_) data.pixelsUV.resize(size_t(width_) * height_ / 2);
+        data.pixels.resize(nv12Mode_ ? size_t(encodedWidth_) * encodedHeight_ : outputBytes);
+        if (nv12Mode_) data.pixelsUV.resize(size_t(encodedWidth_) * encodedHeight_ / 2);
         const AVPixelFormat destination = nv12Mode_ ? AV_PIX_FMT_NV12 : AV_PIX_FMT_RGBA;
         swsCtx_ = sws_getCachedContext(swsCtx_, srcFrame->width, srcFrame->height,
-            AVPixelFormat(srcFrame->format), width_, height_, destination,
+            AVPixelFormat(srcFrame->format), encodedWidth_, encodedHeight_, destination,
             SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!swsCtx_) {
             av_frame_unref(frame_);
             decodeError("video scaler", AVERROR(ENOMEM));
             return false;
         }
-        uint8_t* output[4] = {data.pixels.data(), nv12Mode_ ? data.pixelsUV.data() : nullptr, nullptr, nullptr};
-        int strides[4] = {width_ * (nv12Mode_ ? 1 : 4), nv12Mode_ ? width_ : 0, 0, 0};
+        const bool rotateRGBA = !nv12Mode_ && rotation_.active();
+        if (rotateRGBA) rotationBuffer_.resize(outputBytes);
+        uint8_t* output[4] = {rotateRGBA ? rotationBuffer_.data() : data.pixels.data(), nv12Mode_ ? data.pixelsUV.data() : nullptr, nullptr, nullptr};
+        int strides[4] = {encodedWidth_ * (nv12Mode_ ? 1 : 4), nv12Mode_ ? encodedWidth_ : 0, 0, 0};
         int rows = sws_scale(swsCtx_, srcFrame->data, srcFrame->linesize, 0, srcFrame->height, output, strides);
         av_frame_unref(frame_);
-        if (rows != height_) { decodeError("video conversion", AVERROR(EINVAL)); return false; }
+        if (rows != encodedHeight_) { decodeError("video conversion", AVERROR(EINVAL)); return false; }
+        if (rotateRGBA)
+            rotation_.apply(rotationBuffer_.data(), data.pixels.data(), encodedWidth_, encodedHeight_);
         std::lock_guard<std::mutex> lock(mutex_);
         frameQueue_.push(std::move(data));
         return true;
@@ -1281,21 +1294,24 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     decodeStatus_ = impl->status();
     width_  = impl->getWidth();
     height_ = impl->getHeight();
+    rotationDeg_ = impl->rotation_.degrees;
 
     if (width_ > 0 && height_ > 0) {
-        if (impl->isNV12Capable() && width_ % 2 == 0 && height_ % 2 == 0) {
+        if (impl->isNV12Capable() && impl->encodedWidth_ % 2 == 0 && impl->encodedHeight_ % 2 == 0) {
             impl->nv12Mode_ = true;
             nv12Mode_  = true;
-            pixelsY_   = new (std::nothrow) unsigned char[size_t(width_) * height_];
-            pixelsUV_  = new (std::nothrow) unsigned char[size_t(width_) * height_ / 2];
+            nv12Width_ = impl->encodedWidth_;
+            nv12Height_ = impl->encodedHeight_;
+            pixelsY_   = new (std::nothrow) unsigned char[size_t(nv12Width_) * nv12Height_];
+            pixelsUV_  = new (std::nothrow) unsigned char[size_t(nv12Width_) * nv12Height_ / 2];
             if (!pixelsY_ || !pixelsUV_) {
                 delete[] pixelsY_; delete[] pixelsUV_; pixelsY_ = pixelsUV_ = nullptr;
                 closePlatform(); return false;
             }
-            std::memset(pixelsY_,  0, size_t(width_) * height_);
-            std::memset(pixelsUV_, 128, size_t(width_) * height_ / 2);  // 128 = neutral chroma in NV12
+            std::memset(pixelsY_,  0, size_t(nv12Width_) * nv12Height_);
+            std::memset(pixelsUV_, 128, size_t(nv12Width_) * nv12Height_ / 2);  // 128 = neutral chroma in NV12
 
-            auto* shader = new internal::NV12VideoShader();
+            auto* shader = new internal::NV12VideoShader(impl->rotation_);
             shader->loadShader();
             nv12ShaderHandle_ = shader;
         } else {
@@ -1643,7 +1659,23 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
             int      dstStride[4] = { w * 4, 0, 0, 0 };
             if (decoded.getData()) ok = sws_scale(sws, frame->data, frame->linesize, 0, h, dstData, dstStride) == h;
             sws_freeContext(sws);
-            if (ok) outPixels = std::move(decoded);
+            if (ok) {
+                const auto rotation = internal::videoStreamRotation(fmtCtx->streams[videoIdx]);
+                if (rotation.active()) {
+                    int outputWidth = w, outputHeight = h;
+                    rotation.size(outputWidth, outputHeight);
+                    Pixels rotated;
+                    try { rotated.allocate(outputWidth, outputHeight, 4); }
+                    catch (const std::bad_alloc&) {
+                        status->reject(size_t(w) * h * 4, 0);
+                        cleanup(); return false;
+                    }
+                    if (!rotated.getData()) { cleanup(); return false; }
+                    rotation.apply(decoded.getData(), rotated.getData(), w, h);
+                    decoded = std::move(rotated);
+                }
+                outPixels = std::move(decoded);
+            }
         }
     }
 
