@@ -1184,9 +1184,10 @@ inline int randomInt(int min, int max) {
     return dist(internal::getRandomEngine());
 }
 
-// Normally distributed samples. stddev must be positive, as for normal_distribution.
+// Normally distributed samples; stddev <= 0 returns mean.
 // The distribution is local so randomSeed also resets any cached sample.
 inline float randomGaussian(float mean, float stddev) {
+    if (!(stddev > 0.0f)) return mean;
     std::normal_distribution<float> distribution(mean, stddev);
     return distribution(internal::getRandomEngine());
 }

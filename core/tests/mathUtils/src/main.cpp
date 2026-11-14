@@ -111,6 +111,8 @@ void helpers() {
     randomSeed(1475);
     for (int i = 0; i < 101; ++i)
         check(first[i] == (i % 2 ? randomGaussian() : randomGaussian(3.0f, 2.0f)), "seeded Gaussian");
+    check(randomGaussian(3.0f, 0.0f) == 3.0f, "Gaussian stddev 0 returns mean");
+    check(randomGaussian(3.0f, -2.0f) == 3.0f, "Gaussian negative stddev returns mean");
     vector<int> repeated(101);
     std::iota(repeated.begin(), repeated.end(), 0);
     shuffle(repeated);

@@ -67907,13 +67907,13 @@ description.en = "Returns a normally distributed float, with mean 0 and standard
 description.ja = "正規分布の float 乱数を返す。既定の平均は 0、標準偏差は 1。"
 description.ko = "정규 분포의 float 난수를 반환한다. 기본 평균은 0, 표준 편차는 1이다."
 details.en = '''
-`randomGaussian(mean, stddev)` sets the mean and a positive standard deviation. Uses the same thread-local engine as `random()`. With the same standard library, reseeding with `randomSeed()` repeats the same sequence of calls.
+`randomGaussian(mean, stddev)` sets the mean and the standard deviation; a standard deviation of 0 or less returns `mean`. Uses the same thread-local engine as `random()`. With the same standard library, reseeding with `randomSeed()` repeats the same sequence of calls.
 '''
 details.ja = '''
-`randomGaussian(mean, stddev)` で平均と正の標準偏差を指定します。`random()` と同じスレッド内の生成器を使います。同じ標準ライブラリでは、`randomSeed()` で同じシードを設定し、同じ順序で呼ぶと同じ値を再現します。
+`randomGaussian(mean, stddev)` で平均と標準偏差を指定します。標準偏差が 0 以下なら `mean` を返します。`random()` と同じスレッド内の生成器を使います。同じ標準ライブラリでは、`randomSeed()` で同じシードを設定し、同じ順序で呼ぶと同じ値を再現します。
 '''
 details.ko = '''
-`randomGaussian(mean, stddev)`로 평균과 양의 표준 편차를 지정합니다. `random()`과 스레드 내 생성기를 공유합니다. 같은 표준 라이브러리에서 `randomSeed()`로 같은 시드를 설정하고 같은 순서로 호출하면 같은 값을 재현합니다.
+`randomGaussian(mean, stddev)`로 평균과 표준 편차를 지정합니다. 표준 편차가 0 이하이면 `mean`을 반환합니다. `random()`과 스레드 내 생성기를 공유합니다. 같은 표준 라이브러리에서 `randomSeed()`로 같은 시드를 설정하고 같은 순서로 호출하면 같은 값을 재현합니다.
 '''
 snippet = '''
 randomSeed(42);
