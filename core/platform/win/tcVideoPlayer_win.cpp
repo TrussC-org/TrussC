@@ -515,9 +515,10 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     // known dimensions here; the engine's output boundary checks them again.
     if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &videoType))) {
         UINT32 rotation = 0;
-        // MF's source attribute counts counter-clockwise; the public API is clockwise.
+        // MF's value is already the clockwise display turn (observed on Windows 11
+        // 26200 against the stream display matrix). MF ignores a mirrored matrix.
         if (SUCCEEDED(videoType->GetUINT32(MF_MT_VIDEO_ROTATION, &rotation)))
-            state_->rotationDeg_ = internal::VideoRotation::normalize(-double(rotation));
+            state_->rotationDeg_ = internal::VideoRotation::normalize(double(rotation));
         if (SUCCEEDED(MFGetAttributeSize(videoType.Get(), MF_MT_FRAME_SIZE, &metadataWidth, &metadataHeight)) &&
             (metadataWidth && metadataHeight && !internal::VideoDecodeLimits::rgba(metadataWidth, metadataHeight, metadataBytes))) {
             state_->status_->reject(metadataBytes, 0);
@@ -637,6 +638,8 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
             return {};
         }
         ComPtr<IMFMediaBuffer> buffer;
+        // A contiguous copy keeps rows tightly packed; a 2D buffer's pitch can be
+        // wider than width * 4 (e.g. 1472 bytes for a 360 px rotated frame).
         hr = sample->ConvertToContiguousBuffer(&buffer);
         if (FAILED(hr)) return {};
 
@@ -1322,6 +1325,7 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                 status->reject(sampleBytes, 0); hr = E_INVALIDARG;
             }
             ComPtr<IMFMediaBuffer> buffer;
+            // Contiguous copy: tightly packed rows, unlike a 2D buffer's pitch.
             if (SUCCEEDED(hr)) hr = sample->ConvertToContiguousBuffer(&buffer);
             if (SUCCEEDED(hr)) {
                 BYTE* data = nullptr;
