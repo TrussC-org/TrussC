@@ -24,7 +24,8 @@ struct InjectedWindow {
         metadata.sample_count = 1; metadata.trust_hidden_signals = true;
         metadata.reliable_button_bits = true; metadata.source_interval = 1.0 / 60;
         operations.readMetadata = [](sapp_window, void* user, sapp_tc_window_metadata& out) {
-            out = static_cast<InjectedWindow*>(user)->metadata; return true;
+            auto& n = *static_cast<InjectedWindow*>(user);
+            out = n.metadata; out.pointer_locked = n.pointerLocked; return true;
         };
         operations.closeRecorded = [](sapp_window, void* user) { return static_cast<InjectedWindow*>(user)->closed; };
         operations.injectEvent = [](sapp_window handle, void* user, const sapp_event* input) {
@@ -40,8 +41,6 @@ struct InjectedWindow {
         dpi_scale = metadata.dpi_scale;
         fb_width = metadata.fb_width; fb_height = metadata.fb_height;
         win_width = metadata.width; win_height = metadata.height;
-        event.pointer_locked = event.pointer_locked || pointerLocked;
-        event.reliable_button_bits = true;
         return _sapp_tc_deliver_event(this, &event, 123,
             [&](sapp_window h) { return h.id == win_id ? this : nullptr; }).delivered;
     }

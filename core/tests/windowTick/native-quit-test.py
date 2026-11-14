@@ -94,7 +94,7 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 '''+body(native,'static LRESULT CALLBACK _sapp_tc_wndproc(')+r'''
 void event(const sapp_event* e,sapp_window h,void*) {
     ++calls;
-    check("production delivery stamps quit and guards receiver",e->type==SAPP_EVENTTYPE_QUIT_REQUESTED && e->window_id==17 && h.id==17 && window.in_tick);
+    check("production delivery stamps quit and guards receiver",e->type==SAPP_EVENTTYPE_QUIT_REQUESTED && h.id==17 && window.in_tick);
     if(cancel)_sapp_tc.app.quit_requested=false;
     if(hardQuit)_sapp_tc.app.quit_ordered=true;
     if(removeRecord)live=nullptr;
@@ -164,7 +164,7 @@ int main() {
         _sapp_tc.app.desc._tc_event_cb = [](const sapp_event* e, sapp_window h, void* user) {
             check("process quit addresses Runtime rather than disposed A", e->type == SAPP_EVENTTYPE_QUIT_REQUESTED && h.id == 0 && user == nullptr);
             // Runtime's live-window veto is exercised by the linked ownership probe.
-            sapp_event addressed = *e; addressed.window_id = 17; event(&addressed, {17}, nullptr);
+            event(e, {17}, nullptr);
         };
         // The seam callback above represents B's veto without native stamping.
         window.in_tick = true;

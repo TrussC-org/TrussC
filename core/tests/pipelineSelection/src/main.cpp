@@ -329,6 +329,68 @@ void pointsAndPremult(int samples, TextureFormat format) {
     setColor(1,0,0,0.5f); drawRect(0,0,32,32); fbo.end();
     expect(read(fbo),16,16,Color(192.f/255,64.f/255,64.f/255),"Fbo style pop selects returned blend");
 }
+// Non-square encoded planes: compare the actual NV12 draw with CPU-oriented RGBA.
+void nv12RotationChecks() {
+#if defined(__linux__) && !defined(__ANDROID__)
+    constexpr int encodedWidth = 64, encodedHeight = 36;
+    const int points[4][2] = {{30,2}, {2,18}, {30,18}, {60,32}};
+    std::vector<unsigned char> y(encodedWidth * encodedHeight, 16);
+    std::vector<unsigned char> uv(encodedWidth * encodedHeight / 2, 128);
+    std::vector<unsigned char> rgba(encodedWidth * encodedHeight * 4, 255), rotated(rgba.size());
+    for (int row = 0; row < encodedHeight; ++row) {
+        for (int col = 0; col < encodedWidth; ++col) {
+            const int level = (row < 10 ? 50 : col < 10 ? 100 : row < 26 ? 150 : 220);
+            y[row * encodedWidth + col] = 16 + level * 219 / 255;
+            const auto offset = (row * encodedWidth + col) * 4;
+            for (int c = 0; c < 3; ++c) rgba[offset + c] = level;
+        }
+    }
+    for (int degrees : {0, 90, 180, 270}) for (bool mirrored : {false, true}) {
+        internal::VideoRotation rotation{degrees, mirrored};
+        int width = encodedWidth, height = encodedHeight;
+        rotation.size(width, height);
+        rotation.apply(rgba.data(), rotated.data(), encodedWidth, encodedHeight);
+        Texture planeY, planeUV, reference;
+        planeY.allocate(encodedWidth, encodedHeight, TextureFormat::R8, TextureUsage::Stream);
+        planeY.loadData(y.data(), encodedWidth, encodedHeight, 1);
+        planeUV.allocate(encodedWidth / 2, encodedHeight / 2, TextureFormat::RG8, TextureUsage::Stream);
+        planeUV.loadData(uv.data(), encodedWidth / 2, encodedHeight / 2, 2);
+        reference.allocate(width, height, 4, TextureUsage::Stream);
+        reference.loadData(rotated.data(), width, height, 4);
+        internal::NV12VideoShader shader(rotation);
+        shader.loadShader();
+        VideoPlayer player;
+        Fbo target;
+        target.allocate(160, 160);
+        target.begin(0, 0, 0);
+        setupScreenOrtho();
+        translate(3, 4);
+        internal::VideoPlayerPlatformAccess::drawNV12ForTests(player, &shader,
+            std::move(planeY), std::move(planeUV), 7, 9, width * 2, height * 1.5f);
+        target.end();
+        const auto actual = read(target);
+        target.begin(0, 0, 0);
+        setupScreenOrtho();
+        translate(3, 4);
+        setColor(1, 1, 1);
+        reference.draw(7, 9, width * 2, height * 1.5f);
+        target.end();
+        const auto expected = read(target);
+        std::printf("NV12 rotation=%d mirrored=%d encoded=%dx%d display=%dx%d\n",
+                    degrees, int(mirrored), encodedWidth, encodedHeight, width, height);
+        for (const auto& point : points) {
+            int x = mirrored ? encodedWidth - 1 - point[0] : point[0], y = point[1];
+            int dx = x, dy = y;
+            if (degrees == 90) { dx = encodedHeight - 1 - y; dy = x; }
+            else if (degrees == 180) { dx = encodedWidth - 1 - x; dy = encodedHeight - 1 - y; }
+            else if (degrees == 270) { dx = y; dy = encodedWidth - 1 - x; }
+            const int px = 10 + dx * 2 + 1, py = 13 + int((dy + 0.5f) * 1.5f);
+            expect(actual, px, py, expected.getColor(px, py), "NV12 agrees with RGBA marker", 3);
+        }
+        expect(actual, 8, 14, Color(0, 0, 0), "rotated NV12 stays inside display rectangle");
+    }
+#endif
+}
 void transformedConsumers(int samples, TextureFormat format) {
     Fbo fbo; fbo.allocate(160,96,samples,format);
     Texture source; unsigned char bytes[]={255,0,0,255}; source.allocate(1,1,TextureFormat::RGBA8,TextureUsage::Dynamic); source.loadData(bytes,1,1,4);
@@ -529,6 +591,7 @@ public:
     void draw() override {
         if(frame_==0) {
             lazyResizeChecks();
+            nv12RotationChecks();
             recipeMutationChecks();
             for(int samples:{1,4}) for(auto format:{TextureFormat::RGBA8,TextureFormat::RGBA16F}) {
                 signaturesAndLeases(samples,format); pointsAndPremult(samples,format); transformedConsumers(samples,format);

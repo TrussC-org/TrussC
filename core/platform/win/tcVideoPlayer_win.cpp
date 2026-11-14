@@ -13,6 +13,7 @@
 #ifdef _WIN32
 
 #include "TrussC.h"
+#include "tc/video/internal/tcVideoRotation.h"
 #include "tcVideoPlayerPixels.h"
 #include <vector>
 #include <chrono>
@@ -131,6 +132,7 @@ struct VideoPlayerState {
     int height_ = 0;
     float duration_ = 0.0f;
     float frameRate_ = 0.0f;
+    int rotationDeg_ = 0;
     bool isLoaded_ = false;
     bool isReady_ = false;
     bool hasNewFrame_ = false;
@@ -186,6 +188,7 @@ public:
     void onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2);
 
     std::shared_ptr<internal::VideoDecodeStatus> status() const { return state_->status_; }
+    int getRotationDeg() const { return state_->rotationDeg_; }
     int getWidth() const { return state_->width_; }
     int getHeight() const { return state_->height_; }
 
@@ -491,6 +494,7 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
 
 bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     state_->frameRate_ = 0.0f;
+    state_->rotationDeg_ = 0;
     // Reuse one source reader for video frame rate and audio track info.
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring widePath(wideLen, 0);
@@ -510,6 +514,11 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     // Some MediaEngine sources expose metadata only after loading. Admit
     // known dimensions here; the engine's output boundary checks them again.
     if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &videoType))) {
+        UINT32 rotation = 0;
+        // MF's value is already the clockwise display turn (observed on Windows 11
+        // 26200 against the stream display matrix). MF ignores a mirrored matrix.
+        if (SUCCEEDED(videoType->GetUINT32(MF_MT_VIDEO_ROTATION, &rotation)))
+            state_->rotationDeg_ = internal::VideoRotation::normalize(double(rotation));
         if (SUCCEEDED(MFGetAttributeSize(videoType.Get(), MF_MT_FRAME_SIZE, &metadataWidth, &metadataHeight)) &&
             (metadataWidth && metadataHeight && !internal::VideoDecodeLimits::rgba(metadataWidth, metadataHeight, metadataBytes))) {
             state_->status_->reject(metadataBytes, 0);
@@ -956,6 +965,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     platformHandle_ = owned.release();
     width_ = impl->getWidth();
     height_ = impl->getHeight();
+    rotationDeg_ = impl->getRotationDeg();
 
     // Allocate pixel buffer
     if (width_ > 0 && height_ > 0) {
@@ -1169,7 +1179,7 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
         ComPtr<IMFAttributes> attrs;
         HRESULT hr = MFCreateAttributes(&attrs, 1);
         if (SUCCEEDED(hr)) {
-            attrs->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+            attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
         }
 
         ComPtr<IMFSourceReader> reader;
@@ -1313,6 +1323,7 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                 status->reject(sampleBytes, 0); hr = E_INVALIDARG;
             }
             ComPtr<IMFMediaBuffer> buffer;
+            // Contiguous copy: tightly packed rows, unlike a 2D buffer's pitch.
             if (SUCCEEDED(hr)) hr = sample->ConvertToContiguousBuffer(&buffer);
             if (SUCCEEDED(hr)) {
                 BYTE* data = nullptr;
