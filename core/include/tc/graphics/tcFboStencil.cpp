@@ -44,8 +44,7 @@ bool clearTargetStencil(uint8_t value) {
     sg_apply_pipeline(selected.raw);
     sg_apply_viewport(0, 0, target.width, target.height, true);
     sg_apply_scissor_rect(0, 0, target.width, target.height, true);
-    sg_bindings bindings = {};
-    sg_apply_bindings(&bindings);
+    // The fullscreen triangle has no bindings; applying empty ones fails validation.
     sg_draw(0, 3, 1);
     applyTargetDrawingState();
     return true;

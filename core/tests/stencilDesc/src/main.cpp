@@ -87,7 +87,8 @@ void clearValues() {
     check("color clears preserve stencil", bytesEqual(fbo, 255));
 }
 void colorClearIgnoresDesc() {
-    constexpr int width = 64, height = 48;
+    // Matches the window: Windows enforces a minimum top-level width.
+    constexpr int width = 128, height = 96;
     Fbo fbo;
     fbo.allocate(width, height);
     for (bool screen : {true, false}) {
@@ -499,7 +500,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return 0;
     }
     WindowSettings settings;
-    settings.setSize(64, 48).setHighDpi(false).setSampleCount(1).setSwapInterval(0).setPipelinePoolSize(8192);
+    settings.setSize(128, 96).setHighDpi(false).setSampleCount(1).setSwapInterval(0).setPipelinePoolSize(8192);
     return tcCoreTest::runDisplayTest<StencilApp>(settings, failures, [] {
         check("test completed", completed);
     });
