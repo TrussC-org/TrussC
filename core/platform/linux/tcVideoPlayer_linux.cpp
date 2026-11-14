@@ -142,7 +142,7 @@ private:
         else playbackErrors_.report(std::string(operation) + ": " + message, code);
     }
     void seekToTime(double seconds);
-    void probeHwOutputFormat();
+    bool probeHwOutputFormat();
 
     // FFmpeg context
     AVFormatContext* formatCtx_ = nullptr;
@@ -333,14 +333,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
         if (hwType_ != AV_HWDEVICE_TYPE_NONE) {
             logWarning("VideoPlayer") << "HW codec open failed, falling back to SW";
-            hwType_ = AV_HWDEVICE_TYPE_NONE;
-            av_buffer_unref(&hwDeviceCtx_);
-            avcodec_free_context(&codecCtx_);
-            codecCtx_ = avcodec_alloc_context3(codec);
-            if (!codecCtx_ || avcodec_parameters_to_context(codecCtx_, codecPar) < 0) return false;
-            internal::configureVideoCodec(codecCtx_);
         }
-        if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
+        if (hwType_ == AV_HWDEVICE_TYPE_NONE ||
+            !internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_, codecPar)) {
             logError("VideoPlayer") << "Failed to open codec";
             avcodec_free_context(&codecCtx_);
             avformat_close_input(&formatCtx_);
@@ -387,6 +382,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     packet_ = av_packet_alloc();
     if (!frame_ || !packet_) { close(); return false; }
 
+    // Select a usable decoder before exposing the loaded player or starting audio.
+    if (!probeHwOutputFormat()) { close(); return false; }
+
     isLoaded_ = true;
 
     // Audio uses the shared stream worker unless the app opts into preloading.
@@ -405,10 +403,6 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
             logWarning("VideoPlayer") << "Failed to decode audio";
         }
     }
-
-    // Probe the first decoded frame so callers can see the post-transfer
-    // pixel format and pick NV12 fast path vs RGBA fallback accurately.
-    probeHwOutputFormat();
 
     return true;
 }
@@ -718,15 +712,19 @@ void TCVideoPlayerImpl::decodeThread() {
 // V4L2M2M). The frames context and its transfer formats determine the CPU
 // layout; it cannot be inferred from hwType_ alone. The demuxer is rewound
 // and the codec flushed afterwards so playback starts cleanly from frame 0.
-void TCVideoPlayerImpl::probeHwOutputFormat() {
+bool TCVideoPlayerImpl::probeHwOutputFormat() {
     probedFormat_ = AV_PIX_FMT_NONE;
-    if (hwType_ == AV_HWDEVICE_TYPE_NONE) return;  // SW decode: nothing to probe
+    if (hwType_ == AV_HWDEVICE_TYPE_NONE) return true;  // SW decode: nothing to probe
 
     bool captured = false;
+    bool transferFailed = false;
+    // An unsupported probe transfer is an expected decoder fallback, not a
+    // dropped playback frame. Keep its admission diagnostics out of status_.
+    auto probeStatus = std::make_shared<internal::VideoDecodeStatus>();
     // Bound (security): untrusted file packets may never yield a frame; a probe cap bounds startup work. Overflow ends the probe without a captured frame.
     constexpr int kMaxPackets = 64;  // keep probe bounded
 
-    for (int i = 0; i < kMaxPackets && !captured; ++i) {
+    for (int i = 0; i < kMaxPackets && !captured && !transferFailed; ++i) {
         int ret = av_read_frame(formatCtx_, packet_);
         if (ret < 0) break;
         if (packet_->size < 0 || size_t(packet_->size) > internal::VideoDecodeLimits::inputBytes) {
@@ -753,10 +751,14 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
                 av_frame_unref(frame_); break;
             }
             if (frame_->hw_frames_ctx) {
-                internal::VideoCPUTransfer transfer(status_);
+                internal::VideoCPUTransfer transfer(probeStatus);
                 if (transfer.transfer(frame_) >= 0) {
                     probedFormat_ = AVPixelFormat(transfer.frame()->format);
                     captured = true;
+                } else {
+                    transferFailed = true;
+                    av_frame_unref(frame_);
+                    break;
                 }
             } else {
                 probedFormat_ = (AVPixelFormat)frame_->format;
@@ -769,7 +771,10 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
     av_frame_unref(frame_);
 
     // Reset demuxer + codec state so the decode thread starts from frame 0.
-    av_seek_frame(formatCtx_, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
+    if (av_seek_frame(formatCtx_, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+        logError("VideoPlayer") << "Failed to rewind video after HW format probe";
+        return false;
+    }
     avcodec_flush_buffers(codecCtx_);
     packetPending_ = false;
 
@@ -777,9 +782,17 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
         const char* name = av_get_pix_fmt_name(probedFormat_);
         logNotice("VideoPlayer") << "HW transfer format: "
                                   << (name ? name : "unknown");
+    } else if (transferFailed) {
+        logNotice("VideoPlayer") << "HW frame transfer failed; falling back to software decoding";
+        if (!internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_,
+                formatCtx_->streams[videoStreamIndex_]->codecpar)) {
+            logError("VideoPlayer") << "Failed to open software codec after HW format probe";
+            return false;
+        }
     } else {
         logWarning("VideoPlayer") << "HW format probe failed; using RGBA fallback";
     }
+    return true;
 }
 
 bool TCVideoPlayerImpl::decodeNextFrame() {

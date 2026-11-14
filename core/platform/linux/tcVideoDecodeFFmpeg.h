@@ -68,6 +68,20 @@ inline void configureVideoCodec(AVCodecContext* context) {
     context->thread_count = 0;
 }
 
+// Discard all hardware state before opening a fresh software decoder.
+inline bool reopenVideoCodecSoftware(AVCodecContext*& context, AVBufferRef*& device,
+                                     AVHWDeviceType& type, const AVCodecParameters* parameters) {
+    avcodec_free_context(&context);
+    av_buffer_unref(&device);
+    type = AV_HWDEVICE_TYPE_NONE;
+    const AVCodec* codec = avcodec_find_decoder(parameters->codec_id);
+    if (!codec) return false;
+    context = avcodec_alloc_context3(codec);
+    if (!context || avcodec_parameters_to_context(context, parameters) < 0) return false;
+    configureVideoCodec(context);
+    return avcodec_open2(context, codec, nullptr) >= 0;
+}
+
 // Check FFmpeg image layout arithmetic, including row and plane alignment.
 inline bool videoTransferLayout(int width, int height, AVPixelFormat format,
                                 size_t& bytes, VideoDecodeStatus& status, int* linesizes = nullptr) {
