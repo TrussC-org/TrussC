@@ -844,7 +844,7 @@ overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 
   Allocation/retirement-slot failure preserves storage/cursors and rejects the
   draw/catch-up pass with buffer-creation Error. Checked doubling/aligned int
   arithmetic (`<limits.h>`) rejects unrepresentable uploads before writes;
-  existing growth Warning/upload statistics remain.
+  successful growth is Info (TrussC Notice, #1473); upload statistics remain.
 
 Anchors: `metalUniformGrowth` (PBR raster replay, compute/rollback wrapper),
 `test_backend.py` (production Objective-C mocks, not native pixels/lifetime).
@@ -981,7 +981,7 @@ slots, while TrussC snapshots binding numbers for each generation.
   retain valid offsets into copied data.
 - Synchronous allocation failure leaves storage unchanged; one Error suppresses
   uploads/draws/dispatches until commit, with next-frame retry. One
-  `WGPU_UNIFORM_BUFFER_GROWN` Warning per backend init; `WGPU_UNIFORM_UPLOAD_FAILED`
+  `WGPU_UNIFORM_BUFFER_GROWN` Info (TrussC Notice, #1473) per backend init; `WGPU_UNIFORM_UPLOAD_FAILED`
   is the other added `sg_log_item`. No Metal/Vulkan/API change.
 - #1097/#1101, owner 2026-10-29: asynchronous OOM/validation uses WebGPU reporting;
   no error scopes, per-generation callbacks or last-good fallback. Non-null error
@@ -1086,7 +1086,7 @@ the sgl slot and returns `SG_INVALID_ID`. `_sgl_draw()` skips id-0 commands
 
 `_sgl_grow_context_pool()` doubles array/bookkeeping up to `_SGL_MAX_POOL_SIZE - 1`,
 relooks up `_sgl.cur_ctx` (contexts are ID-referenced) and logs old/new sizes via
-`SGL_LOGITEM_CONTEXT_POOL_GROWN`, `_sgl_log_msg()`/snprintf (`<stdio.h>`).
+`SGL_LOGITEM_CONTEXT_POOL_GROWN` at Info (TrussC Notice, #1473), `_sgl_log_msg()`/snprintf (`<stdio.h>`).
 Fallible temporary allocations roll back, preserving old pool/current context;
 creation returns 0 so TrussC can warn once without retry. Initial reserve grew
 4→8 for default/secondary/Fbo contexts. The adjacent fixed ~13 KB matrix-stack /

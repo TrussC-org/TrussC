@@ -98,7 +98,11 @@ static _sg_pipeline_t* _sg_pipeline_ref_ptr(_sg_pipeline_t** ref) { return *ref;
 static _sg_shader_t* _sg_shader_ref_ptr(_sg_shader_t* const* ref) { return *ref; }
 static int _sg_mtl_add_resource(id buffer) { retired.push_back(buffer); --_sg.mtl.idpool.free_queue_top; return 1; }
 static void _sg_mtl_release_resource(unsigned, int) { ++_sg.mtl.idpool.release_queue_front; }
-static void _sg_log(int, int, const char*, int) {}
+static int growthNotices = 0, growthWrongLevels = 0;
+static void _sg_log(int, int level, const char*, int) {
+    if (level == 3) ++growthNotices;
+    else ++growthWrongLevels;
+}
 constexpr int SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN = 0;
 #define _SOKOL_PRIVATE static
 #define SOKOL_ASSERT assert
@@ -157,6 +161,7 @@ int main() {
           value(vertex[2]) == 11 && value(fragment[5]) == 12 && value(vertex[6]) == 13);
     check("compute growth preserves both independent slots", value(compute[1]) == 14 && value(compute[7]) == 15);
     check("each replaced buffer is retired", retired.size() == 4);
+    check("successful growth logs info", growthNotices == 4 && growthWrongLevels == 0);
     // Base has no transactional failure path: stop after detecting its binding
     // regression instead of dereferencing the nil buffer it would install.
     if (!failures) {
@@ -184,6 +189,7 @@ int main() {
         check("retirement exhaustion leaves live storage intact",
               before == _sg.mtl.uniform_buffers[0] && _sg.mtl.cur_ub_offset == size
               && retired.size() == 4);
+        check("failed or capped growth emits no success info", growthNotices == 4 && growthWrongLevels == 0);
         _sg.mtl.idpool.free_queue_top = 60;
         // Odd user reservations can leave an aligned cursor past capacity.
         // The next upload must grow rather than subtracting with underflow.

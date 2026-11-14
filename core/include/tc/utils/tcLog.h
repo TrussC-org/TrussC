@@ -398,7 +398,8 @@ namespace internal {
 // Logger (console, log file, onLog listeners). The tag is the module name.
 // panic -> Fatal, written without waiting for the Logger's lock and then
 // handed on to slog_func, which aborts as before; error -> Error;
-// warning -> Warning; info -> Verbose (hidden by default). In tcGlobal.cpp.
+// warning -> Warning; successful buffer/context growth info -> Notice; other
+// info -> Verbose (hidden by default). In tcGlobal.cpp.
 void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
               const char* message, uint32_t lineNr, const char* filename,
               void* userData);

@@ -188,6 +188,8 @@ struct WindowContext {
     // A capture must start/flush an unfinished frame, but must leave the
     // completed afterFrame source intact until the next beginFrame().
     bool framePending = true;
+    // Re-arm after a frame without overflow, including at the shared budget cap.
+    bool sglOverflowReported = false;
     // Borrowed Metal drawable rendered into this frame. Valid only until the
     // native frame callback returns; clear after afterFrame and capture drains.
     const void* lastSwapchainDrawable = nullptr;

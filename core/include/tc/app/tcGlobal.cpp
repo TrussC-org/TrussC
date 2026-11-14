@@ -1274,17 +1274,24 @@ void reportSglStackErrors(sgl_error_t err, bool inFbo) {
 void internal::endGpuFrame() {
     sgl_error_t err = sgl_error();
     internal::reportSglStackErrors(err, false);
+    auto& window = internal::currentWindowContext();
     if (err.vertices_full || err.commands_full) {
         auto& budget = internal::sglBudget();
         int newVerts = budget.maxVertices <= INT_MAX / 4 ? budget.maxVertices * 4 : INT_MAX;
         if (newVerts > budget.pendingResize) {
             budget.pendingResize = newVerts;
             budget.pendingCommands = 0;
-            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
-                << budget.maxVertices << " vertices, "
-                << budget.maxCommands << " commands). "
-                << "Will resize to " << newVerts << " next frame.";
+            if (!window.sglOverflowReported) {
+                window.sglOverflowReported = true;
+                logWarning("sokol_gl") << "Vertex buffer overflow detected ("
+                    << budget.maxVertices << " vertices, "
+                    << budget.maxCommands << " commands). "
+                    << "Draws past the limit were dropped this frame. "
+                    << "Will resize to " << newVerts << " next frame.";
+            }
         }
+    } else {
+        window.sglOverflowReported = false;
     }
 
     sg_commit();
@@ -2435,7 +2442,12 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
             } else {
                 const bool appNotice = logLevel == 3 && logItem == SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED &&
                     tag && std::strcmp(tag, "sapp") == 0;
-                getLogger().log(appNotice ? LogLevel::Notice : sokolLogLevel(logLevel),
+                const bool growthNotice = logLevel == 3 && tag &&
+                    ((std::strcmp(tag, "sg") == 0 &&
+                      (logItem == SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN ||
+                       logItem == SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN)) ||
+                     (std::strcmp(tag, "sgl") == 0 && logItem == SGL_LOGITEM_CONTEXT_POOL_GROWN));
+                getLogger().log((appNotice || growthNotice) ? LogLevel::Notice : sokolLogLevel(logLevel),
                                 sokolLogMessage(tag, logItem, message, lineNr));
             }
         } catch (...) {
