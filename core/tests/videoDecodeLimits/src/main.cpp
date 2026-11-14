@@ -430,6 +430,59 @@ void extractionRejectionChecks(const tc::fs::path& dir) {
     }
 }
 
+void softwareReopenChecks(const tc::fs::path& path) {
+    auto status = std::make_shared<Status>();
+    AVFrame* frame = av_frame_alloc();
+    frame->width = 64; frame->height = 32; frame->format = AV_PIX_FMT_DRM_PRIME;
+    // A synthetic surface with no transferable CPU layout exercises the same
+    // admission failure as an unsupported vendor format, without a GPU.
+    frame->hw_frames_ctx = av_buffer_allocz(sizeof(AVHWFramesContext));
+    auto* hardware = reinterpret_cast<AVHWFramesContext*>(frame->hw_frames_ctx->data);
+    hardware->width = 64; hardware->height = 32; hardware->sw_format = AV_PIX_FMT_NONE;
+    {
+        tc::internal::VideoCPUTransfer transfer(status);
+        check("unsupported hardware transfer fails during probe", transfer.transfer(frame) == AVERROR(EINVAL));
+    }
+    av_frame_unref(frame);
+
+    AVFormatContext* input = nullptr;
+    const bool opened = tc::internal::openVideoInput(&input, path.c_str(), *status);
+    check("software reopen fixture opened", opened);
+    if (!opened) { av_frame_free(&frame); return; }
+    AVCodecContext* context = avcodec_alloc_context3(nullptr);
+    // Ref-counted stand-ins verify both the player and codec device references
+    // are released. No FFmpeg hardware operation uses these dummy references.
+    AVBufferRef* device = av_buffer_alloc(1);
+    context->hw_device_ctx = av_buffer_ref(device);
+    AVHWDeviceType type = AV_HWDEVICE_TYPE_DRM;
+    const bool reopened = tc::internal::reopenVideoCodecSoftware(context, device, type, input->streams[0]->codecpar);
+    check("probe fallback opens software decoder and clears hardware state",
+        reopened && context && !context->hw_device_ctx && !device && type == AV_HWDEVICE_TYPE_NONE);
+    int decoded = 0;
+    AVPacket* packet = av_packet_alloc();
+    if (reopened) {
+        while (av_read_frame(input, packet) >= 0) {
+            if (packet->stream_index == 0 && avcodec_send_packet(context, packet) >= 0) {
+                while (avcodec_receive_frame(context, frame) >= 0) { ++decoded; av_frame_unref(frame); }
+            }
+            av_packet_unref(packet);
+        }
+        avcodec_send_packet(context, nullptr);
+        while (avcodec_receive_frame(context, frame) >= 0) { ++decoded; av_frame_unref(frame); }
+    }
+    check("software decoder advances through all eight frames after fallback", decoded == 8);
+    AVCodecParameters* invalid = avcodec_parameters_alloc();
+    invalid->codec_id = AV_CODEC_ID_NONE;
+    check("software reopen failure is reported with hardware cleared",
+        !tc::internal::reopenVideoCodecSoftware(context, device, type, invalid) &&
+        !context && !device && type == AV_HWDEVICE_TYPE_NONE);
+    avcodec_parameters_free(&invalid);
+    av_packet_free(&packet);
+    av_frame_free(&frame);
+    avcodec_free_context(&context);
+    avformat_close_input(&input);
+}
+
 void ffmpegChecks(const tc::fs::path& dir, bool large) {
     extractionRejectionChecks(dir);
     auto status = std::make_shared<Status>();
@@ -465,6 +518,7 @@ void ffmpegChecks(const tc::fs::path& dir, bool large) {
     check("changed size timeline muxed", changedSizeVideo(dir));
     playHeadless(dir / "changed.mkv", "mid-stream size change plays safely");
     check("small fixture generated", makeVideo(dir / "small.mkv", 64, 32, 8));
+    softwareReopenChecks(dir / "small.mkv");
     playHeadless(dir / "small.mkv", "small video loads");
     tc::Pixels image;
     check("thumbnail decodes", tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0) && image.getWidth() == 64 && image.getData()[0] != 0);
