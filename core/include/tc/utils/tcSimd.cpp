@@ -209,8 +209,12 @@ HWY_AFTER_NAMESPACE();
 #if defined(_MSC_VER) && !defined(__clang__)
 // MSVC spills Highway's Vec wrappers: SIMD runs at 0.33–0.61x of scalar on MSVC 14.50.
 #define TRUSSC_SIMD_SCALAR_REDUCTIONS 1
+// MSVC re-stores Highway's 256-bit lookup vector every iteration: Swizzle runs
+// at 0.81–1.02x of scalar on MSVC 19.50.
+#define TRUSSC_SIMD_SCALAR_SWIZZLE 1
 #else
 #define TRUSSC_SIMD_SCALAR_REDUCTIONS TRUSSC_SIMD_SCALAR
+#define TRUSSC_SIMD_SCALAR_SWIZZLE TRUSSC_SIMD_SCALAR
 #endif
 
 namespace trussc::simd {
@@ -350,7 +354,7 @@ HWY_EXPORT(Rms);
 HWY_EXPORT(Mse);
 #endif
 void bgraToRgba(const std::uint8_t* src, std::uint8_t* dst, std::size_t pixels, bool forceAlpha) {
-#if TRUSSC_SIMD_SCALAR
+#if TRUSSC_SIMD_SCALAR_SWIZZLE
     scalar::bgraToRgba(src, dst, pixels, forceAlpha);
 #else
     HWY_DYNAMIC_DISPATCH(Swizzle)(src, dst, pixels, forceAlpha);
