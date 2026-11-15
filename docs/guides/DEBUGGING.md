@@ -1,8 +1,8 @@
 # Debugging
 
-## 1. Read and save the logs
+## 1. Read and save TrussC logs
 
-This Debugging guide starts with logs: check the terminal, VS Code Terminal/Debug Console, or Xcode debug console. On Android, use Android Studio's Logcat window or `adb logcat -s TrussC`.
+When a TrussC app misbehaves, start with its log. Check the terminal, VS Code Terminal/Debug Console, or Xcode debug console. On Android, use Android Studio's Logcat window or `adb logcat -s TrussC`.
 
 Windows Release builds hide the console; to keep it, put this before the TrussC include in `tcApp.h`:
 
@@ -33,13 +33,13 @@ if (!setLogFile("logs/app.log")) return;
 
 Files append; relative paths use `getDataPath()`, creating missing parent folders. `setLogFile()` logs failures and returns a boolean-testable `SaveResult`. On Web, use `setLogFile()` as shown instead of the environment variable; files live in the browser's virtual filesystem.
 
-## 2. Search the message
+## 2. Search the log message
 
-This Debugging guide uses the error text as the next clue: search for the message, or paste it into the chat on [trussc.org](https://trussc.org/) with what you were doing and your OS.
+An error message can help you find the cause of a TrussC app's failure. Search for the message, or paste it into the chat on [trussc.org](https://trussc.org/) with what you were doing and your OS.
 
-## 3. Match the symptom
+## 3. Match the symptom to the cause
 
-This Debugging guide pairs symptoms with fixes. Snippets belong in `tcApp : public tc::App`, with `using namespace tc;` and `using namespace std;`.
+The table pairs common TrussC app symptoms with likely causes and fixes. Snippets belong in `tcApp : public tc::App`, with `using namespace tc;` and `using namespace std;`.
 
 | Symptom → likely cause | Fix in tcApp |
 | --- | --- |
@@ -49,15 +49,15 @@ This Debugging guide pairs symptoms with fixes. Snippets belong in `tcApp : publ
 | Drawing from a worker callback → Node/GPU work needs the main thread | Deliver the event to the main thread, update state, then draw in `draw()`. For a log callback with member `EventListener listener`: `listener = getLogger().onLog.listen([](LogEventArgs&) { redraw(); }, Deliver::Main);` |
 | macOS “Problem Report” after a crash → macOS is reporting an abnormal termination | Read the report's crashed-thread backtrace and the last app logs; rerun under the debugger. There is no TrussC API for this OS dialog. Preserve future app logs in `setup()`: `if (!setLogFile("logs/app.log")) return;` |
 
-## 4. Find the crash site
+## 4. Find the crash site with a debugger
 
-This Debugging guide uses a debugger to stop at the failing code: open the generated project in VS Code and press **F5**. Use CodeLLDB on Linux/macOS and the C/C++ extension's `cppvsdbg` on Windows VS Code, as described in [GET_STARTED.md › Editor Setup](../GET_STARTED.md#editor-setup). Inspect the call stack and the first frame in your code. For Windows editor forks, use the CodeLLDB configuration from that section.
+A debugger can stop a crashing TrussC app at the failing code. Open the generated project in VS Code and press **F5**. Use CodeLLDB on Linux/macOS and the C/C++ extension's `cppvsdbg` on Windows VS Code, as described in [GET_STARTED.md › Editor Setup](../GET_STARTED.md#editor-setup). Inspect the call stack and the first frame in your code. For Windows editor forks, use the CodeLLDB configuration from that section.
 
 In Xcode, run the app with **Product → Run** and inspect the stopped thread's call stack in the Debug navigator.
 
-## 5. Choose logging detail and an in-app view
+## 5. Choose log levels and show logs in the app
 
-This Debugging guide's logging reference uses `logVerbose()`, `logNotice()`, `logWarning()`, `logError()`, and `logFatal()` with stream insertion (`<<`).
+TrussC log levels control how much detail each output shows, and a log listener lets you display messages in the app. Write messages with `logVerbose()`, `logNotice()`, `logWarning()`, `logError()`, and `logFatal()` using stream insertion (`<<`).
 
 | Level (`LogLevel::…`) | Meaning |
 | --- | --- |
@@ -106,6 +106,6 @@ public:
 };
 ```
 
-## 6. Look up details
+## 6. Look up TrussC pitfalls and API details
 
-This Debugging guide's next reference is [FOR_AI_ASSISTANT.md › Pitfalls & troubleshooting](FOR_AI_ASSISTANT.md#pitfalls--troubleshooting) for more symptoms and API details.
+For more TrussC symptoms and API details, consult [FOR_AI_ASSISTANT.md › Pitfalls & troubleshooting](FOR_AI_ASSISTANT.md#pitfalls--troubleshooting).
