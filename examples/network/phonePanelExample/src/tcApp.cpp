@@ -1,6 +1,6 @@
 // Control a fullscreen app from a phone on the same trusted LAN.
 // Open the on-screen URL for color radios, a brightness fader, and live logs.
-// A single-interface bind, per-launch token, and payload/value limits bound input.
+// A private-LAN (or loopback) bind, per-launch token, and payload/value limits bound input.
 // Workers use runOnMainThread with a weak owner; onLog fills a locked ring.
 // Escape stops and joins the server. HTTP has no TLS; see README.md.
 #include "tcApp.h"
@@ -14,9 +14,9 @@ tcApp::tcApp() : server(make_unique<httplib::Server>()) {}
 tcApp::~tcApp() = default;
 
 void tcApp::setup() {
-    // Bind one LAN interface selected by getLocalIp(), never 0.0.0.0.
+    // Bind one private LAN interface selected by getLocalIp(), never 0.0.0.0.
     string address = getLocalIp();
-    if (address.empty()) address = "127.0.0.1";
+    if (!isPrivate(address)) address = "127.0.0.1";   // never expose the panel on a public address
     // Fresh 128-bit token per launch; show it only on screen.
     random_device source;
     uniform_int_distribution<int> byte(0, 255);
@@ -26,8 +26,7 @@ void tcApp::setup() {
         token += "0123456789abcdef"[value >> 4];
         token += "0123456789abcdef"[value & 15];
     }
-    const string urlHost = address.find(':') == string::npos ? address : "[" + address + "]";
-    url = "http://" + urlHost + ":8088/?token=" + token;
+    url = "http://" + address + ":8088/?token=" + token;
     server->set_payload_max_length(64); // Cap the control body before parsing.
     server->set_read_timeout(2);
     server->set_write_timeout(2);
