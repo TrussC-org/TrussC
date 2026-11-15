@@ -509,7 +509,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         settings.setSize(256, 192);
         return tcCoreTest::runDisplayTest<CompactCheckApp>(settings, g_fail, [] {
             filesystem::remove(g_fontPath);
-            check("compaction display checks completed", compactCompleted);
+            check("compaction display checks completed", compactCompleted && g_fail == 0);
         });
     }
     if (burstCheck) {
