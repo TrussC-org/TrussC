@@ -992,7 +992,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             expectStatus("same-length wrong token -> 401", postAuth("Bearer " + sameLength), 401);
             expectStatus("token prefix -> 401", postAuth("Bearer " + kToken.substr(0, kToken.size() - 1)), 401);
             expectStatus("token plus a byte -> 401", postAuth("Bearer " + kToken + "x"), 401);
-            expectStatus("scheme only -> 401", postAuth("Bearer "), 401);
+            // httplib clients refuse a trailing space in a field value, and servers trim it,
+            // so "Bearer " arrives as "Bearer"; bearerTokenMatches("Bearer ") is checked above.
+            expectStatus("scheme only -> 401", postAuth("Bearer"), 401);
             expectStatus("token without scheme -> 401", postAuth(kToken), 401);
             check("GET / needs no token -> 200", status(raw.Get("/")) == 200);
         }
