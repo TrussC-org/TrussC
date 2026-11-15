@@ -51,14 +51,14 @@ This is the one list of third-party code in TrussC and the version the build use
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_truetype** | 1.26, commit `6e9f34d` (+ TrussC patches, including compound-depth, vertex-count and allocation-failure checks; see [stb notes](../core/include/stb/README.md)) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_vorbis** | 1.22, commit `dd0c5ec` (unmodified fork, branch `stb_vorbis-sezero`, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
-| **miniaudio** | 0.11.25 (unmodified, see [MINIAUDIO_TRUSSC_MODIFICATIONS.md](../core/include/MINIAUDIO_TRUSSC_MODIFICATIONS.md)) | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
-| **dr_wav** | 0.14.5 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
-| **dr_mp3** | 0.7.3 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
-| **dr_flac** | 0.13.3 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **miniaudio** | 0.11.26 (unmodified, see [MINIAUDIO_TRUSSC_MODIFICATIONS.md](../core/include/MINIAUDIO_TRUSSC_MODIFICATIONS.md)) | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
+| **dr_wav** | 0.14.6 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **dr_mp3** | 0.7.4 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **dr_flac** | 0.13.4 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
 | **nlohmann/json** | 3.12.0 | `core/include/nlohmann/json.hpp` | https://github.com/nlohmann/json | MIT | Niels Lohmann |
 | **pugixml** | 1.16 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
 | **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` ([upstream checksum](../core/include/impl/HTTPLIB_PATCHES.md)) | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
-| **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
+| **LZ4** | 1.11.1 (see [PROVENANCE.md](../core/include/lz4/PROVENANCE.md)) | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
 | **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
 | **earcut.hpp** | version/commit not recorded; unchanged since TrussC import `8807ee2e`; used for Path fills in `tc/graphics/tcPath.h` | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
 | **Bitmap ASCII glyph data** | version/commit not recorded; see [bitmap notice](#bitmap-font-data) for source and local changes | `core/include/tcBitmapFont.h` | https://github.com/freeglut/freeglut | See bitmap notice below; exact import notice not recorded | freeglut / X11 contributors |

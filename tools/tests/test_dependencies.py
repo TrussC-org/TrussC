@@ -170,7 +170,7 @@ class DependencyTests(unittest.TestCase):
         for path, old, new in [
             ("addons/tcxLua/lua/include/lua.h", '#define LUA_VERSION_RELEASE\t"9"', '#define LUA_VERSION_RELEASE\t"0"'),
             ("addons/tcxLua/lua/src/lua.h", '#define LUA_VERSION_RELEASE\t"9"', '#define LUA_VERSION_RELEASE\t"0"'),
-            ("core/include/miniaudio.h", "#define MA_VERSION_REVISION 25", "#define MA_VERSION_REVISION 26"),
+            ("core/include/miniaudio.h", "#define MA_VERSION_REVISION 26", "#define MA_VERSION_REVISION 27"),
         ]:
             with self.subTest(path=path):
                 source = deps.read(str(ROOT), path)
@@ -280,7 +280,7 @@ fetchcontent_declare(real
             self.assertIn("35 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
             inventory = license_path.read_text(encoding="utf-8")
-            version_prefix = "| **miniaudio** | 0.11.25"
+            version_prefix = "| **miniaudio** | 0.11.26"
             self.assertIn(version_prefix, inventory)
             inventory = inventory.replace(version_prefix, "| **miniaudio** | 0.11.21")
             shader_row = next(r for r in self.rows if r["name"] == deps.SHADER_COMPILER)
