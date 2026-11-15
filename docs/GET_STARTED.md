@@ -349,4 +349,8 @@ Repeated `connectAsync()` calls to the same pending host and port do nothing;
 peer that stops reading does not stall rendering. The default send timeout is
 60 seconds without progress; a timeout reports an error and disconnects.
 
+## Next steps
+
+Recipes for common TrussC uses, a phone control panel, a CLI tool and a resident app, are in [RECIPES.md](RECIPES.md).
+
 If you get stuck, follow [DEBUGGING.md](guides/DEBUGGING.md) for logs, common symptoms, and finding a crash.
