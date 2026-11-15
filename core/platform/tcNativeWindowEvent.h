@@ -2,7 +2,7 @@
 // sokol implementation, so no injection API or provenance lives in sokol.
 #pragma once
 namespace trussc::internal {
-bool sendNativeWindowEvent(sapp_window win, sapp_event* event) {
+bool sendNativeWindowEvent(sapp_tc_window win, sapp_event* event) {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     auto* w = _sapp_tc_lookup(win);
 #if defined(__APPLE__) && TARGET_OS_OSX

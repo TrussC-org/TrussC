@@ -49,9 +49,9 @@ public:
 // Per-window production operations are replaceable without creating a native
 // window. No query may acquire a drawable, allocate GPU resources or call App code.
 struct WindowNativeOperations {
-    bool (*readMetadata)(sapp_window, void*, sapp_tc_window_metadata&);
-    sg_swapchain (*acquireSwapchain)(sapp_window, void*);
-    void (*activate)(sapp_window, void*);
+    bool (*readMetadata)(sapp_tc_window, void*, sapp_tc_window_metadata&);
+    sg_swapchain (*acquireSwapchain)(sapp_tc_window, void*);
+    void (*activate)(sapp_tc_window, void*);
     void (*setTitle)(Window&, const char*) = nullptr;
     void (*setSize)(Window&, double, double, bool) = nullptr;
     void (*setPosition)(Window&, int, int) = nullptr;
@@ -59,12 +59,12 @@ struct WindowNativeOperations {
     void (*setFullscreen)(Window&, bool) = nullptr;
     uint32_t (*fullscreenPhase)(const Window&) = nullptr;
     void (*toggleFullscreen)(Window&) = nullptr;
-    bool (*closeRecorded)(sapp_window, void*) = nullptr;
-    bool (*sendEvent)(sapp_window, void*, sapp_event*) = nullptr;
+    bool (*closeRecorded)(sapp_tc_window, void*) = nullptr;
+    bool (*sendEvent)(sapp_tc_window, void*, sapp_event*) = nullptr;
     void (*bringToFront)(Window&) = nullptr;
 };
 struct WindowBinding {
-    sapp_window handle{};
+    sapp_tc_window handle{};
     const WindowNativeOperations* operations = nullptr;
     void* user = nullptr;
     sapp_tc_window_metadata metadata{};
@@ -106,9 +106,9 @@ private:
     bool entered_ = false, admitted_ = false, dispatch_ = false, requestsReady_ = false;
     void leave() noexcept;
 };
-bool sendNativeWindowEvent(sapp_window, sapp_event*);
+bool sendNativeWindowEvent(sapp_tc_window, sapp_event*);
 bool injectWindowEvent(Window&, const sapp_event*, bool heldButtonSnapshot = false);
-void windowEvent(const sapp_event*, sapp_window, void*) noexcept;
+void windowEvent(const sapp_event*, sapp_tc_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
 // Frozen at native entry before any App or raw callback. Routing stays in the binding.
 struct WindowEventContext {
@@ -118,16 +118,16 @@ struct WindowEventContext {
     bool injected = false;
     bool heldButtonSnapshot = false;
 };
-void enterWindowEvent(const sapp_event*, sapp_window, void*, const WindowEventContext* = nullptr) noexcept;
+void enterWindowEvent(const sapp_event*, sapp_tc_window, void*, const WindowEventContext* = nullptr) noexcept;
 void convertWindowEvent(const sapp_event*, Window&, const WindowEventContext&);
 const char* eventEntryName(const sapp_event*, bool);
 void dispatchWindowEventForTests(const sapp_event*, Window&);
 void dispatchWindowDisplayEventForTests(const sapp_event*, Window&);
-bool enterWindowTick(Window&, sapp_window, std::chrono::steady_clock::time_point, double,
+bool enterWindowTick(Window&, sapp_tc_window, std::chrono::steady_clock::time_point, double,
                      const WindowTickPresentation* = nullptr);
-void windowTick(sapp_window, void*) noexcept;
-bool allowWindowClose(sapp_window, void*) noexcept;
-void windowClosed(sapp_window, void*) noexcept;
+void windowTick(sapp_tc_window, void*) noexcept;
+bool allowWindowClose(sapp_tc_window, void*) noexcept;
+void windowClosed(sapp_tc_window, void*) noexcept;
 void singleWindowFrame() noexcept;
 void bootstrapWindow(Window&, void (*bootstrap)());
 // Reconcile launch visibility; single-window lifecycle observations also use this hook.
@@ -170,7 +170,7 @@ uint32_t nativeWindowFullscreenPhase(const Window&);
 void nativeWindowToggleFullscreen(Window&);
 void nativeWindowBringToFront(Window&);
 const WindowNativeOperations& productionWindowOperations();
-bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user);
+bool bindWindow(Window& window, sapp_tc_window handle, const WindowNativeOperations& operations, void* user);
 bool bindNativeWindow(uint32_t id, void* window) noexcept;
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
 void nativeWindowSetClass(uint32_t id);

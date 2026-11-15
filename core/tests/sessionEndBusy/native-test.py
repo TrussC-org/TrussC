@@ -333,7 +333,7 @@ void sapp_tc_gl_activate_idle() {}
 #undef _WIN32
 }
 void sapp_tc_gl_activate_idle() {}
-template<class T> void sapp_destroy_window(T) { ++sappDisposals; }
+template<class T> void sapp_tc_destroy_window(T) { ++sappDisposals; }
 ''' + body('core/include/tc/app/tcWindow.h', 'inline void Window::teardown() noexcept {') + r'''
 }
 int main() {

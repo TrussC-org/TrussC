@@ -28,8 +28,8 @@ def main():
     rejection = constructor[constructor.index('_sapp_tc_creation_transaction creation('):
                             constructor.index('w->ready = true;')]
     android = native[native.index('/* ---- multi-window API: explicit platform gap on Android') :]
-    android = android[:android.index('void sapp_window_set_title(')]
-    query = body(android, 'bool sapp_window_occluded(')
+    android = android[:android.index('void sapp_tc_window_set_title(')]
+    query = body(android, 'bool sapp_tc_window_occluded(')
     message_handler = body(native, '_SOKOL_PRIVATE int _sapp_tc_android_main_cb(')
     messages = message_handler[message_handler.index('case _SOKOL_ANDROID_MSG_RESUME:'):
                                message_handler.index('case _SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW:')]
@@ -80,7 +80,7 @@ void run() {
 namespace mobile {
 enum sapp_event_type { SAPP_EVENTTYPE_UNFOCUSED, SAPP_EVENTTYPE_SUSPENDED,
     SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_RESTORED };
-struct sapp_window { unsigned id; };
+struct sapp_tc_window { unsigned id; };
 struct sapp_tc_window_metadata {
     int fb_width=0, fb_height=0, width=0, height=0, sample_count=0, color_format=0, depth_format=0;
     float dpi_scale=1; bool pointer_locked=false, reliable_button_bits=false;
@@ -93,7 +93,7 @@ struct WindowContext {
     bool isMain=true, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
-    struct { sapp_tc_window_metadata metadata; sapp_window handle{1}; bool lastDeliveredHidden=false,visibilityReady=false,explicitHideSuspended=false; } binding_;
+    struct { sapp_tc_window_metadata metadata; sapp_tc_window handle{1}; bool lastDeliveredHidden=false,visibilityReady=false,explicitHideSuspended=false; } binding_;
     WindowContext ctx;
     int dispatchDepth_=0;
     bool isOpen() const { return true; }

@@ -35,12 +35,12 @@ struct Native {
     int reads = 0, acquisitions = 0;
     uint32_t expected = 0;
 };
-bool read(sapp_window handle, void* user, sapp_tc_window_metadata& metadata) {
+bool read(sapp_tc_window handle, void* user, sapp_tc_window_metadata& metadata) {
     auto& native = *static_cast<Native*>(user);
     check("metadata uses the receiver identity", handle.id == native.expected);
     ++native.reads; metadata = native.metadata; return native.live;
 }
-sg_swapchain acquire(sapp_window, void* user) { ++static_cast<Native*>(user)->acquisitions; return {}; }
+sg_swapchain acquire(sapp_tc_window, void* user) { ++static_cast<Native*>(user)->acquisitions; return {}; }
 const internal::WindowNativeOperations operations{read, acquire, nullptr};
 void bind(Window& window, Native& native, uint32_t id) {
     native.expected = id;
@@ -65,8 +65,8 @@ struct Probe : App {
     void update() override { ++updates; }
     void exit() override { ++exits; if (onExit) onExit(); }
 };
-using TestDispatch = void (*)(const sapp_event*, sapp_window, Window*, internal::WindowContext&);
-void deliver(const sapp_event* event, sapp_window handle, Window* window, TestDispatch dispatch = nullptr) {
+using TestDispatch = void (*)(const sapp_event*, sapp_tc_window, Window*, internal::WindowContext&);
+void deliver(const sapp_event* event, sapp_tc_window handle, Window* window, TestDispatch dispatch = nullptr) {
     auto listener = window->events().rawEvent.listen([&](const sapp_event& e) {
         if (dispatch && event && e.type == event->type) dispatch(&e, handle, window, trussc::internal::WindowRequestAccess::context(*window));
     });
@@ -149,7 +149,7 @@ void bootstrap() {
             }
             sapp_event e{}; e.type=SAPP_EVENTTYPE_FOCUSED;
             deliver(&e, {716}, &other,
-                [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) { ++peerEvents; });
+                [](const sapp_event*, sapp_tc_window, Window*, internal::WindowContext&) { ++peerEvents; });
             check("secondary init-time event is admitted", peerEvents == 1);
             if (queryEndSession) {
                 check("user HWND yields WM_QUERYENDSESSION to Runtime authority during init", queryEndSession());
@@ -195,7 +195,7 @@ void bootstrap() {
 }
 
 int inputs = 0;
-void input(const sapp_event*, sapp_window, Window* window, internal::WindowContext&) {
+void input(const sapp_event*, sapp_tc_window, Window* window, internal::WindowContext&) {
     ++inputs;
     auto app = std::static_pointer_cast<Probe>(window->getApp());
     check("size is seeded before first input", app && app->sizes == 1 && app->seeded && app->setups == 0);
@@ -432,7 +432,7 @@ void roots() {
         const auto idleUpdates = trussc::internal::WindowRequestAccess::context(window).updateCount, idleResources = trussc::internal::WindowRequestAccess::context(window).resourceTickCount;
         tick(window);
         check("idle independent admission has equal resource semantics for both roots", trussc::internal::WindowRequestAccess::context(window).updateCount == idleUpdates && trussc::internal::WindowRequestAccess::context(window).resourceTickCount == idleResources + 1);
-        event(window, [](const sapp_event*, sapp_window, Window*, internal::WindowContext& ctx) {
+        event(window, [](const sapp_event*, sapp_tc_window, Window*, internal::WindowContext& ctx) {
             check("resource key follows common admitted tick count", internal::resourceFrameKey() == ctx.resourceTickCount);
         });
         const auto updates = trussc::internal::WindowRequestAccess::context(window).updateCount;
@@ -443,11 +443,11 @@ void roots() {
         const int readsBefore = native.reads;
         check("stale tick identity is rejected", !internal::enterWindowTick(window, {9999}, now, .1, &presentation) && trussc::internal::WindowRequestAccess::context(window).updateCount == updates && native.reads == readsBefore);
         native.live = false;
-        event(window, [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) { ++inputs; });
+        event(window, [](const sapp_event*, sapp_tc_window, Window*, internal::WindowContext&) { ++inputs; });
         check("failed metadata read rejects stale binding entry", inputs == 1 && internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(peer));
         native.live = true;
         auto throwing = window.events().keyPressed.listen([](KeyEventArgs&) { throw 1; });
-        event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
+        event(window, [](const sapp_event*, sapp_tc_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
         });
         check("throwing event restores caller and dispatch depth", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(peer) && window.dispatchDepth_ == 0 && !internal::WindowRequestAccess::dispatchActive(window));
@@ -457,12 +457,12 @@ void roots() {
             check("A-B-A same-window tick reentry is rejected", !tick(window));
         });
         auto outerInput = window.events().keyPressed.listen([&](KeyEventArgs&) {
-            event(peer, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
+            event(peer, [](const sapp_event*, sapp_tc_window, Window* w, internal::WindowContext&) {
                 /* Common converter performs typed delivery. */
             });
             check("nested peer event restores receiving A", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(window));
         });
-        event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
+        event(window, [](const sapp_event*, sapp_tc_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
         });
         outerInput.disconnect(); peerInput.disconnect();
@@ -473,7 +473,7 @@ void roots() {
             tick(window);
             check("reentrant tick cannot apply pending attachment", window.getApp() == app && app->exits == 0);
         });
-        event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
+        event(window, [](const sapp_event*, sapp_tc_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
         });
         check("attachment lands at outer entry exit", window.getApp() == next && app->exits == 1);
@@ -481,7 +481,7 @@ void roots() {
         auto committed = internal::makeConstructedApp<Probe>(), later = internal::makeConstructedApp<Probe>();
         next->onExit = [&] { internal::WindowRequestAccess::attachCandidate(window, later); };
         auto atExit = window.events().keyPressed.listen([&](KeyEventArgs&) { internal::WindowRequestAccess::attachCandidate(window, committed); });
-        event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
+        event(window, [](const sapp_event*, sapp_tc_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
         });
         check("request created at exit boundary survives to next boundary", window.getApp() == committed && window.pendingApp_ == later && window.appRequested_);
@@ -539,7 +539,7 @@ void retention() {
         check("receiving Window stays owned throughout its callback", !destroyed);
         inside = false;
     });
-    event(*raw, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
+    event(*raw, [](const sapp_event*, sapp_tc_window, Window* w, internal::WindowContext&) {
         /* Common converter performs typed delivery. */
     });
     check("receiver release waits until safe entry unwind", destroyed && !destroyedInside && !internal::WindowRequestAccess::dispatchActive(*raw));
@@ -582,7 +582,7 @@ void turns() {
         check("no-window no-draw turn still runs maintenance", maintenance == i);
     }
     Window window; Native native; bind(window, native, 921);
-    event(window, [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) {
+    event(window, [](const sapp_event*, sapp_tc_window, Window*, internal::WindowContext&) {
         const int before = queues;
         internal::beforeHostTurn(); internal::afterHostTurn();
         check("process queues never run inside an App callback", queues == before);

@@ -116,7 +116,7 @@ trussc::internal::DialogDismiss presentDialog(const trussc::internal::DialogInpu
         auto native = std::make_shared<NativeDialog>();
         native->kind = inputs.kind;
         if (auto window = inputs.requestingWindow.lock(); window && window->isOpen()) {
-            native->owner = static_cast<HWND>(const_cast<void*>(sapp_window_win32_get_hwnd(
+            native->owner = static_cast<HWND>(const_cast<void*>(sapp_tc_window_win32_get_hwnd(
                 trussc::internal::WindowRequestAccess::binding(*window).handle)));
         }
         native->title = toWide(inputs.title);

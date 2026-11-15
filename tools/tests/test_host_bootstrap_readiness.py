@@ -47,34 +47,34 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     ctor_name = f'_sapp_tc_{platform}_create_window' + ('_ex' if platform == 'mac' else '')
     args = 'const _sapp_tc_native_desc* d' + (', const _sapp_tc_mac_window_attrs*' if platform == 'mac' else '')
     parts.append(f'namespace {platform} {{\n' + r'''
-using Client=void(*)(const sapp_event*,sapp_window,void*);
-using Tick=void(*)(sapp_window,void*);
-struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_window parent{}; bool hidden=false; int swap_interval=0,max_frame_latency=0; };
-struct sapp_desc { Tick _tc_close_cb=nullptr; bool(*_tc_close_request_cb)(sapp_window,void*)=nullptr; int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1,max_frame_latency=0; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
-struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
+using Client=void(*)(const sapp_event*,sapp_tc_window,void*);
+using Tick=void(*)(sapp_tc_window,void*);
+struct sapp_tc_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_tc_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_tc_window parent{}; bool hidden=false; int swap_interval=0,max_frame_latency=0; };
+struct sapp_desc { Tick _tc_close_cb=nullptr; bool(*_tc_close_request_cb)(sapp_tc_window,void*)=nullptr; int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1,max_frame_latency=0; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
+struct _sapp_tc_native_desc { sapp_tc_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
-struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true,link_suspended=false,fullscreen=false,fullscreen_requested=false; int swap_interval=0,requested_swap_interval=1; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; void* window=nullptr; const char* title="test"; };
-struct { sapp_window pacer{}; size_t window_slots=1; int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
+struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_tc_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true,link_suspended=false,fullscreen=false,fullscreen_requested=false; int swap_interval=0,requested_swap_interval=1; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; void* window=nullptr; const char* title="test"; };
+struct { sapp_tc_window pacer{}; size_t window_slots=1; int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
 _sapp_tc_window_t record;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
 constexpr int SAPP_PIXELFORMAT_RGB10A2=1,SAPP_PIXELFORMAT_DEPTH_STENCIL=2,SAPP_PIXELFORMAT_RGBA8=3,SW_SHOW=1,TRUE=1,SAPP_LOGITEM_OK=0,GL_FRAMEBUFFER_BINDING=1;
 using GLint=int;
 constexpr auto nil=nullptr;
 void glGetIntegerv(int,int* out) { *out=0; }
 void* MTLCreateSystemDefaultDevice() { return &record; }
 void _sapp_tc_log(...) {}
-void _sapp_tc_main_tick_tramp(sapp_window,void*) {}
+void _sapp_tc_main_tick_tramp(sapp_tc_window,void*) {}
 int callbacks=0,bound=0;
 bool graphics=false,app=false;
-void client(const sapp_event* e,sapp_window h,void*) {
+void client(const sapp_event* e,sapp_tc_window h,void*) {
     ++callbacks;
     check("desktop listener admission uses native init flag, including init in progress",_sapp_tc.app.init_called);
     check("delivered target and metadata are bound before input",h.id==23 && bound==1 && e->framebuffer_width==160);
 }
 ''' + predicate + '\n' + r'''
-void _sapp_tc_main_event_tramp(const sapp_event* e,sapp_window h,void* u) { if (_sapp_tc_app_events_enabled()) client(e,h,u); }
+void _sapp_tc_main_event_tramp(const sapp_event* e,sapp_tc_window h,void* u) { if (_sapp_tc_app_events_enabled()) client(e,h,u); }
 bool bind(uint32_t id,void*) { ++bound; check("bind precedes show",id==23 && callbacks==0); return true; }
-sapp_window_desc _sapp_tc_normalize_main_window(const sapp_desc*) { sapp_window_desc d; d.bind_cb=bind; return d; }
+sapp_tc_window_desc _sapp_tc_normalize_main_window(const sapp_desc*) { sapp_tc_window_desc d; d.bind_cb=bind; return d; }
 void _sapp_tc_win32_unwind(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_unwind(_sapp_tc_window_t*) {}
 _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t*,const char*) { return nullptr; }

@@ -50,7 +50,7 @@ constexpr int WS_CAPTION=1, WS_THICKFRAME=2, WS_MINIMIZEBOX=4, WS_MAXIMIZEBOX=8,
  SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=1;
 struct RECT { int left=0,top=0,right=480,bottom=300; };
 struct MONITORINFO { unsigned cbSize; RECT rcMonitor{0,0,1920,1080},rcWork{0,0,1920,1040}; };
-struct sapp_window { unsigned id; };
+struct sapp_tc_window { unsigned id; };
 constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0, _SAPP_TC_X11_VISIBILITY_MAPPING=1;
 struct _sapp_tc_window_t {
  bool native_visible=false, fullscreen=false, fullscreen_requested=false, fullscreen_on_map=false, restore_valid=false, decoration_pending=false;
@@ -64,7 +64,7 @@ struct _sapp_tc_window_t {
 _sapp_tc_window_t record;
 struct { struct { _sapp_tc_window_t* main=nullptr; } app;
  int display=1,constructing=0; Atom NET_WM_STATE=10,NET_WM_STATE_FULLSCREEN=11; } _sapp_tc;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window w) { return w.id==1 ? &record : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window w) { return w.id==1 ? &record : nullptr; }
 LONG_PTR style=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_VISIBLE,exstyle=7;
 RECT current; int positions=0,requests=0,swpFlags=0; bool requested=false;
 LONG_PTR GetWindowLongPtrW(int,int index) { return index==GWL_STYLE ? style : exstyle; }

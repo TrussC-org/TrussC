@@ -31,11 +31,19 @@ preserves the `metal_sim` and `wgsl` outputs required by TrussC.
 Search for `tettou771`, `Modified by` or `[TrussC` to locate existing blocks.
 Feature locations below use symbols or comment markers, never drifting line
 numbers. Some entire native sections were rewritten; marker counts alone do
-not establish complete preservation. Event step 3a will normalize surviving
-public fork APIs/types to `sapp_tc_*` and private helpers to `_sapp_tc_*`, exempting
-upstream names and local guard types. Every member added to an upstream struct
-gets its own `[TrussC]`; wholly TrussC-owned structs get one block marker.
-Existing attribution must remain. This slice does not perform those renames.
+not establish complete preservation. Event step 3a completed fork API renames
+to `sapp_tc_*`, private names to
+`_sapp_tc_*`, and surviving app struct markers. Upstream names and local guard
+types are exempt. The fork's `sapp_*`/`sapp_tc_*` surface is not public TrussC API
+(owner decision, 2026-11-16), including declarations exposed by TrussC headers.
+The four held names were renamed without aliases: `sapp_window` to
+`sapp_tc_window`, `sapp_window_desc` to `sapp_tc_window_desc`,
+`sapp_destroy_window` to `sapp_tc_destroy_window`, and
+`sapp_window_request_close` to `sapp_tc_window_request_close`. These old spellings
+are history only. R5 width/height/sample-count wrappers retain their names until
+retirement.
+Every member added to an upstream app struct has its own `[TrussC]`; wholly
+TrussC-owned app structs have a block marker. Existing attribution is retained.
 `Bound` annotations (`64b7ada0`) belong to the affected input, allocator, cache
 and device-buffer features below; retain representation/security/device limits
 with their code, without adding an allocator or recovery framework.
@@ -89,7 +97,7 @@ the feature entries take precedence over historical upstream behavior.
 |---|---|
 | Integration: `buildWindowDescriptor`, `tcWindowRuntime.cpp` | Runtime owns loop modes, update/draw decisions, WindowContext switching and App/Node lifecycle; native backends provide ticks/events/handles. |
 | Integration: `sglue_environment`, `sglue_swapchain` | Translate defaults plus Metal device/drawable/depth/MSAA, D3D11 device/context/render/resolve/depth views, WebGPU device/views or GL default framebuffer; unused backend fields stay zero. |
-| Native handles: `sapp_*_get_*` / `sapp_window_*` | Keep native handles for platform window operations and IME; desktop resize uses native APIs, iOS document pickers use `sapp_ios_get_window`, Android JNI consumers use `sapp_android_get_native_activity`. |
+| Native handles: `sapp_*_get_*` / `sapp_tc_window_*` | Keep native handles for platform window operations and IME; desktop resize uses native APIs, iOS document pickers use `sapp_ios_get_window`, Android JNI consumers use `sapp_android_get_native_activity`. |
 | Keyboard: `_sapp_tc_translate_key`, `_sapp_tc_emsc_keymap` | Desktop key identities follow physical positions (macOS virtual keycodes, Win32 scancodes, XKB names, browser `code`); layout-dependent text uses separate CHAR events. |
 | Desktop modifiers: `_sapp_tc_mods`, `_sapp_tc_win32_mods`, `_sapp_tc_x11_mods` | SHIFT/CTRL/ALT/SUPER masks combine left/right; sided identity belongs to `key_code`. |
 | Desktop paste: `keyEvt:pressed:`, `_sapp_tc_win32_key_event`, `_sapp_tc_x11_key_event` | Enabled clipboard emits CLIPBOARD_PASTED on exact Cmd+V (macOS) or Ctrl+V (Win32/X11); the handler reads the clipboard. |
@@ -118,7 +126,7 @@ the feature entries take precedence over historical upstream behavior.
 | X11: `_sapp_tc_x11_set_fullscreen` | EWMH fullscreen requests require a mapped window; requested/observed reconciliation is owned by the visibility/fullscreen feature below. |
 | X11: `_sapp_tc_x11_create_standard_cursor`, `_sapp_tc_x11_update_window_title` | Prefer themed Xcursor images with font-cursor fallback; retain UTF-8 WM_NAME/ICON_NAME and EWMH title properties. |
 | X11: `_sapp_tc_x11_on_clientmessage`, `_sapp_tc_x11_parse_dropped_files_list` | Advertise XDND v5, negotiate text/uri-list, decode file:// paths and reply XdndFinished after the transfer. |
-| X11: `_sapp_tc_x11_create_window`, `sapp_create_window` | GLX/EGL secondaries inherit the app sample count/compatible visual; GL swapchains report RGBA8 and the default framebuffer, not RGB10A2. |
+| X11: `_sapp_tc_x11_create_window`, `sapp_tc_create_window` | GLX/EGL secondaries inherit the app sample count/compatible visual; GL swapchains report RGBA8 and the default framebuffer, not RGB10A2. |
 | iOS: `_sapp_tc_ios_run`, `_sapp_tc_scene_delegate` | UIApplicationMain owns the loop; programmatic UISceneConfiguration selects the delegate without an Info.plist scene manifest; create Metal/window state only on scene connection. |
 | iOS: `scene:willConnectToSession:` | Size from the scene screen, ignoring descriptor width/height; high_dpi selects nativeScale, otherwise 1. |
 | iOS: `sceneWillResignActive:` / `sceneDidBecomeActive:` | Pause/unpause CADisplayLink and emit SUSPENDED/RESUMED; do no background drawable rendering. Native termination cleanup is best effort (SIGKILL commonly bypasses it). |
@@ -157,9 +165,13 @@ the feature entries take precedence over historical upstream behavior.
 
 **Classification:** KEEP essential.
 
-**Code locations:** `SOKOL_APP_TC_INCLUDED`, `SOKOL_APP_INCLUDED`, `SOKOL_APP_TC_IMPL_INCLUDED`, `SOKOL_APP_TC_IMPL_DONE`; `sapp_window`, `sapp_window_desc`, `sapp_create_window`, `sapp_tc_window_read_metadata`, `sapp_tc_window_close_recorded`; `util/sokol_window_native.h` (`_sapp_tc_next_window_id`, `_sapp_tc_normalize_main_window`, `_sapp_tc_normalize_window`), `util/sokol_window_creation.h` (`_sapp_tc_creation_transaction`).
+**Code locations:** `SOKOL_APP_TC_INCLUDED`, `SOKOL_APP_INCLUDED`, `SOKOL_APP_TC_IMPL_INCLUDED`, `SOKOL_APP_TC_IMPL_DONE`; `sapp_tc_window`, `sapp_tc_window_desc`, `sapp_tc_create_window`, `sapp_tc_destroy_window`, `sapp_tc_window_request_close`, `sapp_tc_window_read_metadata`, `sapp_tc_window_close_recorded`; `util/sokol_window_native.h` (`_sapp_tc_next_window_id`, `_sapp_tc_normalize_main_window`, `_sapp_tc_normalize_window`), `util/sokol_window_creation.h` (`_sapp_tc_creation_transaction`).
 
-**Planned slice:** event 3a for surviving names/markers; no ownership rollback.
+**Completed slice:** event 3a fork names and surviving app markers, including the
+four owner-approved follow-up renames without aliases. Removed three unreachable
+Vulkan swapchain-acquisition blocks copied into iOS/Android/Web; their helper had
+no definition and these platforms support only Metal, GLES3 or WebGPU. No
+ownership rollback.
 
 Fork/include/implementation guards and SOKOL_APP_INCLUDED compatibility keep
 C++/Objective-C++ and third-party glue usable. Desktop IDs are never reused;
@@ -186,7 +198,7 @@ and GLCORE. This registry choice is separate from retained R2 render/context gro
 
 **Classification:** KEEP essential (ownership/admission); KEEP decided by owner (R3 cadence).
 
-**Code locations:** `_sapp_tc_mac_select_source`, `_sapp_tc_mac_source_tick`, `_sapp_tc_mac_tick_body`, `_sapp_tc_mac_host_turn`, `applicationDidFinishLaunching:`; `_sapp_tc_win32_tick`, `_sapp_tc_win32_modal_tick`, `sapp_run`; `_sapp_tc_x11_update_pacer`, `_sapp_tc_x11_tick`, `_sapp_tc_x11_window_due`, `_sapp_tc_x11_run_loop`, `last_tick_presented`; singleton `_sapp_tc_call_init` / `_sapp_tc_call_event`; `sapp_skip_present`, `sapp_tc_window_skip_present`.
+**Code locations:** `_sapp_tc_mac_select_source`, `_sapp_tc_mac_source_tick`, `_sapp_tc_mac_tick_body`, `_sapp_tc_mac_host_turn`, `applicationDidFinishLaunching:`; `_sapp_tc_win32_tick`, `_sapp_tc_win32_modal_tick`, `sapp_run`; `_sapp_tc_x11_update_pacer`, `_sapp_tc_x11_tick`, `_sapp_tc_x11_window_due`, `_sapp_tc_x11_run_loop`, `last_tick_presented`; singleton `_sapp_tc_call_init` / `_sapp_tc_call_event`; `sapp_tc_skip_present`, `sapp_tc_window_skip_present`.
 
 **Planned slice:** R3 X11 one-day portability probe after event 1–5; move processing to TrussC with only a trigger in sokol where useful; leave it if savings are small; no cadence rollback.
 
@@ -314,7 +326,7 @@ notices preserve EVENT_DRIVEN map/resize drawing. Parent policy is separate (R7)
 
 **Classification:** REVERT (planned).
 
-**Code locations:** `sapp_window_desc.parent`; `_sapp_tc_mac_create_window_ex` / parent-child detach; `_sapp_tc_win32_create_native_window` / owner detach; `_sapp_tc_x11_create_native_window` (`WM_TRANSIENT_FOR`).
+**Code locations:** `sapp_tc_window_desc.parent`; `_sapp_tc_mac_create_window_ex` / parent-child detach; `_sapp_tc_win32_create_native_window` / owner detach; `_sapp_tc_x11_create_native_window` (`WM_TRANSIENT_FOR`).
 
 **Planned slice:** R7 parenting reversion.
 
@@ -340,7 +352,7 @@ redraw kinds.
 
 **Completed slice:** event 1 removes `window_id`, `dpi_scale`, `pointer_locked`
 and `reliable_button_bits` from raw `sapp_event` and their native stampers.
-Routing uses the callback's `sapp_window` and existing Window binding, without
+Routing uses the callback's `sapp_tc_window` and existing Window binding, without
 another identity field. Runtime snapshots target DPI, pointer-lock ownership
 and button-bit reliability through the private metadata boundary before any
 App/resize/visibility/raw callback, and passes that local context to conversion.
@@ -359,7 +371,7 @@ The original six extra fields duplicated binding context or TrussC injection
 state. Completed event 2 removes the remaining `source`/`button_snapshot` and
 native injection hook from sokol; TrussC Runtime owns input validation and
 private provenance, with a TrussC platform adapter to the existing send gate.
-Event 3a will mark surviving members. Keep `device_lost_reason`
+Event 3a marked surviving members. Keep `device_lost_reason`
 and all three TC kinds: do not pursue byte-identical upstream events by removing
 required loss/resize/map notifications. The source and snapshot relocation is
 described by the injection feature below, not a second native event
@@ -437,7 +449,7 @@ precision address different problems.
 
 **Classification:** KEEP decided by owner (R1 growth); KEEP essential (protocol/input bounds and async ownership).
 
-**Code locations:** `_sapp_tc_clipboard_text`, `_sapp_tc_dropped_paths`, `_sapp_tc_x11_serve_selection_request`, `_sapp_tc_x11_receive_incr`, `_sapp_tc_x11_parse_dropped_files_list`; `_sapp_tc_js_add_clipboard_listener`, `_sapp_tc_emsc_free`, `sapp_html5_get_dropped_file_size64`, `_SAPP_TC_MAX_DROP_CONTENT_SIZE`, `_SAPP_TC_MAX_DROP_READERS`; `_sapp_tc_mac_create_window_ex` file-drop registration.
+**Code locations:** `_sapp_tc_clipboard_text`, `_sapp_tc_dropped_paths`, `_sapp_tc_x11_serve_selection_request`, `_sapp_tc_x11_receive_incr`, `_sapp_tc_x11_parse_dropped_files_list`; `_sapp_tc_js_add_clipboard_listener`, `_sapp_tc_emsc_free`, `sapp_tc_html5_get_dropped_file_size64`, `_SAPP_TC_MAX_DROP_CONTENT_SIZE`, `_SAPP_TC_MAX_DROP_READERS`; `_sapp_tc_mac_create_window_ex` file-drop registration.
 
 **Planned slice:** none; retain the current behavior.
 
@@ -578,7 +590,7 @@ The existing fullscreen policy is unchanged.
 
 **Classification:** KEEP decided by owner (2026-11-12).
 
-**Code locations:** `sapp_desc::max_frame_latency`, `sapp_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_resize`.
+**Code locations:** `sapp_desc::max_frame_latency`, `sapp_tc_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_resize`.
 
 **Planned slice:** None; preserve this per-window setting on fork updates.
 
@@ -603,7 +615,7 @@ Windows cross-target syntax check; real 60/120 Hz and two-display checks require
 
 **Classification:** KEEP essential.
 
-**Code locations:** `sapp_window_d3d11_render_view`, `sapp_window_d3d11_resolve_view`, `sapp_window_d3d11_depth_stencil_view`.
+**Code locations:** `sapp_tc_window_d3d11_render_view`, `sapp_tc_window_d3d11_resolve_view`, `sapp_tc_window_d3d11_depth_stencil_view`.
 
 **Planned slice:** none; retain the current behavior.
 
@@ -652,14 +664,14 @@ internal ensure-context seam as a no-op, like idle activation.
 
 **Classification:** KEEP decided by owner (orientation/immersive); KEEP essential (actual dimensions).
 
-**Code locations:** `_sapp_tc_ios_view_ctrl`, `_sapp_ios_immersive_mode`, `sapp_ios_set_supported_orientations`, `_sapp_tc_ios_update_dimensions`, `_sapp_tc_ios_mtl_update_framebuffer_dimensions`.
+**Code locations:** `_sapp_tc_ios_view_ctrl`, `_sapp_tc_ios_immersive_mode`, `sapp_tc_ios_set_supported_orientations`, `_sapp_tc_ios_update_dimensions`, `_sapp_tc_ios_mtl_update_framebuffer_dimensions`.
 
 **Planned slice:** none; retain the current behavior.
 
 | Feature | Contract and reason |
 |---|---|
-| Runtime orientation | `_sapp_tc_ios_view_ctrl` replaces UIViewController; `supportedInterfaceOrientations` reads iOS state's `supported_orientations` (default `UIInterfaceOrientationMaskAll`). `sapp_ios_set_supported_orientations()` updates it, calling `setNeedsUpdateOfSupportedInterfaceOrientations` on iOS 16+. |
-| Immersive | Non-static `_sapp_ios_immersive_mode` remains accessible to `tcPlatform_ios.mm`; view-controller `prefersStatusBarHidden`/`prefersHomeIndicatorAutoHidden` hide status bar/home indicator. |
+| Runtime orientation | `_sapp_tc_ios_view_ctrl` replaces UIViewController; `supportedInterfaceOrientations` reads iOS state's `supported_orientations` (default `UIInterfaceOrientationMaskAll`). `sapp_tc_ios_set_supported_orientations()` updates it, calling `setNeedsUpdateOfSupportedInterfaceOrientations` on iOS 16+. |
+| Immersive | Non-static `_sapp_tc_ios_immersive_mode` remains accessible to `tcPlatform_ios.mm`; view-controller `prefersStatusBarHidden`/`prefersHomeIndicatorAutoHidden` hide status bar/home indicator. |
 | Dimensions | `_sapp_tc_ios_update_dimensions()` uses `_sapp_tc.ios.view.bounds` (screen fallback below 1.0), passing `view_rect` instead of `screen_rect`; screen bounds can lag layout. `_sapp_tc_ios_mtl_update_framebuffer_dimensions()` reads `layer.drawableSize` into `framebuffer_width`/`framebuffer_height` so `sapp_width()`/`sapp_height()` match the pass and scissors cannot exceed it. |
 
 Retain single-window UIWindowScene/CADisplayLink, P4 `f3ac1c8f` Metal swapchain

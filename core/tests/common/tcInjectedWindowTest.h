@@ -7,7 +7,7 @@ namespace tcCoreTest {
 // and host client as native windows, without an OS event pump or GPU device.
 struct InjectedWindow {
     uint32_t win_id = 701;
-    sapp_window_desc desc{};
+    sapp_tc_window_desc desc{};
     bool ready = true, in_tick = false, input_delivered = false, wake_on_input = true;
     bool (*events_enabled)() = nullptr;
     int win_width = 640, win_height = 480, fb_width = 640, fb_height = 480;
@@ -23,12 +23,12 @@ struct InjectedWindow {
         metadata.width = win_width; metadata.height = win_height; metadata.dpi_scale = dpi_scale;
         metadata.sample_count = 1; metadata.trust_hidden_signals = true;
         metadata.reliable_button_bits = true; metadata.source_interval = 1.0 / 60;
-        operations.readMetadata = [](sapp_window, void* user, sapp_tc_window_metadata& out) {
+        operations.readMetadata = [](sapp_tc_window, void* user, sapp_tc_window_metadata& out) {
             auto& n = *static_cast<InjectedWindow*>(user);
             out = n.metadata; out.pointer_locked = n.pointerLocked; return true;
         };
-        operations.closeRecorded = [](sapp_window, void* user) { return static_cast<InjectedWindow*>(user)->closed; };
-        operations.sendEvent = [](sapp_window handle, void* user, sapp_event* event) {
+        operations.closeRecorded = [](sapp_tc_window, void* user) { return static_cast<InjectedWindow*>(user)->closed; };
+        operations.sendEvent = [](sapp_tc_window handle, void* user, sapp_event* event) {
             auto& n = *static_cast<InjectedWindow*>(user);
             if (handle.id != n.win_id || !event) return false;
             return n.send(*event);
@@ -40,7 +40,7 @@ struct InjectedWindow {
         fb_width = metadata.fb_width; fb_height = metadata.fb_height;
         win_width = metadata.width; win_height = metadata.height;
         return _sapp_tc_deliver_event(this, &event, 123,
-            [&](sapp_window h) { return h.id == win_id ? this : nullptr; }).delivered;
+            [&](sapp_tc_window h) { return h.id == win_id ? this : nullptr; }).delivered;
     }
     ~InjectedWindow() { trussc::internal::WindowRequestAccess::unbind(window); }
 };

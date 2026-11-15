@@ -32,7 +32,7 @@ probe = r'''
 #include <cmath>
 #include <cstdio>
 #include <cstddef>
-struct sapp_window { int id; };
+struct sapp_tc_window { int id; };
 struct sapp_event { int type=0; };
 QUIT_RESULT
 struct _sapp_tc_window_t {
@@ -44,10 +44,10 @@ struct _sapp_tc_window_t {
     double earliest_next=0, frame_duration=0, last_present=0;
     bool last_tick_presented=false;
     struct { double smooth_dt=1.0/62.0, last=0; } timing;
-    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; bool hidden=false; } desc;
+    struct { void (*tick_cb)(struct sapp_tc_window, void*)=nullptr; void* user_data=nullptr; bool hidden=false; } desc;
 };
-struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
-struct { App app; int display=0; size_t window_slots=2; sapp_window pacer{}; bool SwapIntervalEXT=false, SwapIntervalMESA=false; double refresh_period=1.0/62.0, hidden_refresh_period=1.0/62.0;
+struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
+struct { App app; int display=0; size_t window_slots=2; sapp_tc_window pacer{}; bool SwapIntervalEXT=false, SwapIntervalMESA=false; double refresh_period=1.0/62.0, hidden_refresh_period=1.0/62.0;
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
 struct pollfd { int fd, events, revents; };
@@ -65,19 +65,19 @@ static bool injectWait=false, eventQueued=false, eventProcessed=false, inputEven
 static int eventTarget=0;
 static double savedDeadline=0;
 FRAME_SKIP
-void lowerFps(sapp_window, void*) noexcept {
+void lowerFps(sapp_tc_window, void*) noexcept {
     const double elapsed=clockValue-previousDrawTick;
     previousDrawTick=clockValue;
     if (frameSkipShouldTick(drawAccumulator,elapsed,1.0/20.0)) { ++secondaryDraws; clockValue+=callbackWork; }
     else _sapp_tc.windows[1]->skip_present=true;
     if (_sapp_tc.windows[1]->frame_count==limit-1) _sapp_tc.app.quit_ordered=true;
 }
-void renderWork(sapp_window,void*) noexcept { clockValue+=callbackWork; }
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+void renderWork(sapp_tc_window,void*) noexcept { clockValue+=callbackWork; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) {
     for (auto* w : _sapp_tc.windows) if (w && w->win_id==h.id) return w;
     return nullptr;
 }
-void sapp_destroy_window(sapp_window h) { for (auto*& w : _sapp_tc.windows) if (w && w->win_id==h.id) w=nullptr; }
+void sapp_tc_destroy_window(sapp_tc_window h) { for (auto*& w : _sapp_tc.windows) if (w && w->win_id==h.id) w=nullptr; }
 void _sapp_tc_x11_init_client() {}
 void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*,int) {}
 double _sapp_tc_now() { return clockValue; }
@@ -157,7 +157,7 @@ int main() {
         main.swap_interval=main.requested_swap_interval=4; _sapp_tc.pacer={main.win_id}; // Secondaries keep their native interval-zero timer.
         clockValue=10; eventTarget=target; inputEvent=input;
         injectWait=eventQueued=eventProcessed=batchCleared=false;
-        main.desc.tick_cb=secondary.desc.tick_cb=[](sapp_window h,void*) noexcept {
+        main.desc.tick_cb=secondary.desc.tick_cb=[](sapp_tc_window h,void*) noexcept {
             _sapp_tc_lookup(h)->skip_present=true;
         };
         _sapp_tc.app.desc._tc_after_turn=[]() {
@@ -188,7 +188,7 @@ int main() {
             // One main presentation or due refresh timer per simulated turn.
             if (++pacingOpportunities==12) _sapp_tc.app.quit_ordered=true;
         };
-        secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
+        secondary.desc.tick_cb=[](sapp_tc_window,void*) noexcept {
             const auto* s=_sapp_tc.windows[1];
             const bool sole_pacer = !_sapp_tc.app.main;
             const int expected = (s->frame_count+1)*(sole_pacer ? 1 : s->requested_swap_interval);
@@ -291,7 +291,7 @@ int main() {
         _sapp_tc.refresh_period=seeded ? 1.0/30 : period;
         clockValue=nextMain=10; mainPeriod=period; tail=0; nonblocking=true; queued=false;
         seeded_run=seeded; previousSecondary=0; minSecondaryGap=100; throttledRefresh=0; switchTime=0; switchSecondary=0;
-        main.desc.tick_cb=[](sapp_window,void*) noexcept {
+        main.desc.tick_cb=[](sapp_tc_window,void*) noexcept {
             auto* m=_sapp_tc.windows[0];
             if (m->frame_count==300) {
                 throttledRefresh=_sapp_tc.refresh_period; switchTime=clockValue; switchSecondary=_sapp_tc.windows[1]->frame_count;
@@ -317,7 +317,7 @@ int main() {
         clockValue=nextMain=10; mainPeriod=period; tail=0;
         secondary.earliest_next=10+.25*period+.00005;
         previousSecondary=0; minSecondaryGap=100; hideAfterSecondary=true;
-        secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
+        secondary.desc.tick_cb=[](sapp_tc_window,void*) noexcept {
             if (_sapp_tc.windows[1]->frame_count==1) _sapp_tc.app.quit_ordered=true;
         };
         _sapp_tc_x11_run_loop();
@@ -335,7 +335,7 @@ int main() {
         clockValue=10; hideMain=!iconify; iconMain=iconify; tail=0;
         previousSecondary=0; minSecondaryGap=100;
         secondaryDraws=0; previousDrawTick=10; drawAccumulator=0;
-        secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
+        secondary.desc.tick_cb=[](sapp_tc_window,void*) noexcept {
             if (_sapp_tc.windows[1]->frame_count==limit-1) _sapp_tc.app.quit_ordered=true;
         };
         if (lower) secondary.desc.tick_cb=lowerFps;

@@ -72,10 +72,10 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         return;
     }
     w->pacing_ticks = 0;
-    const sapp_window handle = {w->win_id};
+    const sapp_tc_window handle = {w->win_id};
     w->in_tick = true;
     struct TickGuard {
-        sapp_window handle;
+        sapp_tc_window handle;
         ~TickGuard() { if (auto* live = _sapp_tc_lookup(handle)) live->in_tick = false; }
     } guard{handle};
     _sapp_tc_x11_surface_scope restore_surface;
@@ -91,7 +91,7 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (resized || w->surface_resize_pending) {
         w->surface_resize_pending = false;
         if (!_sapp_tc_x11_resize_surface(w)) {
-            sapp_destroy_window(handle);
+            sapp_tc_destroy_window(handle);
             _sapp_tc.app.quit_ordered = true;
             return;
         }
@@ -264,7 +264,7 @@ static void _sapp_tc_x11_run_loop(void) {
         for (size_t i = 0; i < _sapp_tc.window_slots; ++i)
             if (_sapp_tc.windows[i] && _sapp_tc.windows[i]->in_tick) callbacks_active = true;
         if (callbacks_active) continue;
-        /* sapp_window_request_close() lands here, outside every tick and
+        /* sapp_tc_window_request_close() lands here, outside every tick and
            event: the same close_cb a WM_DELETE_WINDOW sends (re-fetch each
            slot: a close may destroy windows) */
         for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
@@ -335,7 +335,7 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
     _sapp_tc.windows[slot] = w;
     if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
-    const sapp_window identity{w->win_id};
+    const sapp_tc_window identity{w->win_id};
     w->fullscreen_requested = d->fullscreen;
     if (!w->desc.hidden) _sapp_tc_x11_show_window(w);
     if (_sapp_tc_lookup(identity) != w) { creation.removed(); return nullptr; }

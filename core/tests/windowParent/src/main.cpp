@@ -94,12 +94,12 @@ int frame = 0;
 unsigned long hintOf(const std::shared_ptr<Window>& w) {
     unsigned long parent = 0;
     const auto handle = internal::WindowRequestAccess::binding(*w).handle;
-    const unsigned long xwin = (unsigned long)(uintptr_t)sapp_window_x11_get_window(handle);
+    const unsigned long xwin = (unsigned long)(uintptr_t)sapp_tc_window_x11_get_window(handle);
     if (!XGetTransientForHint(sapp_x11_get_display(), xwin, &parent)) return 0;
     return parent;
 }
 unsigned long xwinOf(Window& w) {
-    return (unsigned long)(uintptr_t)sapp_window_x11_get_window(internal::WindowRequestAccess::binding(w).handle);
+    return (unsigned long)(uintptr_t)sapp_tc_window_x11_get_window(internal::WindowRequestAccess::binding(w).handle);
 }
 #endif
 

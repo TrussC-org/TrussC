@@ -658,7 +658,7 @@ inline void Window::close() {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
     if (internal::codeCloseExitsRuntime(*this)) return;
     closeRequested_ = true;
-    if (binding_.handle.id) sapp_window_request_close(binding_.handle);
+    if (binding_.handle.id) sapp_tc_window_request_close(binding_.handle);
     // Surface-only hosts drain this request at the outer host boundary.
 }
 inline void Window::teardown() noexcept {
@@ -692,7 +692,7 @@ inline void Window::teardown() noexcept {
         // Windows can end a logging-off process at the last top-level window's
         // destruction; process exit reclaims the windows.
     } else if (native_) disposeNativeBacking();
-    else if (binding_.handle.id) steps.run("window native disposal", [&] { sapp_destroy_window(binding_.handle); });
+    else if (binding_.handle.id) steps.run("window native disposal", [&] { sapp_tc_destroy_window(binding_.handle); });
     internal::WindowRequestAccess::unbind(*this);
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
@@ -890,7 +890,7 @@ namespace internal {
 // The native parent handle for a new window: {0} when settings name no parent,
 // or when the named one is closed or gone (logs a warning, and the caller then
 // creates a normal window). Hands out an id only; the native side checks it again.
-inline sapp_window resolveParentWindow(const WindowSettings& settings) {
+inline sapp_tc_window resolveParentWindow(const WindowSettings& settings) {
     const std::weak_ptr<Window> none;
     const auto& weak = settings.parentWindow;
     // An empty weak_ptr (never set, or set from an empty pointer) is "no parent";

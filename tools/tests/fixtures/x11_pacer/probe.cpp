@@ -9,20 +9,20 @@
 #include <string>
 #include <vector>
 using std::size_t; using std::isfinite;
-struct sapp_window { uint32_t id=0; };
+struct sapp_tc_window { uint32_t id=0; };
 using GLXDrawable=int; using EGLSurface=int;
-struct sapp_window_desc {
+struct sapp_tc_window_desc {
     int width=64,height=64,swap_interval=0; bool hidden=false,borderless=false,no_high_dpi=false;
     const char* title="probe"; void* user_data=nullptr;
     bool (*bind_cb)(uint32_t,void*)=nullptr;
-    void (*tick_cb)(sapp_window,void*)=nullptr;
+    void (*tick_cb)(sapp_tc_window,void*)=nullptr;
 };
 struct _sapp_tc_native_desc {
-    sapp_window_desc window; bool events_enabled=false,draw_while_hidden=false,fullscreen=false;
+    sapp_tc_window_desc window; bool events_enabled=false,draw_while_hidden=false,fullscreen=false;
     int swap_interval=1,color_format=0,depth_format=0; size_t title_limit=0;
 };
 struct _sapp_tc_window_t {
-    sapp_window_desc desc; bool events_enabled=false,draw_while_hidden=false,trust_hidden_signals=true;
+    sapp_tc_window_desc desc; bool events_enabled=false,draw_while_hidden=false,trust_hidden_signals=true;
     bool ready=false,constructing=false,in_tick=false,is_main=false,skip_present=false,last_tick_presented=false;
     bool close_requested=false,input_delivered=false,surface_resize_pending=false,fullscreen_requested=false,wake_on_input=false;
     bool iconified=false,occluded=false;
@@ -36,7 +36,7 @@ struct _sapp_tc_window_t {
 struct {
     _sapp_tc_window_t* windows[4]{}; size_t window_slots=4; uint32_t next_id=0;
     double refresh_period=1.0/60,hidden_refresh_period=1.0/60; float dpi=96; int display=1,egl_display=1,ctx=1;
-    sapp_window pacer;
+    sapp_tc_window pacer;
     void (*SwapIntervalEXT)(int,int,int)=nullptr; int (*SwapIntervalMESA)(int)=nullptr;
     struct { bool quit_ordered=false,quit_requested=false;
         _sapp_tc_window_t* main=nullptr;
@@ -54,7 +54,7 @@ void record(const char* op,int target,int value=0) {
     nativeCalls.push_back(std::string(op)+":"+std::to_string(target)+":"+std::to_string(value));
     if(trace) std::printf("%s %d %d\n",op,target,value);
 }
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) {
     for(auto* w:_sapp_tc.windows) if(w && w->win_id==h.id) return w;
     return nullptr;
 }
@@ -88,7 +88,7 @@ void _sapp_tc_x11_init_client() {}
 void _sapp_tc_timing_update(decltype(_sapp_tc_window_t::timing)* t) { t->last=clockValue; }
 bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
 bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t*) { return true; }
-void sapp_destroy_window(sapp_window h) { if(_sapp_tc.pacer.id==h.id) _sapp_tc.pacer={}; for(auto*& w:_sapp_tc.windows) if(w && w->win_id==h.id) w=nullptr; }
+void sapp_tc_destroy_window(sapp_tc_window h) { if(_sapp_tc.pacer.id==h.id) _sapp_tc.pacer={}; for(auto*& w:_sapp_tc.windows) if(w && w->win_id==h.id) w=nullptr; }
 constexpr int SAPP_EVENTTYPE_RESIZED=1,SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED=2,_SAPP_TC_X11_VISIBILITY_NONE=0,POLLIN=1;
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
 void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
@@ -116,7 +116,7 @@ PRODUCTION_FUNCTIONS
 static void check(const char* name,bool ok) {
     if(!ok) { std::fprintf(stderr,"FAIL %s\n",name);std::exit(1); }
 }
-static void tick(sapp_window h,void*) { order.push_back(h.id);clockValue+=work; }
+static void tick(sapp_tc_window h,void*) { order.push_back(h.id);clockValue+=work; }
 static void afterTurn() {
     ++turns;
     if(trace) for(auto* w:_sapp_tc.windows) if(w)
@@ -143,7 +143,7 @@ int main(int argc,char** argv) {
         refresh=1.0/62;
         trace=true;auto* w=create(std::atoi(argv[2]));w->is_main=true;_sapp_tc.app.main=w;
         fast=std::string(argv[3])=="fast";
-        if(std::string(argv[3])=="skip") w->desc.tick_cb=[](sapp_window h,void*) {
+        if(std::string(argv[3])=="skip") w->desc.tick_cb=[](sapp_tc_window h,void*) {
             auto* target=_sapp_tc_lookup(h);target->skip_present=target->frame_count%3==1;
         };
         _sapp_tc_x11_run_loop();return 0;
@@ -175,13 +175,13 @@ int main(int argc,char** argv) {
     auto* first=create(2);auto* second=create();auto* third=create();
     intervalCalls.clear();
     check("steady role",_sapp_tc_x11_update_pacer()==first && intervalCalls.empty());
-    first->iconified=true;second->wake_on_input=false; // As sapp_create_window creates secondaries.
+    first->iconified=true;second->wake_on_input=false; // As sapp_tc_create_window creates secondaries.
     check("minimized handoff",_sapp_tc_x11_update_pacer()==second);
     check("new pacer wakes on input",second->wake_on_input);
     check("hidden demotion deferred; promote once",intervalCalls==std::vector<std::string>{"2:1"} && first->swap_interval_pending);
     _sapp_tc_x11_update_pacer();check("no interval reapply",intervalCalls.size()==1);
     // Close the second and reuse its slot: the older third must beat the fourth.
-    sapp_destroy_window({second->win_id});intervalCalls.clear();auto* fourth=create();
+    sapp_tc_destroy_window({second->win_id});intervalCalls.clear();auto* fourth=create();
     check("close and slot reuse",_sapp_tc_x11_update_pacer()==third);
     check("closed surface not demoted; existing visible precedes new window",
         intervalCalls==std::vector<std::string>{"3:1","4:0"});
@@ -197,7 +197,7 @@ int main(int argc,char** argv) {
     check("all hidden intervals remain zero",intervalCalls.empty());
     // Common callback hide must move the role before the old surface can swap.
     reset();first=create();second=create();first->draw_while_hidden=true;
-    first->desc.tick_cb=[](sapp_window h,void*) { _sapp_tc_lookup(h)->desc.hidden=true; };
+    first->desc.tick_cb=[](sapp_tc_window h,void*) { _sapp_tc_lookup(h)->desc.hidden=true; };
     _sapp_tc_x11_tick(first);
     check("late hide skips swap and promotes",swaps[1]==0 && _sapp_tc.pacer.id==2 && nativeIntervals[2]==1);
     // Step 2: both hidden, callback work does not move periodic timer phase.

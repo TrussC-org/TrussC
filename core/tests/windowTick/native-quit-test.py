@@ -57,7 +57,7 @@ struct _sapp_tc_window_t {
     unsigned win_id=17; bool constructing=false,ready=true,in_tick=false,is_main=true,close_requested=false;
     bool wake_on_input=false,input_delivered=false; bool (*events_enabled)()=nullptr;
     int win_width=80,win_height=40,fb_width=160,fb_height=80,hwnd=17;
-    float dpi_scale=2; uint64_t frame_count=7; sapp_window_desc desc{};
+    float dpi_scale=2; uint64_t frame_count=7; sapp_tc_window_desc desc{};
 } window;
 struct App {
     bool quit_ordered=false,quit_requested=false,init_called=true,cleanup_called=false,event_consumed=false;
@@ -65,7 +65,7 @@ struct App {
 };
 struct { App app; } _sapp_tc;
 _sapp_tc_window_t* live=&window;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return live && live->win_id==h.id ? live : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return live && live->win_id==h.id ? live : nullptr; }
 int checks=0,failures=0,calls=0,posted=0,terminated=0,cleaned=0,blocked=0,defaults=0,reasonDestroyed=0;
 bool throwing=false,cancel=false,hardQuit=false,removeRecord=false,throwCleanup=false,throwReason=false;
 void check(const char* label,bool ok) { ++checks;if(!ok){++failures;printf("native-quit: FAIL: %s\n",label);} }
@@ -92,7 +92,7 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     return DefWindowProcW(hwnd,msg,wParam,lParam);
 }
 '''+body(native,'static LRESULT CALLBACK _sapp_tc_wndproc(')+r'''
-void event(const sapp_event* e,sapp_window h,void*) {
+void event(const sapp_event* e,sapp_tc_window h,void*) {
     ++calls;
     check("production delivery stamps quit and guards receiver",e->type==SAPP_EVENTTYPE_QUIT_REQUESTED && h.id==17 && window.in_tick);
     if(cancel)_sapp_tc.app.quit_requested=false;
@@ -143,13 +143,13 @@ int main() {
         reset();window.is_main=initial;
         int closes=0;
         window.desc.user_data=&closes;
-        window.desc.close_cb=[](sapp_window,void* user) { ++*static_cast<int*>(user); };
+        window.desc.close_cb=[](sapp_tc_window,void* user) { ++*static_cast<int*>(user); };
         check("any Window close reaches its addressed callback", _sapp_tc_wndproc(17,WM_CLOSE,0,0)==0 && closes==1 && posted==0 && calls==0);
-        window.desc.close_request_cb=[](sapp_window,void*) { return false; };
+        window.desc.close_request_cb=[](sapp_tc_window,void*) { return false; };
         _sapp_tc_wndproc(17,WM_CLOSE,0,0);
         check("any Window close request can defer without process quit", closes==1 && posted==0 && calls==0);
     }
-    reset();window.is_main=false;window.desc.close_cb=[](sapp_window,void*) { throw 239; };
+    reset();window.is_main=false;window.desc.close_cb=[](sapp_tc_window,void*) { throw 239; };
     check("throwing secondary close is contained without default destruction",_sapp_tc_wndproc(17,WM_CLOSE,0,0)==0 && defaults==0 && posted==0);
     reset();window.is_main=false;
     check("secondary session query does not consult quit client",_sapp_tc_wndproc(17,WM_QUERYENDSESSION,0,0)==TRUE && calls==0);
@@ -161,7 +161,7 @@ int main() {
     for (int platform : {0, 1, 2}) for (bool veto : {false, true}) {
         reset(); _sapp_tc.app.main = nullptr; window.is_main = false;
         cancel = veto;
-        _sapp_tc.app.desc._tc_event_cb = [](const sapp_event* e, sapp_window h, void* user) {
+        _sapp_tc.app.desc._tc_event_cb = [](const sapp_event* e, sapp_tc_window h, void* user) {
             check("process quit addresses Runtime rather than disposed A", e->type == SAPP_EVENTTYPE_QUIT_REQUESTED && h.id == 0 && user == nullptr);
             // Runtime's live-window veto is exercised by the linked ownership probe.
             event(e, {17}, nullptr);
