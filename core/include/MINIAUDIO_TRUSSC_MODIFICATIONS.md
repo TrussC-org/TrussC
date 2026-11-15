@@ -1,10 +1,11 @@
 # miniaudio provenance
 
-`miniaudio.h` is the unmodified miniaudio v0.11.25 header, byte-identical to
-TrussC's original v0.11.25 import (`ea2060ce`). No TrussC patches remain.
+`miniaudio.h` is the unmodified miniaudio v0.11.26 header, byte-identical to
+the upstream `0.11.26` release. Source: https://github.com/mackron/miniaudio/tree/0.11.26.
+No TrussC patches remain.
 The converter and embedded codec format-check hooks (vendor M1/M2) were removed.
 
-SHA-256: `ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc55c89`
+SHA-256: `6b376c7fbb1352ba1e0e432ab66069b335ea9405e45cb6c30b97ef0f3c9c3e0e`
 
 `tc/sound/tcAudio_impl.cpp` configures the upstream
 `MA_DR_WAV_MAX_SAMPLE_RATE` macro to `UINT32_MAX`, the WAV field's range,
