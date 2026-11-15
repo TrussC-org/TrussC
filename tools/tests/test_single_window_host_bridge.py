@@ -24,12 +24,12 @@ assert len(skips) == 3
 for platform, match in zip(('ios','android','web'), skips):
     skip = body(NATIVE[match.start():], 'SOKOL_API_IMPL void sapp_tc_skip_present(') if platform == 'web' else body(NATIVE[match.start():NATIVE.index('}',match.start())+1], 'SOKOL_API_IMPL void sapp_tc_skip_present(')
     parts.append(f'namespace {platform} {{\n' + r'''
-struct sapp_window { unsigned id=0; };
+struct sapp_tc_window { unsigned id=0; };
 struct sapp_event {};
 struct sapp_tc_window_metadata { int fb_width=0,fb_height=0,sample_count=0,color_format=0,depth_format=0; float dpi_scale=0; bool trust_hidden_signals=false,occluded=false,drawable_available=false; double source_interval=0; };
 struct Window;
 struct Context { Window* hostWindow=nullptr; double tickDuration=0; float mouseX=3,mouseY=4,pmouseX=0,pmouseY=0; struct { bool empty() { return true; } } pendingScreenshotPaths; struct { decltype(pendingScreenshotPaths) pending; } asyncScreenshots; void* deferredResponseTarget=nullptr; bool drawWhileHidden=true; int fbWidth=100,fbHeight=50; };
-struct Binding { sapp_window handle; sapp_tc_window_metadata metadata; };
+struct Binding { sapp_tc_window handle; sapp_tc_window_metadata metadata; };
 struct Window { Binding binding; Context ctx; Context& context() { return ctx; } bool isOccluded() { return false; } } window;
 struct WindowRequestAccess { static Context& context(Window& w) { return w.ctx; } static Binding& binding(Window& w) { return w.binding; } };
 bool hasWindow=true, stopping=false;
@@ -41,12 +41,12 @@ bool sapp_isvalid() { return true; }
 int sapp_width() { return 100; } int sapp_height() { return 50; }
 float sapp_dpi_scale() { return 2; } int sapp_sample_count() { return 1; }
 int sapp_color_format() { return 1; } int sapp_depth_format() { return 2; }
-bool sapp_tc_window_occluded(sapp_window) { return false; }
+bool sapp_tc_window_occluded(sapp_tc_window) { return false; }
 double nativeDuration=1.0/120.0;
 double sapp_frame_duration() { return nativeDuration; }
 int stubReads=0, desktopSkips=0;
-double sapp_tc_window_frame_duration(sapp_window) { ++stubReads; return 1.0/60.0; }
-void sapp_tc_window_skip_present(sapp_window) { ++desktopSkips; }
+double sapp_tc_window_frame_duration(sapp_tc_window) { ++stubReads; return 1.0/60.0; }
+void sapp_tc_window_skip_present(sapp_tc_window) { ++desktopSkips; }
 void publishWindowMetadata(Window& w,const sapp_tc_window_metadata& m) { w.binding.metadata=m; }
 bool refreshWindowMetadata(Window&) { return true; }
 void syncWindowAppSize(Window&) {}
@@ -150,7 +150,7 @@ struct Window {};
 struct TeardownSteps { template<class F> void run(const char*,F f) { f(); } };
 constexpr bool supportsSecondaryWindows() { return false; }
 int windowClockNow() { return 0; }
-bool enterWindowTick(Window&,sapp_window,int,double) { return false; }
+bool enterWindowTick(Window&,sapp_tc_window,int,double) { return false; }
 bool runtimeEnding() { return false; }
 ''' + body(RUNTIME,'void windowTick(') + r'''
 int main() { Window window; windowTick({0},&window); return 0; }

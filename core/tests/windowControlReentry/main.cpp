@@ -340,7 +340,7 @@ extern "C" bool sapp_mouse_locked() { return false; }
 extern "C" int sapp_width() { return framebufferWidth; }
 extern "C" int sapp_height() { return framebufferHeight; }
 extern "C" float sapp_dpi_scale() { return nativeDpi; }
-extern "C" float sapp_tc_window_dpi_scale(sapp_window) { return nativeDpi; }
+extern "C" float sapp_tc_window_dpi_scale(sapp_tc_window) { return nativeDpi; }
 extern "C" bool sapp_isvalid() { return true; }
 int main() {
     getMainThreadId();

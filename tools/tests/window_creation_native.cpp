@@ -35,7 +35,7 @@ sapp_desc baseDescriptor(const Settings& settings) {
 bool tinyScale = false, tinySecondary = false, baseMode = false;
 Settings requested{};
 bool pixelPerfectMode() { return requested.pixelPerfect; }
-sapp_window_desc secondaryDescriptor(const Settings& settings) {
+sapp_tc_window_desc secondaryDescriptor(const Settings& settings) {
     using internal::buildNativeWindowDescriptor;
     SECONDARY
     return d;
@@ -56,7 +56,7 @@ void initialized() {
         const auto secondary = sapp_tc_create_window(&descriptor);
         assert(secondary.id != 0);
         std::printf("secondary=%dx%d\n", sapp_tc_window_framebuffer_width(secondary), sapp_tc_window_framebuffer_height(secondary));
-        sapp_destroy_window(secondary);
+        sapp_tc_destroy_window(secondary);
     }
     sapp_quit();
 }

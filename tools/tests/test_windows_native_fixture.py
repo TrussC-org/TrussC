@@ -484,13 +484,13 @@ int main() {
         # Compile the fixture's actual descriptor setup and early launch routing.
         launch = source[source.index('    sapp_desc d{};', source.index('int main(')):
                         source.index('    // Inspect the real launch constructor')]
-        callbacks = body(source, 'void close(sapp_window win, void*)')
-        if 'bool allowClose(sapp_window win, void*)' in source:
-            callbacks = body(source, 'bool allowClose(sapp_window win, void*)') + callbacks
+        callbacks = body(source, 'void close(sapp_tc_window win, void*)')
+        if 'bool allowClose(sapp_tc_window win, void*)' in source:
+            callbacks = body(source, 'bool allowClose(sapp_tc_window win, void*)') + callbacks
         code = r'''
 #include <cstdio>
 #include <cstdint>
-struct sapp_window { unsigned id; };
+struct sapp_tc_window { unsigned id; };
 struct Window { unsigned win_id; };
 Window first{1}, peer{2};
 struct {
@@ -509,17 +509,17 @@ struct sapp_desc {
     const char* window_title=nullptr;
     void (*init_cb)()=nullptr, (*frame_cb)()=nullptr, (*cleanup_cb)()=nullptr;
     void (*event_cb)(int)=nullptr;
-    bool (*_tc_close_request_cb)(sapp_window,void*)=nullptr;
-    void (*_tc_close_cb)(sapp_window,void*)=nullptr;
+    bool (*_tc_close_request_cb)(sapp_tc_window,void*)=nullptr;
+    void (*_tc_close_cb)(sapp_tc_window,void*)=nullptr;
 };
 void initialized() {} void frame() {} void legacyEvent(int) {} void cleanup() {}
-Window* _sapp_tc_lookup(sapp_window win) {
+Window* _sapp_tc_lookup(sapp_tc_window win) {
     for (auto* entry : _sapp_tc.windows) if (entry && entry->win_id==win.id) return entry;
     return nullptr;
 }
-bool sapp_tc_window_valid(sapp_window win) { return _sapp_tc_lookup(win); }
+bool sapp_tc_window_valid(sapp_tc_window win) { return _sapp_tc_lookup(win); }
 bool _sapp_tc_win32_request_exit(Window*) { ++quitRequests; return !vetoQuit; }
-void sapp_destroy_window(sapp_window win) {
+void sapp_tc_destroy_window(sapp_tc_window win) {
     for (auto*& entry : _sapp_tc.windows) if (entry && entry->win_id==win.id) entry=nullptr;
 }
 void sapp_quit() { _sapp_tc.app.quit_ordered=true; }

@@ -19,7 +19,7 @@ using _sapp_tc_x11_surface_t = EGLSurface;
 struct _sapp_tc_window_t { uint32_t win_id = 7; EGLSurface drawable{}; uintptr_t xwin = 1; int swap_interval = 1; };
 static struct { EGLDisplay egl_display{}; EGLConfig fbconfig{}; int error_code = 0; size_t window_slots = 1;
     _sapp_tc_window_t* windows[1]{}; } _sapp_tc;
-static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+static _sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) {
     auto* w = _sapp_tc.windows[0]; return w && w->win_id == h.id ? w : nullptr;
 }
 static void _sapp_tc_x11_grab_error_handler() {}

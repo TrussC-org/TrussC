@@ -168,8 +168,8 @@ def creation_source(backend, *, native_path=None):
     adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
                     'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
     adapter = (ROOT / 'core/platform' / adapter_path).read_text(encoding='utf-8')
-    secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
-    secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
+    secondary = between(adapter, '    sapp_tc_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
+    secondary = '    sapp_tc_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
     secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
     main_signature = {'win': 'static bool _sapp_tc_win32_create_main_window(',
                       'x11': 'static bool _sapp_tc_x11_create_main_window(',
@@ -189,22 +189,22 @@ def creation_source(backend, *, native_path=None):
         # normalization and its descriptor copy, then the entire native creator
         # (including the target-DPI correction condition and SetWindowPos call).
         common = body(native, 'static _sapp_tc_window_t* _sapp_tc_win32_create_window(')
-        secondary_entry = body(before(after(native, main), '\nvoid sapp_destroy_window('),
-                               'sapp_window sapp_tc_create_window(')
+        secondary_entry = body(before(after(native, main), '\nvoid sapp_tc_destroy_window('),
+                               'sapp_tc_window sapp_tc_create_window(')
         for entry in (main, secondary_entry):
             after(entry, '_sapp_tc_win32_create_window(&native)')
         after(common, '_sapp_tc_win32_create_native_window(')
         transfer = 'native.window = ' + between(main, '    native.window = ', ';') + ';'
         secondary_transfer = 'native.window = ' + between(secondary_entry, '    native.window = ', ';') + ';'
         common_transfer = 'w->desc = ' + between(common, '    w->desc = ', ';') + ';'
-        normalizers = '\n'.join(body(shared, 'static inline sapp_window_desc ' + name + '(')
+        normalizers = '\n'.join(body(shared, 'static inline sapp_tc_window_desc ' + name + '(')
                                 for name in ('_sapp_tc_normalize_main_window', '_sapp_tc_normalize_window'))
         win_creator = body(native, 'static bool _sapp_tc_win32_create_native_window(')
     elif backend == 'mac':
         common = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(')
         wrapper = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(')
-        secondary_entry = body(before(after(native, main), '\nvoid sapp_destroy_window('),
-                               'sapp_window sapp_tc_create_window(')
+        secondary_entry = body(before(after(native, main), '\nvoid sapp_tc_destroy_window('),
+                               'sapp_tc_window sapp_tc_create_window(')
         # Replay every statement from descriptor initialization to the actual
         # constructor call, including any overwrite after normalization. Only
         # native API types/services are stubbed, and the ObjC bridge is erased.
@@ -230,10 +230,10 @@ def creation_source(backend, *, native_path=None):
                          '[[maybe_unused]] const _sapp_tc_mac_window_attrs* attrs) {\n'
                          'State state; State* w = &state;\n' + common_transfer +
                          '\nreturn w->desc;\n}\n' + wrapper)
-        normalizers = '\n'.join(body(shared, 'static inline sapp_window_desc ' + name + '(')
+        normalizers = '\n'.join(body(shared, 'static inline sapp_tc_window_desc ' + name + '(')
                                 for name in ('_sapp_tc_normalize_main_window', '_sapp_tc_normalize_window'))
     else:
-        transfer = body(shared, 'static inline sapp_window_desc _sapp_tc_normalize_main_window(')
+        transfer = body(shared, 'static inline sapp_tc_window_desc _sapp_tc_normalize_main_window(')
         transfer = between(transfer, '    window.width = ', '    window.title')
         transfer = ('    window.width = ' + transfer).replace('window.', 'w->desc.')
     def guard(creator):
@@ -256,7 +256,7 @@ def creation_source(backend, *, native_path=None):
         validation = 'if (!' + guard(creator) + ') return false;'
         arithmetic = 'return roundMac(' + call + ');'
     template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
-    return (template.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
+    return (template.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_tc_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('WIN32_NORMALIZERS', normalizers).replace('WIN32_NATIVE_CREATOR', win_creator)
             .replace('WIN32_SECONDARY_TRANSFER', secondary_transfer).replace('WIN32_COMMON_TRANSFER', common_transfer)
             .replace('MAC_TRANSFERS', mac_transfers)
@@ -290,7 +290,7 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('main', 'static bool _sapp_tc_mac_create_main_window(',
              'native.window = _sapp_tc_normalize_main_window(d);',
              '\n    native.window._tc_pixel_width = native.window._tc_pixel_height = 0;', ('main',)),
-            ('secondary', 'sapp_window sapp_tc_create_window(',
+            ('secondary', 'sapp_tc_window sapp_tc_create_window(',
              'native.window = _sapp_tc_normalize_window(desc);',
              '\n    native.window._tc_pixel_width = native.window._tc_pixel_height = 0;', ('secondary',)),
             ('common', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(',
@@ -306,7 +306,7 @@ class WindowPixelSizeTests(unittest.TestCase):
             with self.subTest(transfer=name), tempfile.TemporaryDirectory(prefix='window-mac-mutation-') as scratch:
                 # Limit the public entry lookup to macOS, rather than the last
                 # backend's same-named function selected by body().
-                region = before(native, '\nvoid sapp_destroy_window(') if name == 'secondary' else native
+                region = before(native, '\nvoid sapp_tc_destroy_window(') if name == 'secondary' else native
                 entry = body(region, signature)
                 self.assertEqual(entry.count(marker), 1)
                 private_header = Path(scratch) / 'sokol_app_tc.h'
@@ -355,21 +355,21 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('win', 'inline sapp_desc buildWindowDescriptor('),
             ('win', '    const auto windowTitle'),
             ('win', '    sapp_desc desc = '),
-            ('win', '    sapp_window_desc d = internal::buildNativeWindowDescriptor('),
+            ('win', '    sapp_tc_window_desc d = internal::buildNativeWindowDescriptor('),
             ('win', 'static bool _sapp_tc_win32_create_main_window('),
             ('win', 'static _sapp_tc_window_t* _sapp_tc_win32_create_window('),
-            ('win', 'sapp_window sapp_tc_create_window('),
+            ('win', 'sapp_tc_window sapp_tc_create_window('),
             ('win', '    native.window = '),
             ('win', '_sapp_tc_win32_create_window(&native)'),
             ('win', '    w->desc = '),
-            ('win', 'static inline sapp_window_desc _sapp_tc_normalize_main_window('),
-            ('win', 'static inline sapp_window_desc _sapp_tc_normalize_window('),
+            ('win', 'static inline sapp_tc_window_desc _sapp_tc_normalize_main_window('),
+            ('win', 'static inline sapp_tc_window_desc _sapp_tc_normalize_window('),
             ('win', 'static bool _sapp_tc_win32_create_native_window('),
             ('x11', '    const float scale = '),
             ('mac', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex('),
             ('mac', 'static bool _sapp_tc_mac_create_main_window('),
             ('mac', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window('),
-            ('mac', 'sapp_window sapp_tc_create_window('),
+            ('mac', 'sapp_tc_window sapp_tc_create_window('),
             ('mac', '    _sapp_tc_native_desc native = {};'),
             ('mac', 'native.window = _sapp_tc_normalize_main_window(d);'),
             ('mac', 'native.window = _sapp_tc_normalize_window(desc);'),
@@ -379,8 +379,8 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('mac', '(__bridge const void*)'),
             ('mac', '    w->desc = '),
             ('mac', '    w->swap_interval = '),
-            ('mac', 'static inline sapp_window_desc _sapp_tc_normalize_main_window('),
-            ('mac', 'static inline sapp_window_desc _sapp_tc_normalize_window('),
+            ('mac', 'static inline sapp_tc_window_desc _sapp_tc_normalize_main_window('),
+            ('mac', 'static inline sapp_tc_window_desc _sapp_tc_normalize_window('),
             ('mac', '[w->window setContentSize:NSMakeSize('),
         )
         for backend, marker in cases:
@@ -406,10 +406,10 @@ class WindowPixelSizeTests(unittest.TestCase):
         normal = 'return ' + before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';') + ';'
         source = (ROOT / 'tools/tests/window_creation_native.cpp').read_text(encoding='utf-8')
         adapter = (ROOT / 'core/platform/linux/tcWindowLinux.cpp').read_text(encoding='utf-8')
-        secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
-        secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
+        secondary = between(adapter, '    sapp_tc_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
+        secondary = '    sapp_tc_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
         secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
-        source = source.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
+        source = source.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_tc_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
         runner = r'''import re, subprocess, sys
 for binary in sys.argv[1:-1]:
     for pixels in (False, True):

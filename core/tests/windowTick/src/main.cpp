@@ -308,7 +308,7 @@ void exercise(Window& window) {
 }
 std::shared_ptr<Window> displaySecondary;
 bool displayDone = false, hideMain = false, secondaryExited = false, secondaryCleaned = false;
-bool readVisibility(sapp_window handle, void* user, sapp_tc_window_metadata& metadata) {
+bool readVisibility(sapp_tc_window handle, void* user, sapp_tc_window_metadata& metadata) {
     auto& w = *static_cast<Window*>(user);
     if (!sapp_tc_window_read_metadata(handle, &metadata)) metadata = internal::WindowRequestAccess::binding(w).metadata;
     metadata.trust_hidden_signals = true;
@@ -319,7 +319,7 @@ const internal::WindowNativeOperations& visibilityOperations() {
     static const auto operations = [] {
         auto ops = internal::productionWindowOperations(); ops.readMetadata = readVisibility;
         // Unit bindings have no native record; display mode reads the real close observation.
-        ops.closeRecorded = [](sapp_window handle, void*) { return sapp_isvalid() && sapp_tc_window_close_recorded(handle); };
+        ops.closeRecorded = [](sapp_tc_window handle, void*) { return sapp_isvalid() && sapp_tc_window_close_recorded(handle); };
         return ops;
     }();
     return operations;
@@ -351,7 +351,7 @@ void drawWhileHiddenPolicy(Window& main) {
     for (Window* window : {&main, static_cast<Window*>(second.get())}) {
         setUnitApp(*window, internal::makeConstructedApp<Probe>());
         auto operations = visibilityOperations();
-        operations.readMetadata = [](sapp_window, void* user, sapp_tc_window_metadata& out) {
+        operations.readMetadata = [](sapp_tc_window, void* user, sapp_tc_window_metadata& out) {
             out = internal::WindowRequestAccess::binding(*static_cast<Window*>(user)).metadata;
             return true;
         };

@@ -214,7 +214,7 @@ code = r'''
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
-struct sapp_window { unsigned id; };
+struct sapp_tc_window { unsigned id; };
 struct sapp_event {
     unsigned frame_count=0;
     int type=0, window_width=0, window_height=0, framebuffer_width=0, framebuffer_height=0;
@@ -250,12 +250,12 @@ struct _sapp_tc_window_t {
     _sapp_tc_timing_t timing;
     SwapChain* swap_chain=nullptr;
     struct Descriptor {
-        void (*tick_cb)(sapp_window,void*)=nullptr;
+        void (*tick_cb)(sapp_tc_window,void*)=nullptr;
         void* user_data=nullptr;
-        void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
-        void (*close_cb)(sapp_window,void*)=nullptr;
+        void (*event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr;
+        void (*close_cb)(sapp_tc_window,void*)=nullptr;
         bool fullscreen=false,hidden=false; int swap_interval=0;
-        sapp_window parent{};
+        sapp_tc_window parent{};
     } desc;
 };
 using Native = _sapp_tc_window_t;
@@ -444,7 +444,7 @@ NSTimer* make_timer(double period, View* view) {
 void install_timer(NSTimer*) { ++installs; }
 void invalidate(NSTimer*) { ++stops; }
 int next_drawable(void*) { ++acquired; return 1; }
-Native* _sapp_tc_lookup(sapp_window h) {
+Native* _sapp_tc_lookup(sapp_tc_window h) {
     for (auto* w : _sapp_tc.windows) if (w && h.id==w->win_id) return w;
     return nullptr;
 }
@@ -603,7 +603,7 @@ void exercise_callback(Native* w,int kind) {
     if (request_deferred && probing && w==callback_target) _sapp_tc_mac_process_deferred();
     if (throw_kind==kind) throw kind;
 }
-void event_callback(const sapp_event* ev,sapp_window h,void* user) {
+void event_callback(const sapp_event* ev,sapp_tc_window h,void* user) {
     auto* w=static_cast<Native*>(user);
     check("macOS event callback identity", h.id==w->win_id);
     events.push_back(ev->type);
@@ -632,7 +632,7 @@ void event_callback(const sapp_event* ev,sapp_window h,void* user) {
         if (destroy_at==creation_stage) dispose(w);
     }
 }
-void close_callback(sapp_window h,void* user) {
+void close_callback(sapp_tc_window h,void* user) {
     auto* w=static_cast<Native*>(user);
     check("macOS close callback identity", h.id==w->win_id);
     ++close_callbacks;
@@ -641,7 +641,7 @@ void close_callback(sapp_window h,void* user) {
         callback_target->callback_depth==int(callback_target==w) && !w->in_tick);
     exercise_callback(w,2);
 }
-void callback(sapp_window h,void* user) {
+void callback(sapp_tc_window h,void* user) {
     auto* w=static_cast<Native*>(user); ++consulted;
     check("macOS callback target and reentry guard", h.id==w->win_id && w->in_tick);
     ++updates; // #997: every delivered tick updates, hidden or not
@@ -683,12 +683,12 @@ void peer_setup(Native& peer,NSWindow& window,View& view) {
     peer.desc={callback,&peer}; peer.desc.event_cb=event_callback; peer.desc.close_cb=close_callback;
     _sapp_tc.windows[1]=&peer; other=&peer;
 }
-using sapp_window_desc = ::Native::Descriptor;
-struct _sapp_tc_native_desc { sapp_window_desc window; int swap_interval=1; bool fullscreen=false; int color_format=0, depth_format=0; };
+using sapp_tc_window_desc = ::Native::Descriptor;
+struct _sapp_tc_native_desc { sapp_tc_window_desc window; int swap_interval=1; bool fullscreen=false; int color_format=0, depth_format=0; };
 struct _sapp_tc_mac_window_attrs {};
 constexpr int SAPP_PIXELFORMAT_BGRA8=1, SAPP_PIXELFORMAT_DEPTH_STENCIL=2;
 void _sapp_tc_init_keytable() {}
-sapp_window_desc _sapp_tc_normalize_window(const sapp_window_desc* d) { return *d; }
+sapp_tc_window_desc _sapp_tc_normalize_window(const sapp_tc_window_desc* d) { return *d; }
 void order_out(NSWindow*) { ++ordered_out; }
 void creation_notification(Native* w,int stage) {
     creation_stage=stage;
@@ -719,7 +719,7 @@ void show_window(NSWindow*) {
 sapp_event_type destroyOn;
 bool destroyedInCallback=false;
 void _sapp_tc_mac_unwind(Native* w) { _sapp_tc_mac_forget_key(w->win_id); dispose(w); }
-''' + extract('void sapp_destroy_window(sapp_window win) {') + extract('bool sapp_tc_window_valid(sapp_window win) {') + body(read(root/'core/tests/nativeWindow/main_mac.mm'), 'void victimEvent(', 'main_mac.mm') + r'''
+''' + extract('void sapp_tc_destroy_window(sapp_tc_window win) {') + extract('bool sapp_tc_window_valid(sapp_tc_window win) {') + body(read(root/'core/tests/nativeWindow/main_mac.mm'), 'void victimEvent(', 'main_mac.mm') + r'''
 int native_allocations=0;
 ''' + mac_creation_admission + r'''
     ++native_allocations;
@@ -727,7 +727,7 @@ int native_allocations=0;
     // allocation. A guard-removal mutant must not enter AppKit setup seams.
     Native* w=target; // Fixture has completed allocation, initialization and publication.
     creation_record=w;
-''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {') + r'''
+''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_tc_window sapp_tc_create_window(const sapp_tc_window_desc* desc) {') + r'''
 void run() {
     int before=failures, count=checks;
     Native w; NSWindow window; View view; CADisplayLink link;
@@ -1141,7 +1141,7 @@ void run() {
     }
     reset(w,window,view,false); peer_setup(peer,peer_window,peer_view);
     constructor_probe=true; destroy_at=2;
-    sapp_window handle=sapp_tc_create_window(&w.desc);
+    sapp_tc_window handle=sapp_tc_create_window(&w.desc);
     check("macOS public constructor returns invalid handle if destroyed", handle.id==0 && !_sapp_tc_lookup({w.win_id}) && _sapp_tc.constructing==0);
     summary("macOS round 2 callbacks / deferred close / construction / exceptions", before, count);
     before=failures; count=checks;
@@ -1384,8 +1384,8 @@ void _sapp_tc_win32_app_event(Native* w,int type) {
         check("Win32 event callback cannot reenter tick", consulted==prior);
     }
 }
-Native* _sapp_tc_lookup(sapp_window h) { return h.id==target->win_id?target:nullptr; }
-void callback(sapp_window h,void* user) {
+Native* _sapp_tc_lookup(sapp_tc_window h) { return h.id==target->win_id?target:nullptr; }
+void callback(sapp_tc_window h,void* user) {
     Native* w=static_cast<Native*>(user); ++consulted; callback_events=events;
     resizesAtCallback=resizes;
     firstDrawWidth=attachmentWidth;
@@ -1537,7 +1537,7 @@ HRESULT SwapChain::Present(UINT,UINT flags) {
 namespace x11 {
 constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED=100;
 Native* live = nullptr;
-Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
+Native* _sapp_tc_lookup(sapp_tc_window h) { return live && live->win_id == h.id ? live : nullptr; }
 struct { double refresh_period=.017, hidden_refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
 int consulted, updates, acquired, presents, state, polls, withdrawals, fullscreenCalls, mapCalls;
 bool mapped=false, actualFullscreen=false;
@@ -1566,7 +1566,7 @@ struct _sapp_tc_x11_surface_scope {};
 void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
 void _sapp_tc_x11_pace_periodic(Native* w,double seconds) { w->earliest_next=10+seconds; }
 bool _sapp_tc_x11_resize_surface(Native*) { return renewalOk; }
-void sapp_destroy_window(sapp_window) { live=nullptr; }
+void sapp_tc_destroy_window(sapp_tc_window) { live=nullptr; }
 bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_set_swapinterval(Native*,int) {}
@@ -1578,7 +1578,7 @@ void _sapp_tc_x11_app_event(Native*,int type) {
     events.push_back(type); if (closeOnResize) live=nullptr;
 }
 int _sapp_tc_x11_get_window_state(Native*) { return state; }
-void callback(sapp_window,void* user) {
+void callback(sapp_tc_window,void* user) {
     ++consulted; auto* w=static_cast<Native*>(user);
     check("X11 callback runs inside native tick guard", w->in_tick);
     if (reenter) { reenter=false; _sapp_tc_x11_tick(w); }
@@ -1960,7 +1960,7 @@ if '--mutations' in sys.argv[3:]:
         'mac-stale-after-show': change(ctor,
             '[window makeKeyAndOrderFront:nil];\n    if (!(w = _sapp_tc_mac_live(win_id))) {',
             '[window makeKeyAndOrderFront:nil];\n    if (false) {'),
-        'mac-invalid-public-handle': change('sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {',
+        'mac-invalid-public-handle': change('sapp_tc_window sapp_tc_create_window(const sapp_tc_window_desc* desc) {',
             'return { w ? w->win_id : 0 };', 'return { w ? w->win_id : 99 };'),
         'mac-retain-tick-state': change('struct _sapp_tc_mac_tick_scope {', 'w->in_tick = false;', ''),
         'mac-retain-callback-state': change('struct _sapp_tc_mac_callback_scope {', '--w->callback_depth;', '(void)w;'),
@@ -2122,11 +2122,11 @@ if '--mutations' in sys.argv[3:]:
             # Shared delivery contains the client and reports its result. Test
             # the native boundary failing to contain that reported exception.
             mutants['mac-uncaught-event'] = change(marker,
-                'if (result.client_threw) _sapp_tc_mac_contained("sapp_window_desc.event_cb");',
+                'if (result.client_threw) _sapp_tc_mac_contained("sapp_tc_window_desc.event_cb");',
                 'if (result.client_threw) throw 1;')
         else:
             mutants['mac-uncaught-'+name] = change(marker,
-                'try { '+call+' } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.'+name+'_cb"); }', call)
+                'try { '+call+' } catch (...) { _sapp_tc_mac_contained("sapp_tc_window_desc.'+name+'_cb"); }', call)
 
     private = scratch/'include'
     (private/'util').mkdir(parents=True)

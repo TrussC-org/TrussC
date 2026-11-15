@@ -40,7 +40,7 @@ def generate(native, early=False):
 struct Descriptor {
     void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr; void* user_data=nullptr;
     void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr;
-    void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
+    void (*_tc_event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr;
     void (*event_cb)(const sapp_event*)=nullptr; void (*event_userdata_cb)(const sapp_event*,void*)=nullptr;
 };
 struct _sapp_tc_window_t {
@@ -52,14 +52,14 @@ struct _sapp_tc_window_t {
     int drawable=1,swap_chain=1; void* frame_wait=nullptr; double earliest_next=0;
     float dpi_scale=2;
     uint64_t frame_count=0; int win_width=100,win_height=50,fb_width=200,fb_height=100;
-    void* hwnd=nullptr; bool (*events_enabled)()=nullptr; sapp_window_desc desc{};
+    void* hwnd=nullptr; bool (*events_enabled)()=nullptr; sapp_tc_window_desc desc{};
 } record;
 struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&record};
-    int callbacks_active=0,constructing=0; bool deferred_blocked=false; sapp_window pacer{};
+    int callbacks_active=0,constructing=0; bool deferred_blocked=false; sapp_tc_window pacer{};
     struct { bool init_called=false,quit_requested=false,quit_ordered=false;
         unsigned host_loop_depth=1; bool host_turn_open=false;
         Descriptor desc; _sapp_tc_window_t* main=&record; } app; } _sapp_tc;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==record.win_id ? &record : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return h.id==record.win_id ? &record : nullptr; }
 std::function<void()> initializeHost;
 int drained=0,initCount=0,ticks=0;
 bool queued=true;
@@ -105,7 +105,7 @@ void _sapp_tc_x11_app_event(_sapp_tc_window_t*,sapp_event_type type) { emit(type
 _sapp_tc_window_t* _sapp_tc_x11_update_pacer() { _sapp_tc.pacer={record.win_id}; return &record; }
 ''' + body(native, 'static void _sapp_tc_x11_request_exit(') + r'''
 void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
-    const sapp_window handle{w->win_id}; w->in_tick=true;
+    const sapp_tc_window handle{w->win_id}; w->in_tick=true;
 ''' + callback + r'''
     ++ticks; w->in_tick=false; _sapp_tc.app.quit_ordered=true;
 }
@@ -144,7 +144,7 @@ int querySession() {
 }
 bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) { return w && !w->in_tick; }
 void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
-    const sapp_window tick_handle{w->win_id}; w->in_tick=true;
+    const sapp_tc_window tick_handle{w->win_id}; w->in_tick=true;
 ''' + callback + r'''
     ++ticks; w->in_tick=false; _sapp_tc.app.quit_ordered=true;
 }
@@ -163,7 +163,7 @@ using CFRunLoopObserverRef=void*;using CFRunLoopActivity=unsigned;
 constexpr int kCFRunLoopEntry=1,kCFRunLoopExit=2,kCFRunLoopBeforeSources=4;
 ''' + observer + r'''
 void tick() {
-    auto* w=&record; const sapp_window handle{w->win_id}; bool admitted=true;
+    auto* w=&record; const sapp_tc_window handle{w->win_id}; bool admitted=true;
     _sapp_tc_mac_tick_scope guard(w);
 ''' + tick[start:end].replace('        w->draw_admitted = admitted;', '        (void)admitted;') + r'''
     ++ticks; w->in_tick=false;
@@ -229,9 +229,9 @@ struct _sapp_tc_window_t {
     int timing=0,win_width=100,win_height=50,fb_width=200,fb_height=100;
     double last_tick_time=0,frame_duration=0; uint64_t frame_count=0;
     NSWindow* window=&nativeWindow; bool (*events_enabled)()=nullptr;
-    struct { void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
-        void (*tick_cb)(sapp_window,void*)=nullptr;
-        bool (*close_request_cb)(sapp_window,void*)=nullptr;
+    struct { void (*event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr;
+        void (*tick_cb)(sapp_tc_window,void*)=nullptr;
+        bool (*close_request_cb)(sapp_tc_window,void*)=nullptr;
         void* user_data=nullptr; } desc;
 } record;
 struct { _sapp_tc_window_t* windows[1]={&record};
@@ -242,12 +242,12 @@ struct { _sapp_tc_window_t* windows[1]={&record};
         _sapp_tc_window_t* main=&record;
         struct { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr;
             void* user_data=nullptr; bool (*_tc_callbacks_active)()=nullptr;
-            void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
+            void (*_tc_event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr;
             void (*event_cb)(const sapp_event*)=nullptr;
             void (*event_userdata_cb)(const sapp_event*,void*)=nullptr; } desc;
     } app;
 } _sapp_tc;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==record.win_id?&record:nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return h.id==record.win_id?&record:nullptr; }
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} void setExitReason(const char*) {}
 bool querySessionEnd() { return true; } void cancelSessionEnd() {} void shutdownRuntime() {} }
 constexpr int NSTerminateCancel=0,NSTerminateNow=1;
@@ -292,7 +292,7 @@ void NSWindow::performClose() {
     // AppKit's performClose: asks windowShouldClose: before closing.
     if (_sapp_tc_mac_close(&record)) close();
 }
-void listener(const sapp_event* e,sapp_window,void*) {
+void listener(const sapp_event* e,sapp_tc_window,void*) {
     check("only QUIT_REQUESTED is delivered",e->type==SAPP_EVENTTYPE_QUIT_REQUESTED);
     ++delivered;
     check("QUIT_REQUESTED waits until setup returns",setupReturned);
@@ -320,7 +320,7 @@ int main() {
         setupReturned=callbacksActive=processTerminated=false;
         requestClose=closeRequest; veto=cancel;
         record.events_enabled=_sapp_tc_app_events_enabled; record.desc.event_cb=listener;
-        record.desc.close_request_cb=[](sapp_window target,void*) {
+        record.desc.close_request_cb=[](sapp_tc_window target,void*) {
             ++closeQueries;
             check("close callback addresses the requested Window",target.id==record.win_id);
             check("addressed close waits until setup returns",setupReturned);

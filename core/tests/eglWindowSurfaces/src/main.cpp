@@ -14,7 +14,7 @@
 #include <X11/keysym.h>
 #include <time.h>
 // Private native test entry, compiled only into the combined test backend.
-namespace trussc::internal { void tickX11WindowForTests(sapp_window window); }
+namespace trussc::internal { void tickX11WindowForTests(sapp_tc_window window); }
 static unsigned makeCurrentCalls;
 extern "C" EGLBoolean __real_eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
 extern "C" EGLBoolean __wrap_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface read, EGLContext context) {
@@ -86,7 +86,7 @@ public:
 
 int failures = 0;
 int phase = 0;
-sapp_window redWindow{}, greenWindow{};
+sapp_tc_window redWindow{}, greenWindow{};
 bool closeCaller = false;
 EGLContext sharedContext = EGL_NO_CONTEXT;
 EGLSurface mainSurface = EGL_NO_SURFACE;
@@ -209,19 +209,19 @@ void captureFront(const void* native, const char* path, int channel) noexcept {
     XDestroyImage(image);
 }
 
-void secondaryTick(sapp_window window, void*) noexcept {
+void secondaryTick(sapp_tc_window window, void*) noexcept {
     check("one shared EGL context", eglGetCurrentContext() == sharedContext);
     check("secondary has its own surface", eglGetCurrentSurface(EGL_DRAW) != mainSurface);
     if (window.id == redWindow.id) {
         const bool closingCaller = closeCaller;
-        if (closeCaller) { sapp_destroy_window(greenWindow); closeCaller = false; }
+        if (closeCaller) { sapp_tc_destroy_window(greenWindow); closeCaller = false; }
         // Change color on the close tick to prove a fresh front-buffer present.
         ++redDraws; clearColor(closingCaller ? 0 : 1, closingCaller ? 1 : 0, 0);
     }
     else { ++greenDraws; clearColor(0, 1, 0); }
 }
 
-void event(const sapp_event* ev, sapp_window window, void*) noexcept {
+void event(const sapp_event* ev, sapp_tc_window window, void*) noexcept {
     if (ev->type == SAPP_EVENTTYPE_KEY_DOWN) {
         if (window.id == redWindow.id && ev->key_code == SAPP_KEYCODE_A) ++redKeys;
         if (window.id == greenWindow.id && ev->key_code == SAPP_KEYCODE_B) ++greenKeys;
@@ -236,12 +236,12 @@ void event(const sapp_event* ev, sapp_window window, void*) noexcept {
     }
 }
 
-void closeRequested(sapp_window window, void*) noexcept {
+void closeRequested(sapp_tc_window window, void*) noexcept {
     if (window.id == greenWindow.id) ++greenCloses;
     else check("close event targets green only", false);
 }
 
-void sendKey(Display* display, sapp_window window, KeySym symbol) noexcept {
+void sendKey(Display* display, sapp_tc_window window, KeySym symbol) noexcept {
     XEvent key{};
     key.xkey.type = KeyPress;
     key.xkey.display = display;
@@ -259,7 +259,7 @@ void init() noexcept {
     check("main context and surface exist", sharedContext != EGL_NO_CONTEXT && mainSurface != EGL_NO_SURFACE);
     const auto* version = (const char*)glGetString(GL_VERSION);
     check("native context is OpenGL ES", version && std::strstr(version, "OpenGL ES"));
-    sapp_window_desc desc{};
+    sapp_tc_window_desc desc{};
     desc.width = desc.height = 64;
     desc.no_high_dpi = true;
     desc.tick_cb = secondaryTick;
@@ -342,15 +342,15 @@ void frame() noexcept {
             lastRedWidth == 183 && lastRedHeight == 71 &&
             sapp_tc_window_framebuffer_width(redWindow) == 183 && sapp_tc_window_framebuffer_height(redWindow) == 71);
         check("X11 close routes to its window", greenCloses == 1);
-        sapp_window_desc spareDesc{};
+        sapp_tc_window_desc spareDesc{};
         spareDesc.width = spareDesc.height = 32;
         spareDesc.title = "non-current destroy";
-        const sapp_window spare = sapp_tc_create_window(&spareDesc);
+        const sapp_tc_window spare = sapp_tc_create_window(&spareDesc);
         check("non-current destroy fixture created", sapp_tc_window_valid(spare));
         const EGLDisplay display = eglGetCurrentDisplay();
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         const unsigned beforeDestroy = makeCurrentCalls;
-        sapp_destroy_window(spare);
+        sapp_tc_destroy_window(spare);
         check("destroying non-current secondary preserves unbound caller without make-current",
             makeCurrentCalls == beforeDestroy && eglGetCurrentContext() == EGL_NO_CONTEXT);
         eglMakeCurrent(display, mainSurface, mainSurface, sharedContext);
@@ -368,7 +368,7 @@ void frame() noexcept {
         check("remaining secondary renders on its next tick", redDraws == redBeforeClose + 2);
         captureFront(sapp_tc_window_x11_get_window(redWindow), capturePaths[1].c_str(), 0);
         sapp_tc_gl_make_current(redWindow);
-        sapp_destroy_window(redWindow);
+        sapp_tc_destroy_window(redWindow);
         check("closing current secondary removes its native window", !sapp_tc_window_valid(redWindow));
         // Return to the native loop: verify the survivor in its next ordinary
         // frame callback, after the backend has selected its surface again.

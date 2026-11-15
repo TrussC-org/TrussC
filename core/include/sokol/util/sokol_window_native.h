@@ -16,7 +16,7 @@ struct _sapp_tc_timing_t {
 // [TrussC] Shared native fork record.
 struct _sapp_tc_native_window_t {
     uint32_t win_id;
-    sapp_window_desc desc;
+    sapp_tc_window_desc desc;
     uint64_t frame_count;
     bool is_main; // process quit/session authority only
     bool ready, in_tick, close_requested;
@@ -63,7 +63,7 @@ static inline bool _sapp_tc_native_hidden(const _sapp_tc_native_window_t* w) {
 // [TrussC] Shared native fork record.
 
 struct _sapp_tc_native_desc {
-    sapp_window_desc window;
+    sapp_tc_window_desc window;
     // Install client readiness before publication/show can synchronously deliver events.
     bool (*events_enabled)();
     int swap_interval;
@@ -78,8 +78,8 @@ struct _sapp_tc_native_desc {
 
 // Preserve per-dimension startup defaults: non-positive main dimensions are
 // passed to the OS; secondary descriptors keep the existing 640 x 480 fallback.
-static inline sapp_window_desc _sapp_tc_normalize_main_window(const sapp_desc* d) {
-    sapp_window_desc window = {};
+static inline sapp_tc_window_desc _sapp_tc_normalize_main_window(const sapp_desc* d) {
+    sapp_tc_window_desc window = {};
     window.bind_cb = d->_tc_bind_cb;
     window.user_data = d->_tc_bind_user;
     window.x = window.y = -1;
@@ -94,8 +94,8 @@ static inline sapp_window_desc _sapp_tc_normalize_main_window(const sapp_desc* d
     return window;
 }
 
-static inline sapp_window_desc _sapp_tc_normalize_window(const sapp_window_desc* d) {
-    sapp_window_desc window = *d;
+static inline sapp_tc_window_desc _sapp_tc_normalize_window(const sapp_tc_window_desc* d) {
+    sapp_tc_window_desc window = *d;
     if (window.width <= 0) window.width = 640;
     if (window.height <= 0) window.height = 480;
     if (window.sample_count <= 0) window.sample_count = 1;

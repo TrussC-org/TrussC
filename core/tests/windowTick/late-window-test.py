@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.
         binary = scratch/name
         wrapped = ['sg_isvalid', 'sgl_default_context', 'sg_destroy_buffer', 'sg_destroy_image',
             'sg_destroy_view', 'sg_destroy_sampler', 'sg_destroy_pipeline', 'sg_destroy_shader',
-            'sgl_destroy_pipeline', 'sgl_destroy_context', 'sapp_destroy_window', 'sapp_window_request_close',
+            'sgl_destroy_pipeline', 'sgl_destroy_context', 'sapp_tc_destroy_window', 'sapp_tc_window_request_close',
             '_ZN6trussc8internal17getDefaultContextEv', '_ZN6trussc8internal20currentWindowContextEv',
             '_ZN6trussc9getLoggerEv']
         subprocess.run(['c++', '-fsanitize=address', '-no-pie', *objects, str(obj),
@@ -189,7 +189,7 @@ namespace internal {
 bool frameworkShutdown() noexcept { return true; }
 struct TeardownSteps { template<class F> void run(const char*, F) { std::abort(); } };
 }
-void sapp_destroy_window(int) { std::abort(); }
+void sapp_tc_destroy_window(int) { std::abort(); }
 struct Window {
  void* native_;
  void disposeNativeBacking() noexcept;

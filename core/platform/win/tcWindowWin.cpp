@@ -23,7 +23,7 @@ using namespace trussc;
 namespace {
 
 struct AdapterState {
-    sapp_window win{0};
+    sapp_tc_window win{0};
 
 };
 
@@ -49,13 +49,13 @@ void Window::disposeNativeBacking() noexcept {
     if (!st) return;
     internal::TeardownSteps steps;
     native_ = nullptr;
-    steps.run("native window destruction", [&] { sapp_destroy_window(st->win); });
+    steps.run("native window destruction", [&] { sapp_tc_destroy_window(st->win); });
     delete st;
 }
 
 namespace internal {
 namespace {
-sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
+sapp_tc_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
 }
 void nativeWindowSetTitle(Window& w, const char* title) { sapp_tc_window_set_title(handle(w), title); }
 void nativeWindowSetFullscreen(Window& w, bool full) { sapp_tc_window_set_fullscreen(handle(w), full); }
@@ -86,7 +86,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode()};
     auto* st = new AdapterState();
 
-    sapp_window_desc d = internal::buildNativeWindowDescriptor(settings, pixelPerfectMode());
+    sapp_tc_window_desc d = internal::buildNativeWindowDescriptor(settings, pixelPerfectMode());
     d.title = win->title_.c_str();
     d.tick_cb = &internal::windowTick;
     d.event_cb = &internal::windowEvent;

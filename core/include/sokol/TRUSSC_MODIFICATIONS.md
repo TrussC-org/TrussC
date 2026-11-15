@@ -31,12 +31,17 @@ preserves the `metal_sim` and `wgsl` outputs required by TrussC.
 Search for `tettou771`, `Modified by` or `[TrussC` to locate existing blocks.
 Feature locations below use symbols or comment markers, never drifting line
 numbers. Some entire native sections were rewritten; marker counts alone do
-not establish complete preservation. Event step 3a completed internal-only fork
-API renames to `sapp_tc_*`, private names to `_sapp_tc_*`, and surviving app
-struct markers. Upstream names and local
-guard types are exempt. Public-facing names (`sapp_window`, `sapp_window_desc`,
-`sapp_destroy_window`, `sapp_window_request_close`) remain pending owner API
-review; R5 width/height/sample-count wrappers retain their names until retirement.
+not establish complete preservation. Event step 3a completed fork API renames
+to `sapp_tc_*`, private names to
+`_sapp_tc_*`, and surviving app struct markers. Upstream names and local guard
+types are exempt. The fork's `sapp_*`/`sapp_tc_*` surface is not public TrussC API
+(owner decision, 2026-11-16), including declarations exposed by TrussC headers.
+The four held names were renamed without aliases: `sapp_window` to
+`sapp_tc_window`, `sapp_window_desc` to `sapp_tc_window_desc`,
+`sapp_destroy_window` to `sapp_tc_destroy_window`, and
+`sapp_window_request_close` to `sapp_tc_window_request_close`. These old spellings
+are history only. R5 width/height/sample-count wrappers retain their names until
+retirement.
 Every member added to an upstream app struct has its own `[TrussC]`; wholly
 TrussC-owned app structs have a block marker. Existing attribution is retained.
 `Bound` annotations (`64b7ada0`) belong to the affected input, allocator, cache
@@ -92,7 +97,7 @@ the feature entries take precedence over historical upstream behavior.
 |---|---|
 | Integration: `buildWindowDescriptor`, `tcWindowRuntime.cpp` | Runtime owns loop modes, update/draw decisions, WindowContext switching and App/Node lifecycle; native backends provide ticks/events/handles. |
 | Integration: `sglue_environment`, `sglue_swapchain` | Translate defaults plus Metal device/drawable/depth/MSAA, D3D11 device/context/render/resolve/depth views, WebGPU device/views or GL default framebuffer; unused backend fields stay zero. |
-| Native handles: `sapp_*_get_*` / `sapp_window_*` | Keep native handles for platform window operations and IME; desktop resize uses native APIs, iOS document pickers use `sapp_ios_get_window`, Android JNI consumers use `sapp_android_get_native_activity`. |
+| Native handles: `sapp_*_get_*` / `sapp_tc_window_*` | Keep native handles for platform window operations and IME; desktop resize uses native APIs, iOS document pickers use `sapp_ios_get_window`, Android JNI consumers use `sapp_android_get_native_activity`. |
 | Keyboard: `_sapp_tc_translate_key`, `_sapp_tc_emsc_keymap` | Desktop key identities follow physical positions (macOS virtual keycodes, Win32 scancodes, XKB names, browser `code`); layout-dependent text uses separate CHAR events. |
 | Desktop modifiers: `_sapp_tc_mods`, `_sapp_tc_win32_mods`, `_sapp_tc_x11_mods` | SHIFT/CTRL/ALT/SUPER masks combine left/right; sided identity belongs to `key_code`. |
 | Desktop paste: `keyEvt:pressed:`, `_sapp_tc_win32_key_event`, `_sapp_tc_x11_key_event` | Enabled clipboard emits CLIPBOARD_PASTED on exact Cmd+V (macOS) or Ctrl+V (Win32/X11); the handler reads the clipboard. |
@@ -160,10 +165,13 @@ the feature entries take precedence over historical upstream behavior.
 
 **Classification:** KEEP essential.
 
-**Code locations:** `SOKOL_APP_TC_INCLUDED`, `SOKOL_APP_INCLUDED`, `SOKOL_APP_TC_IMPL_INCLUDED`, `SOKOL_APP_TC_IMPL_DONE`; `sapp_window`, `sapp_window_desc`, `sapp_tc_create_window`, `sapp_tc_window_read_metadata`, `sapp_tc_window_close_recorded`; `util/sokol_window_native.h` (`_sapp_tc_next_window_id`, `_sapp_tc_normalize_main_window`, `_sapp_tc_normalize_window`), `util/sokol_window_creation.h` (`_sapp_tc_creation_transaction`).
+**Code locations:** `SOKOL_APP_TC_INCLUDED`, `SOKOL_APP_INCLUDED`, `SOKOL_APP_TC_IMPL_INCLUDED`, `SOKOL_APP_TC_IMPL_DONE`; `sapp_tc_window`, `sapp_tc_window_desc`, `sapp_tc_create_window`, `sapp_tc_destroy_window`, `sapp_tc_window_request_close`, `sapp_tc_window_read_metadata`, `sapp_tc_window_close_recorded`; `util/sokol_window_native.h` (`_sapp_tc_next_window_id`, `_sapp_tc_normalize_main_window`, `_sapp_tc_normalize_window`), `util/sokol_window_creation.h` (`_sapp_tc_creation_transaction`).
 
-**Completed slice:** event 3a internal names and surviving app markers; public-facing
-names held for owner review. No ownership rollback.
+**Completed slice:** event 3a fork names and surviving app markers, including the
+four owner-approved follow-up renames without aliases. Removed three unreachable
+Vulkan swapchain-acquisition blocks copied into iOS/Android/Web; their helper had
+no definition and these platforms support only Metal, GLES3 or WebGPU. No
+ownership rollback.
 
 Fork/include/implementation guards and SOKOL_APP_INCLUDED compatibility keep
 C++/Objective-C++ and third-party glue usable. Desktop IDs are never reused;
@@ -318,7 +326,7 @@ notices preserve EVENT_DRIVEN map/resize drawing. Parent policy is separate (R7)
 
 **Classification:** REVERT (planned).
 
-**Code locations:** `sapp_window_desc.parent`; `_sapp_tc_mac_create_window_ex` / parent-child detach; `_sapp_tc_win32_create_native_window` / owner detach; `_sapp_tc_x11_create_native_window` (`WM_TRANSIENT_FOR`).
+**Code locations:** `sapp_tc_window_desc.parent`; `_sapp_tc_mac_create_window_ex` / parent-child detach; `_sapp_tc_win32_create_native_window` / owner detach; `_sapp_tc_x11_create_native_window` (`WM_TRANSIENT_FOR`).
 
 **Planned slice:** R7 parenting reversion.
 
@@ -344,7 +352,7 @@ redraw kinds.
 
 **Completed slice:** event 1 removes `window_id`, `dpi_scale`, `pointer_locked`
 and `reliable_button_bits` from raw `sapp_event` and their native stampers.
-Routing uses the callback's `sapp_window` and existing Window binding, without
+Routing uses the callback's `sapp_tc_window` and existing Window binding, without
 another identity field. Runtime snapshots target DPI, pointer-lock ownership
 and button-bit reliability through the private metadata boundary before any
 App/resize/visibility/raw callback, and passes that local context to conversion.
@@ -582,7 +590,7 @@ The existing fullscreen policy is unchanged.
 
 **Classification:** KEEP decided by owner (2026-11-12).
 
-**Code locations:** `sapp_desc::max_frame_latency`, `sapp_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_resize`.
+**Code locations:** `sapp_desc::max_frame_latency`, `sapp_tc_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_resize`.
 
 **Planned slice:** None; preserve this per-window setting on fork updates.
 

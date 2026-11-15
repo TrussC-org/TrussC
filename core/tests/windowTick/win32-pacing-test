@@ -59,7 +59,7 @@ bool pending=false, timerAvailable=false, heldCreditScenario=false, availableCre
 sapp_event_type eventType=SAPP_EVENTTYPE_MOUSE_MOVE;
 struct MSG { unsigned message=1; };
 double _sapp_tc_now() { return clockValue; }
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window handle) {
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window handle) {
     for (auto* w : _sapp_tc.windows) if (w && w->win_id==handle.id) return w;
     return nullptr;
 }
@@ -155,7 +155,7 @@ int main() {
         timerAvailable=timer; eventType=type;
         _sapp_tc_native_desc desc{};
         desc.swap_interval=4;
-        desc.window.event_cb=[](const sapp_event*,sapp_window,void*) { ++deliveries; };
+        desc.window.event_cb=[](const sapp_event*,sapp_tc_window,void*) { ++deliveries; };
         _sapp_tc_window_t target{}, peer{};
         initialize(&target,&desc,1); initialize(&peer,&desc,2);
         check("constructor enables input wake",target.wake_on_input);

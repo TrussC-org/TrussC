@@ -58,7 +58,7 @@ static struct {
     float dpi = 96;
     double refresh_period = 1.0 / 60.0;
     double hidden_refresh_period = 1.0 / 60.0;
-    sapp_window pacer{};
+    sapp_tc_window pacer{};
     unsigned next_id;
     size_t window_slots = 4;
     _sapp_tc_window_t* windows[4];
@@ -109,7 +109,7 @@ extern "C" int XChangeProperty(Display*, Window w, Atom, Atom, int, int, const u
 }
 extern "C" void Xutf8SetWMProperties(Display*, Window, const char*, const char*, char**, int, XSizeHints*, XWMHints*, XClassHint*) {}
 extern "C" int XFlush(Display*) { return 0; }
-static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window win) {
+static _sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window win) {
     if (win.id) for (auto* w : _sapp_tc.windows) if (w && w->win_id == win.id) return w;
     return nullptr;
 }
@@ -159,7 +159,7 @@ static void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) {
     const auto frames = w->frame_count;
     _sapp_tc_x11_tick(w);
     check("Constructing excludes synchronous show-time tick", w->constructing && w->ready && w->frame_count == frames);
-    sapp_destroy_window({w->win_id});
+    sapp_tc_destroy_window({w->win_id});
     check("Constructing defers synchronous show-time destruction", _sapp_tc_lookup({w->win_id}) == w && w->close_requested);
 }
 static bool bindHost(uint32_t id, void* user) {
@@ -193,8 +193,8 @@ for name in ('static uint32_t _sapp_tc_x11_surface_window_id(', 'static bool _sa
         code += helper + '\n'
 code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
 for name in ('static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {',
-             'static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_tc_create_window(',
-             'void sapp_destroy_window(sapp_window win) {',
+             'static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_tc_window sapp_tc_create_window(',
+             'void sapp_tc_destroy_window(sapp_tc_window win) {',
              'static void _sapp_tc_x11_update_window_title(', 'void sapp_tc_window_set_title(',
              'void sapp_set_window_title(', 'void sapp_tc_window_skip_present(',
              'static void _sapp_tc_x11_scroll_event(', 'static void _sapp_tc_x11_init_client(void) {',
@@ -207,7 +207,7 @@ int main() {
     first.drawable = decltype(first.drawable)(11); second.drawable = decltype(second.drawable)(22);
     _sapp_tc.windows[0] = &first; _sapp_tc.windows[1] = &second; _sapp_tc.app.main = &first;
     _sapp_tc.next_id = 2;
-    sapp_window_desc desc{};
+    sapp_tc_window_desc desc{};
     desc.bind_cb = bindHost; desc.user_data = &bindingCalls;
     for (bool reject : {false, true}) {
         rejectBinding = reject; bindingCalls = shows = 0;
@@ -232,7 +232,7 @@ int main() {
         auto* w = _sapp_tc_lookup(created);
         check("show-time close waits until construction returns", w && !w->constructing && w->close_requested);
         const auto before = unwinds;
-        sapp_destroy_window(created);
+        sapp_tc_destroy_window(created);
         check("deferred show-time disposal releases exactly once", !_sapp_tc_lookup(created) && unwinds == before + 1);
     }
     for (bool bound : {true, false}) for (int failure = 0; failure <= 6; ++failure) {

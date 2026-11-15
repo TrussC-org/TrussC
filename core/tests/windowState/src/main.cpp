@@ -18,16 +18,16 @@ struct Native {
     uint32_t id = 0;
     int queries = 0, acquisitions = 0, activations = 0;
 };
-bool read(sapp_window h, void* user, sapp_tc_window_metadata& out) {
+bool read(sapp_tc_window h, void* user, sapp_tc_window_metadata& out) {
     auto& n = *static_cast<Native*>(user); ++n.queries;
     check("metadata addresses actual positive native ID", h.id == n.id && h.id != 0);
     out = n.metadata; return true;
 }
-sg_swapchain acquire(sapp_window h, void* user) {
+sg_swapchain acquire(sapp_tc_window h, void* user) {
     auto& n = *static_cast<Native*>(user); ++n.acquisitions;
     check("drawable operation addresses its binding", h.id == n.id); return {};
 }
-void activate(sapp_window h, void* user) {
+void activate(sapp_tc_window h, void* user) {
     auto& n = *static_cast<Native*>(user); ++n.activations;
     check("activation operation addresses its binding", h.id == n.id);
 }

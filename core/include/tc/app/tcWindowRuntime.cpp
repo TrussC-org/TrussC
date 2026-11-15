@@ -1031,12 +1031,12 @@ sg_pixel_format pixelFormat(sapp_pixel_format format) {
         default: return SG_PIXELFORMAT_NONE;
     }
 }
-bool sendEvent(sapp_window handle, void*, sapp_event* event) { return sendNativeWindowEvent(handle, event); }
-bool closeRecorded(sapp_window handle, void*) { return sapp_tc_window_close_recorded(handle); }
-bool readMetadata(sapp_window handle, void*, sapp_tc_window_metadata& out) {
+bool sendEvent(sapp_tc_window handle, void*, sapp_event* event) { return sendNativeWindowEvent(handle, event); }
+bool closeRecorded(sapp_tc_window handle, void*) { return sapp_tc_window_close_recorded(handle); }
+bool readMetadata(sapp_tc_window handle, void*, sapp_tc_window_metadata& out) {
     return sapp_tc_window_read_metadata(handle, &out);
 }
-sg_swapchain acquireSwapchain(sapp_window handle, void*) {
+sg_swapchain acquireSwapchain(sapp_tc_window handle, void*) {
     sapp_tc_window_metadata metadata{};
     sg_swapchain sc{};
 #if defined(SOKOL_METAL)
@@ -1061,7 +1061,7 @@ sg_swapchain acquireSwapchain(sapp_window handle, void*) {
     sc.depth_format = pixelFormat(metadata.depth_format);
     return sc;
 }
-void activate(sapp_window handle, void*) {
+void activate(sapp_tc_window handle, void*) {
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     sapp_tc_gl_make_current(handle);
 #else
@@ -1141,7 +1141,7 @@ bool refreshWindowMetadata(Window& window) {
     publishWindowMetadata(window, metadata);
     return true;
 }
-bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user) {
+bool bindWindow(Window& window, sapp_tc_window handle, const WindowNativeOperations& operations, void* user) {
     if (!WindowRequestAccess::acceptsBinding(window) || !handle.id || !operations.readMetadata) return false;
     sapp_tc_window_metadata metadata{};
     if (!operations.readMetadata(handle, user, metadata) || metadata.fb_width <= 0 || metadata.fb_height <= 0 ||
@@ -2060,7 +2060,7 @@ void singleWindowEvent(const sapp_event* event) noexcept {
         if (window) windowEvent(event, WindowRequestAccess::binding(*window).handle, window);
     });
 }
-void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
+void windowEvent(const sapp_event* event, sapp_tc_window handle, void* user) noexcept {
     if (event && (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED || event->type == SAPP_EVENTTYPE_TC_DEVICE_LOST)) {
         if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
             runtime().quitPending = false;
@@ -2070,7 +2070,7 @@ void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexce
     }
     enterWindowEvent(event, handle, user);
 }
-void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, const WindowEventContext* testContext) noexcept {
+void enterWindowEvent(const sapp_event* event, sapp_tc_window handle, void* user, const WindowEventContext* testContext) noexcept {
     // Admission belongs to the native init predicate. Desktop init callbacks
     // may synchronously deliver events, as they did through the legacy client.
     TeardownSteps steps;
@@ -2110,7 +2110,7 @@ void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, c
         }
     });
 }
-bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clock::time_point now,
+bool enterWindowTick(Window& window, sapp_tc_window handle, std::chrono::steady_clock::time_point now,
                      double duration, const WindowTickPresentation* presentation) {
     if (WindowRequestAccess::binding(window).handle.id != handle.id) return false;
     WindowEntryScope entry(window, true);
@@ -2133,7 +2133,7 @@ bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clo
     applyWindowDrawWhileHidden(window);
     return drawn;
 }
-void windowTick(sapp_window handle, void* user) noexcept {
+void windowTick(sapp_tc_window handle, void* user) noexcept {
     if (runtimeEnding()) return;
     TeardownSteps steps;
     bool drawn = false;
@@ -2181,7 +2181,7 @@ bool codeCloseExitsRuntime(Window& window) {
     }
     return true;
 }
-bool allowWindowClose(sapp_window handle, void* user) noexcept {
+bool allowWindowClose(sapp_tc_window handle, void* user) noexcept {
     bool allow = false;
     TeardownSteps steps;
     steps.run("window close request", [&] {
@@ -2211,7 +2211,7 @@ bool allowWindowClose(sapp_window handle, void* user) noexcept {
     });
     return allow;
 }
-void windowClosed(sapp_window handle, void* user) noexcept {
+void windowClosed(sapp_tc_window handle, void* user) noexcept {
     TeardownSteps steps;
     steps.run("native window close", [&] {
         auto* window = static_cast<Window*>(user);
