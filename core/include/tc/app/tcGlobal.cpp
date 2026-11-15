@@ -421,7 +421,7 @@ void setup() {
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
     // Fixed at sg_setup: slots hold CPU tables (~3.4 KB/shader, ~1.2 KB/pipeline).
-    // Resolve the requested counts once; later sgl rebuilds retain these values.
+    // Resolve the requested counts once for context setup and diagnostics.
     activeGraphicsPools = {
         graphicsPoolSize(requestedGraphicsPools.resources, 10000, "setResourcePoolSize"),
         graphicsPoolSize(requestedGraphicsPools.shaders, 1024, "setShaderPoolSize"),
@@ -548,8 +548,7 @@ void cleanup() {
 }
 
 // ---------------------------------------------------------------------------
-// Resize sokol_gl buffers (called when vertex/command overflow detected)
-// Destroys and recreates sgl only — sg resources (textures, etc.) survive.
+// Shared drawing resources
 // ---------------------------------------------------------------------------
 namespace internal {
 
@@ -559,7 +558,7 @@ namespace internal {
 // sg_pipeline_desc.shader. Created once on first use (after sokol is up) and
 // LEAKED on purpose: a static sg_shader destroyed at __cxa_finalize would call
 // sg_destroy after sokol shutdown and crash. It is an sg (not sgl) resource, so
-// it survives sgl_shutdown()/resizeSgl() like the font texture. Returns {0} if
+// it survives sgl_shutdown() like the font texture. Returns {0} if
 // sokol isn't ready yet (caller then falls back to sgl's straight shader).
 sg_shader sglPremultShader() {
     static sg_shader shd = {};
@@ -628,24 +627,6 @@ sg_buffer glyphBatchIndices(size_t quads) {
     return buffer;
 }
 
-void resizeSgl(int newMaxVertices, int newMaxCommands) {
-    auto& budget = sglBudget();
-    logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
-        << " -> " << newMaxVertices << ", commands " << budget.maxCommands
-        << " -> " << newMaxCommands;
-
-    const int oldVertices = budget.maxVertices, oldCommands = budget.maxCommands;
-    budget.maxVertices = newMaxVertices;
-    budget.maxCommands = newMaxCommands;
-    if (!rebuildTargetResources()) {
-        budget.maxVertices = oldVertices; budget.maxCommands = oldCommands;
-        budget.pendingResize = newMaxVertices; budget.pendingCommands = newMaxCommands;
-        return;
-    }
-
-    budget.pendingResize = 0;
-    budget.pendingCommands = 0;
-}
 } // namespace internal
 
 // ---------------------------------------------------------------------------
@@ -1278,17 +1259,14 @@ void reportSglStackErrors(sgl_error_t err, bool inFbo) {
 void internal::endGpuFrame() {
     sgl_error_t err = sgl_error();
     internal::reportSglStackErrors(err, false);
+    auto& window = internal::currentWindowContext();
     if (err.vertices_full || err.commands_full) {
-        auto& budget = internal::sglBudget();
-        int newVerts = budget.maxVertices <= INT_MAX / 4 ? budget.maxVertices * 4 : INT_MAX;
-        if (newVerts > budget.pendingResize) {
-            budget.pendingResize = newVerts;
-            budget.pendingCommands = 0;
-            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
-                << budget.maxVertices << " vertices, "
-                << budget.maxCommands << " commands). "
-                << "Will resize to " << newVerts << " next frame.";
+        if (!window.sglOverflowReported) {
+            window.sglOverflowReported = true;
+            logWarning("sokol_gl") << "sokol_gl could not upload this frame (a single flush over 2 GB, or out of memory). Everything sokol_gl drew this frame was dropped.";
         }
+    } else {
+        window.sglOverflowReported = false;
     }
 
     sg_commit();
@@ -2439,7 +2417,12 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
             } else {
                 const bool appNotice = logLevel == 3 && logItem == SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED &&
                     tag && std::strcmp(tag, "sapp") == 0;
-                getLogger().log(appNotice ? LogLevel::Notice : sokolLogLevel(logLevel),
+                const bool growthNotice = logLevel == 3 && tag &&
+                    ((std::strcmp(tag, "sg") == 0 &&
+                      (logItem == SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN ||
+                       logItem == SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN)) ||
+                     (std::strcmp(tag, "sgl") == 0 && logItem == SGL_LOGITEM_CONTEXT_POOL_GROWN));
+                getLogger().log((appNotice || growthNotice) ? LogLevel::Notice : sokolLogLevel(logLevel),
                                 sokolLogMessage(tag, logItem, message, lineNr));
             }
         } catch (...) {
@@ -3089,11 +3072,6 @@ std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap() {
 }
 
 namespace {
-struct PipelineWindowScope {
-    WindowContext* previous;
-    explicit PipelineWindowScope(WindowContext& window) : previous(currentWindowCtx()) { currentWindowCtx() = &window; }
-    ~PipelineWindowScope() { currentWindowCtx() = previous; }
-};
 uint64_t nextPipelineGeneration() { static uint64_t serial = 0; return ++serial; }
 std::unordered_map<uint32_t, uint64_t>& pipelinePrograms() {
     // Global Shaders can clear after static teardown and sg_shutdown.
@@ -3458,52 +3436,6 @@ void prepareWindowTarget() {
         activeClear(); active3D();
     }
 }
-bool rebuildTargetResources() {
-    std::vector<WindowContext*> windows{&nonWindowContext()};
-    for (auto* window : openWindows()) windows.push_back(&trussc::internal::WindowRequestAccess::context(*window));
-    std::erase_if(windows, [](const WindowContext* window) { return window->targetsClosed; });
-    // Foreign submissions preserve CPU recordings. Re-evaluate all immediate
-    // and raw queues on every retry before destroying any context.
-    for (auto* window : windows) if (window->targetStack.size() > 1 || window->swapchainTarget.inPass || window->swapchainTarget.openShaderScopes || hasRecordedWork(window->swapchainTarget)) {
-        logWarning("RenderTarget") << "sgl resize deferred until every window has no pending work or active target pass";
-        return false;
-    }
-    sgl_shutdown();
-#ifndef NDEBUG
-    pipelineOwnerCtx().clear();
-#endif
-    auto discard = [](RenderTargetResources& bundle) {
-        bundle.cache.clear(); bundle.immediateCache.clear(); bundle.selectionCache.reset(); bundle.selections.clear(); bundle.context = {};
-        bundle.contextFailed = false; bundle.rawCache.reset();
-    };
-    for (auto* window : windows) discard(window->swapchainTarget.resources());
-    for (auto& entry : fboSharedMap()) {
-        entry.second.generation.reset(); entry.second.allocationFailed = false;
-        for (auto& lease : entry.second.leases) { assert(!lease->leased); discard(*lease); }
-    }
-    auto desc = sglSetupDescriptor();
-    sgl_setup(&desc);
-    sgl_tc_context_target_owned(sgl_default_context());
-    for (auto* window : windows) {
-        PipelineWindowScope scope(*window);
-        auto& target = window->swapchainTarget;
-        sgl_context_desc_t context = {};
-        context.max_vertices = desc.max_vertices; context.max_commands = desc.max_commands;
-        context.color_format = target.colorFormat; context.depth_format = target.depthFormat; context.sample_count = target.sampleCount;
-        target.resources().makeContext(context, "a resized window");
-        sgl_set_context(target.resources().context);
-        for (bool depth : {false, true}) {
-            for (auto blend : {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply, BlendMode::Screen, BlendMode::Subtract, BlendMode::Disabled})
-                target.pipeline(PipelineKey::immediate(fillSelection(blend, depth)));
-            target.pipeline(PipelineKey::immediate({PipelineRole::Premult, BlendMode::Alpha, depth}));
-            target.pipeline(PipelineKey::immediate({PipelineRole::Coverage, BlendMode::Alpha, depth}));
-        }
-        activeClear(); active3D();
-    }
-    sgl_set_context(currentTarget().resources().context);
-    return true;
-}
-
 RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples, sg_pixel_format depth) {
     auto& bucket = fboSharedMap()[targetBucketKey(format, samples, depth)];
     if (!bucket.generation) bucket.generation = makePipelineGeneration();

@@ -18,7 +18,7 @@ int main() {
 
 namespace {
 bool failBuffer = false, failGroup = false, failAllocation = false;
-int errors = 0, warnings = 0, failures = 0;
+int errors = 0, warnings = 0, growthNotices = 0, failures = 0;
 WGPUBuffer createBuffer(WGPUDevice device, const WGPUBufferDescriptor* desc) {
     if (failBuffer) return nullptr;
     return wgpuDeviceCreateBuffer(device, desc);
@@ -41,9 +41,15 @@ WGPUDevice device;
 void check(bool ok, const char* label) {
     if (!ok) { ++failures; std::printf("FAIL %s\n", label); }
 }
-void logger(const char*, uint32_t level, uint32_t, const char* message, uint32_t, const char*, void*) {
+void logger(const char*, uint32_t level, uint32_t item, const char* message, uint32_t, const char*, void*) {
     if (level <= 1) ++errors;
     if (level == 2) ++warnings;
+#if !defined(TC_WEBGPU_BASELINE)
+    if (level == 3 && item == SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN) ++growthNotices;
+#else
+    (void)item;
+    (void)growthNotices;
+#endif
     if (message) std::printf("sokol[%u] %s\n", level, message);
 }
 void* allocate(size_t size, void*) { return failAllocation ? nullptr : std::malloc(size); }
@@ -284,11 +290,11 @@ int main() {
     }
     device = emscripten_webgpu_get_device();
     auto large = scene(4 * 1024 * 1024);
-    int before = warnings;
+    int before = growthNotices;
     auto tiny = scene(256);
     check(large == tiny, "tiny vs large pixels across six frames and three passes");
     #if !defined(TC_WEBGPU_BASELINE)
-    check(warnings == before + 1, "one growth notice per backend");
+    check(growthNotices == before + 1 && warnings == 0, "one growth info per backend and no warnings");
     #else
     (void)before;
     #endif

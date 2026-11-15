@@ -299,14 +299,11 @@ namespace internal {
     // ScissorRect / scissorStack / currentScissor moved to
     // WindowContext (tc/app/tcWindowContext.h).
 
-    // sokol_gl vertex buffer management (auto-grows on overflow). Defined in
-    // tcGlobal.cpp: the host grows it, and an Fbo created by app code sizes its
-    // sokol_gl context from it.
+    // Initial sokol_gl context capacities, shared by the host and app modules.
+    // Each context grows its own buffers as needed (R2).
     struct SglBudget {
         int maxVertices = 65536;
         int maxCommands = 16384;
-        int pendingResize = 0;  // non-zero = need resize next frame
-        int pendingCommands = 0; // explicit deferred request; 0 derives from vertices
     };
     SglBudget& sglBudget();
     sgl_desc_t sglSetupDescriptor();
@@ -438,23 +435,9 @@ namespace internal {
 
 // Call at frame start (before clear)
 // Sets up the default projection based on internal::defaultScreenFov()
-namespace internal {
-    // Forward declaration (implemented in tcGlobal.cpp)
-    void resizeSgl(int newMaxVertices, int newMaxCommands);
-}
-
 inline void beginFrame() {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
-
-    // Retry the exact deferred request at each boundary. The rebuild checks
-    // every window for live work: only an owner's completion releases its
-    // immediate recording, and a parked begun frame also blocks rebuilding.
-    const int pendingResize = internal::sglBudget().pendingResize;
-    if (pendingResize > 0) {
-        const int commands = internal::sglBudget().pendingCommands;
-        internal::resizeSgl(pendingResize, commands > 0 ? commands : std::max(16384, pendingResize / 4));
-    }
 
     internal::prepareWindowTarget();
     // Screen setup below reapplies the cleared scissor to this window's sgl context.
@@ -2407,7 +2390,7 @@ struct RuntimeSettings {
 
     // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
     // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
-    // the ring grows (with a warning log) when a frame overflows it,
+    // the ring grows (with a notice log) when a frame overflows it,
     // so a sufficient reservation only skips the one-time grow hitch. Every
     // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
     // 8k draw calls per frame). Vulkan does NOT auto-grow: there an

@@ -55,11 +55,11 @@ public:
         check("sg_setup receives shader and pipeline counts", desc.shader_pool_size == shaderCount && desc.pipeline_pool_size == pipelineCount);
         check("shared sgl setup descriptor follows pipeline setting", internal::sglSetupDescriptor().pipeline_pool_size == pipelineCount);
         // Changing the requested values after startup must not change the
-        // descriptor used when sgl is rebuilt (or the counts in diagnostics).
+        // descriptor used for sgl setup (or the counts in diagnostics).
         WindowSettings later;
         later.setResourcePoolSize(8).setShaderPoolSize(8).setPipelinePoolSize(8);
         internal::configureGraphicsPools(later);
-        check("sgl rebuild retains startup pipeline count", internal::sglSetupDescriptor().pipeline_pool_size == pipelineCount);
+        check("sgl descriptor retains startup pipeline count", internal::sglSetupDescriptor().pipeline_pool_size == pipelineCount);
         if (boundary) {
             completed = true;
             return;

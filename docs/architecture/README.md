@@ -388,16 +388,11 @@ tc::enableDepthTest();
 
 Nodes can clip children to their bounds (axis-aligned only, performance priority).
 
-**sokol_gl Vertex Buffer Auto-Resize:**
+**sokol_gl Buffer Growth:**
 
-sokol_gl uses a fixed-size CPU vertex buffer (default 64k vertices). When draw calls exceed this limit, subsequent draws are **silently dropped**. TrussC automatically detects and recovers from this:
+sokol_gl grows its CPU vertex, uniform and command buffers as needed (R2), and grows GPU flush buffers when uploading. Initial capacities do not limit the number of draws in a frame.
 
-1. After each frame's `sgl_draw()`, `present()` checks `sgl_error()` for `vertices_full` or `commands_full`
-2. If overflow is detected, schedules a resize (4x current capacity) for the next frame
-3. On the next `beginFrame()`, `internal::resizeSgl()` destroys all sgl pipelines, calls `sgl_shutdown()` → `sgl_setup()` with larger buffers, then recreates all pipelines. sokol_gfx resources (textures, samplers) are unaffected.
-4. One frame of rendering is lost during the resize; subsequent frames render correctly
-
-This is fully automatic — no user action required. The mechanism exists because sokol_gl has no resize API and no way to query how many vertices are needed before drawing.
+If allocation fails or a single flush exceeds 2 GB, the frame's sokol_gl drawing is dropped. `internal::endGpuFrame()` reports this at Warning once per window context during consecutive failing frames; a clean frame re-arms that context's warning. It does not schedule a context rebuild or increase the initial capacities.
 
 **Deferred Draw Model (record now, replay at frame end):**
 

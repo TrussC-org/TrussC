@@ -351,7 +351,6 @@ struct RenderTargetResources {
 void retirePipelineProgram(sg_shader shader);
 void returnTargetResources(RenderTargetResources& lease);
 void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format depth);
-bool rebuildTargetResources();
 void prepareWindowTarget();
 void refreshWindowDrawingSize();
 

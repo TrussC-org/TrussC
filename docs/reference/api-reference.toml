@@ -66674,7 +66674,7 @@ details.en = '''
 - The field behind `reserveUniformBuffer()`; the default is `0`.
 - It is the size, in bytes, of the GPU buffer that holds each frame's shader uniforms. Every draw call takes a 256-byte-aligned slice of it, so scenes with many draw calls per frame need more (about 4 MiB per 8,000 draw calls).
 - `0` or less selects the backend default: 1 MiB on Metal and WebGPU, 4 MiB on Vulkan. GL and D3D11 ignore it, because they have no such limit.
-- On Metal and WebGPU the buffer grows, with a warning in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
+- On Metal and WebGPU the buffer grows, with a notice in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
 - Metal, WebGPU and Vulkan allocate it twice (for frames in flight), so a larger value costs twice its size in memory.
 - Graphics startup reads it once. Under hot reload it is not applied and the default is used (see `RuntimeSettings`).
 '''
@@ -66682,7 +66682,7 @@ details.ja = '''
 - `reserveUniformBuffer()` が設定するフィールドです。既定値は `0` です。
 - 毎フレームのシェーダーのユニフォームを入れる GPU バッファーのサイズを、バイト単位で指定します。描画呼び出しのたびに 256 バイト単位で切り出して使うため、1 フレームの描画呼び出しが多いシーンほど多く必要です（描画呼び出し 8,000 回でおよそ 4 MiB）。
 - `0` 以下では、バックエンドの既定値（Metal と WebGPU は 1 MiB、Vulkan は 4 MiB）になります。GL と D3D11 にはこの上限がないため、無視されます。
-- Metal と WebGPU では、1 フレームで足りなくなるとログに警告を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
+- Metal と WebGPU では、1 フレームで足りなくなるとログに通知（Notice）を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
 - Metal、WebGPU、Vulkan では、処理中のフレームの分も含めて 2 つ確保するため、メモリはこの値の 2 倍使います。
 - グラフィックスの起動時に 1 回だけ読まれます。ホットリロードでは適用されず、既定値が使われます（`RuntimeSettings` を参照）。
 '''
@@ -66690,7 +66690,7 @@ details.ko = '''
 - `reserveUniformBuffer()`가 설정하는 필드입니다. 기본값은 `0`입니다.
 - 매 프레임의 셰이더 유니폼을 담는 GPU 버퍼의 크기를 바이트 단위로 지정합니다. 그리기 호출마다 256바이트 단위로 잘라 쓰므로, 한 프레임의 그리기 호출이 많은 장면일수록 더 많이 필요합니다(그리기 호출 8,000번에 약 4 MiB).
 - `0` 이하이면 백엔드 기본값(Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB)이 됩니다. GL과 D3D11에는 이런 상한이 없으므로 무시됩니다.
-- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 경고를 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
+- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 알림(Notice)을 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
 - Metal, WebGPU, Vulkan에서는 처리 중인 프레임 몫까지 2개를 확보하므로 메모리를 이 값의 2배 사용합니다.
 - 그래픽 시작 시 한 번만 읽힙니다. 핫 리로드에서는 적용되지 않고 기본값이 사용됩니다(`RuntimeSettings` 참조).
 '''
@@ -66712,7 +66712,7 @@ details.en = '''
 - Sets `uniformBufferReserve` and returns the same `RuntimeSettings&`, so calls can be chained. Call it before `runApp`.
 - It is the size, in bytes, of the GPU buffer that holds each frame's shader uniforms. Every draw call takes a 256-byte-aligned slice of it, so scenes with many draw calls per frame need more (about 4 MiB per 8,000 draw calls).
 - `0` or less selects the backend default: 1 MiB on Metal and WebGPU, 4 MiB on Vulkan. GL and D3D11 ignore it, because they have no such limit.
-- On Metal and WebGPU the buffer grows, with a warning in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
+- On Metal and WebGPU the buffer grows, with a notice in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
 - Metal, WebGPU and Vulkan allocate it twice (for frames in flight), so a larger value costs twice its size in memory.
 - Graphics startup reads it once. Under hot reload it is not applied and the default is used (see `RuntimeSettings`).
 '''
@@ -66720,7 +66720,7 @@ details.ja = '''
 - `uniformBufferReserve` を設定し、同じ `RuntimeSettings&` を返すため、続けて呼べます。`runApp` の前に呼んでください。
 - 毎フレームのシェーダーのユニフォームを入れる GPU バッファーのサイズを、バイト単位で指定します。描画呼び出しのたびに 256 バイト単位で切り出して使うため、1 フレームの描画呼び出しが多いシーンほど多く必要です（描画呼び出し 8,000 回でおよそ 4 MiB）。
 - `0` 以下では、バックエンドの既定値（Metal と WebGPU は 1 MiB、Vulkan は 4 MiB）になります。GL と D3D11 にはこの上限がないため、無視されます。
-- Metal と WebGPU では、1 フレームで足りなくなるとログに警告を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
+- Metal と WebGPU では、1 フレームで足りなくなるとログに通知（Notice）を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
 - Metal、WebGPU、Vulkan では、処理中のフレームの分も含めて 2 つ確保するため、メモリはこの値の 2 倍使います。
 - グラフィックスの起動時に 1 回だけ読まれます。ホットリロードでは適用されず、既定値が使われます（`RuntimeSettings` を参照）。
 '''
@@ -66728,7 +66728,7 @@ details.ko = '''
 - `uniformBufferReserve`를 설정하고 같은 `RuntimeSettings&`를 반환하므로 이어서 호출할 수 있습니다. `runApp` 전에 호출하세요.
 - 매 프레임의 셰이더 유니폼을 담는 GPU 버퍼의 크기를 바이트 단위로 지정합니다. 그리기 호출마다 256바이트 단위로 잘라 쓰므로, 한 프레임의 그리기 호출이 많은 장면일수록 더 많이 필요합니다(그리기 호출 8,000번에 약 4 MiB).
 - `0` 이하이면 백엔드 기본값(Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB)이 됩니다. GL과 D3D11에는 이런 상한이 없으므로 무시됩니다.
-- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 경고를 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
+- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 알림(Notice)을 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
 - Metal, WebGPU, Vulkan에서는 처리 중인 프레임 몫까지 2개를 확보하므로 메모리를 이 값의 2배 사용합니다.
 - 그래픽 시작 시 한 번만 읽힙니다. 핫 리로드에서는 적용되지 않고 기본값이 사용됩니다(`RuntimeSettings` 참조).
 '''
