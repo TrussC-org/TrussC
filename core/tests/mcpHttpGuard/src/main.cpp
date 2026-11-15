@@ -285,7 +285,7 @@ static void testCompleteRefusals(int port) {
     testConcurrentCompleteRefusals(port, "zero body", headers +
         "Content-Type: text/plain\r\nContent-Length: 0\r\n\r\n", 415);
     testConcurrentCompleteRefusals(port, "no body", "GET / HTTP/1.1\r\nHost: other.example\r\n\r\n", 403);
-    testConcurrentCompleteRefusals(port, "header refusal", "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: invalid\r\n\r\n", 416);
+    testConcurrentCompleteRefusals(port, "header refusal", "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=invalid\r\n\r\n", 416);
     testConcurrentCompleteRefusals(port, "read-ahead body", headers +
         "Content-Type: text/plain\r\nContent-Length: " + to_string(kListTools.size()) + "\r\n\r\n" + kListTools, 415);
     testConcurrentCompleteRefusals(port, "body read", headers +
@@ -992,15 +992,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             expectStatus("same-length wrong token -> 401", postAuth("Bearer " + sameLength), 401);
             expectStatus("token prefix -> 401", postAuth("Bearer " + kToken.substr(0, kToken.size() - 1)), 401);
             expectStatus("token plus a byte -> 401", postAuth("Bearer " + kToken + "x"), 401);
-            expectStatus("scheme only -> 401", postAuth("Bearer "), 401);
+            // httplib clients refuse a trailing space in a field value, and servers trim it,
+            // so "Bearer " arrives as "Bearer"; bearerTokenMatches("Bearer ") is checked above.
+            expectStatus("scheme only -> 401", postAuth("Bearer"), 401);
             expectStatus("token without scheme -> 401", postAuth(kToken), 401);
             check("GET / needs no token -> 200", status(raw.Get("/")) == 200);
         }
 
         // GET / (server info) takes the Host / Origin checks too
         check("GET / -> 200", status(cli.Get("/")) == 200);
-        expectStatus("GET / rebinding Host -> 403", cli.Get("/", {{"Host", "evil.example"}}), 403);
-        expectStatus("GET / foreign Origin -> 403", cli.Get("/", {{"Origin", "http://evil.example"}}), 403);
+        expectStatus("GET / rebinding Host -> 403", cli.Get("/", httplib::Headers{{"Host", "evil.example"}}), 403);
+        expectStatus("GET / foreign Origin -> 403", cli.Get("/", httplib::Headers{{"Origin", "http://evil.example"}}), 403);
 
         {
             httplib::Client persistent("127.0.0.1", port);

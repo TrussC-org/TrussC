@@ -127,52 +127,63 @@ TC_CORE_TEST_MAIN() {
     std::snprintf(chunkSize, sizeof(chunkSize), "%zx", toolBody.size());
     const string toolPrefix = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n";
     const auto firstTrailer = raw(toolPrefix + chunkSize + "\r\n" + toolBody + "\r\n0\r\nX-Padded:" + string(65536, ' ') + "\r\n\r\n");
-    check("first trailer overflow refuses before tool dispatch", toolCalls == 0 && connectionClosed &&
-        firstTrailer.find("431") != string::npos && firstTrailer.find("HTTP/1.1", 1) == string::npos);
+    // Upstream's 32768-byte line-reader bound refuses this line before our 64 KiB aggregate bound.
+    check("upstream oversized trailer refuses before tool dispatch", toolCalls == 0 && connectionClosed &&
+        firstTrailer.find("400") != string::npos && firstTrailer.find("HTTP/1.1", 1) == string::npos);
     const auto chunkExtension = raw(toolPrefix + chunkSize + ";" + string(1024 * 1024, 'a') + "\r\n" + toolBody + "\r\n0\r\n\r\n");
     check("1 MiB chunk extension refuses before tool dispatch", toolCalls == 0 && connectionClosed &&
         chunkExtension.find("431") != string::npos && chunkExtension.find("HTTP/1.1", 1) == string::npos);
     const auto acceptedTool = raw(toolPrefix + chunkSize + "\r\n" + toolBody + "\r\n0\r\n\r\n");
     check("metadata probe tool is callable after refusals", toolCalls == 1 && acceptedTool.find("200") != string::npos);
     string headers;
-    for (int i = 0; i < 129; ++i) headers += "X-Test: a\r\n";
+    for (int i = 0; i < 100; ++i) headers += "X-Test: a\r\n";
     check("header count is rejected", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos);
     headers.clear();
     for (int i = 0; i < 9; ++i) headers += "X-Test: " + string(8000, 'a') + "\r\n";
     check("aggregate headers are rejected", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos);
     headers.clear();
-    for (int i = 0; i < 129; ++i) headers += "\rX-Test: a\r\n";
-    check("noncanonical initial field names still count", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    for (int i = 0; i < 101; ++i) headers += "\rX-Test: a\r\n";
+    check("upstream rejects malformed initial field names first", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("400") != string::npos && connectionClosed);
     headers.clear();
     for (int i = 0; i < 10; ++i) headers += "X-Padded:" + string(7000, ' ') + "a\r\n";
     check("wire whitespace counts toward header bytes", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos && connectionClosed);
     const string chunkPrefix = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n";
     headers.clear();
-    for (int i = 0; i < 129; ++i) headers += "X-Trailer: a\r\n";
+    for (int i = 0; i < 101; ++i) headers += "X-Trailer: a\r\n";
     check("trailer count is bounded before storage", raw(chunkPrefix + headers + "\r\n").find("431") != string::npos && connectionClosed);
     headers.clear();
     for (int i = 0; i < 10; ++i) headers += "X-Padded:" + string(7000, ' ') + "a\r\n";
     check("wire whitespace counts toward trailer bytes", raw(chunkPrefix + headers + "\r\n").find("431") != string::npos && connectionClosed);
     headers.clear();
-    for (int i = 0; i < 126; ++i) headers += "X-Test: a\r\n";
-    check("128 initial fields are accepted", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n" + headers + "\r\n").find("200") != string::npos);
+    for (int i = 0; i < 98; ++i) headers += "X-Test: a\r\n";
+    check("100 initial fields are accepted", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n" + headers + "\r\n").find("200") != string::npos);
     headers.clear();
-    for (int i = 0; i < 129; ++i) headers += "\rX-Trailer: a\r\n";
-    check("noncanonical trailer names still count", raw(chunkPrefix + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    for (int i = 0; i < 101; ++i) headers += "\rX-Trailer: a\r\n";
+    check("upstream rejects malformed trailer names first", raw(chunkPrefix + headers + "\r\n").find("400") != string::npos && connectionClosed);
     headers.clear();
-    for (int i = 0; i < 128; ++i) headers += "X-Trailer: a\r\n";
+    for (int i = 0; i < 100; ++i) headers += "X-Trailer: a\r\n";
     check("excess trailer is refused before its line completes", raw(chunkPrefix + headers + "X-Trailer: a").find("431") != string::npos && connectionClosed);
     const string validBody = R"({"jsonrpc":"2.0","id":1,"method":"initialize"})";
     // Multiple chunks, including one-byte data, exercise framing observation.
     const string validChunks = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n" +
         validBody.substr(0, 1) + "\r\n2d\r\n" + validBody.substr(1) + "\r\n0\r\n";
-    check("128 trailers and valid chunk framing are accepted", raw(validChunks + headers + "\r\n").find("200") != string::npos);
+    check("100 trailers and valid chunk framing are accepted", raw(validChunks + headers + "\r\n").find("200") != string::npos);
     const string following = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    const auto pipelined = raw(following + "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    check("pipelined keep-alive requests retain connection read-ahead", connectionClosed &&
+        pipelined.find("200") != string::npos && pipelined.find("HTTP/1.1 200", 1) != string::npos);
+    const auto missingHost = raw("POST /mcp HTTP/1.1\r\nContent-Length: " + to_string(following.size()) + "\r\n\r\n" + following);
+    check("upstream Host refusal before setup closes without dispatch", connectionClosed && toolCalls == 1 &&
+        missingHost.find("400") != string::npos && missingHost.find("HTTP/1.1", 1) == string::npos);
+    const auto ambiguous = raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n" + following);
+    check("upstream framing refusal closes without processing buffered input", connectionClosed && toolCalls == 1 &&
+        ambiguous.find("400") != string::npos && ambiguous.find("HTTP/1.1", 1) == string::npos);
     const auto refused = raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " + to_string(defaults.bodyBytes + 1) + "\r\n\r\n" + following);
     check("refusal with unread body closes without processing its bytes", connectionClosed && refused.find("413") != string::npos && refused.find("HTTP/1.1", 1) == string::npos);
     const auto forbidden = raw("POST /mcp HTTP/1.1\r\nHost: attacker.example\r\nContent-Type: application/json\r\nContent-Length: " + to_string(following.size()) + "\r\n\r\n" + following);
     check("host refusal with unread body closes", connectionClosed && forbidden.find("403") != string::npos && forbidden.find("HTTP/1.1", 1) == string::npos);
     mcp::stopHttpServer();
+    check("upstream and guard refusals return all admission credits", mcp::internal::admittedConnections() == 0);
     auto ingressLimits = defaults;
     ingressLimits.bodyBytes = 64;
     check("small ingress limits configured", mcp::setAdmissionLimits(ingressLimits));
@@ -183,7 +194,7 @@ TC_CORE_TEST_MAIN() {
     check("unregistered body routes preserve upstream 404",
         raw("PUT /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n").find("404") != string::npos);
     check("upstream invalid chunk status is preserved",
-        raw(prefix + "Transfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\n").find("400") != string::npos);
+        raw(prefix + "Transfer-Encoding: chunked\r\n\r\nfffffffffffffffff\r\n").find("400") != string::npos);
 #ifdef CPPHTTPLIB_ZLIB_SUPPORT
     string compressed;
     httplib::detail::gzip_compressor gzip;
@@ -197,7 +208,8 @@ TC_CORE_TEST_MAIN() {
     mcp::startHttpServer();
     while (mcp::internal::admittedConnections() != 0) this_thread::yield();
     mcp::stopHttpServer();
-    check("header refusals counted", mcp::internal::admissionRejections(mcp::internal::AdmissionStore::Headers) == 9);
+    check("guard header refusals counted once; upstream parser refusals stay separate",
+        mcp::internal::admissionRejections(mcp::internal::AdmissionStore::Headers) == 6);
     check("one header warning across HTTP restarts", headerWarnings == 1);
     } else check("HTTP sockets are available", false);
 #endif
