@@ -88,6 +88,7 @@ OSV = {
     "mbedTLS": {"tag": "v{version}"},
     "libcurl": {"tag": "curl-{version_underscored}"},
     "libremidi": {"tag": "v{version}"}, "Box2D": {"tag": "v{version}"},
+    "Box2D v3": {"tag": "v{version}"},
     "cgltf": {"tag": "v{version}"}, "tinyobjloader": {},
     "Snappy": {"tag": "{version}"}, "HAP": {},
     "Lua": {"tag": "v{version}"}, "sol2": {"tag": "v{version}"},
