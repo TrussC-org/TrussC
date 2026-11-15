@@ -25,6 +25,7 @@
     #pragma comment(lib, "iphlpapi.lib")
     #pragma comment(lib, "ws2_32.lib")
 #elif !defined(__EMSCRIPTEN__)
+    #include <unistd.h>
     #include <sys/types.h>
     #include <sys/socket.h>
     #include <netinet/in.h>
@@ -168,10 +169,11 @@ bool isLocallyAdministered(const std::string& mac) {
 
 #ifdef _WIN32
 
-std::vector<NetworkInterface> listNetworkInterfaces() {
+static std::vector<NetworkInterface> enumerateAdapters(std::string* defaultAddress) {
     std::vector<NetworkInterface> result;
 
-    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER |
+                  GAA_FLAG_INCLUDE_GATEWAYS;
     ULONG bufLen = 16384;
     std::vector<unsigned char> buf(bufLen);
     DWORD ret = 0;
@@ -203,6 +205,16 @@ std::vector<NetworkInterface> listNetworkInterfaces() {
         bool isUp = (aa->OperStatus == IfOperStatusUp);
         bool isLoop = (aa->IfType == IF_TYPE_SOFTWARE_LOOPBACK);
 
+        bool hasGateway = false;
+        for (auto* gateway = aa->FirstGatewayAddress; gateway; gateway = gateway->Next) {
+            auto* sa = gateway->Address.lpSockaddr;
+            if (sa && sa->sa_family == AF_INET &&
+                reinterpret_cast<sockaddr_in*>(sa)->sin_addr.s_addr != INADDR_ANY) {
+                hasGateway = true;
+                break;
+            }
+        }
+
         for (auto* ua = aa->FirstUnicastAddress; ua; ua = ua->Next) {
             sockaddr* sa = ua->Address.lpSockaddr;
             if (!sa) continue;
@@ -225,10 +237,19 @@ std::vector<NetworkInterface> listNetworkInterfaces() {
             } else {
                 continue;
             }
-            if (!ni.address.empty()) result.push_back(std::move(ni));
+            if (!ni.address.empty()) {
+                if (defaultAddress && defaultAddress->empty() && hasGateway &&
+                    ni.isUp && !ni.isLoopback && ni.isIPv4)
+                    *defaultAddress = ni.address;
+                result.push_back(std::move(ni));
+            }
         }
     }
     return result;
+}
+
+std::vector<NetworkInterface> listNetworkInterfaces() {
+    return enumerateAdapters(nullptr);
 }
 
 #elif defined(__EMSCRIPTEN__)
@@ -327,8 +348,13 @@ void printNetworkInterfaces() {
     }
 }
 
-std::string getLocalIp() {
-    auto ifs = listNetworkInterfaces();
+// Internal selection seam for deterministic tests; no public declaration.
+namespace detail {
+std::string selectLocalIp(const std::vector<NetworkInterface>& ifs,
+                          const std::string& defaultAddress) {
+    for (const auto& ni : ifs)
+        if (!defaultAddress.empty() && ni.address == defaultAddress &&
+            ni.isUp && !ni.isLoopback && ni.isIPv4) return ni.address;
     // Prefer an up, non-loopback, private IPv4 (the usual LAN address).
     for (const auto& ni : ifs)
         if (ni.isUp && !ni.isLoopback && ni.isIPv4 && isPrivate(ni.address)) return ni.address;
@@ -339,6 +365,39 @@ std::string getLocalIp() {
     for (const auto& ni : ifs)
         if (ni.isUp && !ni.isLoopback) return ni.address;
     return "";
+}
+
+} // namespace detail
+
+std::string getLocalIp() {
+    std::string defaultAddress;
+#ifdef _WIN32
+    auto ifs = enumerateAdapters(&defaultAddress);
+#else
+    auto ifs = listNetworkInterfaces();
+#ifndef __EMSCRIPTEN__
+    // Ask the kernel for the IPv4 source it would route to the Internet.
+    // UDP connect sends no packet and needs no DNS or platform routing parser.
+    const int routeSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (routeSocket >= 0) {
+        sockaddr_in destination{};
+        destination.sin_family = AF_INET;
+        destination.sin_port = htons(53);
+        inet_pton(AF_INET, "8.8.8.8", &destination.sin_addr);
+        if (connect(routeSocket, reinterpret_cast<sockaddr*>(&destination), sizeof(destination)) == 0) {
+            sockaddr_in source{};
+            socklen_t length = sizeof(source);
+            char address[INET_ADDRSTRLEN];
+            if (getsockname(routeSocket, reinterpret_cast<sockaddr*>(&source), &length) == 0 &&
+                source.sin_family == AF_INET &&
+                inet_ntop(AF_INET, &source.sin_addr, address, sizeof(address)))
+                defaultAddress = address;
+        }
+        close(routeSocket);
+    }
+#endif
+#endif
+    return detail::selectLocalIp(ifs, defaultAddress);
 }
 
 std::vector<std::string> getLocalIps() {

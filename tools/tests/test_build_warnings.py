@@ -27,6 +27,29 @@ cache_spec.loader.exec_module(cache)
 
 
 class WarningTests(unittest.TestCase):
+    def test_cp932_redirected_diagnostics(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            log = Path(directory) / 'build.log'
+            diagnostic = 'file.cpp:1: warning: café 漢字 😀'
+            log.write_text(diagnostic + '\n', encoding='utf-8')
+            environment = dict(os.environ, PYTHONIOENCODING='cp932:strict')
+            checked = subprocess.run([sys.executable, str(SCRIPT), str(log)],
+                                     env=environment, capture_output=True)
+            self.assertEqual(checked.returncode, 1, checked.stderr)
+            self.assertIn(diagnostic.encode('utf-8'), checked.stdout)
+            echoed = subprocess.run(
+                [sys.executable, str(SCRIPT), '--run-build', '--', sys.executable,
+                 '-c', "import os; os.write(1, 'café 漢字 😀\\n'.encode('utf-8'))"],
+                env=environment, capture_output=True)
+            self.assertEqual(echoed.returncode, 0, echoed.stderr)
+            self.assertIn('café 漢字 😀'.encode('utf-8'), echoed.stdout)
+            failed = subprocess.run(
+                [sys.executable, str(SCRIPT), '--run-build', '--', sys.executable,
+                 '-c', "import os; os.write(2, 'warning: café 😀\\n'.encode('utf-8'))"],
+                env=environment, capture_output=True)
+            self.assertEqual(failed.returncode, 1)
+            self.assertIn('warning: café 😀'.encode('utf-8'), failed.stderr)
+
     def test_diagnostic_formats(self):
         for line in [
             'file.cpp:12:3: warning: unused result [-Wunused-result]',
