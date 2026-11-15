@@ -354,27 +354,10 @@ bool pipelineGenerationProbe() {
     const auto entries=target.resources().rawCache->cache.size();
     for(auto pipeline:held) sg_destroy_pipeline(pipeline);
     ok &= !failed.raw.id && !target.pipeline(failedRequest).raw.id && target.resources().rawCache->cache.size()==entries && !internal::active3D().id;
-    Fbo survivor; survivor.allocate(16,12);
-    for(int iteration=0;iteration<50;++iteration) {
-        survivor.begin(0,0,0);
-        const auto old=internal::currentTarget().resources().generation;
-        survivor.end();
-        if(iteration==0) {
-            auto* ctx=_sgl_lookup_context(target.resources().context.id);
-            std::printf("RESIZE BOUNDARY commands=%d base=%d vertices=%d base=%d queued=%zu/%zu/%zu pass=%d scopes=%u\n",ctx->commands.next,ctx->draw_base_cmd,ctx->vertices.next,ctx->draw_base_vertex,target.deferredShaderDraws.size(),target.deferredPbrDraws.size(),target.deferredPointDraws.size(),target.inPass,target.openShaderScopes);
-        }
-        auto& budget=internal::sglBudget(); internal::resizeSgl(budget.maxVertices,budget.maxCommands);
-        survivor.begin(0,0,0);
-        ok &= internal::currentTarget().resources().generation!=old;
-        survivor.end();
-        const auto retried=target.pipeline(failedRequest);
-        ok &= retried.raw.id!=0;
-        internal::endGpuFrame();
-    }
     internal::retirePipelineProgram(shader); internal::deferGpuDestroy(shader);
     internal::endGpuFrame();
     internal::currentWindowCtx()=previous;
-    std::printf("PIPELINE failure cached/retry + resize x50=%d expected=1\n",ok);
+    std::printf("PIPELINE failure cached=%d expected=1\n",ok);
     return ok;
 }
 
@@ -454,9 +437,9 @@ bool recipeSelectionProbe() {
     return ok && bounded;
 }
 
-// Adversarial review: recording on a lazy bottom target must survive both
-// rebuild paths, and memory release must follow the rebuilt window context.
-bool lazyResizeProbe(bool dimensions) {
+// Recording on a lazy bottom target must survive
+// dimension changes, and memory release must follow the rebuilt window context.
+bool lazyResizeProbe() {
     auto& window = (*renderFixture);
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
@@ -466,25 +449,20 @@ bool lazyResizeProbe(bool dimensions) {
     internal::prepareWindowTarget();
     const auto before = target.resources().context.id;
     const auto generationBefore = target.resources().generation;
-    const int oldVertices = internal::sglBudget().maxVertices;
-    const int oldCommands = internal::sglBudget().maxCommands;
     internal::loadPipeline(internal::activeFill2D());
     sgl_begin_triangles(); sgl_v2f(0,0); sgl_v2f(1,0); sgl_v2f(0,1); sgl_end();
     const bool lazy = !target.inPass && sgl_num_commands() == 1;
-    if (dimensions) {
-        window.fbWidth = 320; window.fbHeight = 240;
-        internal::prepareWindowTarget();
-    } else internal::resizeSgl(1024,256);
+    window.fbWidth = 320; window.fbHeight = 240;
+    internal::prepareWindowTarget();
     const bool deferred = target.resources().context.id == before && sgl_num_commands() == 1;
     submittedDraws = 0;
     present();
     bool ok = lazy && deferred && submittedDraws == 1;
-    std::printf("LAZY RESIZE dimensions=%d deferred=%d draws=%d expected=1\n",dimensions,deferred,submittedDraws);
-    // beginFrame retries the dimension change or the exact deferred budget.
+    std::printf("LAZY RESIZE deferred=%d draws=%d expected=1\n",deferred,submittedDraws);
+    // beginFrame retries the dimension change.
     beginFrame();
     auto* actual = _sgl_lookup_context(target.resources().context.id);
     ok &= target.resources().generation != generationBefore && target.resources().context.id != sgl_default_context().id;
-    if (!dimensions) ok &= actual->desc.max_vertices == 1024 && actual->desc.max_commands == 256 && !internal::sglBudget().pendingResize;
     // Force real CPU and GPU growth beyond the rebuilt capacities.
     const int initialVertices = actual->vertices.cap;
     internal::loadPipeline(internal::activeFill2D());
@@ -498,16 +476,15 @@ bool lazyResizeProbe(bool dimensions) {
     releaseSglBuffers();
     const bool released = actual->vertices.cap == 0 && actual->commands.cap == 0 &&
         actual->uniforms.cap == 0 && actual->vbuf.id == 0;
-    std::printf("REBUILT RELEASE dimensions=%d grew=%d vertices=%d->%d capacities=%d/%d/%d vbuf=%u expected=0\n",
-        dimensions,grew,initialVertices,grownVertices,actual->vertices.cap,actual->commands.cap,actual->uniforms.cap,actual->vbuf.id);
+    std::printf("REBUILT RELEASE grew=%d vertices=%d->%d capacities=%d/%d/%d vbuf=%u expected=0\n",
+        grew,initialVertices,grownVertices,actual->vertices.cap,actual->commands.cap,actual->uniforms.cap,actual->vbuf.id);
     ok &= grew && released;
-    internal::resizeSgl(oldVertices,oldCommands);
     internal::currentWindowCtx() = previous;
     return ok;
 }
 
 // Register a secondary coordinator with a dummy drawable so the production
-// global rebuild guard sees both windows, without creating a native window.
+// coordinator sees both windows, without creating a native window.
 struct DummyWindowPair {
     Window secondary;
     internal::WindowContext& main = (*renderFixture);
@@ -535,13 +512,11 @@ void recordTriangle() {
     sgl_begin_triangles(); sgl_v2f(0,0); sgl_v2f(1,0); sgl_v2f(0,1); sgl_end();
 }
 
-bool windowTickRestoreProbe(bool dimensions) {
+bool windowTickRestoreProbe() {
     DummyWindowPair windows;
     internal::restoreWindowContext(&(*renderFixture));
-    if (dimensions) {
-        windows.main.fbWidth = 320; windows.main.fbHeight = 240;
-        internal::prepareWindowTarget();
-    } else internal::resizeSgl(1024,256);
+    windows.main.fbWidth = 320; windows.main.fbHeight = 240;
+    internal::prepareWindowTarget();
     const auto mainContext = internal::currentTarget().resources().context;
     bool ok = mainContext.id && mainContext.id != sgl_default_context().id;
     // Mirror a secondary tick, including the exact helper used by all native
@@ -556,8 +531,8 @@ bool windowTickRestoreProbe(bool dimensions) {
     submittedDraws = 0;
     present();
     ok &= restored && submittedDraws == 1;
-    std::printf("WINDOW TICK RESTORE dimensions=%d actual=%u selected=%u restored=%d draws=%d expected=1\n",
-        dimensions,mainContext.id,sgl_get_context().id,restored,submittedDraws);
+    std::printf("WINDOW TICK RESTORE actual=%u selected=%u restored=%d draws=%d expected=1\n",
+        mainContext.id,sgl_get_context().id,restored,submittedDraws);
     // A boundary may also return to a parked Fbo, rather than a bottom target.
     Fbo fbo; fbo.allocate(8,8); fbo.begin(0,0,0);
     const auto fboContext = internal::currentTarget().resources().context;
@@ -568,13 +543,12 @@ bool windowTickRestoreProbe(bool dimensions) {
     return ok;
 }
 
-// Foreign commits preserve every unconsumed recording and defer exact resize requests.
-bool interleavedRewindProbe(bool resize, bool raw) {
+// Foreign commits preserve every unconsumed recording.
+bool interleavedRewindProbe(bool raw) {
     DummyWindowPair windows;
     internal::restoreWindowContext(&(*renderFixture));
     auto& target = windows.main.swapchainTarget;
     const auto before = target.resources().context;
-    const auto generation = target.resources().generation;
     recordTriangle();
     Shader shader;
     bool ok = !target.inPass && sgl_tc_context_has_pending_draws(before);
@@ -584,34 +558,16 @@ bool interleavedRewindProbe(bool resize, bool raw) {
         ok &= !target.deferredShaderDraws.empty();
     }
     internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
-    if (resize) {
-        internal::resizeSgl(2048,333);
-        // A repeated request must retain the latest explicit capacities.
-        internal::resizeSgl(3072,377);
-        ok &= internal::sglBudget().pendingResize == 3072 &&
-            internal::sglBudget().pendingCommands == 377 && target.resources().context.id == before.id;
-        beginFrame(); // A still has pending work: this retry must defer too.
-        ok &= target.resources().context.id == before.id && sgl_tc_context_has_pending_draws(before);
-    }
     present(); // B completes only B.
     const bool rewound = !sgl_tc_context_has_pending_draws(before);
     ok &= !rewound;
     internal::restoreWindowContext(&(*renderFixture));
-    if (resize) {
-        beginFrame(); // Rebuild now, unless A still owns a raw deferred draw.
-        ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == before.id && target.resources().generation == generation;
-    }
     submittedDraws = 0;
     present();
     const int draws = submittedDraws;
     ok &= draws == (raw ? 2 : 1);
-    if (resize) {
-        beginFrame(); // Raw work has now drained too: first safe retry succeeds.
-        auto* context = _sgl_lookup_context(target.resources().context.id);
-        ok &= !internal::sglBudget().pendingResize && context->desc.max_vertices == 3072 && context->desc.max_commands == 377;
-    }
-    std::printf("CROSS WINDOW REWIND resize=%d raw=%d rewound=%d draws=%d expected=%d retry=%d\n",
-        resize,raw,rewound,draws,raw ? 2 : 1,ok);
+    std::printf("CROSS WINDOW REWIND raw=%d rewound=%d draws=%d expected=%d ok=%d\n",
+        raw,rewound,draws,raw ? 2 : 1,ok);
     return ok;
 }
 
@@ -1083,57 +1039,6 @@ bool synchronousCapturePhaseProbe(bool secondary) {
     return ok;
 }
 
-bool begunResizeProbe() {
-    DummyWindowPair windows;
-    internal::restoreWindowContext(&(*renderFixture));
-    auto& target = internal::currentTarget();
-    const auto context = target.resources().context;
-    const auto generation = target.resources().generation;
-    int oldDrawable = 1, oldDepth = 2, oldMsaa = 3;
-    int newDrawable = 4, newDepth = 5, newMsaa = 6;
-    auto acquired = dummySwapchain(nullptr);
-    acquired.metal.current_drawable = &oldDrawable;
-    acquired.metal.depth_stencil_texture = &oldDepth;
-    acquired.metal.msaa_color_texture = &oldMsaa;
-    windows.main.acquireSwapchainUser = &acquired;
-    windows.main.acquireSwapchain = [](void* value) { return *static_cast<sg_swapchain*>(value); };
-    submittedDraws = 0;
-    internal::ensureCurrentPass(); recordTriangle(); target.flushLayers();
-    bool ok = target.passStartedThisFrame && !sgl_tc_context_has_pending_draws(context);
-    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
-    // Model native resize replacing the attachment generation while A is
-    // parked. Dummy pointers test descriptor identity, not Objective-C retain.
-    acquired.metal.current_drawable = &newDrawable;
-    acquired.metal.depth_stencil_texture = &newDepth;
-    acquired.metal.msaa_color_texture = &newMsaa;
-    acquired.width = 128; acquired.height = 96;
-    internal::resizeSgl(3072,377);
-    for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES + 3; ++i) { beginFrame(); present(); }
-    ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == context.id;
-    internal::restoreWindowContext(&(*renderFixture)); beginFrame();
-    ok &= target.resources().generation == generation;
-    internal::ensureCurrentPass();
-    ok &= passes.back().action.colors[0].load_action == SG_LOADACTION_LOAD;
-    ok &= passes.back().swapchain.metal.current_drawable == &oldDrawable &&
-        passes.back().swapchain.metal.depth_stencil_texture == &oldDepth &&
-        passes.back().swapchain.metal.msaa_color_texture == &oldMsaa &&
-        passes.back().swapchain.width == 256 && passes.back().swapchain.height == 192;
-    recordTriangle(); present();
-    ok &= submittedDraws == 2;
-    beginFrame();
-    auto* selected = _sgl_lookup_context(target.resources().context.id);
-    ok &= !internal::sglBudget().pendingResize && selected->desc.max_vertices == 3072 && selected->desc.max_commands == 377;
-    internal::ensureCurrentPass();
-    ok &= passes.back().swapchain.metal.current_drawable == &newDrawable &&
-        passes.back().swapchain.metal.depth_stencil_texture == &newDepth &&
-        passes.back().swapchain.metal.msaa_color_texture == &newMsaa;
-    present();
-    windows.main.acquireSwapchain = dummySwapchain;
-    windows.main.acquireSwapchainUser = nullptr;
-    std::printf("BEGUN FRAME RESIZE deferred=1 LOAD=1 retained_attachments=1 draws=%d expected=2 capacities=3072/377 ok=%d\n",submittedDraws,ok);
-    return ok;
-}
-
 bool resourceRetirementProbe() {
     DummyWindowPair windows;
     internal::restoreWindowContext(&(*renderFixture));
@@ -1214,6 +1119,49 @@ bool textureUploadLayoutProbe() {
     sg_commit(); internal::drainPendingGpuDestroys();
     const bool ok = trace.ok && trace.writes == 2 && trace.copies == 2;
     std::printf("TEXTURE GPU STAGING padded_rows=1 distinct_sources=1 ok=%d\n", ok);
+    return ok;
+}
+
+bool overflowWarningProbe() {
+    DummyWindowPair windows;
+    int warnings = 0;
+    bool ok = true;
+    const auto budget = internal::sglBudget();
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.message.starts_with("[sokol_gl]")) {
+            ++warnings;
+            ok &= event.level == LogLevel::Warning && event.message ==
+                "[sokol_gl] sokol_gl could not upload this frame (a single flush over 2 GB, or out of memory). Everything sokol_gl drew this frame was dropped.";
+        }
+    });
+    auto frame = [&](internal::WindowContext& window, bool vertices, bool commands) {
+        internal::restoreWindowContext(&window);
+        auto* context = _sgl_lookup_context(sgl_get_context().id);
+        context->error = {};
+        context->error.vertices_full = vertices;
+        context->error.commands_full = commands;
+        internal::endGpuFrame();
+        context->error = {};
+    };
+    auto& secondary = trussc::internal::WindowRequestAccess::context(windows.secondary);
+    frame(windows.main, true, false);
+    frame(windows.main, false, true);
+    ok &= warnings == 1;
+    frame(secondary, false, true);
+    ok &= warnings == 2;
+    frame(secondary, false, false);
+    frame(windows.main, true, false);
+    ok &= warnings == 2;
+    frame(secondary, true, true);
+    ok &= warnings == 3;
+    frame(windows.main, false, false);
+    frame(windows.main, false, true);
+    ok &= warnings == 4;
+    ok &= internal::sglBudget().maxVertices == budget.maxVertices &&
+        internal::sglBudget().maxCommands == budget.maxCommands;
+    frame(windows.main, false, false);
+    frame(secondary, false, false);
+    std::printf("SGL OVERFLOW per_window_gate_clean_frame_rearm=%d warnings=%d expected=4\n", ok, warnings);
     return ok;
 }
 
@@ -2370,9 +2318,9 @@ int main(int argc, char** argv) {
     const bool stores = storePolicyProbe();
     const bool pipelines = pipelineGenerationProbe();
     const bool recipes = recipeSelectionProbe();
-    const bool lazyResize = lazyResizeProbe(false) && lazyResizeProbe(true);
-    const bool tickRestore = windowTickRestoreProbe(false) && windowTickRestoreProbe(true);
-    const bool interleaved = interleavedRewindProbe(false,false) && interleavedRewindProbe(true,false) && interleavedRewindProbe(true,true);
+    const bool lazyResize = lazyResizeProbe();
+    const bool tickRestore = windowTickRestoreProbe();
+    const bool interleaved = interleavedRewindProbe(false) && interleavedRewindProbe(true);
     const bool parity = noDrawParityProbe(false,true) && noDrawParityProbe(true,true) && noDrawParityProbe(false,false);
     const bool rawKinds = rawKindsLifetimeProbe();
     const bool parking = parkedWindowProbe(false) && parkedWindowProbe(true);
@@ -2381,9 +2329,9 @@ int main(int argc, char** argv) {
     const bool shadowParking = parkedShadowProbe();
     const bool capturePhase = synchronousCapturePhaseProbe(false) && synchronousCapturePhaseProbe(true);
     const bool foreignTeardown = foreignTeardownReplayFailureProbe();
-    const bool begunResize = begunResizeProbe();
     const bool retirement = resourceRetirementProbe();
     const bool growth = growthFailureProbe();
+    const bool overflowWarning = overflowWarningProbe();
     const bool rawFailure = rawFailureProbe();
     bool resizeBeforeDraw = true;
     for (float dpi : {1.0f, 2.0f}) for (bool pixelPerfect : {false, true}) for (float fov : {0.0f, TAU / 6})
@@ -2407,7 +2355,7 @@ int main(int argc, char** argv) {
     const bool curveRollback = curveRollbackProbe();
     const bool retirementRestart = retirementRestartProbe();
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=textureUploads && strokeStyles && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && recipes && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
+    const int result=textureUploads && strokeStyles && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && recipes && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && retirement && growth && overflowWarning && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
     return result;
 }
 #else

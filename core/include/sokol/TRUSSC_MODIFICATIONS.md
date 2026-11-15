@@ -1056,6 +1056,13 @@ rendering. Resize an unused GPU flush-pool slot to CPU vertex capacity as needed
 sokol retains old backend storage through in-flight work. Metal starts at
 128 vertices/64 commands; non-Metal at 64K/16K; all retain growth.
 
+Allocation failure or a single flush over `INT_MAX` bytes drops the frame's
+sokol_gl drawing. TrussC reports this at Warning once per window context until
+a clean frame re-arms the warning. The former overflow-triggered ×4 initial
+budget increase and deferred global context rebuild have been removed (#1473);
+R2 buffer growth and initial context sizing remain unchanged.
+Flush-slot replacement destroys the old buffer before allocating its replacement so a full sg buffer pool can still recover (#1473).
+
 ### Float vertex colors
 
 **Classification:** KEEP decided by owner (R4).

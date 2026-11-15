@@ -3860,14 +3860,18 @@ static bool _sgl_prepare_flush_buffer(_sgl_context_t* ctx, size_t data_size) {
         desc.usage.vertex_buffer = true;
         desc.usage.write_transient = true;
         desc.label = "sgl-vertex-buffer";
+        // [TrussC fork] The selected slot has not been used this frame; sokol's
+        // deferred backend destruction retains any earlier in-flight storage.
+        // [TrussC fork] Destroy first so a full buffer pool can still replace the slot.
+        sg_destroy_buffer(*buffer);
+        buffer->id = SG_INVALID_ID;
+        ctx->vbuf = *buffer;
+        ctx->bind.vertex_buffers[0] = *buffer;
         const sg_buffer replacement = sg_make_buffer(&desc);
         if (sg_query_buffer_state(replacement) != SG_RESOURCESTATE_VALID) {
             if (replacement.id) sg_destroy_buffer(replacement);
             return false;
         }
-        // [TrussC fork] The selected slot has not been used this frame; sokol's
-        // deferred backend destruction retains any earlier in-flight storage.
-        sg_destroy_buffer(*buffer);
         *buffer = replacement;
     }
     ctx->vbuf = *buffer;
