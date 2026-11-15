@@ -58,7 +58,7 @@ static void check(const string& name, bool ok, const string& detail = "") {
 }
 
 // Stand-in for the platform's native state. Its first member reads as the
-// sapp_window handle the platform close() passes to sokol: id 0 is the
+// sapp_tc_window handle the platform close() passes to sokol: id 0 is the
 // invalid handle, so the request reaches no native window.
 static uint64_t g_nativeStandIn = 0;
 

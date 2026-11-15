@@ -49266,27 +49266,29 @@ void tcApp::setup() {
 category = "network"
 keywords = ["address", "lan", "host"]
 description.en = "Returns a preferred local IP address."
-description.ja = "優先順位に従って選んだローカル IP アドレスを返す。"
-description.ko = "우선순위에 따라 선택한 로컬 IP 주소를 반환한다."
+description.ja = "優先順位に従って選んだローカル IP アドレスを返します。"
+description.ko = "우선순위에 따라 선택한 로컬 IP 주소를 반환합니다."
 details.en = '''
-- Returns a `string` selected from up, non-loopback interfaces: first a private IPv4 address, then any IPv4 address, then any remaining address, including IPv6.
-- Returns the first address in enumeration order within each preference group, or an empty string if none qualifies.
-- Platform availability and enumeration failures follow `listNetworkInterfaces`; the web backend returns an empty string after logging a warning.
+- Returns a `string` selected from up, non-loopback interfaces: first the IPv4 address of the interface that carries the default route, then a private IPv4 address, then any IPv4 address, then any remaining address, including IPv6.
+- Returns the first address in enumeration order within each fallback preference group, or an empty string if none qualifies.
+- Platform availability and enumeration failures follow `listNetworkInterfaces`; the web backend returns an empty string after logging a warning. No browser API exists for local interface lookup.
 '''
 details.ja = '''
-- 稼働中でループバックではないインターフェースから、プライベート IPv4、その他の IPv4、IPv6 を含む残りのアドレスの順に選び、`string` を返します。
-- 各優先グループでは列挙順で最初のアドレスを返します。条件を満たすものがなければ空文字列を返します。
-- 対応プラットフォームと列挙失敗時の扱いは、`listNetworkInterfaces` に従います。Web バックエンドでは警告をログに出力して空文字列を返します。
+- 稼働中でループバックではないインターフェースから、デフォルトルートを持つインターフェースの IPv4、プライベート IPv4、その他の IPv4、IPv6 を含む残りのアドレスの順に選び、`string` を返します。
+- フォールバック時の各優先グループでは列挙順で最初のアドレスを返します。条件を満たすものがなければ空文字列を返します。
+- 対応プラットフォームと列挙失敗時の扱いは、`listNetworkInterfaces` に従います。Web バックエンドでは警告をログに出力して空文字列を返します。ブラウザーでローカルインターフェースを取得する API はありません。
 '''
 details.ko = '''
-- 활성 상태이며 루프백이 아닌 인터페이스에서 사설 IPv4, 그 밖의 IPv4, IPv6를 포함한 나머지 주소 순으로 선택하여 `string`을 반환합니다.
-- 각 우선순위 그룹에서 열거 순서상 첫 주소를 반환합니다. 조건에 맞는 주소가 없으면 빈 문자열을 반환합니다.
-- 지원 플랫폼과 열거 실패 시 동작은 `listNetworkInterfaces`를 따릅니다. 웹 백엔드에서는 경고를 기록하고 빈 문자열을 반환합니다.
+- 활성 상태이며 루프백이 아닌 인터페이스에서 기본 경로를 사용하는 인터페이스의 IPv4, 사설 IPv4, 그 밖의 IPv4, IPv6를 포함한 나머지 주소 순으로 선택하여 `string`을 반환합니다.
+- 대체 주소를 고르는 각 우선순위 그룹에서 열거 순서상 첫 주소를 반환합니다. 조건에 맞는 주소가 없으면 빈 문자열을 반환합니다.
+- 지원 플랫폼과 열거 실패 시 동작은 `listNetworkInterfaces`를 따릅니다. 웹 백엔드에서는 경고를 기록하고 빈 문자열을 반환합니다. 브라우저에서 로컬 인터페이스를 조회하는 API는 없습니다.
 '''
 related = ["getLocalIps", "listNetworkInterfaces", "isPrivate"]
 snippet = '''
 void tcApp::setup() {
-    logNotice("Network") << getLocalIp();
+    auto address = getLocalIp();
+    if (address.empty()) address = "127.0.0.1";
+    logNotice("Network") << address;
 }
 '''
 

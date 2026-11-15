@@ -1031,26 +1031,26 @@ sg_pixel_format pixelFormat(sapp_pixel_format format) {
         default: return SG_PIXELFORMAT_NONE;
     }
 }
-bool sendEvent(sapp_window handle, void*, sapp_event* event) { return sendNativeWindowEvent(handle, event); }
-bool closeRecorded(sapp_window handle, void*) { return sapp_tc_window_close_recorded(handle); }
-bool readMetadata(sapp_window handle, void*, sapp_tc_window_metadata& out) {
+bool sendEvent(sapp_tc_window handle, void*, sapp_event* event) { return sendNativeWindowEvent(handle, event); }
+bool closeRecorded(sapp_tc_window handle, void*) { return sapp_tc_window_close_recorded(handle); }
+bool readMetadata(sapp_tc_window handle, void*, sapp_tc_window_metadata& out) {
     return sapp_tc_window_read_metadata(handle, &out);
 }
-sg_swapchain acquireSwapchain(sapp_window handle, void*) {
+sg_swapchain acquireSwapchain(sapp_tc_window handle, void*) {
     sapp_tc_window_metadata metadata{};
     sg_swapchain sc{};
 #if defined(SOKOL_METAL)
-    sc.metal.current_drawable = sapp_window_metal_current_drawable(handle);
+    sc.metal.current_drawable = sapp_tc_window_metal_current_drawable(handle);
     if (!sc.metal.current_drawable) return {};
-    sc.metal.depth_stencil_texture = sapp_window_metal_depth_stencil_texture(handle);
-    sc.metal.msaa_color_texture = sapp_window_metal_msaa_color_texture(handle);
+    sc.metal.depth_stencil_texture = sapp_tc_window_metal_depth_stencil_texture(handle);
+    sc.metal.msaa_color_texture = sapp_tc_window_metal_msaa_color_texture(handle);
 #elif defined(SOKOL_D3D11)
-    sc.d3d11.render_view = sapp_window_d3d11_render_view(handle);
+    sc.d3d11.render_view = sapp_tc_window_d3d11_render_view(handle);
     if (!sc.d3d11.render_view) return {};
-    sc.d3d11.resolve_view = sapp_window_d3d11_resolve_view(handle);
-    sc.d3d11.depth_stencil_view = sapp_window_d3d11_depth_stencil_view(handle);
+    sc.d3d11.resolve_view = sapp_tc_window_d3d11_resolve_view(handle);
+    sc.d3d11.depth_stencil_view = sapp_tc_window_d3d11_depth_stencil_view(handle);
 #else
-    sc.gl.framebuffer = sapp_window_gl_framebuffer(handle);
+    sc.gl.framebuffer = sapp_tc_window_gl_framebuffer(handle);
 #endif
     // Acquiring a drawable can absorb an external resize (notably Retina).
     // Read its metadata afterwards, so the pass has one native size snapshot.
@@ -1061,7 +1061,7 @@ sg_swapchain acquireSwapchain(sapp_window handle, void*) {
     sc.depth_format = pixelFormat(metadata.depth_format);
     return sc;
 }
-void activate(sapp_window handle, void*) {
+void activate(sapp_tc_window handle, void*) {
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     sapp_tc_gl_make_current(handle);
 #else
@@ -1141,7 +1141,7 @@ bool refreshWindowMetadata(Window& window) {
     publishWindowMetadata(window, metadata);
     return true;
 }
-bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user) {
+bool bindWindow(Window& window, sapp_tc_window handle, const WindowNativeOperations& operations, void* user) {
     if (!WindowRequestAccess::acceptsBinding(window) || !handle.id || !operations.readMetadata) return false;
     sapp_tc_window_metadata metadata{};
     if (!operations.readMetadata(handle, user, metadata) || metadata.fb_width <= 0 || metadata.fb_height <= 0 ||
@@ -1228,7 +1228,7 @@ void refreshSelectedWindowMetadata() {
         metadata.fb_width = sapp_width(); metadata.fb_height = sapp_height();
         metadata.dpi_scale = sapp_dpi_scale(); metadata.sample_count = sapp_sample_count();
         metadata.color_format = sapp_color_format(); metadata.depth_format = sapp_depth_format();
-        metadata.trust_hidden_signals = true; metadata.occluded = sapp_window_occluded({0});
+        metadata.trust_hidden_signals = true; metadata.occluded = sapp_tc_window_occluded({0});
         metadata.drawable_available = metadata.fb_width > 0 && metadata.fb_height > 0;
         metadata.source_interval = sapp_frame_duration();
         publishWindowMetadata(*window, metadata);
@@ -2060,7 +2060,7 @@ void singleWindowEvent(const sapp_event* event) noexcept {
         if (window) windowEvent(event, WindowRequestAccess::binding(*window).handle, window);
     });
 }
-void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
+void windowEvent(const sapp_event* event, sapp_tc_window handle, void* user) noexcept {
     if (event && (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED || event->type == SAPP_EVENTTYPE_TC_DEVICE_LOST)) {
         if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
             runtime().quitPending = false;
@@ -2070,7 +2070,7 @@ void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexce
     }
     enterWindowEvent(event, handle, user);
 }
-void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, const WindowEventContext* testContext) noexcept {
+void enterWindowEvent(const sapp_event* event, sapp_tc_window handle, void* user, const WindowEventContext* testContext) noexcept {
     // Admission belongs to the native init predicate. Desktop init callbacks
     // may synchronously deliver events, as they did through the legacy client.
     TeardownSteps steps;
@@ -2110,7 +2110,7 @@ void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, c
         }
     });
 }
-bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clock::time_point now,
+bool enterWindowTick(Window& window, sapp_tc_window handle, std::chrono::steady_clock::time_point now,
                      double duration, const WindowTickPresentation* presentation) {
     if (WindowRequestAccess::binding(window).handle.id != handle.id) return false;
     WindowEntryScope entry(window, true);
@@ -2133,19 +2133,19 @@ bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clo
     applyWindowDrawWhileHidden(window);
     return drawn;
 }
-void windowTick(sapp_window handle, void* user) noexcept {
+void windowTick(sapp_tc_window handle, void* user) noexcept {
     if (runtimeEnding()) return;
     TeardownSteps steps;
     bool drawn = false;
     steps.run("native window tick", [&] {
         if (auto* window = static_cast<Window*>(user)) {
-            const double duration = supportsSecondaryWindows() ? sapp_window_frame_duration(handle) : sapp_frame_duration();
+            const double duration = supportsSecondaryWindows() ? sapp_tc_window_frame_duration(handle) : sapp_frame_duration();
             drawn = enterWindowTick(*window, handle, windowClockNow(), duration);
         }
     });
     if (!drawn) {
         if constexpr (supportsSecondaryWindows()) sapp_tc_window_skip_present(handle);
-        else sapp_skip_present();
+        else sapp_tc_skip_present();
     }
 }
 void bootstrapWindow(Window& target, void (*bootstrap)()) {
@@ -2181,7 +2181,7 @@ bool codeCloseExitsRuntime(Window& window) {
     }
     return true;
 }
-bool allowWindowClose(sapp_window handle, void* user) noexcept {
+bool allowWindowClose(sapp_tc_window handle, void* user) noexcept {
     bool allow = false;
     TeardownSteps steps;
     steps.run("window close request", [&] {
@@ -2211,7 +2211,7 @@ bool allowWindowClose(sapp_window handle, void* user) noexcept {
     });
     return allow;
 }
-void windowClosed(sapp_window handle, void* user) noexcept {
+void windowClosed(sapp_tc_window handle, void* user) noexcept {
     TeardownSteps steps;
     steps.run("native window close", [&] {
         auto* window = static_cast<Window*>(user);

@@ -195,10 +195,10 @@ extern "C" void __real_sgl_destroy_pipeline(sgl_pipeline);
 extern "C" void __wrap_sgl_destroy_pipeline(sgl_pipeline value) { checkLateCall("sgl_destroy_pipeline"); __real_sgl_destroy_pipeline(value); }
 extern "C" void __real_sgl_destroy_context(sgl_context);
 extern "C" void __wrap_sgl_destroy_context(sgl_context value) { checkLateCall("sgl_destroy_context"); __real_sgl_destroy_context(value); }
-extern "C" void __real_sapp_window_request_close(sapp_window);
-extern "C" void __wrap_sapp_window_request_close(sapp_window value) { checkLateCall("sapp_window_request_close"); __real_sapp_window_request_close(value); }
-extern "C" void __real_sapp_destroy_window(sapp_window);
-extern "C" void __wrap_sapp_destroy_window(sapp_window value) { checkLateCall("sapp_destroy_window"); __real_sapp_destroy_window(value); }
+extern "C" void __real_sapp_tc_window_request_close(sapp_tc_window);
+extern "C" void __wrap_sapp_tc_window_request_close(sapp_tc_window value) { checkLateCall("sapp_tc_window_request_close"); __real_sapp_tc_window_request_close(value); }
+extern "C" void __real_sapp_tc_destroy_window(sapp_tc_window);
+extern "C" void __wrap_sapp_tc_destroy_window(sapp_tc_window value) { checkLateCall("sapp_tc_destroy_window"); __real_sapp_tc_destroy_window(value); }
 
 int main(int argc, char** argv) {
     std::fputs("late-window: entered main\n", stderr);

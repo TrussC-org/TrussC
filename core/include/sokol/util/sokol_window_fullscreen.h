@@ -4,6 +4,7 @@ enum class _sapp_tc_fullscreen_phase { Windowed, Entering, Fullscreen, Exiting }
 
 // Fullscreen notifications only update this plain state. Native callers toggle
 // when request()/reconcile() returns true; reconciliation runs on a normal tick.
+// [TrussC] Shared native fork record.
 struct _sapp_tc_fullscreen_state_t {
     _sapp_tc_fullscreen_phase phase = _sapp_tc_fullscreen_phase::Windowed;
     bool desired = false;

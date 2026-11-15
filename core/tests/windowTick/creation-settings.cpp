@@ -71,24 +71,24 @@ DeviceContext deviceContext;
 struct {
     unsigned next_id=0; _sapp_tc_window_t* windows[32]{};
     int constructing=0, callbacks_active=0; bool deferred_blocked=false;
-    sapp_window pacer{UINT32_MAX}; // Existing launch pacer is outside this secondary-only seam.
+    sapp_tc_window pacer{UINT32_MAX}; // Existing launch pacer is outside this secondary-only seam.
     size_t window_slots=32; const char* create_error=nullptr;
     int display=1,ctx=1,NET_WM_STATE=1,NET_WM_STATE_FULLSCREEN=2; float dpi=96;
     struct { sapp_desc desc{}; bool valid=true; const void* device=(void*)1;
         DeviceContext* device_context=&deviceContext; _sapp_tc_window_t* main=nullptr; } app;
 } _sapp_tc;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) {
     for (auto* w:_sapp_tc.windows) if (w && w->win_id==h.id) return w;
     return nullptr;
 }
-_sapp_tc_window_t* _sapp_tc_resolve(sapp_window h) { return _sapp_tc_lookup(h); }
+_sapp_tc_window_t* _sapp_tc_resolve(sapp_tc_window h) { return _sapp_tc_lookup(h); }
 namespace trussc::internal { bool frameworkShutdown() { return false; } }
 static void _sapp_tc_mac_schedule_deferred() {}
 static _sapp_tc_window_t* _sapp_tc_mac_live(unsigned id) { return _sapp_tc_lookup({id}); }
 void order_out(NativeWindow*) {}
 bool _sapp_tc_app_events_enabled() { return true; }
-void _sapp_tc_main_event_tramp(const sapp_event*,sapp_window,void*) {}
-void _sapp_tc_main_tick_tramp(sapp_window,void*) {}
+void _sapp_tc_main_event_tramp(const sapp_event*,sapp_tc_window,void*) {}
+void _sapp_tc_main_tick_tramp(sapp_tc_window,void*) {}
 void _sapp_tc_timing_reset(_sapp_tc_timing_t*) {}
 void dispose(_sapp_tc_window_t* w) {
     for (auto*& slot:_sapp_tc.windows) if (slot==w) slot=nullptr;
@@ -231,11 +231,11 @@ struct WindowRequestAccess {
     static Binding& binding(Window&) { static Binding b; return b; }
     static void unbind(Window&) {}
 };
-void windowTick(sapp_window,void*) {} void windowEvent(const sapp_event*,sapp_window,void*) {}
-void windowClosed(sapp_window,void*) {}
-bool allowWindowClose(sapp_window,void*) { return true; }
+void windowTick(sapp_tc_window,void*) {} void windowEvent(const sapp_event*,sapp_tc_window,void*) {}
+void windowClosed(sapp_tc_window,void*) {}
+bool allowWindowClose(sapp_tc_window,void*) { return true; }
 void retainRuntimeWindow(const std::shared_ptr<Window>&) {}
-sapp_window resolveParentWindow(const WindowSettings&) { return {0}; }
+sapp_tc_window resolveParentWindow(const WindowSettings&) { return {0}; }
 void refreshWindowMetadata(Window&) {}
 bool bindNativeWindow(uint32_t id,void*) {
     auto* w=_sapp_tc_lookup({id}); check("binding after dimensions before ready",w&&w->initialized&&!w->ready);
@@ -246,7 +246,7 @@ std::shared_ptr<Window> createSecondaryWindow(const WindowSettings&);
 struct { struct { const void* device=(void*)1; } metal; } environment;
 auto sglue_environment() { return environment; }
 int sapp_x11_get_display() { return _sapp_tc.display; }
-struct AdapterState { sapp_window win{0}; };
+struct AdapterState { sapp_tc_window win{0}; };
 // PRODUCTION_BIND
 Window::~Window() {
     auto* st=static_cast<AdapterState*>(native_);
@@ -345,8 +345,8 @@ int main() {
         check("X11 peer interval independent",p&&p->requested_swap_interval==4&&w->requested_swap_interval==(interval>0?interval:1));
 #endif
     }
-    sapp_window_desc legacy{};
-    auto legacyHandle=sapp_create_window(&legacy);
+    sapp_tc_window_desc legacy{};
+    auto legacyHandle=sapp_tc_create_window(&legacy);
     auto* legacyWindow=_sapp_tc_lookup(legacyHandle);
     check("zero descriptor creates windowed",legacyWindow&&!legacyWindow->fullscreen);
 #if defined(TEST_MAC) || defined(TEST_WIN)
@@ -355,7 +355,7 @@ int main() {
     check("X11 zero descriptor keeps default interval",legacyWindow&&legacyWindow->requested_swap_interval==1);
     if(legacyWindow) dispose(legacyWindow);
     legacy.swap_interval=-2;
-    legacyWindow=_sapp_tc_lookup(sapp_create_window(&legacy));
+    legacyWindow=_sapp_tc_lookup(sapp_tc_create_window(&legacy));
     check("X11 negative interval normalizes to one",legacyWindow&&legacyWindow->requested_swap_interval==1);
 #endif
 #if defined(TEST_WIN)

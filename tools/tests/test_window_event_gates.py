@@ -19,7 +19,7 @@ void check(const char* name,bool ok){++checks;if(!ok){++failures;printf("event-g
 '''+shared+r'''
 namespace native {
 struct Record {
-    uint32_t win_id=91; sapp_window_desc desc{};
+    uint32_t win_id=91; sapp_tc_window_desc desc{};
     uint64_t frame_count=9,close_recorded_frame=0; bool ready=true,in_tick=false,close_requested=false,close_recorded=false,is_main=true;
     int link=0,callback_depth=0; bool native_closed=false,closed_pending=false;
     bool input_delivered=false,wake_on_input=true;bool (*events_enabled)()=nullptr;
@@ -36,7 +36,7 @@ struct { bool mouse_locked=false;Record* lock_owner=nullptr; Record* windows[1]=
     struct {Record* main=&first; struct { bool (*_tc_callbacks_active)()=nullptr; } desc;}app;} _sapp_tc;
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
-Record* _sapp_tc_lookup(sapp_window h){return live&&h.id==live->win_id?live:nullptr;}
+Record* _sapp_tc_lookup(sapp_tc_window h){return live&&h.id==live->win_id?live:nullptr;}
 '''
 import re
 send=next(re.finditer(r'static void _sapp_tc_send\(_sapp_tc_window_t\* w, sapp_event\* ev\) \{',source))
@@ -47,8 +47,8 @@ code+=body(runtime_source,'static inline bool injectedKeyDefined(')+'\n'
 code+=body(runtime_source,'static inline bool validInjectedWindowEvent(')+'\n'
 code+=body(bridge,'bool sendNativeWindowEvent(')+'\n'
 code+=r'''
-struct Operations {bool (*sendEvent)(sapp_window,void*,sapp_event*);};
-struct Binding {Operations* operations; sapp_window handle; void* user;} binding;
+struct Operations {bool (*sendEvent)(sapp_tc_window,void*,sapp_event*);};
+struct Binding {Operations* operations; sapp_tc_window handle; void* user;} binding;
 struct Window {};
 Window window;
 struct WindowRequestAccess {static Binding& binding(Window&) {return native::binding;}};
@@ -56,8 +56,8 @@ struct WindowRequestAccess {static Binding& binding(Window&) {return native::bin
 code+=body(runtime_source,'struct InjectedWindowEvent {')+';\nthread_local InjectedWindowEvent* injectedWindowEvent=nullptr;\n'
 code+=body(runtime_source,'bool injectWindowEvent(')+'\n'
 code+=r'''
-bool inject(sapp_window h,const sapp_event* event) {
-    static Operations operations{[](sapp_window h,void*,sapp_event* e){return sendNativeWindowEvent(h,e);}};
+bool inject(sapp_tc_window h,const sapp_event* event) {
+    static Operations operations{[](sapp_tc_window h,void*,sapp_event* e){return sendNativeWindowEvent(h,e);}};
     binding={&operations,h,nullptr};return injectWindowEvent(window,event,false);
 }
 '''
@@ -71,7 +71,7 @@ int terminated=0,closedCallbacks=0;
 void terminate(){++terminated;}void invalidate(int){}void _sapp_tc_mac_stop_fallback(Record*){}
 int calls=0;bool throwCallback=false,removeRecord=false;
 sapp_event last{};
-void callback(const sapp_event* e,sapp_window h,void*){
+void callback(const sapp_event* e,sapp_tc_window h,void*){
     ++calls;last=*e;
     check("native busy state precedes callback",record.in_tick);
     check("wake flag precedes callback",!_sapp_tc_event_wakes(e->type)||record.input_delivered);
@@ -88,7 +88,7 @@ void run(){
         check("sentinel event cannot wake",!_sapp_tc_event_wakes(type));
         check("sentinel event cannot be injected",!validInjectedWindowEvent(sentinel));
     }
-    record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
+    record.desc.close_cb=[](sapp_tc_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
     check("direct main close records frame cancellation without a queued close",record.close_recorded&&!record.close_requested&&!record.ready&&terminated==0&&closedCallbacks==1&&sapp_tc_window_close_recorded({91}));
     sapp_event closedInput{};closedInput.type=SAPP_EVENTTYPE_MOUSE_MOVE;
@@ -97,7 +97,7 @@ void run(){
     record.native_closed=false; record.ready=true; // Isolate the shared frame marker contract too.
     check("shared physical close marker rejects closing-frame input",!inject({91},&closedInput));
     ++record.frame_count;check("physical close marker is limited to its native frame",!sapp_tc_window_close_recorded({91}));--record.frame_count;
-    record.close_recorded=false;record.is_main=false;record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
+    record.close_recorded=false;record.is_main=false;record.desc.close_cb=[](sapp_tc_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
     check("direct secondary close stops admission and reports once",record.close_recorded&&!record.ready&&!record.close_requested&&closedCallbacks==2);
     record.close_recorded=false;record.native_closed=false;record.ready=true;record.is_main=false;
@@ -169,7 +169,7 @@ int main(){native::run();presentation::run();printf("event-gates: %d checks, %d 
 '''
 code=code.replace('sapp_tc_window_close_recorded(', 'closeRecorded(')
 # The removed stamp assertions now exercise the production metadata query.
-metadata_query=body(source,'extern "C" bool sapp_tc_window_read_metadata(').replace('extern "C" ','').replace('sapp_tc_window_read_metadata(', 'readMetadata(').replace('sapp_tc_window_visible(', 'visible(').replace('sapp_window_occluded(', 'occluded(')
+metadata_query=body(source,'extern "C" bool sapp_tc_window_read_metadata(').replace('extern "C" ','').replace('sapp_tc_window_read_metadata(', 'readMetadata(').replace('sapp_tc_window_visible(', 'visible(').replace('sapp_tc_window_occluded(', 'occluded(')
 metadata_parts=[]
 for platform,defines in [
     ('mac','#define __APPLE__ 1\n#define TARGET_OS_OSX 1'),
@@ -193,7 +193,7 @@ for platform,defines in [
 struct Record {
     int fb_width=302,fb_height=152,win_width=201,win_height=101;
     float dpi_scale=1.5f;
-    sapp_window_desc desc{};
+    sapp_tc_window_desc desc{};
     sapp_pixel_format color_format=SAPP_PIXELFORMAT_RGBA8,depth_format=SAPP_PIXELFORMAT_DEPTH;
     bool trust_hidden_signals=true,iconified=false,occluded=false;
     double frame_duration=.01,refresh_period=.02;
@@ -205,19 +205,19 @@ struct {
     float dpi_scale=1.5f;
     struct {bool locked=true;} mouse;
 } _sapp_tc;
-Record* _sapp_tc_lookup(sapp_window h){return h.id==41?&record:nullptr;}
-bool visible(sapp_window){return true;}
+Record* _sapp_tc_lookup(sapp_tc_window h){return h.id==41?&record:nullptr;}
+bool visible(sapp_tc_window){return true;}
 bool _sapp_tc_native_hidden(const Record*){return false;}
 int sapp_sample_count(){return 4;}
 sapp_pixel_format sapp_color_format(){return SAPP_PIXELFORMAT_RGBA8;}
 sapp_pixel_format sapp_depth_format(){return SAPP_PIXELFORMAT_DEPTH;}
-bool occluded(sapp_window){return false;}
+bool occluded(sapp_tc_window){return false;}
 double sapp_frame_duration(){return .01;}
 '''+metadata_query+r'''
 void run(){
     sapp_tc_window_metadata metadata{};
     record.desc.sample_count=4;
-'''+f'    const sapp_window handle{{{41 if desktop else 0}}};\n'+r'''
+'''+f'    const sapp_tc_window handle{{{41 if desktop else 0}}};\n'+r'''
     check("metadata query rejects null output",!readMetadata(handle,nullptr));
     check("metadata query accepts target handle",readMetadata(handle,&metadata));
     check("target metadata retains fractional DPI and dimensions",metadata.dpi_scale==1.5f&&metadata.fb_width==302&&metadata.fb_height==152&&metadata.width==201&&metadata.height==101);

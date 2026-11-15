@@ -53,8 +53,8 @@ void check(const char* name, bool ok) {
     ++checks; if (!ok) { ++failures; printf("hidden-reentry: FAIL: %s\n", name); }
 }
 struct Native { sapp_tc_window_metadata metadata{}; int acquisitions=0; };
-bool read(sapp_window, void* p, sapp_tc_window_metadata& m) { m=static_cast<Native*>(p)->metadata; return true; }
-sg_swapchain acquire(sapp_window, void* p) { ++static_cast<Native*>(p)->acquisitions; return {}; }
+bool read(sapp_tc_window, void* p, sapp_tc_window_metadata& m) { m=static_cast<Native*>(p)->metadata; return true; }
+sg_swapchain acquire(sapp_tc_window, void* p) { ++static_cast<Native*>(p)->acquisitions; return {}; }
 const internal::WindowNativeOperations operations{read,acquire,nullptr};
 struct Probe : App {
     Window* owner=nullptr;
@@ -73,7 +73,7 @@ struct Probe : App {
     void cleanup() override { ++cleanups; cleanedInside |= resizing; }
     void exit() override { ++exits; exitedInside |= resizing; }
 };
-void exercise(void (*tick)(sapp_window,void*), const char* name) {
+void exercise(void (*tick)(sapp_tc_window,void*), const char* name) {
     Window window; Native native;
     auto& m=native.metadata;
     m.fb_width=m.fb_height=100; m.dpi_scale=1; m.sample_count=1;
@@ -110,7 +110,7 @@ void resizeDelivery(bool first, bool pixels) {
     m.fb_width=m.fb_height=100; m.dpi_scale=2; m.sample_count=1;
     m.color_format=SAPP_PIXELFORMAT_RGBA8; m.depth_format=SAPP_PIXELFORMAT_DEPTH_STENCIL;
     m.trust_hidden_signals=true; m.occluded=true;
-    const sapp_window handle{first ? 801u : 802u};
+    const sapp_tc_window handle{first ? 801u : 802u};
     check("resize probe binds each addressed receiver", internal::bindWindow(window,handle,operations,&native));
     window.setApp<Probe>(); internal::applyPendingAppForTests(window);
     auto app=std::static_pointer_cast<Probe>(window.getApp()); app->owner=&window;

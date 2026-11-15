@@ -49,14 +49,14 @@ FOLDERS = dict(zip(('mac', 'win', 'linux', 'ios', 'android', 'web'), PLATFORMS))
 # These are exact names, not prefixes, so new native APIs require review.
 PLATFORM_ONLY = {
     'sapp_macos_get_window': {'macOS'},  # NSWindow access for Mac geometry/dialogs.
-    'sapp_window_macos_get_window': {'macOS'},  # Secondary NSWindow access.
+    'sapp_tc_window_macos_get_window': {'macOS'},  # Secondary NSWindow access.
     'sapp_win32_get_hwnd': {'Win32'},  # HWND access for Windows geometry.
-    'sapp_window_win32_get_hwnd': {'Win32'},  # Secondary HWND/dialog owner.
+    'sapp_tc_window_win32_get_hwnd': {'Win32'},  # Secondary HWND/dialog owner.
     'sapp_x11_get_display': {'X11'},  # Xlib display connection.
     'sapp_x11_get_window': {'X11'},  # Main Xlib window ID.
-    'sapp_window_x11_get_window': {'X11'},  # Secondary Xlib window ID.
+    'sapp_tc_window_x11_get_window': {'X11'},  # Secondary Xlib window ID.
     'sapp_ios_get_window': {'iOS'},  # UIWindow for the iOS dialog presenter.
-    'sapp_ios_set_supported_orientations': {'iOS'},  # UIKit orientation mask.
+    'sapp_tc_ios_set_supported_orientations': {'iOS'},  # UIKit orientation mask.
     'sapp_android_get_native_activity': {'Android'},  # JNI native activity bridge.
 }
 

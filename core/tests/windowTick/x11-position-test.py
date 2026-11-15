@@ -106,8 +106,8 @@ struct Window {
 };
 Window* selected=nullptr;
 void* sapp_x11_get_display() { return reinterpret_cast<void*>(1); }
-const void* sapp_window_x11_get_window(int handle) { return reinterpret_cast<void*>(handle); }
-const void* sapp_x11_get_window() { return sapp_window_x11_get_window(7); }
+const void* sapp_tc_window_x11_get_window(int handle) { return reinterpret_cast<void*>(handle); }
+const void* sapp_x11_get_window() { return sapp_tc_window_x11_get_window(7); }
 void sapp_tc_window_set_visible(int, bool visible) {
     nativeHidden=!visible; mapComplete=false;
     // Withdrawal makes the raw position wrong; the snapshot must precede it.

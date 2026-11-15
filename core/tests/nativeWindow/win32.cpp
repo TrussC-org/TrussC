@@ -107,7 +107,7 @@ uint64_t cleanupFrames;
 uint32_t lastLaunchId;
 int launchPolicy;
 _sapp_tc_window_t* first;
-sapp_window second, third;
+sapp_tc_window second, third;
 double started;
 int loopStage;
 unsigned loopTicks[3];
@@ -119,7 +119,7 @@ void check(const char* label, bool passed) {
     std::fflush(stdout);
     if (!passed) ++failures;
 }
-void event(const sapp_event* ev, sapp_window win, void*) {
+void event(const sapp_event* ev, sapp_tc_window win, void*) {
     const auto* w = _sapp_tc_lookup(win);
     check("event callback holds the native reentry guard", w && w->in_tick);
     if (ev->type < 64) ++events[ev->type];
@@ -138,7 +138,7 @@ void event(const sapp_event* ev, sapp_window win, void*) {
     }
 }
 void legacyEvent(const sapp_event* ev) { event(ev, {_sapp_tc.app.main->win_id}, nullptr); }
-void tick(sapp_window win, void*) {
+void tick(sapp_tc_window win, void*) {
     ++ticks;
     auto* w = _sapp_tc_lookup(win);
     check("every callback holds the native reentry guard", w && w->in_tick);
@@ -147,15 +147,15 @@ void tick(sapp_window win, void*) {
     _sapp_tc_win32_tick(w);
     check("nested native tick is rejected", w->frame_count == before);
 }
-bool allowClose(sapp_window win, void*) {
+bool allowClose(sapp_tc_window win, void*) {
     // Runtime owns last-window quit policy since C1. Model that client here.
     int count = 0;
     for (auto* entry : _sapp_tc.windows) if (entry) ++count;
     return count > 1 || _sapp_tc_win32_request_exit(_sapp_tc_lookup(win));
 }
-void close(sapp_window win, void*) {
+void close(sapp_tc_window win, void*) {
     ++closed;
-    sapp_destroy_window(win);
+    sapp_tc_destroy_window(win);
     for (auto* entry : _sapp_tc.windows) if (entry) return;
     sapp_quit();
 }
@@ -213,7 +213,7 @@ BOOL WINAPI testShowWindow(HWND hwnd, int command) {
         check("Constructing excludes show-time native scheduling", !_sapp_tc_win32_window_due(w));
         _sapp_tc_win32_tick(w);
         check("Constructing excludes show-time native tick", w->constructing && w->frame_count == frames);
-        sapp_destroy_window({w->win_id});
+        sapp_tc_destroy_window({w->win_id});
         check("Constructing defers show-time physical destruction", _sapp_tc_lookup({w->win_id}) == w && w->close_requested);
         return FALSE;
     }
@@ -311,13 +311,13 @@ void titles() {
     sapp_set_window_title(longTitle);
     check("legacy title retains stable borrowed 255-byte storage", borrowed == first->title &&
         sapp_query_desc().window_title == borrowed && std::strlen(borrowed) == 255);
-    sapp_window_set_title({first->win_id},"Handle first");
-    sapp_window_set_title(second,"Handle secondary");
+    sapp_tc_window_set_title({first->win_id},"Handle first");
+    sapp_tc_window_set_title(second,"Handle secondary");
     WCHAR text[512]; GetWindowTextW(first->hwnd,text,512);
     check("positive first handle title targets first without replacing storage", !std::wcscmp(text,L"Handle first") && sapp_query_desc().window_title == borrowed);
-    sapp_window_set_title({0},"Zero is not a title handle");
-    sapp_window_set_title({UINT32_MAX},"Unknown is not first");
-    sapp_window_set_title({first->win_id},longTitle);
+    sapp_tc_window_set_title({0},"Zero is not a title handle");
+    sapp_tc_window_set_title({UINT32_MAX},"Unknown is not first");
+    sapp_tc_window_set_title({first->win_id},longTitle);
     GetWindowTextW(first->hwnd,text,512);
     check("invalid handles and overflowing native title conversion do not change first", !std::wcscmp(text,L"Handle first"));
     char utf8[361];
@@ -356,7 +356,7 @@ void visibilityTransitions(_sapp_tc_window_t* w, SwapProbe& spy) {
         expect("DXGI clearing occlusion while minimized never emits RESUMED",
             {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED});
         check("cleared DXGI observation retains effective minimized visibility",
-            !w->occluded && sapp_window_occluded({w->win_id}) == trust);
+            !w->occluded && sapp_tc_window_occluded({w->win_id}) == trust);
         SendMessageW(w->hwnd, WM_SIZE, SIZE_RESTORED, 0);
         expect("restore emits RESTORED then one RESUMED only when trusted",
             {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESUMED});
@@ -388,19 +388,19 @@ bool inFocusHandler, exerciseFocus;
 int focusTicks, focusCloseCalls, focusTimers;
 void callbackReentry() {
     auto d = nativeDesc();
-    d.window.tick_cb = [](sapp_window, void*) {
+    d.window.tick_cb = [](sapp_tc_window, void*) {
         if (inFocusHandler) ++focusTicks;
         if (_sapp_tc_now() - started > 2) {
             check("event deferred-close native boundary completed before timeout", false);
             PostQuitMessage(0);
         }
     };
-    d.window.close_cb = [](sapp_window, void*) {
+    d.window.close_cb = [](sapp_tc_window, void*) {
         ++focusCloseCalls;
         check("nested event close runs only after the handler returns", !inFocusHandler);
         if (!inFocusHandler) PostQuitMessage(0);
     };
-    d.window.event_cb = [](const sapp_event* ev, sapp_window win, void*) {
+    d.window.event_cb = [](const sapp_event* ev, sapp_tc_window win, void*) {
         event(ev, win, nullptr);
         if (ev->type != SAPP_EVENTTYPE_FOCUSED || !exerciseFocus) return;
         exerciseFocus = false;
@@ -444,20 +444,20 @@ void callbackReentry() {
     // the aggregate event. Neither event-scope restoration nor WM_SIZE may use it.
     for (bool restore : {false,true}) {
         d = nativeDesc();
-        d.window.event_cb = [](const sapp_event* ev, sapp_window win, void*) {
+        d.window.event_cb = [](const sapp_event* ev, sapp_tc_window win, void*) {
             event(ev, win, nullptr);
             if (ev->type == SAPP_EVENTTYPE_ICONIFIED || ev->type == SAPP_EVENTTYPE_RESTORED)
-                sapp_destroy_window(win);
+                sapp_tc_destroy_window(win);
         };
         w = _sapp_tc_win32_create_window(&d);
         check("WM_SIZE callback lifetime test window constructed", w != nullptr);
         if (!w) continue;
-        const sapp_window win = {w->win_id};
+        const sapp_tc_window win = {w->win_id};
         w->iconified = restore;
         const int aggregates = events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED];
         SendMessageW(w->hwnd, WM_SIZE, restore ? SIZE_RESTORED : SIZE_MINIMIZED, 0);
         check("detailed WM_SIZE callback may destroy its window before aggregate delivery",
-            !sapp_window_valid(win) && events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED] == aggregates);
+            !sapp_tc_window_valid(win) && events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED] == aggregates);
     }
 }
 
@@ -477,7 +477,7 @@ void policies(_sapp_tc_window_t* w) {
         spy.presents = spy.probes = 0;
         const int before = ticks;
         _sapp_tc_win32_tick(w);
-        check("hidden observation query honors trust independently of draw", sapp_window_occluded({w->win_id}) == trust);
+        check("hidden observation query honors trust independently of draw", sapp_tc_window_occluded({w->win_id}) == trust);
         check("hidden drawing admission is per-window policy", spy.presents == int(draw || !trust));
         check("untrusted observations do not probe DXGI", spy.probes == int(trust && !minimized));
         check("hidden update-policy callback still runs once", ticks == before + 1);
@@ -500,7 +500,7 @@ void policies(_sapp_tc_window_t* w) {
     _sapp_tc_win32_tick(w);
     const HRESULT countAfter=spy.real->GetLastPresentCount(&presentsAfter);
     check("untrusted stale observations allow addressed real DXGI presentation", spy.presents == 1 && spy.probes == 0 &&
-        !w->credit_held && !sapp_window_occluded({w->win_id}) && SUCCEEDED(countBefore) && SUCCEEDED(countAfter) && presentsAfter == presentsBefore+1);
+        !w->credit_held && !sapp_tc_window_occluded({w->win_id}) && SUCCEEDED(countBefore) && SUCCEEDED(countAfter) && presentsAfter == presentsBefore+1);
     spy.inject = true;
     w->trust_hidden_signals = true; w->draw_while_hidden = false;
     w->iconified = false; w->occluded = true;
@@ -527,7 +527,7 @@ void policies(_sapp_tc_window_t* w) {
     spy.resizes = 0;
     resizeFrameWidth = framebufferExtent(313); resizeFrameHeight = framebufferExtent(219); resizeFrameModal = true;
     resizeFrameChecks = 0;
-    w->desc.tick_cb = [](sapp_window handle, void*) {
+    w->desc.tick_cb = [](sapp_tc_window handle, void*) {
         ++resizeFrameChecks;
         auto* live = _sapp_tc_lookup(handle);
         ID3D11Texture2D* buffer = nullptr;
@@ -572,7 +572,7 @@ void policies(_sapp_tc_window_t* w) {
     const auto realTiming=w->timing;
     const double realDuration=w->frame_duration, realPresent=w->last_present;
     fakeCounter=true; fakeCounterValue=100; _sapp_tc.qpc_period=1;
-    w->desc.tick_cb=[](sapp_window,void*) { fakeCounterValue+=3; };
+    w->desc.tick_cb=[](sapp_tc_window,void*) { fakeCounterValue+=3; };
     w->skip_present=true;
     _sapp_tc_win32_tick(w);
     check("skipped-present deadline follows completed client work", std::fabs(w->earliest_next-(103+w->refresh_period*w->swap_interval))<1e-9);
@@ -636,7 +636,7 @@ bool initialDimensionsMatchClient(const _sapp_tc_window_t* w, bool* clamped = nu
 void initialized() {
     first = _sapp_tc.app.main;
     lastLaunchId = first->win_id;
-    if (initQuit) { sapp_skip_present(); sapp_quit(); return; }
+    if (initQuit) { sapp_tc_skip_present(); sapp_quit(); return; }
     if (sessionEnd) {
         trussc::internal::appExitCode() = 37;
         SendMessageW(first->hwnd, WM_ENDSESSION, TRUE, 0);
@@ -655,10 +655,10 @@ void initialized() {
     d.width = 1001; d.height = 667;
     if (pixelSizes) { d._tc_pixel_width = 1001; d._tc_pixel_height = 667; }
     d.max_frame_latency = 1;
-    second = sapp_create_window(&d); d.x = 700; d.max_frame_latency = 16; third = sapp_create_window(&d);
+    second = sapp_tc_create_window(&d); d.x = 700; d.max_frame_latency = 16; third = sapp_tc_create_window(&d);
     auto* other = _sapp_tc_lookup(second);
-    check("one main and two secondaries constructed", other && sapp_window_valid(third) && liveHwnds == 3);
-    if (!other || !sapp_window_valid(third)) { sapp_quit(); return; }
+    check("one main and two secondaries constructed", other && sapp_tc_window_valid(third) && liveHwnds == 3);
+    if (!other || !sapp_tc_window_valid(third)) { sapp_quit(); return; }
     for (auto item : {std::pair{first,2u}, std::pair{other,1u}, std::pair{_sapp_tc_lookup(third),16u}}) {
         IDXGISwapChain2* chain = nullptr;
         UINT latency = 0;
@@ -762,9 +762,9 @@ void nativeChecks() {
     SendMessageW(first->hwnd,WM_ENDSESSION,FALSE,0);
     vetoQuit = false;
     const auto savedClose=other->desc.close_cb;
-    other->desc.close_cb=[](sapp_window,void*) { throw std::runtime_error("native close callback fault"); };
+    other->desc.close_cb=[](sapp_tc_window,void*) { throw std::runtime_error("native close callback fault"); };
     SendMessageW(other->hwnd,WM_CLOSE,0,0);
-    check("throwing close client cannot bypass native disposal ownership", IsWindow(other->hwnd) && sapp_window_valid(second));
+    check("throwing close client cannot bypass native disposal ownership", IsWindow(other->hwnd) && sapp_tc_window_valid(second));
     other->desc.close_cb=savedClose;
     throwQuit=true;
     _sapp_tc_win32_request_exit(first);
@@ -782,9 +782,9 @@ void nativeChecks() {
     auto* last = _sapp_tc_lookup(third);
     sizeClient(last,301,211);
     SetWindowPos(last->hwnd,HWND_TOP,500,250,0,0,SWP_NOSIZE|SWP_NOACTIVATE);
-    first->desc.tick_cb = [](sapp_window,void*) { ++loopTicks[0]; };
-    other->desc.tick_cb = [](sapp_window,void*) { ++loopTicks[1]; };
-    _sapp_tc_lookup(third)->desc.tick_cb = [](sapp_window,void*) { ++loopTicks[2]; };
+    first->desc.tick_cb = [](sapp_tc_window,void*) { ++loopTicks[0]; };
+    other->desc.tick_cb = [](sapp_tc_window,void*) { ++loopTicks[1]; };
+    _sapp_tc_lookup(third)->desc.tick_cb = [](sapp_tc_window,void*) { ++loopTicks[2]; };
     events[SAPP_EVENTTYPE_SUSPENDED] = 0;
     started = _sapp_tc_now();
 }
@@ -843,7 +843,7 @@ int main(int argc, char** argv) {
         if (launchCovered && launchPolicy == 0) {
             const uint32_t previousId = lastLaunchId;
             sapp_run(&d);
-            check("repeat sapp_run preserves monotonic creation identities", lastLaunchId > previousId && !sapp_window_valid({previousId}));
+            check("repeat sapp_run preserves monotonic creation identities", lastLaunchId > previousId && !sapp_tc_window_valid({previousId}));
             check("repeat sapp_run initializes and cleans up independently", cleanupCalls == 2 && liveHwnds == 0);
             delete launchProbe; launchProbe = nullptr;
         }
@@ -866,7 +866,7 @@ int main(int argc, char** argv) {
     nativeChecks();
     // Init installed independent loop callbacks; use the real run loop,
     // driven by per-window clients to advance scripted stages.
-    first->desc.tick_cb = [](sapp_window,void*) {
+    first->desc.tick_cb = [](sapp_tc_window,void*) {
         ++loopTicks[0];
         const double elapsed = _sapp_tc_now()-started;
         if (elapsed > 12) { check("scripted native loop completed",false); sapp_quit(); return; }
@@ -878,23 +878,23 @@ int main(int argc, char** argv) {
             check("three real waitable surfaces keep ticking", loopTicks[1]>2 && loopTicks[2]>2);
             ShowWindow(other->hwnd,SW_MINIMIZE); loopStage=1;
         } else if (loopStage == 1 && elapsed > .9) {
-            check("real minimize reports hidden", sapp_window_occluded(second));
+            check("real minimize reports hidden", sapp_tc_window_occluded(second));
             ShowWindow(other->hwnd,SW_RESTORE); loopStage=2;
         } else if (loopStage == 2 && elapsed > 1.5) {
-            check("real restore resumes addressed presentation", !sapp_window_occluded(second) && other->last_present>started+.9);
+            check("real restore resumes addressed presentation", !sapp_tc_window_occluded(second) && other->last_present>started+.9);
             ShowWindow(first->hwnd,SW_MINIMIZE); loopStage=3;
         } else if (loopStage == 3 && elapsed > 1.9) {
-            check("real first-window minimize reports hidden", sapp_window_occluded({0}));
+            check("real first-window minimize reports hidden", sapp_tc_window_occluded({0}));
             ShowWindow(first->hwnd,SW_RESTORE); loopStage=4;
         } else if (loopStage == 4 && elapsed > 2.5) {
-            check("real first-window restore resumes presentation", !sapp_window_occluded({0}) && first->last_present>started+1.9);
-            sapp_window_request_close(second); sapp_window_request_close(third); loopStage=5;
-        } else if (loopStage == 5 && !sapp_window_valid(second) && !sapp_window_valid(third)) {
+            check("real first-window restore resumes presentation", !sapp_tc_window_occluded({0}) && first->last_present>started+1.9);
+            sapp_tc_window_request_close(second); sapp_tc_window_request_close(third); loopStage=5;
+        } else if (loopStage == 5 && !sapp_tc_window_valid(second) && !sapp_tc_window_valid(third)) {
             check("two scripted secondary closes use common close", closed==2);
-            quitRequests=0; vetoQuit=true; sapp_window_request_close({first->win_id}); loopStage=6;
+            quitRequests=0; vetoQuit=true; sapp_tc_window_request_close({first->win_id}); loopStage=6;
         } else if (loopStage == 6 && quitRequests==1) {
             check("first close reaches process quit veto", !_sapp_tc.app.quit_ordered);
-            vetoQuit=false; sapp_window_request_close({first->win_id}); loopStage=7;
+            vetoQuit=false; sapp_tc_window_request_close({first->win_id}); loopStage=7;
         }
     };
     _sapp_tc_win32_run_loop();

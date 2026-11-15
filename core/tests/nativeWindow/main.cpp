@@ -15,7 +15,7 @@ int failures, callbacks, liveWindows, presents, resizeTicks, mapRequests;
 bool failSurface, noHighDpi, didInitialize, coveredFirst, fullscreenProbe;
 int launchHidden;
 Window firstXwin;
-sapp_window visibilityWindow, secondaryWindow;
+sapp_tc_window visibilityWindow, secondaryWindow;
 bool visibilityTrust;
 std::chrono::steady_clock::time_point visibilityDeadline;
 void check(const char* name, bool passed);
@@ -27,7 +27,7 @@ void startVisibilityCheck() {
     check("show reports requested visibility", sapp_tc_window_visible(visibilityWindow));
     sapp_tc_window_set_visible(visibilityWindow, false);
     check("hide reports requested state immediately regardless of OS signal trust",
-        !sapp_tc_window_visible(visibilityWindow) && sapp_window_occluded(visibilityWindow));
+        !sapp_tc_window_visible(visibilityWindow) && sapp_tc_window_occluded(visibilityWindow));
     visibilityDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
 }
 template<class P> concept FourPropertyArguments = requires(P value) {
@@ -40,7 +40,7 @@ void check(const char* name, bool passed) {
     std::printf("nativeWindow: %s: %s\n", name, passed ? "PASS" : "FAIL");
     if (!passed) ++failures;
 }
-void onEvent(const sapp_event* event, sapp_window, void*) { received = *event; ++callbacks; }
+void onEvent(const sapp_event* event, sapp_tc_window, void*) { received = *event; ++callbacks; }
 bool waitForClientSize(Window window, int width, int height) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     XWindowAttributes actual{};
@@ -59,7 +59,7 @@ void fullscreenChecks() {
     auto desc = first->desc;
     desc.borderless = true; desc.width = 240; desc.height = 160;
     desc.fullscreen = true; desc.hidden = true;
-    const auto second = sapp_create_window(&desc);
+    const auto second = sapp_tc_create_window(&desc);
     auto* other = _sapp_tc_lookup(second);
     check("borderless hidden fullscreen starts with real state false", other && !other->fullscreen);
     if (!other) { sapp_quit(); return; }
@@ -116,7 +116,7 @@ void fullscreenChecks() {
             check("hide/show replays latest WM state", wait(w, full));
         }
     }
-    sapp_destroy_window(second);
+    sapp_tc_destroy_window(second);
     sapp_quit();
 }
 void initialized() {
@@ -129,9 +129,9 @@ void initialized() {
         return;
     }
     check("hidden signals trusted by default", first->trust_hidden_signals);
-    sapp_window_desc desc = first->desc;
+    sapp_tc_window_desc desc = first->desc;
     desc.event_cb = onEvent; desc.tick_cb = nullptr;
-    const sapp_window second = sapp_create_window(&desc);
+    const sapp_tc_window second = sapp_tc_create_window(&desc);
     auto* other = _sapp_tc_lookup(second);
     check("secondary created", other != nullptr);
     if (!other) { sapp_quit(); return; }
@@ -184,7 +184,7 @@ void initialized() {
                 event.xvisibility.state = visibility; callbacks = 0;
                 _sapp_tc_x11_process_event(&event);
                 check("visibility input respects trust for either window", callbacks == int(trust) &&
-                    sapp_window_occluded({target->win_id}) == (trust && visibility == VisibilityFullyObscured));
+                    sapp_tc_window_occluded({target->win_id}) == (trust && visibility == VisibilityFullyObscured));
             }
             event = {}; event.type = PropertyNotify; event.xproperty.window = target->xwin;
             event.xproperty.atom = _sapp_tc.WM_STATE; event.xproperty.state = PropertyNewValue;
@@ -194,7 +194,7 @@ void initialized() {
                     32, PropModeReplace, (unsigned char*)values, 2);
                 callbacks = 0; _sapp_tc_x11_process_event(&event);
                 check("minimize detail and effective visibility events respect trust for either window", callbacks == 2 * int(trust) &&
-                    sapp_window_occluded({target->win_id}) == (trust && state == IconicState));
+                    sapp_tc_window_occluded({target->win_id}) == (trust && state == IconicState));
             }
         }
         target->trust_hidden_signals = true;
@@ -203,10 +203,10 @@ void initialized() {
     auto hiddenDesc = desc;
     hiddenDesc.hidden = true; hiddenDesc.fullscreen = true;
     const int mapsBefore = mapRequests;
-    const sapp_window hidden = sapp_create_window(&hiddenDesc);
+    const sapp_tc_window hidden = sapp_tc_create_window(&hiddenDesc);
     auto* hiddenNative = _sapp_tc_lookup(hidden);
     check("start-hidden fullscreen window never maps", hiddenNative && mapRequests == mapsBefore &&
-        !sapp_tc_window_visible(hidden) && sapp_window_occluded(hidden));
+        !sapp_tc_window_visible(hidden) && sapp_tc_window_occluded(hidden));
     secondaryWindow = second;
     visibilityWindow = hidden;
     if (hiddenNative) {
@@ -229,13 +229,13 @@ void visibilityFrame() {
         startVisibilityCheck();
         return;
     }
-    sapp_destroy_window(visibilityWindow);
+    sapp_tc_destroy_window(visibilityWindow);
     visibilityWindow = {};
     finishChecks();
 }
 void finishChecks() {
     auto* first = _sapp_tc.app.main;
-    const sapp_window second = secondaryWindow;
+    const sapp_tc_window second = secondaryWindow;
     auto* other = _sapp_tc_lookup(second);
     const auto desc = first->desc;
     for (auto* target : {first, other}) {
@@ -248,7 +248,7 @@ void finishChecks() {
     }
     first->in_tick = false; // exercise native admission directly, outside the legacy client
     for (auto* target : {first, other}) {
-        target->desc.tick_cb = [](sapp_window, void*) { ++callbacks; };
+        target->desc.tick_cb = [](sapp_tc_window, void*) { ++callbacks; };
         for (bool trust : {true, false}) for (bool iconified : {false, true}) {
             target->trust_hidden_signals = trust;
             target->iconified = iconified; target->occluded = !iconified;
@@ -260,18 +260,18 @@ void finishChecks() {
                 const bool shouldPresent = !trust;
                 check("hidden drawing and trust are independent for either window", callbacks == 1 &&
                     presents == int(shouldPresent) && (!presents || presentedDrawable == (uintptr_t)target->drawable));
-                check("all visibility readers use effective state", sapp_window_occluded({target->win_id}) == trust &&
+                check("all visibility readers use effective state", sapp_tc_window_occluded({target->win_id}) == trust &&
                     _sapp_tc_native_iconified(target) == (trust && iconified) &&
                     _sapp_tc_native_occluded(target) == (trust && !iconified) &&
-                    (target != first || sapp_window_occluded({0}) == trust));
+                    (target != first || sapp_tc_window_occluded({0}) == trust));
                 auto* peer = target == first ? other : first;
-                check("hidden signal switch is per window", !sapp_window_occluded({peer->win_id}) && peer->trust_hidden_signals);
+                check("hidden signal switch is per window", !sapp_tc_window_occluded({peer->win_id}) && peer->trust_hidden_signals);
             }
         }
         target->occluded = target->iconified = false;
         target->trust_hidden_signals = true;
     }
-    presents = 0; sapp_skip_present();
+    presents = 0; sapp_tc_skip_present();
     _sapp_tc_x11_tick(other); _sapp_tc_x11_tick(first);
     check("first skip is isolated", presents == 1 && presentedDrawable == (uintptr_t)other->drawable);
     presents = 0; sapp_tc_window_skip_present(second);
@@ -301,7 +301,7 @@ void finishChecks() {
     check("WM applied requested client size before resize failure", resized);
     if (!resized) { sapp_quit(); return; }
     callbacks = presents = 0;
-    other->desc.tick_cb = [](sapp_window handle, void*) {
+    other->desc.tick_cb = [](sapp_tc_window handle, void*) {
         ++resizeTicks;
         sapp_tc_window_metadata metadata{};
         check("resized native frame publishes new metadata", sapp_tc_window_read_metadata(handle, &metadata) &&
@@ -318,30 +318,30 @@ void finishChecks() {
     _sapp_tc_x11_tick(other);
     const auto restored = sapp_tc_gl_save();
     check("successful resize draws exactly once with the same identity", resizeTicks == 1 && presents == 1 &&
-        other->drawable && !other->surface_resize_pending && sapp_window_valid(second));
+        other->drawable && !other->surface_resize_pending && sapp_tc_window_valid(second));
     check("successful resize restores actual native caller", restored.display == caller.display &&
         restored.context == caller.context && restored.draw == caller.draw && restored.read == caller.read);
-    other->desc.tick_cb = [](sapp_window, void*) { ++callbacks; };
+    other->desc.tick_cb = [](sapp_tc_window, void*) { ++callbacks; };
     first->in_tick = true;
     const float savedDpi = _sapp_tc.dpi;
     _sapp_tc.dpi = 9.6e-7f;
-    sapp_window_desc tooLarge = desc;
+    sapp_tc_window_desc tooLarge = desc;
     tooLarge.no_high_dpi = false;
     tooLarge._tc_pixel_width = 640; tooLarge._tc_pixel_height = 400;
-    const auto rejected = sapp_create_window(&tooLarge);
+    const auto rejected = sapp_tc_create_window(&tooLarge);
     check("unrepresentable logical size rejected", rejected.id == 0);
-    if (rejected.id) sapp_destroy_window(rejected);
+    if (rejected.id) sapp_tc_destroy_window(rejected);
     _sapp_tc.dpi = savedDpi;
     const int before = liveWindows;
     failSurface = true;
-    check("failed surface rejects creation", sapp_create_window(&desc).id == 0);
+    check("failed surface rejects creation", sapp_tc_create_window(&desc).id == 0);
     failSurface = false;
-    check("failure unwinds native window", liveWindows == before && sapp_window_valid(second));
+    check("failure unwinds native window", liveWindows == before && sapp_tc_window_valid(second));
     _sapp_tc.next_id = UINT32_MAX - 1;
-    const auto last = sapp_create_window(&desc);
+    const auto last = sapp_tc_create_window(&desc);
     check("last identity is valid", last.id == UINT32_MAX);
-    if (last.id) sapp_destroy_window(last);
-    check("identity exhaustion rejects cleanly", sapp_create_window(&desc).id == 0 && _sapp_tc.next_id == UINT32_MAX && liveWindows == before);
+    if (last.id) sapp_tc_destroy_window(last);
+    check("identity exhaustion rejects cleanly", sapp_tc_create_window(&desc).id == 0 && _sapp_tc.next_id == UINT32_MAX && liveWindows == before);
     XResizeWindow(_sapp_tc.display, other->xwin, 120, 80);
     XSync(_sapp_tc.display, False);
     check("WM applied terminal resize", waitForClientSize(other->xwin, 120, 80));
@@ -350,7 +350,7 @@ void finishChecks() {
     _sapp_tc_x11_tick(other);
     failSurface = false;
     check("failed renewal closes the Window and ends the backend without another frame",
-        !callbacks && !presents && !sapp_window_valid(second) && _sapp_tc.app.quit_ordered);
+        !callbacks && !presents && !sapp_tc_window_valid(second) && _sapp_tc.app.quit_ordered);
     sapp_quit();
 }
 }
@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
     sapp_desc desc{}; desc._tc_draw_while_hidden = launchHidden; desc.width = 101; desc.height = 77;
     desc.high_dpi = !noHighDpi; desc.init_cb = initialized; desc.frame_cb = visibilityFrame;
     if (coveredFirst) desc.frame_cb = []() {
-        check("covered first frame follows init", didInitialize && sapp_window_occluded({0}));
+        check("covered first frame follows init", didInitialize && sapp_tc_window_occluded({0}));
         ++callbacks; sapp_quit();
     };
     sapp_run(&desc);

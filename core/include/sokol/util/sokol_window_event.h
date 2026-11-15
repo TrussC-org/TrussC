@@ -22,6 +22,7 @@ static inline bool _sapp_tc_event_wakes(sapp_event_type type) {
     }
     return false;
 }
+// [TrussC] Shared native fork record.
 struct _sapp_tc_event_result {
     bool delivered = false;
     bool client_threw = false;
@@ -63,7 +64,7 @@ static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event
     _sapp_tc_event_result result{true, false};
     try { w->desc.event_cb(event, {id}, w->desc.user_data); }
     catch (...) { result.client_threw = true; } // Report failure without unwinding through an OS callback.
-    if (auto* live = lookup(sapp_window{id})) live->in_tick = busy;
+    if (auto* live = lookup(sapp_tc_window{id})) live->in_tick = busy;
     return result;
 }
 
@@ -71,9 +72,10 @@ static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event
 // The local record is only a view of that state; it owns no native resources.
 template<class State>
 static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input) noexcept {
+    // [TrussC] Shared native fork record.
     struct Client {
         uint32_t win_id = 0;
-        sapp_window_desc desc{};
+        sapp_tc_window_desc desc{};
         bool ready, in_tick = false, input_delivered = false, wake_on_input = false;
         bool (*events_enabled)() = nullptr;
         int win_width, win_height, fb_width, fb_height;
@@ -81,7 +83,7 @@ static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input)
         state.window_width, state.window_height, state.framebuffer_width, state.framebuffer_height};
     client.desc.user_data = &state;
     if (state.desc.event_cb || state.desc.event_userdata_cb) {
-        client.desc.event_cb = [](const sapp_event* event, sapp_window, void* user) {
+        client.desc.event_cb = [](const sapp_event* event, sapp_tc_window, void* user) {
             auto& receiver = *static_cast<State*>(user);
             if (receiver.desc.event_cb) receiver.desc.event_cb(event);
             else receiver.desc.event_userdata_cb(event, receiver.desc.user_data);
@@ -89,7 +91,7 @@ static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input)
     }
     sapp_event event = *input;
     _sapp_tc_deliver_event(&client, &event, state.frame_count,
-        [&](sapp_window handle) { return handle.id == 0 ? &client : nullptr; });
+        [&](sapp_tc_window handle) { return handle.id == 0 ? &client : nullptr; });
     const bool consumed = state.event_consumed;
     state.event_consumed = false;
     return consumed;

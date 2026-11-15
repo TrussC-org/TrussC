@@ -82,7 +82,7 @@ NSWindow* visibleDialogOwner(const internal::DialogInputs& inputs) {
     auto nativeVisible = [](Window* window) -> NSWindow* {
         if (!window || !window->isOpen()) return nil;
         auto handle = internal::WindowRequestAccess::binding(*window).handle;
-        NSWindow* native = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(handle);
+        NSWindow* native = (__bridge NSWindow*)(void*)sapp_tc_window_macos_get_window(handle);
         return native.isVisible && !native.isMiniaturized ? native : nil;
     };
     if (auto requester = inputs.requestingWindow.lock()) {

@@ -21,7 +21,7 @@ using GLXDrawable=unsigned long;
 using Display=int; using GLXContext=void*;
 using GLXFBConfig=int;
 constexpr int None=0, False=0;
-struct sapp_window { uint32_t id; };
+struct sapp_tc_window { uint32_t id; };
 struct XErrorEvent { int error_code; };
 using Handler=int(*)(Display*,XErrorEvent*);
 struct _sapp_tc_window_t {
@@ -66,7 +66,7 @@ static GLXDrawable glXCreateWindow(Display*,GLXFBConfig,unsigned long xwin,const
     windowLive=true;return 12;
 }
 static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*,int){}
-static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h){auto*w=_sapp_tc.windows[0];return w&&h.id==w->win_id?w:nullptr;}
+static _sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h){auto*w=_sapp_tc.windows[0];return w&&h.id==w->win_id?w:nullptr;}
 using _sapp_tc_x11_surface_t=GLXDrawable;
 '''
 code += '\n'.join(body(marker) for marker in (

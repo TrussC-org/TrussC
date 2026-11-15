@@ -46,7 +46,7 @@ def generate(source):
     code = r'''
 namespace nativeFixture {
 struct NativeRecord {
-    sapp_window_desc desc{};
+    sapp_tc_window_desc desc{};
     tcCoreTest::InjectedWindow& producer;
     unsigned win_id;
     bool iconified=false,occluded=false,trust_hidden_signals=true,draw_while_hidden=false,is_main=false;
@@ -69,7 +69,7 @@ struct Record:NativeRecord {
 };
 using _sapp_tc_window_t=Record;
 Record* live=nullptr;
-Record* _sapp_tc_lookup(sapp_window h){return live&&live->win_id==h.id?live:nullptr;}
+Record* _sapp_tc_lookup(sapp_tc_window h){return live&&live->win_id==h.id?live:nullptr;}
 void _sapp_tc_send_type(Record* w,sapp_event_type type){w->send(type);}
 void _sapp_tc_mac_select_source(Record*){}
 ''' + declaration(source, '_sapp_tc_mac_observe') + body(source, 'static _sapp_tc_window_t* _sapp_tc_mac_live(') + body(source, 'static void _sapp_tc_mac_update_suspension(')
@@ -88,7 +88,7 @@ void observe(Record& w,bool iconic,bool covered) {
 namespace win {
 using Record=NativeRecord;using _sapp_tc_window_t=Record;
 Record* live=nullptr;
-Record* _sapp_tc_lookup(sapp_window h){return live&&live->win_id==h.id?live:nullptr;}
+Record* _sapp_tc_lookup(sapp_tc_window h){return live&&live->win_id==h.id?live:nullptr;}
 void _sapp_tc_win32_app_event(Record* w,sapp_event_type type){w->send(type);}
 ''' + body(source, 'static void _sapp_tc_win32_observe_occlusion(') + r'''
 constexpr int WM_SIZE=1,SIZE_MINIMIZED=1;
@@ -98,7 +98,7 @@ int minimize(Record* w,bool minimized){int wParam=minimized?SIZE_MINIMIZED:0;swi
 namespace x11 {
 using Record=NativeRecord;using _sapp_tc_window_t=Record;
 Record* live=nullptr;
-Record* _sapp_tc_lookup(sapp_window h){return live&&live->win_id==h.id?live:nullptr;}
+Record* _sapp_tc_lookup(sapp_tc_window h){return live&&live->win_id==h.id?live:nullptr;}
 void _sapp_tc_x11_app_event(Record* w,sapp_event_type type){w->send(type);}
 constexpr int PropertyNewValue=1,IconicState=1,NormalState=2,VisibilityUnobscured=0,VisibilityPartiallyObscured=1,VisibilityFullyObscured=2;
 struct Event{struct{int state=PropertyNewValue,atom=1;}xproperty;struct{int state;}xvisibility;};
@@ -128,8 +128,8 @@ using _sapp_tc_window_t=Record;
 struct {bool mouse_locked=true;Record* lock_owner=nullptr;int display=0;
     struct{bool available=true;int major_opcode=55;}xi;struct{Record* main=nullptr;}app;
 }_sapp_tc;
-Record* _sapp_tc_lookup(sapp_window h){auto* w=_sapp_tc.lock_owner;return w&&h.id==w->win_id?w:nullptr;}
-bool visible(sapp_window){return true;}
+Record* _sapp_tc_lookup(sapp_tc_window h){auto* w=_sapp_tc.lock_owner;return w&&h.id==w->win_id?w:nullptr;}
+bool visible(sapp_tc_window){return true;}
 bool _sapp_tc_native_hidden(const Record*){return false;}
 constexpr int GenericEvent=1,XI_RawMotion=17;
 struct XIRawEvent{struct{int mask_len=1;unsigned char* mask;}valuators;double* raw_values;};
@@ -147,7 +147,7 @@ uint32_t _sapp_tc_x11_mods(unsigned){return 0;}
     code += r'''
 void motion(Record& w,double dx,double dy){
     _sapp_tc.lock_owner=&w;_sapp_tc.app.main=&w;_sapp_tc.mouse_locked=true;
-    w.operations.readMetadata=[](sapp_window handle,void*,sapp_tc_window_metadata& out){return readMetadata(handle,&out);};
+    w.operations.readMetadata=[](sapp_tc_window handle,void*,sapp_tc_window_metadata& out){return readMetadata(handle,&out);};
     unsigned char mask=3;double values[]={dx,dy};XIRawEvent raw{{1,&mask},values};XEvent e;e.xcookie.data=&raw;process(&e);
 }
 }

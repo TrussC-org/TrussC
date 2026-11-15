@@ -1,6 +1,6 @@
 // Control a fullscreen app from a phone on the same trusted LAN.
 // Open the on-screen URL for color radios, a brightness fader, and live logs.
-// A private IPv4 bind, per-launch token, and payload/value limits bound input.
+// A private-LAN (or loopback) bind, per-launch token, and payload/value limits bound input.
 // Workers use runOnMainThread with a weak owner; onLog fills a locked ring.
 // Escape stops and joins the server. HTTP has no TLS; see README.md.
 #include "tcApp.h"
@@ -14,14 +14,9 @@ tcApp::tcApp() : server(make_unique<httplib::Server>()) {}
 tcApp::~tcApp() = default;
 
 void tcApp::setup() {
-    // Bind the first up private IPv4, never 0.0.0.0; fall back to loopback.
-    string address = "127.0.0.1";
-    for (const auto& entry : listNetworkInterfaces()) {
-        if (entry.isUp && entry.isIPv4 && !entry.isLoopback && isPrivate(entry.address)) {
-            address = entry.address;
-            break;
-        }
-    }
+    // Bind one private LAN interface selected by getLocalIp(), never 0.0.0.0.
+    string address = getLocalIp();
+    if (!isPrivate(address)) address = "127.0.0.1";   // never expose the panel on a public address
     // Fresh 128-bit token per launch; show it only on screen.
     random_device source;
     uniform_int_distribution<int> byte(0, 255);
