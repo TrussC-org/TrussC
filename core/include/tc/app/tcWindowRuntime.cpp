@@ -1031,7 +1031,7 @@ sg_pixel_format pixelFormat(sapp_pixel_format format) {
         default: return SG_PIXELFORMAT_NONE;
     }
 }
-bool injectEvent(sapp_window handle, void*, const sapp_event* event) { return sapp_window_inject_event(handle, event); }
+bool sendEvent(sapp_window handle, void*, sapp_event* event) { return sendNativeWindowEvent(handle, event); }
 bool closeRecorded(sapp_window handle, void*) { return sapp_tc_window_close_recorded(handle); }
 bool readMetadata(sapp_window handle, void*, sapp_tc_window_metadata& out) {
     return sapp_tc_window_read_metadata(handle, &out);
@@ -1103,7 +1103,7 @@ WindowContext* nonWindowContextIfInitialized() noexcept { return initializedNonW
 const WindowNativeOperations& productionWindowOperations() {
     static const WindowNativeOperations operations{readMetadata, acquireSwapchain, activate,
         nativeWindowSetTitle, nativeWindowSetSize, nativeWindowSetPosition, nativeWindowPosition,
-        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen, closeRecorded, injectEvent,
+        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen, closeRecorded, sendEvent,
         nativeWindowBringToFront};
     return operations;
 }
@@ -1551,7 +1551,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
         // A raw listener can change pointer lock; keep this move's original
         // button-bit reliability for the entire dispatch.
         const bool recoverButtonsOnMove = ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && !delivery.pointerLocked &&
-            (ev->button_snapshot || mouseMoveHasReliableButtonBits(delivery));
+            ((delivery.injected && delivery.heldButtonSnapshot) || mouseMoveHasReliableButtonBits(delivery));
 
         // Keep this event's coordinate basis through raw-listener reentry.
         const float dpi = std::isfinite(delivery.dpiScale) && delivery.dpiScale > 0
@@ -1602,7 +1602,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
         if (isTouch && !finiteTouchAction(touchAction)) return;
         unsigned int recoveryButtonsAtEntry = ctx.pressedMouseButtons;
         // Snapshot-held input is also a press admission, even without a typed DOWN.
-        if (ev->button_snapshot && ev->type == SAPP_EVENTTYPE_MOUSE_MOVE) {
+        if ((delivery.injected && delivery.heldButtonSnapshot) && ev->type == SAPP_EVENTTYPE_MOUSE_MOVE) {
             for (int button = 0; button < SAPP_MAX_MOUSEBUTTONS; ++button) {
                 if (!mouseButtonLostOnMove(ev, button)) {
                     recoveryButtonsAtEntry |= mouseButtonBit(button);
@@ -1782,7 +1782,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_MOUSE_MOVE: {
                 if (!dispatch.current()) break;
                 const Vec2 delta = position(ev->mouse_x * scale, ev->mouse_y * scale);
-                if (ev->button_snapshot) {
+                if ((delivery.injected && delivery.heldButtonSnapshot)) {
                     for (int button = 0; button < SAPP_MAX_MOUSEBUTTONS; ++button) {
                         if (!mouseButtonLostOnMove(ev, button)) {
                             const unsigned bit = mouseButtonBit(button);
@@ -1956,6 +1956,81 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 break;
         }
     }
+namespace {
+static inline bool injectedKeyDefined(int key) {
+    return key == SAPP_KEYCODE_SPACE || key == SAPP_KEYCODE_APOSTROPHE ||
+        (key >= SAPP_KEYCODE_COMMA && key <= SAPP_KEYCODE_9) ||
+        key == SAPP_KEYCODE_SEMICOLON || key == SAPP_KEYCODE_EQUAL ||
+        (key >= SAPP_KEYCODE_A && key <= SAPP_KEYCODE_RIGHT_BRACKET) ||
+        key == SAPP_KEYCODE_GRAVE_ACCENT ||
+        (key >= SAPP_KEYCODE_WORLD_1 && key <= SAPP_KEYCODE_WORLD_2) ||
+        (key >= SAPP_KEYCODE_ESCAPE && key <= SAPP_KEYCODE_END) ||
+        (key >= SAPP_KEYCODE_CAPS_LOCK && key <= SAPP_KEYCODE_PAUSE) ||
+        (key >= SAPP_KEYCODE_F1 && key <= SAPP_KEYCODE_F25) ||
+        (key >= SAPP_KEYCODE_KP_0 && key <= SAPP_KEYCODE_KP_EQUAL) ||
+        (key >= SAPP_KEYCODE_LEFT_SHIFT && key <= SAPP_KEYCODE_MENU);
+}
+static inline bool validInjectedWindowEvent(const sapp_event& e) {
+    // Injection carries input only. OS state and borrowed drop/clipboard payloads remain native.
+    switch (e.type) {
+        case SAPP_EVENTTYPE_KEY_DOWN: case SAPP_EVENTTYPE_KEY_UP:
+            // Bound (platform): injection rejects keys outside the SDK key domain before delivery.
+            return injectedKeyDefined(e.key_code);
+        case SAPP_EVENTTYPE_CHAR:
+            // Bound (encoding): text injection rejects values outside Unicode scalars before delivery.
+            return e.char_code <= 0x10ffff && !(e.char_code >= 0xd800 && e.char_code <= 0xdfff);
+        case SAPP_EVENTTYPE_MOUSE_DOWN: case SAPP_EVENTTYPE_MOUSE_UP:
+            // Bound (platform): injection rejects buttons outside the SDK button domain before delivery.
+            if (e.mouse_button < SAPP_MOUSEBUTTON_LEFT || e.mouse_button > SAPP_MOUSEBUTTON_MIDDLE) return false;
+            [[fallthrough]];
+        case SAPP_EVENTTYPE_MOUSE_MOVE: case SAPP_EVENTTYPE_MOUSE_ENTER: case SAPP_EVENTTYPE_MOUSE_LEAVE:
+        case SAPP_EVENTTYPE_MOUSE_SCROLL:
+            // Bound (numeric): injection rejects nonfinite mouse components before delivery or state mutation.
+            return std::isfinite(e.mouse_x) && std::isfinite(e.mouse_y) &&
+                std::isfinite(e.mouse_dx) && std::isfinite(e.mouse_dy) &&
+                std::isfinite(e.scroll_x) && std::isfinite(e.scroll_y);
+        case SAPP_EVENTTYPE_TOUCHES_BEGAN: case SAPP_EVENTTYPE_TOUCHES_MOVED:
+        case SAPP_EVENTTYPE_TOUCHES_ENDED: case SAPP_EVENTTYPE_TOUCHES_CANCELLED:
+            // Bound (numeric): injection rejects nonfinite touch-relative components before delivery or state mutation.
+            if (!std::isfinite(e.mouse_dx) || !std::isfinite(e.mouse_dy)) return false;
+            // Bound (platform): invalid touch counts reject injection before array reads or state mutation.
+            if (e.num_touches < 0 || e.num_touches > SAPP_MAX_TOUCHPOINTS) return false;
+            // Bound (numeric): injection rejects nonfinite touch positions before delivery or state mutation.
+            for (int i = 0; i < e.num_touches; ++i)
+                if (!std::isfinite(e.touches[i].pos_x) || !std::isfinite(e.touches[i].pos_y)) return false;
+            return true;
+        case SAPP_EVENTTYPE_INVALID: case SAPP_EVENTTYPE_RESIZED: case SAPP_EVENTTYPE_ICONIFIED:
+        case SAPP_EVENTTYPE_RESTORED: case SAPP_EVENTTYPE_FOCUSED: case SAPP_EVENTTYPE_UNFOCUSED:
+        case SAPP_EVENTTYPE_SUSPENDED: case SAPP_EVENTTYPE_RESUMED: case SAPP_EVENTTYPE_QUIT_REQUESTED:
+        case SAPP_EVENTTYPE_CLIPBOARD_PASTED: case SAPP_EVENTTYPE_FILES_DROPPED: case SAPP_EVENTTYPE_TC_DEVICE_LOST:
+        case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+        case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
+        case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return false;
+    }
+    return false;
+}
+
+// The synchronous native gate delivers this context once. Consume it before
+// any callbacks so nested native input cannot inherit the MCP snapshot.
+struct InjectedWindowEvent {
+    Window* window;
+    bool heldButtonSnapshot;
+    bool pending = true;
+};
+thread_local InjectedWindowEvent* injectedWindowEvent = nullptr;
+}
+bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonSnapshot) {
+    const auto& binding = WindowRequestAccess::binding(window);
+    if (!input || !validInjectedWindowEvent(*input) || !binding.operations || !binding.operations->sendEvent) return false;
+    sapp_event event = *input;
+    InjectedWindowEvent injection{&window, heldButtonSnapshot};
+    struct Scope {
+        InjectedWindowEvent* previous = injectedWindowEvent;
+        ~Scope() { injectedWindowEvent = previous; }
+    } scope;
+    injectedWindowEvent = &injection;
+    return binding.operations->sendEvent(binding.handle, binding.user, &event);
+}
 void dispatchWindowEventForTests(const sapp_event* input, Window& window) {
     if (!input) return;
     const auto& b = WindowRequestAccess::binding(window);
@@ -1971,7 +2046,7 @@ void dispatchWindowEventForTests(const sapp_event* input, Window& window) {
     enterWindowEvent(input, b.handle, &window, &delivery);
 }
 void dispatchWindowDisplayEventForTests(const sapp_event* event, Window& window) {
-    sapp_window_inject_event(WindowRequestAccess::binding(window).handle, event);
+    injectWindowEvent(window, event);
 }
 void singleWindowEvent(const sapp_event* event) noexcept {
     if (!event) return;
@@ -2016,6 +2091,11 @@ void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, c
             // step 1; desktop admission below still requires live metadata.
             delivery = read ? WindowEventContext{metadata.dpi_scale, metadata.pointer_locked, metadata.reliable_button_bits}
                             : WindowEventContext{WindowRequestAccess::context(*window).dpiScale, false, false};
+        }
+        if (injectedWindowEvent && injectedWindowEvent->window == window && injectedWindowEvent->pending) {
+            injectedWindowEvent->pending = false;
+            delivery.injected = true;
+            delivery.heldButtonSnapshot = injectedWindowEvent->heldButtonSnapshot;
         }
         WindowEntryScope entry(*window, false, false, false);
         if (!entry) return;

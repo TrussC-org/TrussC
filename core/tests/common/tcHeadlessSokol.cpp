@@ -7,6 +7,7 @@
 #include "sokol/sokol_log.h"
 #define SOKOL_APP_TC_IMPL
 #include "sokol/sokol_app_tc.h"
+#include "../../platform/tcNativeWindowEvent.h"
 
 #undef SOKOL_GLCORE
 #undef SOKOL_GLES3

@@ -206,8 +206,8 @@ void pointers(Window& w, Native& n) {
         clearInput(w); n.send(event(SAPP_EVENTTYPE_MOUSE_LEAVE)); n.send(event(SAPP_EVENTTYPE_MOUSE_ENTER,20,30));
         check("initial leave cannot create position anchor",delta==Vec2(0,0));
         clearInput(w); n.metadata.dpi_scale=1;
-        auto snapshot=event(SAPP_EVENTTYPE_MOUSE_MOVE,10,20,SAPP_MODIFIER_RMB);snapshot.button_snapshot=true;
-        n.send(snapshot);
+        auto snapshot=event(SAPP_EVENTTYPE_MOUSE_MOVE,10,20,SAPP_MODIFIER_RMB);
+        internal::injectWindowEvent(w,&snapshot,true);
         check("drag-only snapshot does not fabricate press",presses==1&&trussc::internal::WindowRequestAccess::context(w).snapshotMouseButtons==2&&trussc::internal::WindowRequestAccess::context(w).mouseButton==1&&delta==Vec2(0,0));
         n.send(event(SAPP_EVENTTYPE_MOUSE_LEAVE)); n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,30,40));
         check("missing snapshot-held button recovers release once",releases==2&&release==Vec2(10,20)&&trussc::internal::WindowRequestAccess::context(w).snapshotMouseButtons==0);
@@ -335,7 +335,7 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
         auto& b=internal::WindowRequestAccess::binding(w);b.lastDeliveredHidden=false;
         int rawCount=0,typed=0;bool rawFirst=true;
         std::vector<EventListener> listeners;
-        listeners.push_back(w.events().rawEvent.listen([&](const sapp_event& e){++rawCount;check("native target source and dimensions",internal::currentWindowCtx()==&internal::WindowRequestAccess::context(w)&&internal::WindowRequestAccess::binding(w).handle.id==n.win_id&&e.source==SAPP_EVENTSOURCE_REAL&&e.frame_count==123&&internal::WindowRequestAccess::binding(w).metadata.dpi_scale==n.metadata.dpi_scale&&e.framebuffer_width==n.metadata.fb_width);check("input wake precedes callback",!_sapp_tc_event_wakes(e.type)||n.input_delivered);}));
+        listeners.push_back(w.events().rawEvent.listen([&](const sapp_event& e){++rawCount;check("native target and dimensions",internal::currentWindowCtx()==&internal::WindowRequestAccess::context(w)&&internal::WindowRequestAccess::binding(w).handle.id==n.win_id&&e.frame_count==123&&internal::WindowRequestAccess::binding(w).metadata.dpi_scale==n.metadata.dpi_scale&&e.framebuffer_width==n.metadata.fb_width);check("input wake precedes callback",!_sapp_tc_event_wakes(e.type)||n.input_delivered);}));
         const bool processEvent = type == SAPP_EVENTTYPE_QUIT_REQUESTED || type == SAPP_EVENTTYPE_TC_DEVICE_LOST || type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED;
         auto notify=[&](auto&){rawFirst &= rawCount == (processEvent ? 0 : 1); ++typed;};
         listeners.push_back(w.events().keyPressed.listen(notify));listeners.push_back(w.events().keyReleased.listen(notify));
@@ -385,8 +385,8 @@ void injections(Window& w,Native& n,Window& peer) {
     FixtureWindowScope fixture(w);
     clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=2;
     internal::currentWindowCtx()=&trussc::internal::WindowRequestAccess::context(peer);mcp::setToolLevel(mcp::ToolLevel::Control);
-    Vec2 pos,delta;int raw=0,press=0,release=0,chars=0;bool injected=true;std::shared_ptr<App> oldApp;
-    auto r=w.events().rawEvent.listen([&](const sapp_event& e){++raw;if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN)check("MCP raw press has held button bit",e.modifiers&SAPP_MODIFIER_LMB);if(e.type==SAPP_EVENTTYPE_MOUSE_UP)check("MCP raw release clears button bit",!(e.modifiers&SAPP_MODIFIER_LMB));injected&=e.source==SAPP_EVENTSOURCE_INJECTED&&internal::currentWindowCtx()==&internal::WindowRequestAccess::context(w)&&internal::WindowRequestAccess::binding(w).handle.id==n.win_id;if(e.type==SAPP_EVENTTYPE_CHAR)++chars;});
+    Vec2 pos,delta;int raw=0,press=0,release=0,chars=0;bool targetMatches=true;std::shared_ptr<App> oldApp;
+    auto r=w.events().rawEvent.listen([&](const sapp_event& e){++raw;if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN)check("MCP raw press has held button bit",e.modifiers&SAPP_MODIFIER_LMB);if(e.type==SAPP_EVENTTYPE_MOUSE_UP)check("MCP raw release clears button bit",!(e.modifiers&SAPP_MODIFIER_LMB));targetMatches&=internal::currentWindowCtx()==&internal::WindowRequestAccess::context(w)&&internal::WindowRequestAccess::binding(w).handle.id==n.win_id;if(e.type==SAPP_EVENTTYPE_CHAR)++chars;});
     auto m=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){pos=e.pos;delta=e.delta;});
     auto d=w.events().mouseDragged.listen([&](MouseDragEventArgs& e){pos=e.pos;delta=e.delta;});
     auto p=w.events().mousePressed.listen([&](MouseEventArgs& e){++press;check("temporary click modifiers held through callback",!e.shift||isShiftPressed());});
@@ -401,18 +401,21 @@ void injections(Window& w,Native& n,Window& peer) {
     auto consumed=w.events().mousePressed.listen([](MouseEventArgs& e){e.consumed=true;},-100);
     tool("tc_mouse_click",{{"x",40},{"y",50},{"shift",true}});check("click release has fresh consumption and modifiers restore",release==3&&!trussc::internal::WindowRequestAccess::context(w).keysPressed.contains(SAPP_KEYCODE_LEFT_SHIFT));consumed.disconnect();
     tool("tc_key_press",{{"key",SAPP_KEYCODE_A},{"shift",true}});tool("tc_key_release",{{"key",SAPP_KEYCODE_A},{"shift",true}});
-    check("key input never guesses CHAR",chars==0&&injected&&raw==13&&trussc::internal::WindowRequestAccess::context(w).keysPressed.empty());
+    check("key input never guesses CHAR",chars==0&&targetMatches&&raw==13&&trussc::internal::WindowRequestAccess::context(w).keysPressed.empty());
     check("MCP restores peer caller",internal::currentWindowCtx()==&trussc::internal::WindowRequestAccess::context(peer));
-    auto replay=event(SAPP_EVENTTYPE_CHAR);replay.source=SAPP_EVENTSOURCE_REPLAYED;
-    check("explicit replay text admitted",n.operations.injectEvent({n.win_id},&n,&replay)&&chars==1);
+    auto text=event(SAPP_EVENTTYPE_CHAR);
+    check("explicit text admitted",internal::injectWindowEvent(w,&text)&&chars==1);
     const int before=raw;
     auto invalid=event(SAPP_EVENTTYPE_MOUSE_MOVE,std::numeric_limits<float>::infinity());
-    check("native invalid coordinates reject before state change",!n.operations.injectEvent({n.win_id},&n,&invalid)&&raw==before);
+    check("native invalid coordinates reject before state change",!internal::injectWindowEvent(w,&invalid)&&raw==before);
     invalid=event(SAPP_EVENTTYPE_TOUCHES_MOVED);invalid.num_touches=SAPP_MAX_TOUCHPOINTS+1;
-    check("native oversized touch array rejected",!n.operations.injectEvent({n.win_id},&n,&invalid)&&raw==before);
-    invalid.num_touches=-1;check("native negative touch count rejected",!n.operations.injectEvent({n.win_id},&n,&invalid));
-    invalid=event(SAPP_EVENTTYPE_SUSPENDED);check("injection cannot change OS visibility",!n.operations.injectEvent({n.win_id},&n,&invalid));
-    invalid=event(SAPP_EVENTTYPE_MOUSE_MOVE);check("stale injection target rejected",!n.operations.injectEvent({n.win_id+1},&n,&invalid));
+    check("native oversized touch array rejected",!internal::injectWindowEvent(w,&invalid)&&raw==before);
+    invalid.num_touches=-1;check("native negative touch count rejected",!internal::injectWindowEvent(w,&invalid));
+    invalid=event(SAPP_EVENTTYPE_SUSPENDED);check("injection cannot change OS visibility",!internal::injectWindowEvent(w,&invalid));
+    invalid=event(SAPP_EVENTTYPE_MOUSE_MOVE);
+    const auto nativeId=n.win_id; ++n.win_id;
+    check("stale injection target rejected",!internal::injectWindowEvent(w,&invalid));
+    n.win_id=nativeId;
     const int rawBefore=raw;
     int invalidCallbacks=0;
     struct InvalidApp : App { int& calls; explicit InvalidApp(int& calls):calls(calls){} void windowResized(int,int)override{++calls;} };
@@ -438,10 +441,10 @@ void injections(Window& w,Native& n,Window& peer) {
     tool("tc_mouse_click",{{"x",10},{"y",10}});
     check("pending native close cannot split an admitted click",pendingCloseApp->presses==1&&pendingCloseApp->releases==1);
     n.closed=false;closeDuringPress.disconnect();w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
-    auto nestedKey=w.events().mousePressed.listen([&](MouseEventArgs&){auto key=event(SAPP_EVENTTYPE_KEY_DOWN);key.key_code=SAPP_KEYCODE_B;key.modifiers=SAPP_MODIFIER_SHIFT;n.operations.injectEvent({n.win_id},&n,&key);});
+    auto nestedKey=w.events().mousePressed.listen([&](MouseEventArgs&){auto key=event(SAPP_EVENTTYPE_KEY_DOWN);key.key_code=SAPP_KEYCODE_B;key.modifiers=SAPP_MODIFIER_SHIFT;internal::injectWindowEvent(w,&key);});
     tool("tc_mouse_click",{{"x",10},{"y",10},{"shift",true}});
     check("temporary click modifiers preserve callback changes to other keys",trussc::internal::WindowRequestAccess::context(w).keysPressed.contains(SAPP_KEYCODE_B)&&!trussc::internal::WindowRequestAccess::context(w).keysPressed.contains(SAPP_KEYCODE_LEFT_SHIFT));
-    nestedKey.disconnect();auto keyUp=event(SAPP_EVENTTYPE_KEY_UP);keyUp.key_code=SAPP_KEYCODE_B;n.operations.injectEvent({n.win_id},&n,&keyUp);
+    nestedKey.disconnect();auto keyUp=event(SAPP_EVENTTYPE_KEY_UP);keyUp.key_code=SAPP_KEYCODE_B;internal::injectWindowEvent(w,&keyUp);
     auto fail=w.events().rawEvent.listen([](const sapp_event& e){if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN)throw 239;});
     tool("tc_mouse_click",{{"x",10},{"y",10},{"shift",true}});
     check("click modifier restoration survives failed raw delivery",!trussc::internal::WindowRequestAccess::context(w).keysPressed.contains(SAPP_KEYCODE_LEFT_SHIFT));
@@ -534,7 +537,7 @@ void abortedClickOwnership(Window& w, Native& n) {
         int phase=0,typed=0;bool nested=false;
         auto count=w.events().mousePressed.listen([&](MouseEventArgs&){++typed;},EventPriority::BeforeApp);
         n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,20,30,SAPP_MODIFIER_LMB));a->consume=false;
-        auto raw=w.events().rawEvent.listen([&](const sapp_event& e){if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN&&(phase==1||e.source==SAPP_EVENTSOURCE_REAL))throw 239;});
+        auto raw=w.events().rawEvent.listen([&](const sapp_event& e){if(e.type==SAPP_EVENTTYPE_MOUSE_DOWN&&(phase==1||nested))throw 239;});
         auto after=w.events().mousePressed.listen([&](MouseEventArgs&){if(!nested){nested=true;n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,120,30,SAPP_MODIFIER_LMB));}},EventPriority::AfterApp);
         tool("tc_mouse_click",{{"x",20},{"y",30}});
         auto intact=[&]{return trussc::internal::WindowRequestAccess::context(w).grabbedNode.lock()==a&&trussc::internal::WindowRequestAccess::context(w).pressedMouseButtons==1&&trussc::internal::WindowRequestAccess::context(w).mousePressed&&a->releases==0&&app->releases==0;};
@@ -703,7 +706,7 @@ void newestPressMatrix(Window& w, Native& n) {
             beforeA=a->releases;beforeB=b->releases;beforeApp=app->releases;
             a->consumePress=b->consumePress=a->consumeRelease=b->consumeRelease=true;
             if(newer==0)send(event(SAPP_EVENTTYPE_MOUSE_DOWN,x,30,SAPP_MODIFIER_LMB));
-            if(newer==1){auto e=event(SAPP_EVENTTYPE_MOUSE_DOWN,x*factor,30*factor,SAPP_MODIFIER_LMB);check("matrix injected newer DOWN admitted",n.operations.injectEvent({n.win_id},&n,&e));}
+            if(newer==1){auto e=event(SAPP_EVENTTYPE_MOUSE_DOWN,x*factor,30*factor,SAPP_MODIFIER_LMB);check("matrix injected newer DOWN admitted",internal::injectWindowEvent(w,&e));}
             if(newer==2)touch(SAPP_EVENTTYPE_TOUCHES_BEGAN,42,x);
             if(newer==3)tool("tc_mouse_click",{{"x",x},{"y",30}});
             auto& c=trussc::internal::WindowRequestAccess::context(w);newestEpoch=c.mousePressGenerations[0];
@@ -914,13 +917,13 @@ void finiteExtremes(Window& w, Native& n) {
     auto r=w.events().rawEvent.listen([&](const sapp_event&){++raw;});
     auto m=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){++typed;finite=finite&&std::isfinite(e.delta.x)&&std::isfinite(e.delta.y);});
     const auto previous=trussc::internal::WindowRequestAccess::context(w).lastPointerX;
-    e.mouse_x=-e.mouse_x;e.mouse_y=-e.mouse_y;e.source=SAPP_EVENTSOURCE_REPLAYED;
-    n.operations.injectEvent({n.win_id},&n,&e);
+    e.mouse_x=-e.mouse_x;e.mouse_y=-e.mouse_y;
+    internal::injectWindowEvent(w,&e);
     check("opposite finite extremes never deliver infinite delta",finite);
     check("derived overflow rejects before raw or anchor mutation",raw==0&&typed==0&&trussc::internal::WindowRequestAccess::context(w).lastPointerX==previous);
     clearInput(w);n.metadata.dpi_scale=.5f;
     e.mouse_x=std::numeric_limits<float>::max();e.mouse_y=0;internal::pixelPerfectMode()=false;
-    n.operations.injectEvent({n.win_id},&n,&e);
+    internal::injectWindowEvent(w,&e);
     check("converted position overflow rejects before raw and anchor",raw==0&&typed==0&&!trussc::internal::WindowRequestAccess::context(w).pointerValid);
     clearInput(w);n.metadata.dpi_scale=1;internal::pixelPerfectMode()=true;
     n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,std::numeric_limits<float>::max()*.75f));
@@ -984,10 +987,10 @@ void nestedPointerBasis(Window& w, Native& n) {
 void sourceParity(Window& w, Native& n) {
     FixtureWindowScope fixture(w);
     std::vector<std::string> reference;
-    for (auto source : {SAPP_EVENTSOURCE_REAL,SAPP_EVENTSOURCE_INJECTED,SAPP_EVENTSOURCE_REPLAYED}) {
+    for (bool injected : {false,true}) {
         clearInput(w); n.metadata.dpi_scale=1;
         std::vector<std::string> trace;
-        auto raw=w.events().rawEvent.listen([&](const sapp_event& e){check("real injected replay source tags",e.source==source);trace.push_back("raw:"+std::to_string(e.type));});
+        auto raw=w.events().rawEvent.listen([&](const sapp_event& e){trace.push_back("raw:"+std::to_string(e.type));});
         auto point=[&](const char* name,auto& e){trace.push_back(std::string(name)+":"+std::to_string(e.pos.x)+":"+std::to_string(e.pos.y));};
         auto press=w.events().mousePressed.listen([&](MouseEventArgs& e){point("press",e);});
         auto release=w.events().mouseReleased.listen([&](MouseEventArgs& e){point("release",e);});
@@ -995,10 +998,9 @@ void sourceParity(Window& w, Native& n) {
         auto move=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){point("move",e);trace.push_back(std::to_string(e.delta.x));});
         auto key=w.events().keyPressed.listen([&](KeyEventArgs& e){trace.push_back("key:"+std::to_string(e.key));});
         for(auto e:{event(SAPP_EVENTTYPE_MOUSE_MOVE,100,40),event(SAPP_EVENTTYPE_MOUSE_DOWN,100,40),event(SAPP_EVENTTYPE_MOUSE_MOVE,120,60,SAPP_MODIFIER_LMB),event(SAPP_EVENTTYPE_MOUSE_LEAVE),event(SAPP_EVENTTYPE_MOUSE_ENTER,140,80,SAPP_MODIFIER_LMB),event(SAPP_EVENTTYPE_MOUSE_UP,150,90),event(SAPP_EVENTTYPE_KEY_DOWN),event(SAPP_EVENTTYPE_CHAR)}) {
-            e.source=source;
-            if(source==SAPP_EVENTSOURCE_REAL)n.send(e);else check("injected or replay trace admitted",n.operations.injectEvent({n.win_id},&n,&e));
+            if(!injected)n.send(e);else check("injected trace admitted",internal::injectWindowEvent(w,&e));
         }
-        if(source==SAPP_EVENTSOURCE_REAL)reference=trace;else check("same real injected replay trace produces identical typed data and order",trace==reference);
+        if(!injected)reference=trace;else check("same native and injected trace produces identical typed data and order",trace==reference);
     }
 }
 void touchIsolation(Window& a, Native& an, Window& b, Native& bn) {
