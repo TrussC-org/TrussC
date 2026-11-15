@@ -152,6 +152,7 @@ src/                  # Platform-specific implementations
 ## Documentation
 
 - [GET_STARTED.md](docs/GET_STARTED.md) - Getting started guide
+- [DEBUGGING.md](docs/guides/DEBUGGING.md) - Logs, common symptoms, and crash debugging
 - [API Reference](https://trussc.org/reference/) - Full API reference (web)
 - [Docs search MCP (beta)](docs/GET_STARTED.md#docs-search-for-your-own-ai-mcp-beta) - Let your AI search the TrussC docs at `https://api.trussc.org/mcp`
 - [TrussC_vs_openFrameworks.md](docs/guides/TrussC_vs_openFrameworks.md) - API mapping for oF users
