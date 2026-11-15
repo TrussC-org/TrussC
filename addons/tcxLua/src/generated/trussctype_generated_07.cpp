@@ -243,6 +243,10 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::FilesOpenedEventArgs> t = lua->new_usertype<trussc::FilesOpenedEventArgs>("FilesOpenedEventArgs");
         t["files"] = &trussc::FilesOpenedEventArgs::files;
     }
+    {
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

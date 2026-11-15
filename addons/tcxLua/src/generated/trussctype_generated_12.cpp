@@ -172,71 +172,64 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::FileReader
-            , trussc::FileReader()
+        auto constructors = tcxLuaConstructors<trussc::IesProfile
+            , trussc::IesProfile()
         >();
-        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
-        t["close"] = &trussc::FileReader::close;
-        t["eof"] = &trussc::FileReader::eof;
-        t["isOpen"] = &trussc::FileReader::isOpen;
-        t["open"] = &trussc::FileReader::open;
-        t["readChar"] = &trussc::FileReader::readChar;
-        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
-        t["remaining"] = &trussc::FileReader::remaining;
-        t["seek"] = &trussc::FileReader::seek;
-        t["tell"] = &trussc::FileReader::tell;
+        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile", constructors, sol::call_constructor, constructors);
+        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
+        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
+        t["getSampler"] = &trussc::IesProfile::getSampler;
+        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
+        t["getView"] = &trussc::IesProfile::getView;
+        t["isLoaded"] = &trussc::IesProfile::isLoaded;
+        t["load"] = &trussc::IesProfile::load;
+        t["loadFromString"] = &trussc::IesProfile::loadFromString;
     }
-    lua->new_usertype<trussc::LoadError>("LoadError",
-        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
-        "None", sol::var(trussc::LoadError::None),
-        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
-        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
-        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown),
-        "TooLarge", sol::var(trussc::LoadError::TooLarge),
-        "Cancelled", sol::var(trussc::LoadError::Cancelled));
+    lua->new_usertype<trussc::SendError>("SendError",
+        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
+        "None", sol::var(trussc::SendError::None),
+        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
+        "Disconnected", sol::var(trussc::SendError::Disconnected),
+        "Timeout", sol::var(trussc::SendError::Timeout),
+        "QueueFull", sol::var(trussc::SendError::QueueFull),
+        "NotRunning", sol::var(trussc::SendError::NotRunning),
+        "AllocationFailed", sol::var(trussc::SendError::AllocationFailed));
     {
-        auto constructors = tcxLuaConstructors<trussc::LogEventArgs
-            , trussc::LogEventArgs(trussc::LogLevel, const std::string &)
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["backend"] = &trussc::AudioDeviceInfo::backend;
+        t["channels"] = &trussc::AudioDeviceInfo::channels;
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+        t["sampleRates"] = &trussc::AudioDeviceInfo::sampleRates;
+        t["uniqueId"] = &trussc::AudioDeviceInfo::uniqueId;
+    }
+    {
+        auto constructors = tcxLuaConstructors<trussc::OnceGate
+            , trussc::OnceGate()
+            , trussc::OnceGate(double)
         >();
-        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs", constructors, sol::call_constructor, constructors);
-        t["level"] = &trussc::LogEventArgs::level;
-        t["message"] = &trussc::LogEventArgs::message;
-        t["timestamp"] = &trussc::LogEventArgs::timestamp;
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+        t["reset"] = &trussc::OnceGate::reset;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::EventListener
-            , trussc::EventListener()
-        >();
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
-        t["disconnect"] = &trussc::EventListener::disconnect;
-        t["isConnected"] = &trussc::EventListener::isConnected;
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
     }
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
-    }
-    {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["success"] = &trussc::FileDialogResult::success;
-    }
-    {
-        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
-    }
-    {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
-    }
-    {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["args"] = &trussc::ConsoleEventArgs::args;
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
     }
 }
 #ifdef _MSC_VER
