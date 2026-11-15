@@ -127,6 +127,7 @@ PROVENANCE_COMMITS = {
 
 # Rows whose version is recorded only in the list itself.
 NO_SOURCE = {
+    "earcut.hpp": "unmodified header without a version line; identified upstream commit recorded in the list",
     "luajit-cmake": "vendored CMake scripts without a version line; the commit is recorded only in the list",
 }
 
