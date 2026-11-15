@@ -250,8 +250,13 @@ struct ImmediateSelection {
     BlendMode blend = BlendMode::Alpha;
     bool depth = false;
     uint32_t customBlendId = 0;
+    // Packed StencilDesc value, computed when state changes, never per draw.
+    // Bits: value [0:7], compare [8:10] (sg_compare_func & 7, Always=0), write [11],
+    // inverted mask [12:19], disabled color writes [20]. Default is zero.
+    uint32_t stencilDescKey = 0;
     bool operator==(const ImmediateSelection& other) const {
-        return role == other.role && blend == other.blend && depth == other.depth && customBlendId == other.customBlendId;
+        return role == other.role && blend == other.blend && depth == other.depth &&
+            customBlendId == other.customBlendId && stencilDescKey == other.stencilDescKey;
     }
 };
 inline ImmediateSelection fillSelection(BlendMode blend, bool depth = false, uint32_t customId = blendDescId(BlendDesc{})) {
@@ -291,10 +296,12 @@ struct PipelineSelectionId {
     uint64_t recipe = 0;
     uint64_t variant = 0;
     uint64_t attachments = 0;
+    uint32_t stencilDescKey = 0;
     bool operator==(const PipelineSelectionId&) const = default;
     static PipelineSelectionId immediate(ImmediateSelection selection, uint32_t customBlendId = 0) {
         return {0, uint64_t(selection.role) | (uint64_t(selection.blend) << 8) |
-            (uint64_t(selection.depth) << 16) | (uint64_t(selection.blend == BlendMode::Custom ? selection.customBlendId : customBlendId) << 32)};
+            (uint64_t(selection.depth) << 16) | (uint64_t(selection.blend == BlendMode::Custom ? selection.customBlendId : customBlendId) << 32),
+            0, selection.stencilDescKey};
     }
 };
 struct PipelineSelectionHash {
@@ -305,7 +312,9 @@ struct PipelineSelectionHash {
             hash = (hash ^ uint32_t(value)) * 16777619u;
             hash = (hash ^ uint32_t(value >> 32)) * 16777619u;
         }
-        return hash;
+        // Zero preserves the old hash. Equality adds one integer comparison;
+        // hashing needs only an XOR, with no default-state branch or packing.
+        return hash ^ id.stencilDescKey;
     }
 };
 struct PipelineHandles {
@@ -366,19 +375,29 @@ struct ScissorRect {
     bool active;
 };
 
-// Framework-only layout. Applications borrow the entire byte, never a field.
-constexpr uint8_t frameworkStencilMask = 0x87; // draw-once 0x80, clip 0x07
-struct StencilState {
-    sg_stencil_state raster = [] {
-        sg_stencil_state state = {};
-        state.front.compare = SG_COMPAREFUNC_ALWAYS;
-        state.front.fail_op = state.front.depth_fail_op = state.front.pass_op = SG_STENCILOP_KEEP;
-        state.back = state.front;
-        state.read_mask = state.write_mask = 0xFF;
-        return state;
-    }();
-    sg_color_mask colorWriteMask = SG_COLORMASK_RGBA;
-};
+// Packed once when Style changes. Zero is the untouched default.
+constexpr uint32_t stencilDescKey(const StencilDesc& desc) {
+    return uint32_t(desc.value) | ((uint32_t(desc.test) & 7u) << 8) |
+        (uint32_t(desc.write) << 11) | (uint32_t(desc.mask ^ 0xFFu) << 12) |
+        (uint32_t(!desc.colorWrite) << 20);
+}
+constexpr StencilDesc stencilDescFromKey(uint32_t key) {
+    return {uint8_t(key), StencilTest((key >> 8) & 7u), bool(key & (1u << 11)),
+        uint8_t((key >> 12) ^ 0xFFu), !(key & (1u << 20))};
+}
+inline void applyStencilDesc(sg_pipeline_desc& pipeline, uint32_t key) {
+    auto& stencil = pipeline.stencil;
+    stencil.enabled = true;
+    const auto compare = (key >> 8) & 7u;
+    stencil.front.compare = sg_compare_func(compare ? compare : SG_COMPAREFUNC_ALWAYS);
+    stencil.front.fail_op = stencil.front.depth_fail_op = SG_STENCILOP_KEEP;
+    stencil.front.pass_op = key & (1u << 11) ? SG_STENCILOP_REPLACE : SG_STENCILOP_KEEP;
+    stencil.back = stencil.front;
+    stencil.ref = uint8_t(key);
+    stencil.read_mask = uint8_t((key >> 12) ^ 0xFFu);
+    stencil.write_mask = key & (1u << 11) ? stencil.read_mask : 0;
+    if (key & (1u << 20)) pipeline.colors[0].write_mask = SG_COLORMASK_NONE;
+}
 
 struct TargetCameraState {
     std::shared_ptr<const CameraContext> currentCameraContext;
@@ -471,10 +490,16 @@ struct RenderTarget {
     uint32_t customBlendId = blendDescId(BlendDesc{});
     bool depthTestEnabled = false;
 
-    StencilState stencil;
-    StencilState savedStencil;
-    bool stencilOwned = false;
-    unsigned frameworkStencilClipDepth = 0;
+    uint32_t requestedStencilDescKey = 0; // Retained even without an attachment.
+    uint32_t stencilDescKey = 0; // Effective state: zero without a stencil attachment.
+    bool warnedStencilDesc = false;
+    bool warnedStencilClear = false;
+    bool hasStencil() const { return hasDepth && depthFormat == SG_PIXELFORMAT_DEPTH_STENCIL; }
+    void setStencilDescKey(uint32_t key);
+    void setStencilDesc(const StencilDesc& desc) {
+        const auto key = internal::stencilDescKey(desc);
+        if (requestedStencilDescKey != key) setStencilDescKey(key);
+    }
 
     std::vector<DeferredPbrDraw> deferredPbrDraws;
     std::vector<DeferredPointDraw> deferredPointDraws;
@@ -503,6 +528,7 @@ struct RenderTarget {
         auto& bundle = resources();
         if (!sg_isvalid()) return {};
         id.attachments = pipelineSignature();
+        id.stencilDescKey = stencilDescKey;
         if (bundle.selectionCache) {
             auto found = bundle.selectionCache->find(id);
             if (found != bundle.selectionCache->end())
@@ -521,6 +547,8 @@ struct RenderTarget {
         customBlendDesc = previous.customBlendDesc;
         customBlendId = previous.customBlendId;
         depthTestEnabled = previous.depthTestEnabled;
+        if (requestedStencilDescKey != previous.requestedStencilDescKey)
+            setStencilDescKey(previous.requestedStencilDescKey);
     }
 };
 // Immutable recipe between reset() calls. Last-selection handles never pin a
@@ -541,6 +569,7 @@ public:
             lastOwner_ = std::exchange(other.lastOwner_, 0);
             lastGeneration_ = other.lastGeneration_;
             lastSignature_ = other.lastSignature_;
+            lastStencilDescKey_ = other.lastStencilDescKey_;
             last_ = other.last_;
         }
         return *this;
@@ -557,12 +586,14 @@ public:
     PipelineSelection select(RenderTarget& target) {
         auto& bundle = target.resources();
         if (!sg_isvalid()) return {};
-        if (lastOwner_ == target.ownerId && lastGeneration_ == bundle.generation && lastSignature_ == target.pipelineSignature())
+        if (lastOwner_ == target.ownerId && lastGeneration_ == bundle.generation &&
+            lastSignature_ == target.pipelineSignature() && lastStencilDescKey_ == target.stencilDescKey)
             return {last_.immediate, last_.raw, bundle.rawCache};
         auto selected = target.selectPipeline({revision_, uint64_t(key_.role)}, [&]() -> const PipelineKey& { return key_; });
         lastOwner_ = target.ownerId;
         lastGeneration_ = bundle.generation;
         lastSignature_ = target.pipelineSignature();
+        lastStencilDescKey_ = target.stencilDescKey;
         last_ = selected;
         return {selected.immediate, selected.raw, bundle.rawCache};
     }
@@ -570,6 +601,7 @@ private:
     PipelineKey key_;
     uint64_t revision_ = 0;
     uint64_t lastOwner_ = 0, lastGeneration_ = 0, lastSignature_ = 0;
+    uint32_t lastStencilDescKey_ = 0;
     PipelineHandles last_;
 };
 

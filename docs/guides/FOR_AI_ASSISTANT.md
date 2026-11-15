@@ -719,12 +719,18 @@ fbo.draw(0, 0);                     // Composite to screen
 fbo.draw(0, 0, w, h);              // Scaled
 fbo.copyTo(image);                  // FBO → Image
 fbo.save("output.png");
-// Full stencil ownership on the current target (plain bytes 0–255):
-canvas.begin();
-if (beginStencil()) { clearStencil(5); endStencil(); }
-canvas.end();
-// endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
-// clearStencil outside ownership warns.
+// Stencil bytes belong to the application; no begin/endStencil is needed.
+fbo.begin();
+clearStencil();
+setStencilDesc(StencilDesc::shape());
+drawCircle(100, 100, 60);
+setStencilDesc(StencilDesc::inside());
+drawRect(0, 0, 200, 200);
+resetStencilDesc();
+fbo.end();
+// mask controls comparison and writes; unmasked bits survive.
+// Style push/pop/reset changes the descriptor, never stored stencil values.
+// Each Node starts with default Style; a parent's inside() does not clip children.
 
 // Stencil debugging: ended, owned, single-sample Fbos only.
 fbo.drawStencil(0, 0);              // Opaque gray byte/255, nearest sampling
@@ -735,6 +741,8 @@ if (fbo.readStencil(stencilBytes)) stencilBytes.save("stencil.png");
 - `begin(r,g,b,a)` clears with specified color
 - Use `clear()` inside begin/end to clear to transparent black
 - Nested `begin()` is NOT supported. Must `end()` before another `begin()`.
+- Without a stencil attachment, non-default StencilDesc and clearStencil each
+  warn once per target; drawing uses default state.
 - Stencil diagnostics preserve source color/stencil and reuse an internal R8 Fbo.
   Active/unallocated/MSAA sources warn and are refused; main-target capture is
   unavailable. `readStencil` requires all Fbos ended and returns one-channel U8
@@ -2746,14 +2754,6 @@ int channelCount(TextureFormat fmt)  // Returns the number of channels in a Text
 bool isFloatFormat(TextureFormat fmt)  // Reports whether a TextureFormat uses floating-point components.
 ```
 
-### Graphics - FBO
-
-```cpp
-bool beginStencil()  // Borrows all eight stencil bits on the current drawing target.
-void clearStencil(uint8_t value = 0)  // Replaces all stencil bytes with a plain value while owned.
-void endStencil()  // Returns the whole stencil to 0, ends ownership and restores the saved framework state.
-```
-
 ### Graphics - Shader
 
 ```cpp
@@ -2821,13 +2821,19 @@ void console::stop()  // Disables command delivery from standard input.
 ### graphics
 
 ```cpp
+bool beginStencil() ⚠️deprecated  // Deprecated attachment query; leaves stencil unchanged and may lose its desc across Style resets. Removed in v0.9.
+void clearStencil(uint8_t value = 0)  // Replaces the entire stencil attachment with a byte, without a begin call.
+void endStencil() ⚠️deprecated  // Deprecated helper that clears stencil to 0 and resets the desc; Style resets can drop the desc before end. Removed in v0.9.
 BlendDesc getCustomBlendDesc()  // Returns a copy of the custom blend slot, regardless of the active mode.
 int getHeight()  // Returns the current drawing target's height.
 Mat4 getProjectionMatrix()  // Returns the current drawing target's camera projection matrix.
 Vec2 getSize()  // Returns the width and height of the active drawing target as a Vec2.
+StencilDesc getStencilDesc()  // Returns the current stencil Style descriptor.
 Mat4 getViewMatrix()  // Returns the current drawing target's camera view matrix.
 int getWidth()  // Returns the current drawing target's width.
+void resetStencilDesc()  // Restores the default stencil descriptor without clearing stored bytes or other Style state.
 void setCustomBlendDesc(const BlendDesc & desc)  // Stores a blend equation and source-conversion flag; updates an active Custom mode immediately.
+void setStencilDesc(const StencilDesc & desc)  // Applies one stencil descriptor to subsequent drawing as Style state.
 ```
 
 ### Other
@@ -3276,7 +3282,7 @@ void Fbo::clear()  // Releases the framebuffer resources.
 void Fbo::clearColor(float r, float g, float b, float a)  // Clears the active framebuffer to a solid color.
 bool Fbo::copyTo(Image & image) const  // Copies the framebuffer contents into an Image.
 void Fbo::draw(float x, float y) const [+1]  // Draws the Fbo upright using the current color and blend mode.
-void Fbo::drawStencil(float x, float y) const  // Draws the framebuffer's stencil bytes as an opaque gray image.
+void Fbo::drawStencil(float x, float y) const  // Draws ended single-sample Fbo stencil bytes as an opaque gray image for debugging.
 void Fbo::end()  // Finishes framebuffer rendering and returns to the parent target.
 sg_image Fbo::getColorImage() const  // Returns the underlying sokol color image handle.
 const std::string & Fbo::getDebugName() const  // Returns the Fbo's inspection name.
@@ -3292,7 +3298,7 @@ bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeed
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a top-first CPU RGBA8 buffer.
 bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
-bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads the framebuffer's stencil bytes into one-channel U8 Pixels.
+bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
 void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
@@ -4539,6 +4545,15 @@ fs::path SoundStream::getPath() const  // Returns the stream's recorded file pat
 LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Prepares an audio file for streaming playback.
 ```
 
+### StencilDesc — Sets stencil comparison, writing and color output for drawing; the default leaves stencil unchanged.
+
+```cpp
+StencilDesc StencilDesc::drawOnce()  // Prevents self-overlapping translucent or additive fills and strokes from double-blending; requires clearStencil and a stencil attachment.
+StencilDesc StencilDesc::inside(uint8_t value = 1, uint8_t mask = 255)  // Creates a read-only stencil descriptor that draws where the masked reference and stored byte match.
+StencilDesc StencilDesc::outside(uint8_t value = 1, uint8_t mask = 255)  // Creates a read-only stencil descriptor that draws where the masked reference and stored byte differ.
+StencilDesc StencilDesc::shape(uint8_t value = 1, uint8_t mask = 255)  // Creates a stencil-writing descriptor with color output disabled.
+```
+
 ### StorageBuffer — Owns byte-sized persistent GPU storage and its view (C++ only).
 
 ```cpp
@@ -5268,6 +5283,7 @@ enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }
 enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Identifies a save error.
 enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning, AllocationFailed }  // Describes a send queue rejection or a completed send's outcome.
 enum SoundSource::Kind { Eager, Stream }  // Identifies how a sound source supplies audio data.
+enum StencilTest { Always, Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual }  // Selects the comparison between masked reference and stored stencil bytes.
 enum StrokeCap { Butt, Round, Square }  // Selects the shape of stroke endpoints.
 enum StrokeJoin { Miter, Round, Bevel }  // Selects the shape of stroke corners.
 enum StrokeMesh::CapType { CAP_BUTT, CAP_ROUND, CAP_SQUARE }  // Defines the end-cap shape of an open stroke.

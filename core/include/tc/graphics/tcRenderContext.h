@@ -336,6 +336,7 @@ public:
         style_.blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         style_.customBlendDesc = internal::currentTarget().customBlendDesc;
         style_.customBlendId = internal::currentTarget().customBlendId;
+        style_.stencilDescKey = internal::currentTarget().requestedStencilDescKey;
         styleStack_.push_back(style_);
     }
 
@@ -462,12 +463,22 @@ public:
         applyBlend(style_.blend);
     }
 
+    void setStencilDesc(const StencilDesc& desc) {
+        auto& target = internal::currentTarget();
+        target.setStencilDesc(desc);
+        style_.stencilDescKey = target.requestedStencilDescKey;
+        internal::restoreCurrentPipeline();
+    }
+
 private:
     void applyBlend(BlendMode mode) {
-        internal::currentTarget().currentBlendMode = mode;
-        internal::currentTarget().customBlendDesc = style_.customBlendDesc;
-        internal::currentTarget().customBlendId = style_.customBlendId;
-        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled, style_.customBlendId);
+        auto& target = internal::currentTarget();
+        if (target.requestedStencilDescKey != style_.stencilDescKey)
+            target.setStencilDescKey(style_.stencilDescKey);
+        target.currentBlendMode = mode;
+        target.customBlendDesc = style_.customBlendDesc;
+        target.customBlendId = style_.customBlendId;
+        target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled, style_.customBlendId);
         internal::loadPipeline(internal::active2D(mode));
     }
 public:
@@ -1134,6 +1145,7 @@ private:
         // Mirror of internal::currentWindowContext().currentTarget->currentBlendMode. blend state itself lives outside the
         // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
         // restore it explicitly rather than via this field's value alone.
+        uint32_t stencilDescKey = 0;
         BlendMode blend = BlendMode::Alpha;
         BlendDesc customBlendDesc;
         uint32_t customBlendId = internal::blendDescId(BlendDesc{});
