@@ -154,7 +154,7 @@ void capture() {
           chunkedText.substr(chunkedText.size() - edge) == pattern.substr(pattern.size() - edge) &&
           chunked.omittedBytes() == pattern.size() - edge * 2,
           "tail ring preserves byte order across wrap and arbitrary read boundaries");
-    for (const std::string character : {std::string("¢"), std::string("€"), std::string("𐍈")}) {
+    for (const std::string& character : {std::string("¢"), std::string("€"), std::string("𐍈")}) {
         // Euro text crosses both cuts; an ASCII prefix also splits two-/four-byte head characters.
         std::string unicode = character.size() == 3 ? "" : "x";
         for (size_t i = 0; i < edge; ++i) unicode += character;

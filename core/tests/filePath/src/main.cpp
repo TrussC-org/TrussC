@@ -115,13 +115,15 @@ TC_CORE_TEST_MAIN() {
         fs::create_directories(bin / "data");
         { std::ofstream out(bin / "data/outside-only.txt"); out << "outside"; }
 
-        internal::DataPathState dev{"../../../data"};
+        internal::DataPathState dev;
+        dev.root = "../../../data";
         internal::resolveAppleDataPathRootOnce(dev, exe);
         check("Apple probe: dev bin/data used without Resources/data",
               dev.probed && dev.root == "../../../data");
 
         fs::create_directories(resources);
-        internal::DataPathState release{"../../../data"};
+        internal::DataPathState release;
+        release.root = "../../../data";
         internal::resolveAppleDataPathRootOnce(release, exe);
         check("Apple probe: Resources/data wins over dev bin/data",
               release.probed && release.root == "../Resources/data");
@@ -153,16 +155,20 @@ TC_CORE_TEST_MAIN() {
               dev.root == "../../../data");
 
         fs::create_directories(exe / "data");
-        internal::DataPathState flat{"../../../data"};
+        internal::DataPathState flat;
+        flat.root = "../../../data";
         internal::resolveAppleDataPathRootOnce(flat, exe);
         check("Apple probe: flat data wins over both macOS folders",
               flat.root == "data");
 
-        internal::DataPathState custom{"custom", true};
+        internal::DataPathState custom;
+        custom.root = "custom";
+        custom.userSet = true;
         internal::resolveAppleDataPathRootOnce(custom, exe);
         check("Apple probe: explicit root bypasses selection",
               custom.root == "custom" && !custom.probed);
-        internal::DataPathState early{"../../../data"};
+        internal::DataPathState early;
+        early.root = "../../../data";
         internal::resolveAppleDataPathRootOnce(early, {});
         internal::resolveAppleDataPathRootOnce(early, "/");
         check("Apple probe: unavailable executable path does not latch", !early.probed);
@@ -172,7 +178,8 @@ TC_CORE_TEST_MAIN() {
 
         fs::remove_all(exe / "data");
         { std::ofstream out(exe / "data"); out << "not a folder"; }
-        internal::DataPathState notFolder{"../../../data"};
+        internal::DataPathState notFolder;
+        notFolder.root = "../../../data";
         internal::resolveAppleDataPathRootOnce(notFolder, exe);
         check("Apple probe: regular file named data is not selected",
               notFolder.root == "../Resources/data");
