@@ -286,7 +286,7 @@ class UpstreamTests(unittest.TestCase):
 
     def test_release_check_runs_same_osv_tool_and_records_summary(self):
         import yaml
-        workflow = yaml.load((ROOT / ".github/workflows/release-check.yml").read_text(), Loader=yaml.BaseLoader)
+        workflow = yaml.load((ROOT / ".github/workflows/release-check.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         steps = workflow["jobs"]["osv-check"]["steps"]
         self.assertIn("--osv-only --body osv.md", steps[2]["run"])
         self.assertIn('cat osv.md >> "$GITHUB_STEP_SUMMARY"', steps[3]["run"])
