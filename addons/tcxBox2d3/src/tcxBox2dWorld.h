@@ -9,6 +9,8 @@ namespace tcx::box2d {
 
 // Experimental v3 world. Pixel methods use 30 pixels per meter.
 // Raw ids use Box2D units (meters); the World owns its id.
+// Pixel coordinates match TrussC (y down); no axis flip, so raw Box2D meters
+// are y-down too and upstream samples' negative-y gravity becomes positive here.
 class World {
 public:
     World() = default;
@@ -33,7 +35,7 @@ public:
 
 private:
     b2WorldId worldId_ = b2_nullWorldId;
-    tc::Vec2 gravity_{0.0f, -300.0f}; // upstream's -10 m/s^2 at 30 px/m
+    tc::Vec2 gravity_{0.0f, 300.0f}; // 10 m/s^2 downward in TrussC's y-down pixels
     int subSteps_ = 4;
     int workerCount_ = 1;
 };

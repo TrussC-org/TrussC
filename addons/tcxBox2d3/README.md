@@ -36,8 +36,9 @@ class tcApp : public App {
 `setup()` creates the world, replacing any previous world and its bodies.
 The destructor destroys the world and all contained Box2D objects. World cannot
 be copied or moved. `setGravity()` and `setSubSteps()` also work before setup.
-Default gravity follows v3: (0, -300) px/s². Set positive y gravity for a
-screen coordinate scene as in the example above.
+Default gravity is (0, 300) px/s², 10 m/s² downward. Pixel coordinates match
+TrussC (y down); no axis flip, so raw Box2D meters are y-down too and upstream
+samples' negative-y gravity becomes positive here.
 Non-positive sub-step counts are ignored. `update()` before setup is a no-op.
 
 Each `update()` advances exactly 1/60 second, with four solver sub-steps by
@@ -63,7 +64,10 @@ Managed bodies/shapes in later slices must likewise be destroyed through their
 owners. Use raw calls for settings:
 
 ```cpp
-void setup() override { world.setup(); b2World_SetGravity(world.id(), {0.0f, 10.0f}); }
+void setup() override {
+    world.setup();
+    b2World_SetGravity(world.id(), {0.0f, 10.0f});   // meters, y down
+}
 ```
 
 v3 uses sub-steps, not v2 velocity/position iteration counts. There are no

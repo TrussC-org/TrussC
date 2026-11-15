@@ -28,6 +28,7 @@ void testSubSteps(int count, bool useDefault = false) {
     auto body = fallingBody(world.id());
     auto def = b2DefaultWorldDef();
     def.workerCount = 1;
+    def.gravity = {0.0f, 10.0f};   // the World default: y-down pixels, so +y meters
     auto reference = b2CreateWorld(&def);
     auto expectedBody = fallingBody(reference);
     auto alternate = b2CreateWorld(&def);
@@ -90,9 +91,8 @@ int main() {
         check("worker count changes at runtime", b2World_GetWorkerCount(world.id()) == 2);
         world.update();
         world.setWorkerCount(1);
-        auto defaults = b2DefaultWorldDef();
         auto gravity = b2World_GetGravity(world.id());
-        check("default gravity is upstream gravity", nearlyEqual(gravity.y, defaults.gravity.y));
+        check("default gravity points down in y-down space", gravity.y > 0.0f && nearlyEqual(gravity.y, 10));
         auto body = fallingBody(world.id());
         auto shapeDef = b2DefaultShapeDef();
         check("v3 shape defaults preserved", nearlyEqual(shapeDef.density, 1.0f) && nearlyEqual(shapeDef.material.friction, 0.6f));
