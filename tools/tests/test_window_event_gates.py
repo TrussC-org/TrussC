@@ -6,6 +6,8 @@ from test_web_window_controls import body
 ROOT=Path(__file__).resolve().parents[2]
 source=(ROOT/'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
 global_source=(ROOT/'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
+runtime_source=(ROOT/'core/include/tc/app/tcWindowRuntime.cpp').read_text(encoding='utf-8')
+bridge=(ROOT/'core/platform/tcNativeWindowEvent.h').read_text(encoding='utf-8')
 shared=(ROOT/'core/include/sokol/util/sokol_window_event.h').read_text(encoding='utf-8').replace('#pragma once','')
 code=r'''
 #include "sokol_app_tc.h"
@@ -41,7 +43,25 @@ send=next(re.finditer(r'static void _sapp_tc_send\(_sapp_tc_window_t\* w, sapp_e
 code+=body(source,'struct _sapp_tc_mac_callback_scope {')+';\n'+body(source,'static bool _sapp_tc_mac_busy(')+'\n'
 code+=body(source[send.start():],send.group())+'\n'
 code+='#define __APPLE__ 1\n#define TARGET_OS_OSX 1\n'
-for marker in ['extern "C" bool sapp_window_inject_event(', 'extern "C" bool sapp_tc_window_close_recorded(']:
+code+=body(runtime_source,'static inline bool injectedKeyDefined(')+'\n'
+code+=body(runtime_source,'static inline bool validInjectedWindowEvent(')+'\n'
+code+=body(bridge,'bool sendNativeWindowEvent(')+'\n'
+code+=r'''
+struct Operations {bool (*sendEvent)(sapp_window,void*,sapp_event*);};
+struct Binding {Operations* operations; sapp_window handle; void* user;} binding;
+struct Window {};
+Window window;
+struct WindowRequestAccess {static Binding& binding(Window&) {return native::binding;}};
+'''
+code+=body(runtime_source,'struct InjectedWindowEvent {')+';\nthread_local InjectedWindowEvent* injectedWindowEvent=nullptr;\n'
+code+=body(runtime_source,'bool injectWindowEvent(')+'\n'
+code+=r'''
+bool inject(sapp_window h,const sapp_event* event) {
+    static Operations operations{[](sapp_window h,void*,sapp_event* e){return sendNativeWindowEvent(h,e);}};
+    binding={&operations,h,nullptr};return injectWindowEvent(window,event,false);
+}
+'''
+for marker in ['extern "C" bool sapp_tc_window_close_recorded(']:
     code+=body(source,marker).replace('extern "C" ','')+'\n'
 code+=body(source,'static void _sapp_tc_mac_forget_key(')+'\n'
 closed=(body(source,'static void _sapp_tc_mac_closed_now(')+body(source,'static void _sapp_tc_mac_closed(')).replace('[NSApp terminate:nil]','terminate()').replace('[w->link invalidate]','invalidate(w->link)').replace('= nil','= 0')
@@ -66,49 +86,48 @@ void run(){
     for(auto type:{_SAPP_EVENTTYPE_NUM,_SAPP_EVENTTYPE_FORCE_U32}) {
         sapp_event sentinel{};sentinel.type=type;
         check("sentinel event cannot wake",!_sapp_tc_event_wakes(type));
-        check("sentinel event cannot be injected",!_sapp_tc_valid_injected_event(sentinel));
+        check("sentinel event cannot be injected",!validInjectedWindowEvent(sentinel));
     }
     record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
     check("direct main close records frame cancellation without a queued close",record.close_recorded&&!record.close_requested&&!record.ready&&terminated==0&&closedCallbacks==1&&sapp_tc_window_close_recorded({91}));
     sapp_event closedInput{};closedInput.type=SAPP_EVENTTYPE_MOUSE_MOVE;
-    check("physically closed target rejects input in its closing frame",!sapp_window_inject_event({91},&closedInput));
+    check("physically closed target rejects input in its closing frame",!inject({91},&closedInput));
     ++record.frame_count;check("native close persists beyond its recorded frame",sapp_tc_window_close_recorded({91}));--record.frame_count;
     record.native_closed=false; record.ready=true; // Isolate the shared frame marker contract too.
-    check("shared physical close marker rejects closing-frame input",!sapp_window_inject_event({91},&closedInput));
+    check("shared physical close marker rejects closing-frame input",!inject({91},&closedInput));
     ++record.frame_count;check("physical close marker is limited to its native frame",!sapp_tc_window_close_recorded({91}));--record.frame_count;
     record.close_recorded=false;record.is_main=false;record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
     check("direct secondary close stops admission and reports once",record.close_recorded&&!record.ready&&!record.close_requested&&closedCallbacks==2);
     record.close_recorded=false;record.native_closed=false;record.ready=true;record.is_main=false;
     sapp_event e{};e.type=SAPP_EVENTTYPE_MOUSE_MOVE;e.mouse_x=40;e.mouse_y=20;
-    _sapp_tc_send(&record,&e);check("real source is zero",last.source==SAPP_EVENTSOURCE_REAL&&!record.in_tick);
+    _sapp_tc_send(&record,&e);check("native gate restores busy state",!record.in_tick);
     e.frame_count=999;
-    check("injection accepted",sapp_window_inject_event({91},&e));
-    check("injection copies const input and marks source",last.source==SAPP_EVENTSOURCE_INJECTED&&e.frame_count==999);
-    e.source=SAPP_EVENTSOURCE_REPLAYED;sapp_window_inject_event({91},&e);check("replay source preserved",last.source==SAPP_EVENTSOURCE_REPLAYED);
+    check("injection accepted",inject({91},&e));
+    check("injection copies const input",e.frame_count==999);
     int before=calls;
-    check("stale and null targets rejected",!sapp_window_inject_event({92},&e)&&!sapp_window_inject_event({0},&e)&&!sapp_window_inject_event({91},nullptr)&&calls==before);
-    e.mouse_x=std::numeric_limits<float>::quiet_NaN();check("NaN rejected",!sapp_window_inject_event({91},&e)&&calls==before);e.mouse_x=0;
-    e.mouse_dx=std::numeric_limits<float>::infinity();check("infinite delta rejected",!sapp_window_inject_event({91},&e)&&calls==before);e.mouse_dx=0;
-    e.type=SAPP_EVENTTYPE_TOUCHES_MOVED;e.num_touches=33;check("oversized touches rejected",!sapp_window_inject_event({91},&e));e.num_touches=-1;check("negative touches rejected",!sapp_window_inject_event({91},&e));
-    e.num_touches=1;e.touches[0].pos_y=std::numeric_limits<float>::infinity();check("nonfinite touch rejected",!sapp_window_inject_event({91},&e));
-    e.touches[0].pos_y=0;e.mouse_dx=std::numeric_limits<float>::infinity();check("nonfinite locked touch movement rejected",!sapp_window_inject_event({91},&e));
+    check("stale and null targets rejected",!inject({92},&e)&&!inject({0},&e)&&!inject({91},nullptr)&&calls==before);
+    e.mouse_x=std::numeric_limits<float>::quiet_NaN();check("NaN rejected",!inject({91},&e)&&calls==before);e.mouse_x=0;
+    e.mouse_dx=std::numeric_limits<float>::infinity();check("infinite delta rejected",!inject({91},&e)&&calls==before);e.mouse_dx=0;
+    e.type=SAPP_EVENTTYPE_TOUCHES_MOVED;e.num_touches=33;check("oversized touches rejected",!inject({91},&e));e.num_touches=-1;check("negative touches rejected",!inject({91},&e));
+    e.num_touches=1;e.touches[0].pos_y=std::numeric_limits<float>::infinity();check("nonfinite touch rejected",!inject({91},&e));
+    e.touches[0].pos_y=0;e.mouse_dx=std::numeric_limits<float>::infinity();check("nonfinite locked touch movement rejected",!inject({91},&e));
     e={};e.type=SAPP_EVENTTYPE_CHAR;
-    for(uint32_t c:{0xd800u,0xdfffu,0x110000u}){e.char_code=c;check("invalid Unicode rejected",!sapp_window_inject_event({91},&e));}
-    e.char_code=0;check("explicit NUL text remains a valid Unicode scalar",sapp_window_inject_event({91},&e)&&last.char_code==0);
-    e.char_code=0x1f600;check("explicit Unicode text accepted",sapp_window_inject_event({91},&e)&&last.char_code==0x1f600);
-    for(auto type:{SAPP_EVENTTYPE_ICONIFIED,SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_RESUMED,SAPP_EVENTTYPE_FILES_DROPPED,SAPP_EVENTTYPE_CLIPBOARD_PASTED,SAPP_EVENTTYPE_QUIT_REQUESTED,SAPP_EVENTTYPE_TC_DEVICE_LOST}){e.type=type;check("injection cannot forge native observations or borrowed payload",!sapp_window_inject_event({91},&e));}
+    for(uint32_t c:{0xd800u,0xdfffu,0x110000u}){e.char_code=c;check("invalid Unicode rejected",!inject({91},&e));}
+    e.char_code=0;check("explicit NUL text remains a valid Unicode scalar",inject({91},&e)&&last.char_code==0);
+    e.char_code=0x1f600;check("explicit Unicode text accepted",inject({91},&e)&&last.char_code==0x1f600);
+    for(auto type:{SAPP_EVENTTYPE_ICONIFIED,SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_RESUMED,SAPP_EVENTTYPE_FILES_DROPPED,SAPP_EVENTTYPE_CLIPBOARD_PASTED,SAPP_EVENTTYPE_QUIT_REQUESTED,SAPP_EVENTTYPE_TC_DEVICE_LOST}){e.type=type;check("injection cannot forge native observations or borrowed payload",!inject({91},&e));}
     e={};e.type=SAPP_EVENTTYPE_KEY_DOWN;int validKeys=0;
-    for(int key=0;key<SAPP_MAX_KEYCODES;++key){e.key_code=static_cast<sapp_keycode>(key);validKeys+=_sapp_tc_valid_injected_event(e);}
+    for(int key=0;key<SAPP_MAX_KEYCODES;++key){e.key_code=static_cast<sapp_keycode>(key);validKeys+=validInjectedWindowEvent(e);}
     check("native injection key domain retains exactly 120 defined codes",validKeys==120);
-    e={};e.type=SAPP_EVENTTYPE_MOUSE_DOWN;e.mouse_button=SAPP_MOUSEBUTTON_INVALID;check("invalid button rejected",!sapp_window_inject_event({91},&e));
+    e={};e.type=SAPP_EVENTTYPE_MOUSE_DOWN;e.mouse_button=SAPP_MOUSEBUTTON_INVALID;check("invalid button rejected",!inject({91},&e));
     e.type=SAPP_EVENTTYPE_MOUSE_MOVE;
-    record.ready=false;check("pre-ready injection rejected",!sapp_window_inject_event({91},&e));record.ready=true;
-    record.events_enabled=disabled;check("client admission preserved",!sapp_window_inject_event({91},&e));record.events_enabled=nullptr;
-    record.close_requested=true;check("pending close preserves admitted input until native unpublication",sapp_tc_window_close_recorded({91})&&sapp_window_inject_event({91},&e));record.close_requested=false;
+    record.ready=false;check("pre-ready injection rejected",!inject({91},&e));record.ready=true;
+    record.events_enabled=disabled;check("client admission preserved",!inject({91},&e));record.events_enabled=nullptr;
+    record.close_requested=true;check("pending close preserves admitted input until native unpublication",sapp_tc_window_close_recorded({91})&&inject({91},&e));record.close_requested=false;
     check("live target not closing",!sapp_tc_window_close_recorded({91}));check("stale target query fails closed",sapp_tc_window_close_recorded({999}));
-    throwCallback=true;record.in_tick=true;sapp_window_inject_event({91},&e);check("throwing native callback restores outer busy state",record.in_tick);throwCallback=false;record.in_tick=false;
+    throwCallback=true;record.in_tick=true;inject({91},&e);check("throwing native callback restores outer busy state",record.in_tick);throwCallback=false;record.in_tick=false;
     removeRecord=true;_sapp_tc_send(&record,&e);check("destroyed receiver not touched on unwind",live==nullptr);
 }
 }
@@ -148,7 +167,7 @@ void run(){window.coreEvents=&hub;present();check("production present cancels dr
 }
 int main(){native::run();presentation::run();printf("event-gates: %d checks, %d failures\n",checks,failures);return failures?1:0;}
 '''
-code=code.replace('sapp_window_inject_event(', 'inject(').replace('sapp_tc_window_close_recorded(', 'closeRecorded(')
+code=code.replace('sapp_tc_window_close_recorded(', 'closeRecorded(')
 # The removed stamp assertions now exercise the production metadata query.
 metadata_query=body(source,'extern "C" bool sapp_tc_window_read_metadata(').replace('extern "C" ','').replace('sapp_tc_window_read_metadata(', 'readMetadata(').replace('sapp_tc_window_visible(', 'visible(').replace('sapp_window_occluded(', 'occluded(')
 metadata_parts=[]
@@ -229,9 +248,8 @@ if os.environ.get('TC_EVENT_GATE_MUTATIONS'):
         ('single_window_dpi','out->dpi_scale = _sapp_tc.dpi_scale;','out->dpi_scale = 1;'),
         ('wake_before_callback','if (_sapp_tc_event_wakes(event->type)) w->input_delivered = w->wake_on_input;','/* omit input wake */'),
         ('sentinel_wake','case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return false;','case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return true;'),
-        ('injected_source','event.source = input->source == SAPP_EVENTSOURCE_REPLAYED ? SAPP_EVENTSOURCE_REPLAYED : SAPP_EVENTSOURCE_INJECTED;','event.source = SAPP_EVENTSOURCE_REAL;'),
         ('touch_relative_validation','if (!std::isfinite(e.mouse_dx) || !std::isfinite(e.mouse_dy)) return false;','/* omit touch relative validation */'),
-        ('input_validation','!_sapp_tc_valid_injected_event(*input)','false'),
+        ('input_validation','!validInjectedWindowEvent(*input)','false'),
         ('const_copy','sapp_event event = *input;','sapp_event& event = *const_cast<sapp_event*>(input);'),
         ('native_direct_close_record','w->close_recorded = true;','/* omit physical close observation */'),
         ('close_epoch','(w->close_recorded && w->close_recorded_frame == w->frame_count)','w->close_recorded'),

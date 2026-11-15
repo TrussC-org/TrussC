@@ -22,59 +22,6 @@ static inline bool _sapp_tc_event_wakes(sapp_event_type type) {
     }
     return false;
 }
-static inline bool _sapp_tc_key_defined(int key) {
-    return key == SAPP_KEYCODE_SPACE || key == SAPP_KEYCODE_APOSTROPHE ||
-        (key >= SAPP_KEYCODE_COMMA && key <= SAPP_KEYCODE_9) ||
-        key == SAPP_KEYCODE_SEMICOLON || key == SAPP_KEYCODE_EQUAL ||
-        (key >= SAPP_KEYCODE_A && key <= SAPP_KEYCODE_RIGHT_BRACKET) ||
-        key == SAPP_KEYCODE_GRAVE_ACCENT ||
-        (key >= SAPP_KEYCODE_WORLD_1 && key <= SAPP_KEYCODE_WORLD_2) ||
-        (key >= SAPP_KEYCODE_ESCAPE && key <= SAPP_KEYCODE_END) ||
-        (key >= SAPP_KEYCODE_CAPS_LOCK && key <= SAPP_KEYCODE_PAUSE) ||
-        (key >= SAPP_KEYCODE_F1 && key <= SAPP_KEYCODE_F25) ||
-        (key >= SAPP_KEYCODE_KP_0 && key <= SAPP_KEYCODE_KP_EQUAL) ||
-        (key >= SAPP_KEYCODE_LEFT_SHIFT && key <= SAPP_KEYCODE_MENU);
-}
-static inline bool _sapp_tc_valid_injected_event(const sapp_event& e) {
-    // Injection carries input only. OS state and borrowed drop/clipboard payloads remain native.
-    switch (e.type) {
-        case SAPP_EVENTTYPE_KEY_DOWN: case SAPP_EVENTTYPE_KEY_UP:
-            // Bound (platform): injection rejects keys outside the SDK key domain before delivery.
-            return _sapp_tc_key_defined(e.key_code);
-        case SAPP_EVENTTYPE_CHAR:
-            // Bound (encoding): text injection rejects values outside Unicode scalars before delivery.
-            return e.char_code <= 0x10ffff && !(e.char_code >= 0xd800 && e.char_code <= 0xdfff);
-        case SAPP_EVENTTYPE_MOUSE_DOWN: case SAPP_EVENTTYPE_MOUSE_UP:
-            // Bound (platform): injection rejects buttons outside the SDK button domain before delivery.
-            if (e.mouse_button < SAPP_MOUSEBUTTON_LEFT || e.mouse_button > SAPP_MOUSEBUTTON_MIDDLE) return false;
-            [[fallthrough]];
-        case SAPP_EVENTTYPE_MOUSE_MOVE: case SAPP_EVENTTYPE_MOUSE_ENTER: case SAPP_EVENTTYPE_MOUSE_LEAVE:
-        case SAPP_EVENTTYPE_MOUSE_SCROLL:
-            // Bound (numeric): injection rejects nonfinite mouse components before delivery or state mutation.
-            return std::isfinite(e.mouse_x) && std::isfinite(e.mouse_y) &&
-                std::isfinite(e.mouse_dx) && std::isfinite(e.mouse_dy) &&
-                std::isfinite(e.scroll_x) && std::isfinite(e.scroll_y);
-        case SAPP_EVENTTYPE_TOUCHES_BEGAN: case SAPP_EVENTTYPE_TOUCHES_MOVED:
-        case SAPP_EVENTTYPE_TOUCHES_ENDED: case SAPP_EVENTTYPE_TOUCHES_CANCELLED:
-            // Bound (numeric): injection rejects nonfinite touch-relative components before delivery or state mutation.
-            if (!std::isfinite(e.mouse_dx) || !std::isfinite(e.mouse_dy)) return false;
-            // Bound (platform): invalid touch counts reject injection before array reads or state mutation.
-            if (e.num_touches < 0 || e.num_touches > SAPP_MAX_TOUCHPOINTS) return false;
-            // Bound (numeric): injection rejects nonfinite touch positions before delivery or state mutation.
-            for (int i = 0; i < e.num_touches; ++i)
-                if (!std::isfinite(e.touches[i].pos_x) || !std::isfinite(e.touches[i].pos_y)) return false;
-            return true;
-        case SAPP_EVENTTYPE_INVALID: case SAPP_EVENTTYPE_RESIZED: case SAPP_EVENTTYPE_ICONIFIED:
-        case SAPP_EVENTTYPE_RESTORED: case SAPP_EVENTTYPE_FOCUSED: case SAPP_EVENTTYPE_UNFOCUSED:
-        case SAPP_EVENTTYPE_SUSPENDED: case SAPP_EVENTTYPE_RESUMED: case SAPP_EVENTTYPE_QUIT_REQUESTED:
-        case SAPP_EVENTTYPE_CLIPBOARD_PASTED: case SAPP_EVENTTYPE_FILES_DROPPED: case SAPP_EVENTTYPE_TC_DEVICE_LOST:
-        case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
-        case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
-        case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return false;
-    }
-    return false;
-}
-
 struct _sapp_tc_event_result {
     bool delivered = false;
     bool client_threw = false;

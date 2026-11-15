@@ -19,6 +19,7 @@
 
 #define SOKOL_APP_TC_IMPL
 #include "sokol_app_tc.h"
+#include "../tcNativeWindowEvent.h"
 
 #include "sokol_gfx.h"
 #include "sokol_glue.h"

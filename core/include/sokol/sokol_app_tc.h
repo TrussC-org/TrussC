@@ -1727,17 +1727,9 @@ enum {
     should first check the event type before reading other struct
     fields.
 */
-typedef enum sapp_event_source {
-    SAPP_EVENTSOURCE_REAL = 0,
-    SAPP_EVENTSOURCE_INJECTED,
-    SAPP_EVENTSOURCE_REPLAYED
-} sapp_event_source;
-
 typedef struct sapp_event {
     uint64_t frame_count;               // current frame counter, always valid, useful for checking if two events were issued in the same frame
     sapp_event_type type;               // the event type, always valid
-    sapp_event_source source;
-    bool button_snapshot;               // injected drag-only held-button observation
     sapp_keycode key_code;              // the virtual key code, only valid in KEY_UP, KEY_DOWN
     uint32_t char_code;                 // the UTF-32 character code, only valid in CHAR events
     bool key_repeat;                    // true if this is a key-repeat event, valid in KEY_UP, KEY_DOWN and CHAR
@@ -2472,7 +2464,6 @@ typedef struct sapp_tc_window_metadata {
     bool reliable_button_bits;
     bool pointer_locked;        /* [TrussC] the receiving window owns pointer lock */
 } sapp_tc_window_metadata;
-SOKOL_APP_API_DECL bool sapp_window_inject_event(sapp_window win, const sapp_event* event);
 SOKOL_APP_API_DECL bool sapp_tc_window_close_recorded(sapp_window win);
 SOKOL_APP_API_DECL bool sapp_tc_window_read_metadata(sapp_window win, sapp_tc_window_metadata* out);
 SOKOL_APP_API_DECL sapp_window sapp_create_window(const sapp_window_desc* desc);
@@ -18410,34 +18401,6 @@ extern "C" bool sapp_tc_window_close_recorded(sapp_window win) {
         (w->close_recorded && w->close_recorded_frame == w->frame_count);
 #else
     (void)win;
-    return false;
-#endif
-}
-extern "C" bool sapp_window_inject_event(sapp_window win, const sapp_event* input) {
-#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
-    auto* w = _sapp_tc_lookup(win);
-#if defined(__APPLE__) && TARGET_OS_OSX
-    if ((w && w->native_closed)) return false;
-#endif
-    if (!w || !input || !_sapp_tc_valid_injected_event(*input) || !w->ready ||
-        (w->close_recorded && w->close_recorded_frame == w->frame_count) ||
-        !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return false;
-    sapp_event event = *input;
-    event.source = input->source == SAPP_EVENTSOURCE_REPLAYED ? SAPP_EVENTSOURCE_REPLAYED : SAPP_EVENTSOURCE_INJECTED;
-    _sapp_tc_send(w, &event);
-    return true;
-#elif defined(__EMSCRIPTEN__) || defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
-    if (win.id || !input || !_sapp_tc.valid || !_sapp_tc.init_called || _sapp_tc.cleanup_called ||
-        !_sapp_tc_valid_injected_event(*input)) return false;
-    sapp_event event = *input;
-    event.source = input->source == SAPP_EVENTSOURCE_REPLAYED ? SAPP_EVENTSOURCE_REPLAYED : SAPP_EVENTSOURCE_INJECTED;
-    event.frame_count = _sapp_tc.frame_count;
-    event.window_width = _sapp_tc.window_width; event.window_height = _sapp_tc.window_height;
-    event.framebuffer_width = _sapp_tc.framebuffer_width; event.framebuffer_height = _sapp_tc.framebuffer_height;
-    try { _sapp_tc_call_event(&event); } catch (...) { return false; }
-    return true;
-#else
-    (void)win; (void)input;
     return false;
 #endif
 }

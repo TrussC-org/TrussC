@@ -437,21 +437,15 @@ struct InputTarget {
         event.mouse_dx = float(dx * factor); event.mouse_dy = float(dy * factor);
         return event;
     }
-    void send(sapp_event event, const void* pressOwner = nullptr) {
+    void send(sapp_event event, const void* pressOwner = nullptr, bool heldButtonSnapshot = false) {
         begin();
-        const auto& binding = trussc::internal::WindowRequestAccess::binding(window);
-        event.source = SAPP_EVENTSOURCE_INJECTED;
         struct PressOwnerScope {
             trussc::internal::WindowContext& ctx;
             const void* previous;
             ~PressOwnerScope() { ctx.pendingMousePressOwner = previous; }
         } ownerScope{ctx, ctx.pendingMousePressOwner};
         ctx.pendingMousePressOwner = pressOwner;
-        bool delivered = false;
-        if constexpr (trussc::internal::supportsSecondaryWindows()) {
-            delivered = binding.operations && binding.operations->injectEvent &&
-                binding.operations->injectEvent(binding.handle, binding.user, &event);
-        } else delivered = sapp_window_inject_event(binding.handle, &event);
+        const bool delivered = trussc::internal::injectWindowEvent(window, &event, heldButtonSnapshot);
         if (!delivered) throw InputArgumentError("target window rejected input");
     }
     void key(int key, bool down) {
@@ -1106,10 +1100,9 @@ void registerStandardTools(Server& server) {
             int button = internal::inputMouseButton(a, true);
             internal::InputTarget target(a);
             auto event = target.pointer(SAPP_EVENTTYPE_MOUSE_MOVE, x, y);
-            event.button_snapshot = true;
             event.modifiers &= ~(SAPP_MODIFIER_LMB | SAPP_MODIFIER_RMB | SAPP_MODIFIER_MMB);
             if (button >= 0) event.modifiers |= SAPP_MODIFIER_LMB << button;
-            target.send(event);
+            target.send(event, nullptr, true);
 
             return json{{"status", "ok"}};
         });
