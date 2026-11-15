@@ -280,12 +280,21 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
   32-bit relative indices, multiple passes, and captured-resource lifetime.
   Standalone CMake unit test with a plain `int main()`; run in Debug and Release.
 - `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
-  `allCoreTests shaderStreamDraws --gpu-check` (OpenGL Core display required)
+  `allCoreTests shaderStreamDraws --gpu-check` (native display required)
   also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
   passes, checks the growth notice, and exercises Shader moves/clear with
   a pending swapchain draw. It also checks that an invalid binding skips the
   draw and a corrected binding recovers without reapplying the pipeline (#1644).
-  On Linux, run it with Xvfb.
+  `--sampler-slots-check` draws 14 distinct solid textures with separate samplers
+  at slots 0–13 and checks each stripe's RGBA pixels. `--samplerless-check`
+  uses `setTexture(0, view, sg_sampler{})` and verifies texelFetch output on
+  Metal, D3D11 and WebGPU; GL/GLES prints `SKIP samplerless: GL requires a sampler`.
+  Both new modes are in `display-test`. WebGPU uses a test-local asynchronous
+  readback; the older stream `--gpu-check` still skips there. Browser builds
+  accept `?mode=--sampler-slots-check` or `?mode=--samplerless-check`.
+  Android NativeActivity has no argv route, so the standalone app runs the
+  slot check by default and logs the samplerless SKIP to logcat's TrussC tag.
+  On Linux, run with an explicitly numbered private Xvfb display.
 - `stringPatterns/` — empty substring patterns count as zero or leave the
   input unchanged (#405); replacements are left-to-right and nonoverlapping,
   including the internal timestamp helper. Covers deletion, growth, and many

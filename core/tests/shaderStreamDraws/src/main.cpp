@@ -5,6 +5,13 @@
 
 #include <cstdio>
 #include <cstring>
+#include <array>
+#if defined(SOKOL_WGPU)
+#include <webgpu/webgpu.h>
+#endif
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 
 using namespace tc;
 
@@ -13,6 +20,9 @@ int failures = 0;
 
 void check(const char* name, bool ok) {
     std::printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
+#if defined(__ANDROID__)
+    __android_log_print(ANDROID_LOG_INFO, "TrussC", "%s: %s", name, ok ? "PASS" : "FAIL");
+#endif
     if (!ok) ++failures;
 }
 
@@ -22,6 +32,169 @@ struct InspectShader : Shader {
 
 struct InspectFullscreen : FullscreenShader {
     sg_pipeline_desc description() { return createPipelineDesc(); }
+};
+
+// Four pixels per column keep the sample well inside each slot's stripe.
+constexpr int slotCount = 14;
+constexpr int targetWidth = slotCount * 4;
+bool samplerless = false;
+bool samplerCompleted = false;
+std::array<unsigned char, 4> slotColor(int slot) {
+    return {static_cast<unsigned char>(17 + slot * 17),
+            static_cast<unsigned char>(241 - slot * 13),
+            static_cast<unsigned char>(31 + slot * 11), 255};
+}
+
+const sg_shader_desc* samplerlessDesc(sg_backend backend) {
+    static sg_shader_desc desc;
+    desc = *stream_samplerless_shader_desc(backend);
+    // texelFetch becomes Metal read / HLSL Load / WGSL textureLoad. shdc
+    // still reflects its unused GLSL sampler; non-GL validation allows its
+    // removal. No sampler is declared in this shader's runtime descriptor.
+    for (auto& sampler : desc.samplers) sampler = {};
+    for (auto& pair : desc.texture_sampler_pairs) pair = {};
+    return &desc;
+}
+
+class SamplerApp : public App {
+public:
+    void setup() override {
+        errors_ = getLogger().onLog.listen([](LogEventArgs& e) {
+            if (e.level >= LogLevel::Error) check("sampler GPU error", false);
+        });
+        if (samplerless) {
+            check("samplerless shader loads", shader_.load(samplerlessDesc));
+            Pixels pixels;
+            pixels.allocate(slotCount, 1, 4);
+            for (int i = 0; i < slotCount; ++i) {
+                const auto color = slotColor(i);
+                std::memcpy(pixels.getData() + i * 4, color.data(), 4);
+            }
+            textures_[0].allocate(pixels);
+            shader_.setTexture(0, textures_[0].getView(), sg_sampler{});
+        } else {
+            check("14-slot shader loads", shader_.load(stream_slots_shader_desc));
+            for (int i = 0; i < slotCount; ++i) {
+                Pixels pixels;
+                pixels.allocate(1, 1, 4);
+                const auto color = slotColor(i);
+                std::memcpy(pixels.getData(), color.data(), 4);
+                textures_[i].allocate(pixels);
+                shader_.setTexture(i, textures_[i].getView(), textures_[i].getSampler());
+            }
+        }
+#if defined(SOKOL_WGPU)
+        // Ordinary Fbo textures do not request COPY_SRC on WebGPU. Give this
+        // test's target that usage without changing the public Fbo API.
+        sg_image_desc target = {};
+        target.width = targetWidth;
+        target.height = 4;
+        target.pixel_format = SG_PIXELFORMAT_RGBA8;
+        target.usage.color_attachment = true;
+        target.usage.copy_src = true;
+        target_ = sg_make_image(&target);
+        sg_view_desc view = {};
+        view.color_attachment.image = target_;
+        attachment_ = sg_make_view(&view);
+#else
+        fbo_.allocate(targetWidth, 4);
+#endif
+    }
+
+    void draw() override {
+        if (!rendered_) {
+            if (!shader_.isLoaded()) { exitApp(1); return; }
+            ShaderVertex quad[] = {
+                {-1, -1, 0, 0, 0, 0, 0, 0, 0}, {1, -1, 0, 0, 0, 0, 0, 0, 0},
+                {1, 1, 0, 0, 0, 0, 0, 0, 0}, {-1, 1, 0, 0, 0, 0, 0, 0, 0}};
+#if defined(SOKOL_WGPU)
+            sg_pass pass = {};
+            pass.attachments.colors[0] = attachment_;
+            pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+            pass.action.colors[0].clear_value = {0, 0, 0, 1};
+            {
+                internal::TargetPassScope scope(pass, targetWidth, 4, SG_PIXELFORMAT_RGBA8);
+                shader_.submitVertices(quad, 4, PrimitiveType::Quads);
+            }
+#else
+            fbo_.begin(0, 0, 0, 1);
+            shader_.submitVertices(quad, 4, PrimitiveType::Quads);
+            fbo_.end();
+#endif
+            rendered_ = true;
+#if defined(SOKOL_WGPU)
+            // Public Fbo readPixels is synchronous and unsupported on WebGPU.
+            // Append a test-only copy to the same encoder; map after commit.
+            WGPUBufferDescriptor desc = {};
+            desc.size = rowBytes * 4;
+            desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+            readback_ = wgpuDeviceCreateBuffer((WGPUDevice)sg_wgpu_device(), &desc);
+            WGPUTexelCopyTextureInfo source = {};
+            source.texture = (WGPUTexture)sg_wgpu_query_image_info(target_).tex;
+            WGPUTexelCopyBufferInfo destination = {};
+            destination.buffer = readback_;
+            destination.layout.bytesPerRow = rowBytes;
+            destination.layout.rowsPerImage = 4;
+            WGPUExtent3D extent = {targetWidth, 4, 1};
+            wgpuCommandEncoderCopyTextureToBuffer((WGPUCommandEncoder)sg_wgpu_command_encoder(),
+                &source, &destination, &extent);
+#else
+            std::array<unsigned char, targetWidth * 4 * 4> pixels = {};
+            check("sampler FBO readback succeeds", fbo_.readPixels(pixels.data()));
+            verify(pixels.data(), targetWidth * 4);
+#endif
+        }
+#if defined(SOKOL_WGPU)
+        else if (!mapping_) {
+            mapping_ = true;
+            WGPUBufferMapCallbackInfo callback = {};
+            callback.mode = WGPUCallbackMode_AllowSpontaneous;
+            callback.callback = [](WGPUMapAsyncStatus status, WGPUStringView, void*, void*) {
+                mapSuccess_ = status == WGPUMapAsyncStatus_Success;
+                mapDone_ = true;
+            };
+            wgpuBufferMapAsync(readback_, WGPUMapMode_Read, 0, rowBytes * 4, callback);
+        } else if (mapDone_) {
+            check("sampler FBO readback succeeds", mapSuccess_);
+            if (mapSuccess_) {
+                verify(static_cast<const unsigned char*>(wgpuBufferGetConstMappedRange(readback_, 0, rowBytes * 4)), rowBytes);
+                wgpuBufferUnmap(readback_);
+            } else exitApp(1);
+        }
+#endif
+    }
+
+    void cleanup() override {
+#if defined(SOKOL_WGPU)
+        if (readback_) wgpuBufferRelease(readback_);
+        sg_destroy_view(attachment_);
+        sg_destroy_image(target_);
+#endif
+    }
+private:
+    void verify(const unsigned char* pixels, int stride) {
+        for (int i = 0; i < slotCount; ++i) {
+            const auto expected = slotColor(i);
+            char label[80];
+            std::snprintf(label, sizeof(label), "%s slot %d RGBA", samplerless ? "samplerless" : "sampler", i);
+            check(label, std::memcmp(pixels + stride * 2 + (i * 4 + 2) * 4, expected.data(), 4) == 0);
+        }
+        samplerCompleted = true;
+        exitApp();
+    }
+    Shader shader_;
+    Fbo fbo_;
+    std::array<Texture, slotCount> textures_;
+    EventListener errors_;
+    bool rendered_ = false;
+#if defined(SOKOL_WGPU)
+    static constexpr int rowBytes = 256;
+    sg_image target_ = {};
+    sg_view attachment_ = {};
+    WGPUBuffer readback_ = nullptr;
+    bool mapping_ = false;
+    inline static bool mapDone_ = false, mapSuccess_ = false;
+#endif
 };
 
 // WebGPU has no Fbo pixel readback (tcFbo_web.cpp), so its GPU check stays a SKIP.
@@ -201,7 +374,40 @@ private:
 #endif
 } // namespace
 
+#if defined(__ANDROID__)
+// NativeActivity calls main() without argv. Run the applicable new check by
+// default; GLES cannot exercise samplerless bindings.
+TC_CORE_TEST_MAIN() {
+    int argc = 2;
+    const char* argv[] = {"shaderStreamDraws", "--sampler-slots-check"};
+    std::printf("SKIP samplerless: GL requires a sampler\n");
+    __android_log_print(ANDROID_LOG_INFO, "TrussC", "SKIP samplerless: GL requires a sampler");
+#else
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+#endif
+#if defined(__EMSCRIPTEN__)
+    // Interactive browser recipe: ?mode=--sampler-slots-check (or samplerless).
+    const char* browserMode = emscripten_run_script_string("new URLSearchParams(location.search).get('mode') || ''");
+    const char* browserArgs[] = {"shaderStreamDraws", browserMode};
+    if (browserMode[0]) { argc = 2; argv = const_cast<char**>(browserArgs); }
+#endif
+    if (argc > 1 && (std::strcmp(argv[1], "--sampler-slots-check") == 0
+                    || std::strcmp(argv[1], "--samplerless-check") == 0)) {
+        samplerless = std::strcmp(argv[1], "--samplerless-check") == 0;
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        if (samplerless) {
+            std::printf("SKIP samplerless: GL requires a sampler\n");
+            return 0;
+        }
+#endif
+        WindowSettings settings;
+        settings.setSize(targetWidth, 4);
+        settings.setHighDpi(false);
+        return tcCoreTest::runDisplayTest<SamplerApp>(settings, failures, [] {
+            check(samplerless ? "samplerless checks completed" : "sampler slots checks completed", samplerCompleted);
+            check(samplerless ? "samplerless verdict" : "sampler slots verdict", samplerCompleted && failures == 0);
+        });
+    }
     InspectShader shader;
     InspectFullscreen fullscreen;
     check("custom Shader pipelines use uint32 stream indices", shader.description().index_type == SG_INDEXTYPE_UINT32);
