@@ -168,6 +168,7 @@ public:
 
 private:
     friend class FontAtlasManager;
+    friend struct FontAtlasCompactionTestAccess;
 
     size_t atlasIndex_;          // Which atlas contains this glyph
     float u0_, v0_, u1_, v1_;    // Texture coordinates (normalized)
@@ -201,6 +202,7 @@ public:
 
 private:
     friend class FontAtlasManager;
+    friend struct FontAtlasCompactionTestAccess;
 
     int currentX_ = 0;           // X position for next glyph
     int currentY_ = 0;           // Y position for next glyph
@@ -213,6 +215,8 @@ private:
     sg_image texture_ = {};
     sg_view view_ = {};
     sg_view pendingView_ = {}; // Reserved before recording, initialized at flush.
+    bool frozen_ = false;     // Closed to new glyphs; compacted pages stay immutable.
+    bool compacted_ = false;
     bool sealed_ = false;     // Recorded UVs require a fixed page size.
     bool mipmaps_ = false;
     bool textureValid_ = false;
@@ -262,7 +266,7 @@ public:
     void requestMipmaps() {
         if (!wantMipmaps_ || mipsBuilt_) return;
         mipsBuilt_ = true;
-        for (auto& atlas : atlases_) { atlas->textureDirty_ = true; atlas->mipmaps_ = true; }
+        for (auto& atlas : atlases_) if (!atlas->compacted_) { atlas->textureDirty_ = true; atlas->mipmaps_ = true; }
     }
     bool hasMipmaps() const { return mipsBuilt_; }
 
@@ -563,6 +567,11 @@ public:
         if (atlas.textureDirty_) updateAtlasTexture(atlas);
     }
 
+    void scheduleCompaction() { compactRequested_ = true; }
+    uint64_t getAtlasGeneration() const { return atlasGeneration_; }
+    // Host frame boundary only; CPU-only tests may call this without a GPU.
+    void processCompaction();
+
     size_t getAtlasCount() const { return atlases_.size(); }
     const AtlasState& getAtlas(size_t index) const { return *atlases_[index]; }
 
@@ -586,6 +595,8 @@ public:
         // Pending target uploads retain their pages through replay.
         atlases_.clear();
         glyphs_.clear();
+        ++atlasGeneration_;
+        compactRequested_ = false;
         if (loaded_) {
             createNewAtlas();
         }
@@ -615,8 +626,12 @@ public:
     size_t getLoadedGlyphCount() const { return glyphs_.size(); }
 
 private:
+    friend struct FontAtlasCompactionTestAccess;
     static constexpr int INITIAL_ATLAS_SIZE = 256;
     static constexpr int GLYPH_PADDING = 2;
+    // The gap never lowers raster oversampling or rejects a bitmap that fits;
+    // packing reserves it between glyphs and uses whatever slack remains at page edges.
+    static int glyphGap(int size) { return std::max(GLYPH_PADDING, (size + 7) / 8); }
     // Align the raster/UV rectangle's top-left, after the leading padding.
     // Cursor steps round trailing padding up too, preserving mip phase to L4.
     static int alignGlyphOffset(int value) { return (value + 15) & ~15; }
@@ -648,6 +663,10 @@ private:
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
 
+    uint64_t atlasGeneration_ = 0;
+    bool compactRequested_ = false;
+    static bool uploadCompactedAtlas(AtlasState& atlas, sg_image& scratch);
+
     bool loaded_ = false;
 
     // -------------------------------------------------------------------------
@@ -657,7 +676,7 @@ private:
 
     bool expandAtlas(size_t atlasIndex) {
         AtlasState& atlas = *atlases_[atlasIndex];
-        if (atlas.sealed_) return false;
+        if (atlas.sealed_ || atlas.frozen_) return false;
 
         int newWidth = atlas.width_ * 2;
         int newHeight = atlas.height_ * 2;
@@ -808,10 +827,14 @@ private:
                                << " (oversampling " << oversample_ << ")";
         }
 
+        const int gap = glyphGap(std::max(glyphWidth, glyphHeight));
+        paddedWidth = glyphWidth + gap;
+        paddedHeight = glyphHeight + gap;
+
         // Find atlas that can fit glyph
         size_t targetAtlas = atlases_.size();
         for (size_t i = 0; i < atlases_.size(); i++) {
-            if (tryFitGlyph(i, paddedWidth, paddedHeight)) {
+            if (tryFitGlyph(i, glyphWidth, glyphHeight)) {
                 targetAtlas = i;
                 break;
             }
@@ -823,12 +846,15 @@ private:
             if (!atlases_.empty() && expandAtlas(atlases_.size() - 1)) {
                 targetAtlas = atlases_.size() - 1;
             } else {
+                // A spill closes recorded pages permanently. Never append to a
+                // merged page or to the frozen input of a future merge.
+                for (auto& page : atlases_) if (page->sealed_) page->frozen_ = true;
                 // Create new atlas
                 targetAtlas = createNewAtlas();
             }
 
             // Expand until it fits
-            while (!tryFitGlyph(targetAtlas, paddedWidth, paddedHeight)) {
+            while (!tryFitGlyph(targetAtlas, glyphWidth, glyphHeight)) {
                 if (!expandAtlas(targetAtlas)) {
                     logWarning() << "FontAtlasManager: cannot fit glyph for U+" << std::hex << codepoint << std::dec;
                     outInfo.valid_ = false;
@@ -840,8 +866,8 @@ private:
         AtlasState& atlas = *atlases_[targetAtlas];
 
         // Move to next row if current row overflows
-        if (atlas.currentX_ + paddedWidth > atlas.width_) {
-            atlas.currentY_ = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_ + GLYPH_PADDING);
+        if (atlas.currentX_ + glyphWidth > atlas.width_) {
+            atlas.currentY_ = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_);
             atlas.rowHeight_ = 0;
 
             // After expand, old content occupies top-left quadrant (width/2 x height/2).
@@ -948,6 +974,7 @@ private:
 
     bool tryFitGlyph(size_t atlasIndex, int width, int height) {
         const AtlasState& atlas = *atlases_[atlasIndex];
+        if (atlas.frozen_) return false;
         // A recorded page can accept more coverage, but its UV dimensions
         // stay fixed. expandAtlas alone is forbidden after recording.
 
@@ -959,7 +986,7 @@ private:
         }
 
         // Fits in next row?
-        int nextY = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_ + GLYPH_PADDING);
+        int nextY = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_);
         if (nextY + height <= atlas.height_) {
             // Check if the glyph fits horizontally in the next row
             // (right-half rows are narrower)
@@ -976,6 +1003,7 @@ private:
     }
 
     static void updateAtlasTexture(AtlasState& atlas) {
+        if (atlas.compacted_) return; // Published once, transactionally at the frame boundary.
         // Called once per page at a consuming target flush. Old views remain
         // immutable for retained recordings and earlier passes in this frame.
         // Defer destruction of existing resources
@@ -1002,9 +1030,8 @@ private:
         // build the chain on the CPU here. Texels hold coverage only (the color
         // comes from the vertex color in the coverage shader), so each mip
         // box-averages coverage; there is no color channel to darken at glyph
-        // edges, and minified glyphs stay clean. (GLYPH_PADDING=2 means very
-        // coarse mips bleed slightly between neighbors, but that range is
-        // sub-pixel on screen and far preferable to shimmer.)
+        // edges. The size-dependent glyph gap protects small text; very heavy
+        // minification can still mix neighboring glyphs.
         std::vector<uint8_t> mipBlob;
         // Both text shaders select the level from the screen-space footprint.
         if (atlas.mipmaps_) {
@@ -1147,6 +1174,19 @@ public:
         if (it != cache_.end() && it->second.use_count() == 1) {
             cache_.erase(it);
         }
+    }
+
+    void compactAtlases() {
+        // Failure logging can invoke application listeners that load/release
+        // fonts. Keep the visited managers stable across cache rehash/erasure.
+        std::vector<std::shared_ptr<FontAtlasManager>> managers;
+        try {
+            managers.reserve(cache_.size());
+            for (const auto& entry : cache_) managers.push_back(entry.second);
+        } catch (const std::bad_alloc&) {
+            return; // Requests remain pending for the next frame boundary.
+        }
+        for (auto& manager : managers) manager->processCompaction();
     }
 
     // Release all
@@ -2746,6 +2786,11 @@ public:
 
     // Alias for clarity
     size_t getAtlasMemoryUsage() const { return getMemoryUsage(); }
+
+    // Schedule frozen-page merging after all rendering targets have flushed.
+    void compactAtlas() {
+        if (atlasManager_) atlasManager_->scheduleCompaction();
+    }
 
     // Clear atlas pages (glyphs re-rasterized on next draw)
     void clearAtlas() {
