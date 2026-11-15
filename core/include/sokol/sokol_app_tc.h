@@ -2652,6 +2652,935 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 }
 #endif
 
+// [TrussC] Shared singleton support follows upstream's clock/timing/state/helpers
+// order. Desktop multiwindow implementations remain outside this layer.
+#if (defined(__APPLE__) && TARGET_OS_IPHONE) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#ifndef _SOKOL_PRIVATE
+#define _SOKOL_PRIVATE static
+#endif
+#if !defined(__EMSCRIPTEN__)
+_SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64_t denom) {
+    int64_t q = value / denom;
+    int64_t r = value % denom;
+    return q * numer + r * numer / denom;
+}
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/*== iOS (Metal) ============================================================
+    Implements the public sokol_app.h API on iOS plus the multi-window API
+    (as stubs -- there is exactly ONE UIWindow bound to the connecting
+    UIWindowScene, so a second window is not representable;
+    sapp_create_window() returns the invalid handle and logs).
+
+    UIKit owns the loop: sapp_run() -> UIApplicationMain() never returns.
+    The real setup (UIWindow + CAMetalLayer + CADisplayLink) happens later,
+    scene-driven, inside scene:willConnectToSession: -- the scene lifecycle
+    is adopted PROGRAMMATICALLY via the app delegate's
+    configurationForConnectingSceneSession: (the TrussC Info-iOS.plist has
+    NO UIApplicationSceneManifest; that method is what makes scenes work).
+    The frame driver is the CADisplayLink firing displayLinkFired: every
+    vsync; backgrounding pauses the link (rendering while suspended is an
+    iOS watchdog kill) and fires SAPP_EVENTTYPE_SUSPENDED/RESUMED.
+
+    Structure mirrors sokol_app.h's iOS backend including all TrussC
+    patches: runtime orientation control (_sapp_tc_ios_view_ctrl +
+    sapp_ios_set_supported_orientations), immersive mode (the NON-STATIC
+    global _sapp_ios_immersive_mode -- tcPlatform_ios.mm externs it by
+    name, keep it), view-bounds dimension update, drawable-size readback
+    after resize (sapp_width/height must match what Metal actually
+    renders), RGB10A2 10-bit layer + MSAA format, framebufferOnly=false
+    for captureWindow() readback, and sapp_ios_get_window() for the
+    document picker. Input is multi-touch plus an on-screen keyboard
+    driven through a hidden UITextField (CHAR + Enter/Space/Backspace
+    only). Upstream's GLES3/EAGL path is not ported -- TrussC iOS is
+    Metal-only. The tvOS press-event code is lifted but unexercised. */
+#if !defined(__OBJC__)
+#error "sokol_app_tc.h iOS implementation must be compiled as Objective-C++ (.mm)"
+#endif
+#if !defined(SOKOL_METAL)
+#error "sokol_app_tc.h: TrussC iOS builds are Metal-only (define SOKOL_METAL)"
+#endif
+#import <UIKit/UIKit.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CADisplayLink.h>
+#include <Availability.h>
+#include <mach/mach_time.h>
+#include <stdio.h>
+
+#if defined(SOKOL_APP_IMPL_INCLUDED)
+#error "sokol_app_tc.h owns the iOS implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
+#endif
+
+#ifndef SOKOL_ASSERT
+#include <assert.h>
+#define SOKOL_ASSERT(c) assert(c)
+#endif
+#ifndef _SOKOL_PRIVATE
+#define _SOKOL_PRIVATE static
+#endif
+#ifndef _SOKOL_UNUSED
+#define _SOKOL_UNUSED(x) (void)(x)
+#endif
+#ifndef SOKOL_API_IMPL
+#define SOKOL_API_IMPL
+#endif
+#ifndef SOKOL_UNREACHABLE
+#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
+#endif
+
+/* the lifted upstream code keys Apple/iOS forks on these */
+#define _SAPP_APPLE (1)
+#define _SAPP_IOS (1)
+
+#define _SAPP_MAX_TITLE_LENGTH (128)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
+#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
+/* always ObjC++ here, so the C++ forms are unconditional (ARC compatible) */
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
+#if __has_feature(objc_arc)
+#define _SAPP_OBJC_RELEASE(obj) { obj = nil; }
+#else
+#define _SAPP_OBJC_RELEASE(obj) { [obj release]; obj = nil; }
+#endif
+
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+typedef struct {
+    #if defined(_SAPP_APPLE)
+        struct {
+            mach_timebase_info_data_t timebase;
+            uint64_t start;
+        } mach;
+    #elif defined(_SAPP_EMSCRIPTEN)
+        int _dummy;
+    #elif defined(_SAPP_WIN32)
+        struct {
+            LARGE_INTEGER freq;
+            LARGE_INTEGER start;
+        } win;
+    #else // Linux, Android, ...
+        #ifdef CLOCK_MONOTONIC
+        #define _SAPP_CLOCK_MONOTONIC CLOCK_MONOTONIC
+        #else
+        // on some embedded platforms, CLOCK_MONOTONIC isn't defined
+        #define _SAPP_CLOCK_MONOTONIC (1)
+        #endif
+        struct {
+            uint64_t start;
+        } posix;
+    #endif
+} _sapp_tc_timestamp_t;
+
+_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) {
+    #if defined(_SAPP_APPLE)
+        mach_timebase_info(&ts->mach.timebase);
+        ts->mach.start = mach_absolute_time();
+    #elif defined(_SAPP_EMSCRIPTEN)
+        (void)ts;
+    #elif defined(_SAPP_WIN32)
+        QueryPerformanceFrequency(&ts->win.freq);
+        QueryPerformanceCounter(&ts->win.start);
+    #else
+        struct timespec tspec;
+        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
+        ts->posix.start = (uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec;
+    #endif
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
+    #if defined(_SAPP_APPLE)
+        const uint64_t traw = mach_absolute_time() - ts->mach.start;
+        const uint64_t now = (uint64_t) _sapp_tc_int64_muldiv((int64_t)traw, (int64_t)ts->mach.timebase.numer, (int64_t)ts->mach.timebase.denom);
+        return (double)now / 1000000000.0;
+    #elif defined(_SAPP_EMSCRIPTEN)
+        (void)ts;
+        SOKOL_ASSERT(false);
+        return 0.0;
+    #elif defined(_SAPP_WIN32)
+        LARGE_INTEGER qpc;
+        QueryPerformanceCounter(&qpc);
+        const uint64_t now = (uint64_t)_sapp_tc_int64_muldiv(qpc.QuadPart - ts->win.start.QuadPart, 1000000000, ts->win.freq.QuadPart);
+        return (double)now / 1000000000.0;
+    #else
+        struct timespec tspec;
+        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
+        const uint64_t now = ((uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec) - ts->posix.start;
+        return (double)now / 1000000000.0;
+    #endif
+}
+
+#endif
+#if defined(__ANDROID__)
+/*== Android (GLES3 / NativeActivity) =======================================
+    Implements the public sokol_app.h API on Android plus the multi-window
+    API (as stubs -- the activity owns exactly ONE ANativeWindow, so a
+    second window is not representable; sapp_create_window() returns the
+    invalid handle and logs).
+
+    The entry point is INVERTED relative to every other platform: this
+    section EXPORTS ANativeActivity_onCreate() (NativeActivity dlopens the
+    app .so and calls it on Android's UI thread), which spawns a dedicated
+    APP THREAD and returns. The app thread owns the ALooper, the EGL
+    display/context/surface, the frame loop and every TrussC callback
+    (init/frame/event/cleanup); the UI thread only forwards lifecycle
+    callbacks through a message pipe + mutex/cond handshake. sapp_run()
+    is NOT supported (SOKOL_NO_ENTRY is a compile error); sokol_main()
+    is defined by TrussC's platform/android/sokol_impl.cpp bridge.
+
+    The EGL surface has an independent lifecycle: it is destroyed on
+    background and recreated on foreground (APP_CMD state machine); frames
+    only run while has_resumed && has_focus && a surface exists.
+
+    Structure mirrors sokol_app.h's Android backend including all TrussC
+    patches: the Choreographer vsync-paced frame loop with ALooper poll
+    fallback (compiled in at __ANDROID_API__ >= 29), the BACK-key
+    no-shutdown fix (kiosk/screen-pinning survival -- BACK is consumed,
+    never tears down EGL), DPI scale from AConfiguration_getDensity()/160
+    with fb/win-ratio fallback, and the skip_present early-return. Input
+    is multi-touch + the BACK key; orientation and immersive mode are
+    TrussC-side JNI (tcPlatform_android.cpp), not sokol's business. */
+#define _SAPP_ANDROID (1)
+#if !defined(SOKOL_GLES3)
+#error "sokol_app_tc.h: unknown 3D API selected for Android, must be SOKOL_GLES3"
+#endif
+#if defined(SOKOL_NO_ENTRY)
+#error "sokol_app_tc.h: SOKOL_NO_ENTRY is not supported on Android"
+#endif
+/* GLES3 always -> the lifted code's GL forks are live */
+#define _SAPP_ANY_GL (1)
+
+#include <pthread.h>
+#include <unistd.h>
+#include <time.h>
+#include <android/native_activity.h>
+#include <android/configuration.h>  /* [TrussC] AConfiguration for display density */
+#include <android/looper.h>
+#if __ANDROID_API__ >= 29
+    #include <android/choreographer.h>
+#endif
+#include <EGL/egl.h>
+#include <GLES3/gl3.h>
+#include <stdio.h>
+
+#if defined(SOKOL_APP_IMPL_INCLUDED)
+#error "sokol_app_tc.h owns the Android implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
+#endif
+
+#ifndef SOKOL_ASSERT
+#include <assert.h>
+#define SOKOL_ASSERT(c) assert(c)
+#endif
+#ifndef _SOKOL_PRIVATE
+#define _SOKOL_PRIVATE static
+#endif
+#ifndef _SOKOL_UNUSED
+#define _SOKOL_UNUSED(x) (void)(x)
+#endif
+#ifndef SOKOL_API_IMPL
+#define SOKOL_API_IMPL
+#endif
+#ifndef SOKOL_UNREACHABLE
+#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
+#endif
+
+#define _SAPP_MAX_TITLE_LENGTH (128)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
+#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
+#if defined(__cplusplus)
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
+#else
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {0}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
+#endif
+
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log). The ones that run before
+   _sapp_tc_init_state() stores the desc -- ANDROID_NATIVE_ACTIVITY_ONCREATE
+   at the top of ANativeActivity_onCreate() -- find no logger and reach
+   logcat through _sapp_tc_log's fallback ("sokol_app_tc" tag), as before.
+   (<android/log.h> comes from the implementation preamble.) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+#define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
+#define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
+typedef struct {
+    #if defined(_SAPP_APPLE)
+        struct {
+            mach_timebase_info_data_t timebase;
+            uint64_t start;
+        } mach;
+    #elif defined(_SAPP_EMSCRIPTEN)
+        int _dummy;
+    #elif defined(_SAPP_WIN32)
+        struct {
+            LARGE_INTEGER freq;
+            LARGE_INTEGER start;
+        } win;
+    #else // Linux, Android, ...
+        #ifdef CLOCK_MONOTONIC
+        #define _SAPP_CLOCK_MONOTONIC CLOCK_MONOTONIC
+        #else
+        // on some embedded platforms, CLOCK_MONOTONIC isn't defined
+        #define _SAPP_CLOCK_MONOTONIC (1)
+        #endif
+        struct {
+            uint64_t start;
+        } posix;
+    #endif
+} _sapp_tc_timestamp_t;
+
+_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) {
+    #if defined(_SAPP_APPLE)
+        mach_timebase_info(&ts->mach.timebase);
+        ts->mach.start = mach_absolute_time();
+    #elif defined(_SAPP_EMSCRIPTEN)
+        (void)ts;
+    #elif defined(_SAPP_WIN32)
+        QueryPerformanceFrequency(&ts->win.freq);
+        QueryPerformanceCounter(&ts->win.start);
+    #else
+        struct timespec tspec;
+        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
+        ts->posix.start = (uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec;
+    #endif
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
+    #if defined(_SAPP_APPLE)
+        const uint64_t traw = mach_absolute_time() - ts->mach.start;
+        const uint64_t now = (uint64_t) _sapp_tc_int64_muldiv((int64_t)traw, (int64_t)ts->mach.timebase.numer, (int64_t)ts->mach.timebase.denom);
+        return (double)now / 1000000000.0;
+    #elif defined(_SAPP_EMSCRIPTEN)
+        (void)ts;
+        SOKOL_ASSERT(false);
+        return 0.0;
+    #elif defined(_SAPP_WIN32)
+        LARGE_INTEGER qpc;
+        QueryPerformanceCounter(&qpc);
+        const uint64_t now = (uint64_t)_sapp_tc_int64_muldiv(qpc.QuadPart - ts->win.start.QuadPart, 1000000000, ts->win.freq.QuadPart);
+        return (double)now / 1000000000.0;
+    #else
+        struct timespec tspec;
+        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
+        const uint64_t now = ((uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec) - ts->posix.start;
+        return (double)now / 1000000000.0;
+    #endif
+}
+
+#endif
+#if defined(__EMSCRIPTEN__)
+/*== Emscripten (web) =======================================================
+    Implements the public sokol_app.h API on the web plus the multi-window
+    API (as stubs -- the whole backend binds to ONE <canvas> element, so a
+    second window is not representable; sapp_create_window() returns the
+    invalid handle and logs).
+
+    Unlike every native backend there is NO owned loop: sapp_run() sets
+    everything up, hands a per-frame callback to
+    emscripten_request_animation_frame_loop() (or emscripten_set_main_loop())
+    and RETURNS IMMEDIATELY. Rendering, events and the quit dance all happen
+    later inside browser-driven callbacks; "quit" stops the rAF loop and
+    tears down sokol state -- the tab and the wasm module stay alive.
+
+    Structure mirrors sokol_app.h's emscripten backend (HTML5 event
+    callbacks on the canvas selector, code-string keymap, deferred
+    pointer-lock on user gesture, execCommand copy + paste-event clipboard,
+    dragndrop with FileReader fetch, CSS cursors + BMP-in-JS custom cursors,
+    favicon icon, resize tracking via CSS size x devicePixelRatio). Both
+    graphics backends are supported: SOKOL_WGPU (async adapter/device chain
+    gated by init_done, browser auto-presents the surface at rAF boundaries)
+    and SOKOL_GLES3 (WebGL2 context, swapchain = default framebuffer).
+
+    The TrussC keyboard-on-canvas patch is native here: key handlers are
+    registered on the canvas selector (NOT the window), so other page
+    elements (e.g. an editor besides the canvas) receive keyboard input
+    independently. The canvas element needs a tabindex attribute and focus
+    for keyboard events to arrive (the TrussC web shell provides both). */
+#if defined(SOKOL_WGPU)
+#include <webgpu/webgpu.h>   /* emdawnwebgpu (modern Dawn API), NOT -sUSE_WEBGPU */
+#elif defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
+#else
+#error "sokol_app_tc.h: web build requires SOKOL_WGPU or SOKOL_GLES3"
+#endif
+#include <emscripten/emscripten.h>
+#include <emscripten/html5.h>
+#include <stdio.h>
+
+#if defined(SOKOL_APP_IMPL_INCLUDED)
+#error "sokol_app_tc.h owns the web implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
+#endif
+
+#ifndef SOKOL_ASSERT
+#include <assert.h>
+#define SOKOL_ASSERT(c) assert(c)
+#endif
+#ifndef _SOKOL_PRIVATE
+#define _SOKOL_PRIVATE static
+#endif
+#ifndef _SOKOL_UNUSED
+#define _SOKOL_UNUSED(x) (void)(x)
+#endif
+
+/* the lifted upstream code keys web-only forks on this */
+#define _SAPP_EMSCRIPTEN (1)
+#if defined(SOKOL_GLES3)
+#define _SAPP_ANY_GL (1)
+#endif
+/* NOTE: _SAPP_WGPU_HAS_WAIT stays UNDEFINED on web -- the WGPU
+   adapter/device/swapchain chain is async-callback driven */
+
+#define _SAPP_MAX_TITLE_LENGTH (128)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
+#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
+#if defined(__cplusplus)
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
+#else
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {0}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
+#endif
+
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+
+/* the internal monotonic clock is deliberately unused on web: all timing
+   comes from the timestamp the browser hands to the frame callback */
+typedef struct { int _dummy; } _sapp_tc_timestamp_t;
+_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) { _SOKOL_UNUSED(ts); }
+_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) { _SOKOL_UNUSED(ts); SOKOL_ASSERT(false); return 0.0; }
+#ifndef SOKOL_API_IMPL
+#define SOKOL_API_IMPL
+#endif
+#ifndef SOKOL_UNREACHABLE
+#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
+#endif
+
+#endif
+
+typedef struct {
+    _sapp_tc_timestamp_t timestamp;
+    double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
+    double dt_max;          // config: max clamp value for unfiltered time delta (seconds)
+    double dt_threshold;    // config: threshold time delta for 'resetting' filtering (default: 0.004s, 4ms)
+    double alpha;           // config: smoothing constant, lower values smoother, higher values faster response
+    double last;        // last absolute time in seconds
+    double dt;          // unfiltered frame delta in seconds, clamped to dt_min/dt_max
+    double ema;         // intermediate ema-filter result
+    double smooth_dt;   // smoothed frame delta in seconds
+} _sapp_tc_timing_t;
+
+_SOKOL_PRIVATE void _sapp_tc_timing_init(_sapp_tc_timing_t* t) {
+    _sapp_tc_timestamp_init(&t->timestamp);
+    t->dt_min = 0.000001;       // 1 us
+    t->dt_max = 0.1;            // 100 ms
+    t->dt_threshold = 0.004;    // 4ms
+    t->alpha = 0.025;
+    t->dt = 1.0 / 60.0;         // a 'likely' non-null value
+    t->ema = t->dt;
+    t->smooth_dt = t->dt;
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timing_clamp(_sapp_tc_timing_t* t, double dt) {
+    SOKOL_ASSERT((t->dt_min > 0.0) && (t->dt_max > 0.0) && (t->dt_max >= t->dt_min));
+    if (dt < t->dt_min) {
+        return t->dt_min;
+    } else if (dt > t->dt_max) {
+        return t->dt_max;
+    } else {
+        return dt;
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_timing_delta(_sapp_tc_timing_t* t, double dt) {
+    // first clamp raw dt against min/max (min avoid division by zero, max
+    // may avoids glitches and 'death-spirals' during debugging
+    dt = _sapp_tc_timing_clamp(t, dt);
+    t->dt = dt;
+    const double error = fabs(dt - t->smooth_dt);
+    if (error > t->dt_threshold) {
+        // 'reset' filter when new delta is outside threshold
+        t->ema = dt;
+        t->smooth_dt = dt;
+    } else {
+        // simple ema-filter with fixed alpha
+        t->ema = t->ema + t->alpha * (dt - t->ema);
+        t->smooth_dt = _sapp_tc_timing_clamp(t, t->ema);
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_timing_update(_sapp_tc_timing_t* t, double external_now) {
+    double now;
+    if (external_now == 0.0) {
+        now = _sapp_tc_timestamp_now(&t->timestamp);
+    } else {
+        now = external_now;
+    }
+    if (t->last > 0.0) {
+        double dt = now - t->last;
+        _sapp_tc_timing_delta(t, dt);
+    }
+    t->last = now;
+
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
+    return t->smooth_dt;
+}
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+
+#if defined(_SAPP_IOS)
+
+@interface _sapp_tc_scene_delegate : NSObject<UIApplicationDelegate, UIWindowSceneDelegate>;
+@end
+@interface _sapp_tc_textfield_dlg : NSObject<UITextFieldDelegate>
+- (void)keyboardWasShown:(NSNotification*)notif;
+- (void)keyboardWillBeHidden:(NSNotification*)notif;
+- (void)keyboardDidChangeFrame:(NSNotification*)notif;
+@end
+
+// Modified by tettou771 for TrussC: custom view controller for runtime orientation control
+@interface _sapp_tc_ios_view_ctrl : UIViewController
+@end
+
+#if defined(SOKOL_METAL)
+    @interface _sapp_tc_ios_view : UIView
+    - (void)displayLinkFired:(id)sender;
+    @end
+#else
+    @interface _sapp_tc_ios_view : GLKView
+    @end
+#endif
+
+typedef struct {
+    UIWindow* window;
+    _sapp_tc_ios_view* view;
+    UITextField* textfield;
+    _sapp_tc_textfield_dlg* textfield_dlg;
+    NSUInteger supported_orientations;  // UIInterfaceOrientationMask (default: all)
+    #if defined(SOKOL_METAL)
+        UIViewController* view_ctrl;
+    #else
+        GLKViewController* view_ctrl;
+    #endif
+    #if defined(SOKOL_METAL)
+    struct {
+        id<MTLDevice> device;
+        CAMetalLayer* layer;
+        CADisplayLink* display_link;
+        id<MTLTexture> depth_tex;
+        id<MTLTexture> msaa_tex;
+        struct {
+            CFTimeInterval timestamp;
+            CFTimeInterval frame_duration_sec;
+        } timing;
+    } mtl;
+    #else
+    EAGLContext* eagl_ctx;
+    #endif
+    bool suspended;
+} _sapp_tc_ios_t;
+
+#endif // _SAPP_IOS
+
+typedef struct {
+    bool enabled;
+} _sapp_tc_clipboard_t;
+
+typedef struct {
+    bool enabled;
+} _sapp_tc_drop_t;
+
+typedef struct {
+    float x, y;
+    float dx, dy;
+    bool shown;
+    bool locked;
+    bool pos_valid;
+    sapp_mouse_cursor current_cursor;
+} _sapp_tc_mouse_t;
+
+/* per-app state -- an iOS-sized subset of sokol_app.h's _sapp_t with the same
+   member names, so the lifted implementation code reads unchanged. mouse /
+   clipboard / drop / html5 / cursor members are inert on iOS (touch-only, no
+   OS clipboard or dnd surface) but kept so the shared lifted helpers and the
+   lifted public API compile verbatim. */
+typedef struct {
+    sapp_desc desc;
+    bool valid;
+    bool fullscreen;            /* inert: iOS is inherently fullscreen */
+    bool first_frame;
+    bool init_called;
+    bool constructing; // client publication uses the shared creation transaction
+    bool cleanup_called;
+    bool quit_requested;        /* inert: no user-driven quit path on iOS */
+    bool quit_ordered;
+    bool event_consumed;
+    bool html5_ask_leave_site;  /* inert */
+    bool onscreen_keyboard_shown;
+    bool skip_present;          /* inert: Metal presents via sokol_gfx commit */
+    int window_width;
+    int window_height;
+    int framebuffer_width;
+    int framebuffer_height;
+    int sample_count;
+    int swap_interval;
+    float dpi_scale;
+    uint64_t frame_count;
+    sapp_event event;
+    _sapp_tc_mouse_t mouse;
+    _sapp_tc_clipboard_t clipboard;
+    _sapp_tc_drop_t drop;
+    _sapp_tc_timing_t timing;
+    _sapp_tc_ios_t ios;
+    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
+    char window_title[_SAPP_MAX_TITLE_LENGTH];
+    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
+} _sapp_tc_t;
+static _sapp_tc_t _sapp_tc;
+#endif
+#if defined(__ANDROID__)
+
+#if defined(_SAPP_ANDROID)
+typedef enum {
+    _SOKOL_ANDROID_MSG_CREATE,
+    _SOKOL_ANDROID_MSG_RESUME,
+    _SOKOL_ANDROID_MSG_PAUSE,
+    _SOKOL_ANDROID_MSG_FOCUS,
+    _SOKOL_ANDROID_MSG_NO_FOCUS,
+    _SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW,
+    _SOKOL_ANDROID_MSG_SET_INPUT_QUEUE,
+    _SOKOL_ANDROID_MSG_DESTROY,
+} _sapp_tc_android_msg_t;
+
+typedef struct {
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int read_from_main_fd;
+    int write_from_main_fd;
+} _sapp_tc_android_pt_t;
+
+typedef struct {
+    ANativeWindow* window;
+    AInputQueue* input;
+} _sapp_tc_android_resources_t;
+
+typedef struct {
+    ANativeActivity* activity;
+    _sapp_tc_android_pt_t pt;
+    _sapp_tc_android_resources_t pending;
+    _sapp_tc_android_resources_t current;
+    ALooper* looper;
+    bool is_thread_started;
+    bool is_thread_stopping;
+    bool is_thread_stopped;
+    bool has_created;
+    bool has_resumed;
+    bool has_focus;
+    EGLConfig config;
+    EGLDisplay display;
+    EGLContext context;
+    EGLSurface surface;
+    #if __ANDROID_API__ >= 29
+    AChoreographer* choreographer;
+    bool frame_callback_in_flight;
+    #endif
+} _sapp_tc_android_t;
+
+#endif // _SAPP_ANDROID
+
+typedef struct {
+    bool enabled;
+} _sapp_tc_clipboard_t;
+
+typedef struct {
+    bool enabled;
+} _sapp_tc_drop_t;
+
+typedef struct {
+    float x, y;
+    float dx, dy;
+    bool shown;
+    bool locked;
+    bool pos_valid;
+    sapp_mouse_cursor current_cursor;
+} _sapp_tc_mouse_t;
+
+typedef struct {
+    uint32_t framebuffer;
+} _sapp_tc_gl_t;
+
+/* per-app state -- an Android-sized subset of sokol_app.h's _sapp_t with the
+   same member names, so the lifted implementation code reads unchanged.
+   mouse / clipboard / drop / html5 / cursor members are inert on Android
+   (touch-only, no OS clipboard or dnd surface) but kept so the shared lifted
+   helpers and the lifted public API compile verbatim. */
+typedef struct {
+    sapp_desc desc;
+    bool valid;
+    bool fullscreen;            /* inert: Android is inherently fullscreen */
+    bool first_frame;
+    bool init_called;
+    bool constructing; // client publication uses the shared creation transaction
+    bool cleanup_called;
+    bool quit_requested;        /* inert: lifecycle is activity-driven */
+    bool quit_ordered;
+    bool event_consumed;
+    bool html5_ask_leave_site;  /* inert */
+    bool onscreen_keyboard_shown;   /* never set on Android (pre-existing quirk) */
+    bool skip_present;
+    int window_width;
+    int window_height;
+    int framebuffer_width;
+    int framebuffer_height;
+    int sample_count;
+    int swap_interval;
+    float dpi_scale;
+    uint64_t frame_count;
+    sapp_event event;
+    _sapp_tc_mouse_t mouse;
+    _sapp_tc_clipboard_t clipboard;
+    _sapp_tc_drop_t drop;
+    _sapp_tc_timing_t timing;
+    _sapp_tc_android_t android;
+    _sapp_tc_gl_t gl;
+    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
+    char window_title[_SAPP_MAX_TITLE_LENGTH];
+    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
+} _sapp_tc_t;
+static _sapp_tc_t _sapp_tc;
+#endif
+#if defined(__EMSCRIPTEN__)
+
+// ███████ ████████ ██████  ██    ██  ██████ ████████ ███████
+// ██         ██    ██   ██ ██    ██ ██         ██    ██
+// ███████    ██    ██████  ██    ██ ██         ██    ███████
+//      ██    ██    ██   ██ ██    ██ ██         ██         ██
+// ███████    ██    ██   ██  ██████   ██████    ██    ███████
+
+#if defined(SOKOL_WGPU)
+typedef struct {
+    WGPUInstance instance;
+    WGPUAdapter adapter;
+    WGPUDevice device;
+    WGPUSurface surface;
+    WGPUTextureFormat render_format;
+    WGPUTexture msaa_tex;
+    WGPUTextureView msaa_view;
+    WGPUTexture depth_stencil_tex;
+    WGPUTextureView depth_stencil_view;
+    WGPUTextureView swapchain_view;
+    bool init_done;
+} _sapp_tc_wgpu_t;
+#endif
+
+#if defined(_SAPP_EMSCRIPTEN)
+
+typedef struct {
+    bool mouse_lock_requested;
+    uint16_t mouse_buttons;
+} _sapp_tc_emsc_t;
+#endif // _SAPP_EMSCRIPTEN
+
+#if defined(_SAPP_ANY_GL)
+typedef struct {
+    uint32_t framebuffer;
+} _sapp_tc_gl_t;
+#endif
+
+typedef struct {
+    bool enabled;
+} _sapp_tc_clipboard_t;
+
+typedef struct {
+    bool enabled;
+} _sapp_tc_drop_t;
+
+typedef struct {
+    float x, y;
+    float dx, dy;
+    bool shown;
+    bool locked;
+    bool pos_valid;
+    sapp_mouse_cursor current_cursor;
+} _sapp_tc_mouse_t;
+
+/* per-app state -- a web-sized subset of sokol_app.h's _sapp_t with the same
+   member names, so the lifted implementation code reads unchanged. A large
+   part of the web backend's real state lives in JavaScript on the Module
+   object (Module.sapp_emsc_target = the canvas, Module.sokol_dropped_files,
+   Module.__sapp_tc_custom_cursors), reachable only from the EM_JS blocks. */
+typedef struct {
+    sapp_desc desc;
+    bool valid;
+    bool fullscreen;
+    bool first_frame;
+    bool init_called;
+    bool constructing; // client publication uses the shared creation transaction
+    bool cleanup_called;
+    bool quit_requested;
+    bool quit_ordered;
+    bool event_consumed;
+    bool html5_ask_leave_site;
+    bool onscreen_keyboard_shown;
+    bool skip_present;      /* stored for API parity; the browser auto-presents at rAF (ignored) */
+    int window_width;
+    int window_height;
+    int framebuffer_width;
+    int framebuffer_height;
+    int sample_count;
+    int swap_interval;      /* stored for API parity; the browser paces via rAF (ignored) */
+    float dpi_scale;
+    uint64_t frame_count;
+    sapp_event event;
+    _sapp_tc_mouse_t mouse;
+    _sapp_tc_clipboard_t clipboard;
+    _sapp_tc_drop_t drop;
+    _sapp_tc_timing_t timing;
+    #if defined(SOKOL_WGPU)
+    _sapp_tc_wgpu_t wgpu;
+    #endif
+    _sapp_tc_emsc_t emsc;
+    #if defined(_SAPP_ANY_GL)
+    _sapp_tc_gl_t gl;
+    #endif
+    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
+    char window_title[_SAPP_MAX_TITLE_LENGTH];
+    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
+} _sapp_tc_t;
+static _sapp_tc_t _sapp_tc;
+#endif
+
+_SOKOL_PRIVATE void _sapp_tc_clear(void* ptr, size_t size) {
+    SOKOL_ASSERT(ptr && (size > 0));
+    memset(ptr, 0, size);
+}
+
+_SOKOL_PRIVATE void* _sapp_tc_malloc(size_t size) {
+    SOKOL_ASSERT(size > 0);
+    void* ptr;
+    if (_sapp_tc.desc.allocator.alloc_fn) {
+        ptr = _sapp_tc.desc.allocator.alloc_fn(size, _sapp_tc.desc.allocator.user_data);
+    } else {
+        ptr = malloc(size);
+    }
+    if (0 == ptr) {
+        _SAPP_PANIC(MALLOC_FAILED);
+    }
+    return ptr;
+}
+
+_SOKOL_PRIVATE void* _sapp_tc_malloc_clear(size_t size) {
+    void* ptr = _sapp_tc_malloc(size);
+    _sapp_tc_clear(ptr, size);
+    return ptr;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
+    if (_sapp_tc.desc.allocator.free_fn) {
+        _sapp_tc.desc.allocator.free_fn(ptr, _sapp_tc.desc.allocator.user_data);
+    } else {
+        free(ptr);
+    }
+}
+
+// round float to int and at least 1
+_SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
+    int val = (int)roundf(f);
+    if (val <= 0) {
+        val = 1;
+    }
+    return val;
+}
+
+/* Copy a string (either zero-terminated or with explicit length)
+   into a fixed size buffer with guaranteed zero-termination.
+
+   Return false if the string didn't fit into the buffer and had to be clamped.
+
+   FIXME: Currently UTF-8 strings might become invalid if the string
+   is clamped, because the last zero-byte might be written into
+   the middle of a multi-byte sequence.
+*/
+_SOKOL_PRIVATE bool _sapp_tc_strcpy_range(const char* src, size_t src_len, char* dst, size_t dst_buf_len) {
+    SOKOL_ASSERT(src && dst && (dst_buf_len > 0));
+    if (0 == src_len) {
+        src_len = dst_buf_len;
+    }
+    char* const end = &(dst[dst_buf_len-1]);
+    char c = 0;
+    for (size_t i = 0; i < dst_buf_len; i++) {
+        c = *src;
+        if (i >= src_len) {
+            c = 0;
+        }
+        if (c != 0) {
+            src++;
+        }
+        *dst++ = c;
+    }
+    // truncated?
+    if (c != 0) {
+        *end = 0;
+        return false;
+    } else {
+        return true;
+    }
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_strcpy(const char* src, char* dst, size_t dst_buf_len) {
+    return _sapp_tc_strcpy_range(src, 0, dst, dst_buf_len);
+}
+
+_SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
+    SOKOL_ASSERT((desc->allocator.alloc_fn && desc->allocator.free_fn) || (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
+    sapp_desc res = *desc;
+    res.sample_count = _sapp_tc_def(res.sample_count, 1);
+    res.swap_interval = _sapp_tc_def(res.swap_interval, 1);
+    if (0 == res.gl.major_version) {
+        #if defined(SOKOL_GLCORE)
+            res.gl.major_version = 4;
+            #if defined(_SAPP_APPLE)
+                res.gl.minor_version = 1;
+            #else
+                res.gl.minor_version = 3;
+            #endif
+        #elif defined(SOKOL_GLES3)
+            res.gl.major_version = 3;
+            #if defined(_SAPP_ANDROID) || defined(_SAPP_LINUX)
+                res.gl.minor_version = 1;
+            #else
+                res.gl.minor_version = 0;
+            #endif
+        #endif
+    }
+    res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
+    res.window_title = _sapp_tc_def(res.window_title, "sokol");
+    return res;
+}
+#endif // singleton support
+
 #if defined(__APPLE__) && TARGET_OS_OSX
 /*== macOS ==================================================================*/
 #if !defined(__OBJC__)
@@ -5018,374 +5947,6 @@ extern "C" void sapp_tc_window_toggle_fullscreen(sapp_window win) {
 }
 
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
-/*== iOS (Metal) ============================================================
-    Implements the public sokol_app.h API on iOS plus the multi-window API
-    (as stubs -- there is exactly ONE UIWindow bound to the connecting
-    UIWindowScene, so a second window is not representable;
-    sapp_create_window() returns the invalid handle and logs).
-
-    UIKit owns the loop: sapp_run() -> UIApplicationMain() never returns.
-    The real setup (UIWindow + CAMetalLayer + CADisplayLink) happens later,
-    scene-driven, inside scene:willConnectToSession: -- the scene lifecycle
-    is adopted PROGRAMMATICALLY via the app delegate's
-    configurationForConnectingSceneSession: (the TrussC Info-iOS.plist has
-    NO UIApplicationSceneManifest; that method is what makes scenes work).
-    The frame driver is the CADisplayLink firing displayLinkFired: every
-    vsync; backgrounding pauses the link (rendering while suspended is an
-    iOS watchdog kill) and fires SAPP_EVENTTYPE_SUSPENDED/RESUMED.
-
-    Structure mirrors sokol_app.h's iOS backend including all TrussC
-    patches: runtime orientation control (_sapp_tc_ios_view_ctrl +
-    sapp_ios_set_supported_orientations), immersive mode (the NON-STATIC
-    global _sapp_ios_immersive_mode -- tcPlatform_ios.mm externs it by
-    name, keep it), view-bounds dimension update, drawable-size readback
-    after resize (sapp_width/height must match what Metal actually
-    renders), RGB10A2 10-bit layer + MSAA format, framebufferOnly=false
-    for captureWindow() readback, and sapp_ios_get_window() for the
-    document picker. Input is multi-touch plus an on-screen keyboard
-    driven through a hidden UITextField (CHAR + Enter/Space/Backspace
-    only). Upstream's GLES3/EAGL path is not ported -- TrussC iOS is
-    Metal-only. The tvOS press-event code is lifted but unexercised. */
-#if !defined(__OBJC__)
-#error "sokol_app_tc.h iOS implementation must be compiled as Objective-C++ (.mm)"
-#endif
-#if !defined(SOKOL_METAL)
-#error "sokol_app_tc.h: TrussC iOS builds are Metal-only (define SOKOL_METAL)"
-#endif
-#import <UIKit/UIKit.h>
-#import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
-#import <QuartzCore/CADisplayLink.h>
-#include <Availability.h>
-#include <mach/mach_time.h>
-#include <stdio.h>
-
-#if defined(SOKOL_APP_IMPL_INCLUDED)
-#error "sokol_app_tc.h owns the iOS implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
-#endif
-
-#ifndef SOKOL_ASSERT
-#include <assert.h>
-#define SOKOL_ASSERT(c) assert(c)
-#endif
-#ifndef _SOKOL_PRIVATE
-#define _SOKOL_PRIVATE static
-#endif
-#ifndef _SOKOL_UNUSED
-#define _SOKOL_UNUSED(x) (void)(x)
-#endif
-#ifndef SOKOL_API_IMPL
-#define SOKOL_API_IMPL
-#endif
-#ifndef SOKOL_UNREACHABLE
-#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
-#endif
-
-/* the lifted upstream code keys Apple/iOS forks on these */
-#define _SAPP_APPLE (1)
-#define _SAPP_IOS (1)
-
-#define _SAPP_MAX_TITLE_LENGTH (128)
-#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
-#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
-#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
-/* always ObjC++ here, so the C++ forms are unconditional (ARC compatible) */
-#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
-#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
-#if __has_feature(objc_arc)
-#define _SAPP_OBJC_RELEASE(obj) { obj = nil; }
-#else
-#define _SAPP_OBJC_RELEASE(obj) { [obj release]; obj = nil; }
-#endif
-
-/* controlled failure instead of sokol_app.h's log-item machinery, reported
-   through sapp_desc.logger (_sapp_tc_log) */
-#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
-#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
-#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
-#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
-#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
-typedef struct {
-    #if defined(_SAPP_APPLE)
-        struct {
-            mach_timebase_info_data_t timebase;
-            uint64_t start;
-        } mach;
-    #elif defined(_SAPP_EMSCRIPTEN)
-        int _dummy;
-    #elif defined(_SAPP_WIN32)
-        struct {
-            LARGE_INTEGER freq;
-            LARGE_INTEGER start;
-        } win;
-    #else // Linux, Android, ...
-        #ifdef CLOCK_MONOTONIC
-        #define _SAPP_CLOCK_MONOTONIC CLOCK_MONOTONIC
-        #else
-        // on some embedded platforms, CLOCK_MONOTONIC isn't defined
-        #define _SAPP_CLOCK_MONOTONIC (1)
-        #endif
-        struct {
-            uint64_t start;
-        } posix;
-    #endif
-} _sapp_tc_timestamp_t;
-
-_SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64_t denom) {
-    int64_t q = value / denom;
-    int64_t r = value % denom;
-    return q * numer + r * numer / denom;
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) {
-    #if defined(_SAPP_APPLE)
-        mach_timebase_info(&ts->mach.timebase);
-        ts->mach.start = mach_absolute_time();
-    #elif defined(_SAPP_EMSCRIPTEN)
-        (void)ts;
-    #elif defined(_SAPP_WIN32)
-        QueryPerformanceFrequency(&ts->win.freq);
-        QueryPerformanceCounter(&ts->win.start);
-    #else
-        struct timespec tspec;
-        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
-        ts->posix.start = (uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec;
-    #endif
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
-    #if defined(_SAPP_APPLE)
-        const uint64_t traw = mach_absolute_time() - ts->mach.start;
-        const uint64_t now = (uint64_t) _sapp_tc_int64_muldiv((int64_t)traw, (int64_t)ts->mach.timebase.numer, (int64_t)ts->mach.timebase.denom);
-        return (double)now / 1000000000.0;
-    #elif defined(_SAPP_EMSCRIPTEN)
-        (void)ts;
-        SOKOL_ASSERT(false);
-        return 0.0;
-    #elif defined(_SAPP_WIN32)
-        LARGE_INTEGER qpc;
-        QueryPerformanceCounter(&qpc);
-        const uint64_t now = (uint64_t)_sapp_tc_int64_muldiv(qpc.QuadPart - ts->win.start.QuadPart, 1000000000, ts->win.freq.QuadPart);
-        return (double)now / 1000000000.0;
-    #else
-        struct timespec tspec;
-        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
-        const uint64_t now = ((uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec) - ts->posix.start;
-        return (double)now / 1000000000.0;
-    #endif
-}
-
-typedef struct {
-    _sapp_tc_timestamp_t timestamp;
-    double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
-    double dt_max;          // config: max clamp value for unfiltered time delta (seconds)
-    double dt_threshold;    // config: threshold time delta for 'resetting' filtering (default: 0.004s, 4ms)
-    double alpha;           // config: smoothing constant, lower values smoother, higher values faster response
-    double last;        // last absolute time in seconds
-    double dt;          // unfiltered frame delta in seconds, clamped to dt_min/dt_max
-    double ema;         // intermediate ema-filter result
-    double smooth_dt;   // smoothed frame delta in seconds
-} _sapp_tc_timing_t;
-
-_SOKOL_PRIVATE void _sapp_tc_timing_init(_sapp_tc_timing_t* t) {
-    _sapp_tc_timestamp_init(&t->timestamp);
-    t->dt_min = 0.000001;       // 1 us
-    t->dt_max = 0.1;            // 100 ms
-    t->dt_threshold = 0.004;    // 4ms
-    t->alpha = 0.025;
-    t->dt = 1.0 / 60.0;         // a 'likely' non-null value
-    t->ema = t->dt;
-    t->smooth_dt = t->dt;
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timing_clamp(_sapp_tc_timing_t* t, double dt) {
-    SOKOL_ASSERT((t->dt_min > 0.0) && (t->dt_max > 0.0) && (t->dt_max >= t->dt_min));
-    if (dt < t->dt_min) {
-        return t->dt_min;
-    } else if (dt > t->dt_max) {
-        return t->dt_max;
-    } else {
-        return dt;
-    }
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timing_delta(_sapp_tc_timing_t* t, double dt) {
-    // first clamp raw dt against min/max (min avoid division by zero, max
-    // may avoids glitches and 'death-spirals' during debugging
-    dt = _sapp_tc_timing_clamp(t, dt);
-    t->dt = dt;
-    const double error = fabs(dt - t->smooth_dt);
-    if (error > t->dt_threshold) {
-        // 'reset' filter when new delta is outside threshold
-        t->ema = dt;
-        t->smooth_dt = dt;
-    } else {
-        // simple ema-filter with fixed alpha
-        t->ema = t->ema + t->alpha * (dt - t->ema);
-        t->smooth_dt = _sapp_tc_timing_clamp(t, t->ema);
-    }
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timing_update(_sapp_tc_timing_t* t, double external_now) {
-    double now;
-    if (external_now == 0.0) {
-        now = _sapp_tc_timestamp_now(&t->timestamp);
-    } else {
-        now = external_now;
-    }
-    if (t->last > 0.0) {
-        double dt = now - t->last;
-        _sapp_tc_timing_delta(t, dt);
-    }
-    t->last = now;
-
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
-    return t->smooth_dt;
-}
-
-#if defined(_SAPP_IOS)
-
-@interface _sapp_tc_scene_delegate : NSObject<UIApplicationDelegate, UIWindowSceneDelegate>;
-@end
-@interface _sapp_tc_textfield_dlg : NSObject<UITextFieldDelegate>
-- (void)keyboardWasShown:(NSNotification*)notif;
-- (void)keyboardWillBeHidden:(NSNotification*)notif;
-- (void)keyboardDidChangeFrame:(NSNotification*)notif;
-@end
-
-// Modified by tettou771 for TrussC: custom view controller for runtime orientation control
-@interface _sapp_tc_ios_view_ctrl : UIViewController
-@end
-
-#if defined(SOKOL_METAL)
-    @interface _sapp_tc_ios_view : UIView
-    - (void)displayLinkFired:(id)sender;
-    @end
-#else
-    @interface _sapp_tc_ios_view : GLKView
-    @end
-#endif
-
-typedef struct {
-    UIWindow* window;
-    _sapp_tc_ios_view* view;
-    UITextField* textfield;
-    _sapp_tc_textfield_dlg* textfield_dlg;
-    NSUInteger supported_orientations;  // UIInterfaceOrientationMask (default: all)
-    #if defined(SOKOL_METAL)
-        UIViewController* view_ctrl;
-    #else
-        GLKViewController* view_ctrl;
-    #endif
-    #if defined(SOKOL_METAL)
-    struct {
-        id<MTLDevice> device;
-        CAMetalLayer* layer;
-        CADisplayLink* display_link;
-        id<MTLTexture> depth_tex;
-        id<MTLTexture> msaa_tex;
-        struct {
-            CFTimeInterval timestamp;
-            CFTimeInterval frame_duration_sec;
-        } timing;
-    } mtl;
-    #else
-    EAGLContext* eagl_ctx;
-    #endif
-    bool suspended;
-} _sapp_tc_ios_t;
-
-#endif // _SAPP_IOS
-
-typedef struct {
-    bool enabled;
-} _sapp_tc_clipboard_t;
-
-typedef struct {
-    bool enabled;
-} _sapp_tc_drop_t;
-
-typedef struct {
-    float x, y;
-    float dx, dy;
-    bool shown;
-    bool locked;
-    bool pos_valid;
-    sapp_mouse_cursor current_cursor;
-} _sapp_tc_mouse_t;
-
-/* per-app state -- an iOS-sized subset of sokol_app.h's _sapp_t with the same
-   member names, so the lifted implementation code reads unchanged. mouse /
-   clipboard / drop / html5 / cursor members are inert on iOS (touch-only, no
-   OS clipboard or dnd surface) but kept so the shared lifted helpers and the
-   lifted public API compile verbatim. */
-typedef struct {
-    sapp_desc desc;
-    bool valid;
-    bool fullscreen;            /* inert: iOS is inherently fullscreen */
-    bool first_frame;
-    bool init_called;
-    bool constructing; // client publication uses the shared creation transaction
-    bool cleanup_called;
-    bool quit_requested;        /* inert: no user-driven quit path on iOS */
-    bool quit_ordered;
-    bool event_consumed;
-    bool html5_ask_leave_site;  /* inert */
-    bool onscreen_keyboard_shown;
-    bool skip_present;          /* inert: Metal presents via sokol_gfx commit */
-    int window_width;
-    int window_height;
-    int framebuffer_width;
-    int framebuffer_height;
-    int sample_count;
-    int swap_interval;
-    float dpi_scale;
-    uint64_t frame_count;
-    sapp_event event;
-    _sapp_tc_mouse_t mouse;
-    _sapp_tc_clipboard_t clipboard;
-    _sapp_tc_drop_t drop;
-    _sapp_tc_timing_t timing;
-    _sapp_tc_ios_t ios;
-    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
-    char window_title[_SAPP_MAX_TITLE_LENGTH];
-    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
-} _sapp_tc_t;
-static _sapp_tc_t _sapp_tc;
-_SOKOL_PRIVATE void _sapp_tc_clear(void* ptr, size_t size) {
-    SOKOL_ASSERT(ptr && (size > 0));
-    memset(ptr, 0, size);
-}
-
-_SOKOL_PRIVATE void* _sapp_tc_malloc(size_t size) {
-    SOKOL_ASSERT(size > 0);
-    void* ptr;
-    if (_sapp_tc.desc.allocator.alloc_fn) {
-        ptr = _sapp_tc.desc.allocator.alloc_fn(size, _sapp_tc.desc.allocator.user_data);
-    } else {
-        ptr = malloc(size);
-    }
-    if (0 == ptr) {
-        _SAPP_PANIC(MALLOC_FAILED);
-    }
-    return ptr;
-}
-
-_SOKOL_PRIVATE void* _sapp_tc_malloc_clear(size_t size) {
-    void* ptr = _sapp_tc_malloc(size);
-    _sapp_tc_clear(ptr, size);
-    return ptr;
-}
-
-_SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
-    if (_sapp_tc.desc.allocator.free_fn) {
-        _sapp_tc.desc.allocator.free_fn(ptr, _sapp_tc.desc.allocator.user_data);
-    } else {
-        free(ptr);
-    }
-}
 
 // ██   ██ ███████ ██      ██████  ███████ ██████  ███████
 // ██   ██ ██      ██      ██   ██ ██      ██   ██ ██
@@ -5394,15 +5955,6 @@ _SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
 // ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
 //
 // >>helpers
-
-// round float to int and at least 1
-_SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
-    int val = (int)roundf(f);
-    if (val <= 0) {
-        val = 1;
-    }
-    return val;
-}
 
 _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
     if (_sapp_tc.init_called || _sapp_tc.constructing) return;
@@ -5442,75 +5994,6 @@ _SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
 
 _SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* input) {
     return _sapp_tc_deliver_single_event(_sapp_tc, input);
-}
-
-
-
-
-/* Copy a string (either zero-terminated or with explicit length)
-   into a fixed size buffer with guaranteed zero-termination.
-
-   Return false if the string didn't fit into the buffer and had to be clamped.
-
-   FIXME: Currently UTF-8 strings might become invalid if the string
-   is clamped, because the last zero-byte might be written into
-   the middle of a multi-byte sequence.
-*/
-_SOKOL_PRIVATE bool _sapp_tc_strcpy_range(const char* src, size_t src_len, char* dst, size_t dst_buf_len) {
-    SOKOL_ASSERT(src && dst && (dst_buf_len > 0));
-    if (0 == src_len) {
-        src_len = dst_buf_len;
-    }
-    char* const end = &(dst[dst_buf_len-1]);
-    char c = 0;
-    for (size_t i = 0; i < dst_buf_len; i++) {
-        c = *src;
-        if (i >= src_len) {
-            c = 0;
-        }
-        if (c != 0) {
-            src++;
-        }
-        *dst++ = c;
-    }
-    // truncated?
-    if (c != 0) {
-        *end = 0;
-        return false;
-    } else {
-        return true;
-    }
-}
-
-_SOKOL_PRIVATE bool _sapp_tc_strcpy(const char* src, char* dst, size_t dst_buf_len) {
-    return _sapp_tc_strcpy_range(src, 0, dst, dst_buf_len);
-}
-
-_SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
-    SOKOL_ASSERT((desc->allocator.alloc_fn && desc->allocator.free_fn) || (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
-    sapp_desc res = *desc;
-    res.sample_count = _sapp_tc_def(res.sample_count, 1);
-    res.swap_interval = _sapp_tc_def(res.swap_interval, 1);
-    if (0 == res.gl.major_version) {
-        #if defined(SOKOL_GLCORE)
-            res.gl.major_version = 4;
-            #if defined(_SAPP_APPLE)
-                res.gl.minor_version = 1;
-            #else
-                res.gl.minor_version = 3;
-            #endif
-        #elif defined(SOKOL_GLES3)
-            res.gl.major_version = 3;
-            #if defined(_SAPP_ANDROID) || defined(_SAPP_LINUX)
-                res.gl.minor_version = 1;
-            #else
-                res.gl.minor_version = 0;
-            #endif
-        #endif
-    }
-    res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
-    res.window_title = _sapp_tc_def(res.window_title, "sokol");
-    return res;
 }
 
 _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
@@ -6901,8 +7384,6 @@ SOKOL_API_IMPL void sapp_skip_present(void) {
     _sapp_tc.skip_present = true;
 }
 // end of modification
-
-
 
 /* ---- Metal backend getters (real values; iOS is single-window) ----------- */
 #if defined(__cplusplus)
@@ -13530,384 +14011,6 @@ void* sapp_userdata(void) { return _sapp_tc.app.desc.user_data; }
 #error "sokol_app_tc.h: unknown 3D API selected for Linux, must be SOKOL_GLCORE or SOKOL_GLES3"
 #endif /* linux backend select */
 #elif defined(__ANDROID__)
-/*== Android (GLES3 / NativeActivity) =======================================
-    Implements the public sokol_app.h API on Android plus the multi-window
-    API (as stubs -- the activity owns exactly ONE ANativeWindow, so a
-    second window is not representable; sapp_create_window() returns the
-    invalid handle and logs).
-
-    The entry point is INVERTED relative to every other platform: this
-    section EXPORTS ANativeActivity_onCreate() (NativeActivity dlopens the
-    app .so and calls it on Android's UI thread), which spawns a dedicated
-    APP THREAD and returns. The app thread owns the ALooper, the EGL
-    display/context/surface, the frame loop and every TrussC callback
-    (init/frame/event/cleanup); the UI thread only forwards lifecycle
-    callbacks through a message pipe + mutex/cond handshake. sapp_run()
-    is NOT supported (SOKOL_NO_ENTRY is a compile error); sokol_main()
-    is defined by TrussC's platform/android/sokol_impl.cpp bridge.
-
-    The EGL surface has an independent lifecycle: it is destroyed on
-    background and recreated on foreground (APP_CMD state machine); frames
-    only run while has_resumed && has_focus && a surface exists.
-
-    Structure mirrors sokol_app.h's Android backend including all TrussC
-    patches: the Choreographer vsync-paced frame loop with ALooper poll
-    fallback (compiled in at __ANDROID_API__ >= 29), the BACK-key
-    no-shutdown fix (kiosk/screen-pinning survival -- BACK is consumed,
-    never tears down EGL), DPI scale from AConfiguration_getDensity()/160
-    with fb/win-ratio fallback, and the skip_present early-return. Input
-    is multi-touch + the BACK key; orientation and immersive mode are
-    TrussC-side JNI (tcPlatform_android.cpp), not sokol's business. */
-#define _SAPP_ANDROID (1)
-#if !defined(SOKOL_GLES3)
-#error "sokol_app_tc.h: unknown 3D API selected for Android, must be SOKOL_GLES3"
-#endif
-#if defined(SOKOL_NO_ENTRY)
-#error "sokol_app_tc.h: SOKOL_NO_ENTRY is not supported on Android"
-#endif
-/* GLES3 always -> the lifted code's GL forks are live */
-#define _SAPP_ANY_GL (1)
-
-#include <pthread.h>
-#include <unistd.h>
-#include <time.h>
-#include <android/native_activity.h>
-#include <android/configuration.h>  /* [TrussC] AConfiguration for display density */
-#include <android/looper.h>
-#if __ANDROID_API__ >= 29
-    #include <android/choreographer.h>
-#endif
-#include <EGL/egl.h>
-#include <GLES3/gl3.h>
-#include <stdio.h>
-
-#if defined(SOKOL_APP_IMPL_INCLUDED)
-#error "sokol_app_tc.h owns the Android implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
-#endif
-
-#ifndef SOKOL_ASSERT
-#include <assert.h>
-#define SOKOL_ASSERT(c) assert(c)
-#endif
-#ifndef _SOKOL_PRIVATE
-#define _SOKOL_PRIVATE static
-#endif
-#ifndef _SOKOL_UNUSED
-#define _SOKOL_UNUSED(x) (void)(x)
-#endif
-#ifndef SOKOL_API_IMPL
-#define SOKOL_API_IMPL
-#endif
-#ifndef SOKOL_UNREACHABLE
-#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
-#endif
-
-#define _SAPP_MAX_TITLE_LENGTH (128)
-#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
-#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
-#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
-#if defined(__cplusplus)
-#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
-#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
-#else
-#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {0}
-#define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
-#endif
-
-/* controlled failure instead of sokol_app.h's log-item machinery, reported
-   through sapp_desc.logger (_sapp_tc_log). The ones that run before
-   _sapp_tc_init_state() stores the desc -- ANDROID_NATIVE_ACTIVITY_ONCREATE
-   at the top of ANativeActivity_onCreate() -- find no logger and reach
-   logcat through _sapp_tc_log's fallback ("sokol_app_tc" tag), as before.
-   (<android/log.h> comes from the implementation preamble.) */
-#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
-#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
-#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
-#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
-#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
-#define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
-#define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
-typedef struct {
-    #if defined(_SAPP_APPLE)
-        struct {
-            mach_timebase_info_data_t timebase;
-            uint64_t start;
-        } mach;
-    #elif defined(_SAPP_EMSCRIPTEN)
-        int _dummy;
-    #elif defined(_SAPP_WIN32)
-        struct {
-            LARGE_INTEGER freq;
-            LARGE_INTEGER start;
-        } win;
-    #else // Linux, Android, ...
-        #ifdef CLOCK_MONOTONIC
-        #define _SAPP_CLOCK_MONOTONIC CLOCK_MONOTONIC
-        #else
-        // on some embedded platforms, CLOCK_MONOTONIC isn't defined
-        #define _SAPP_CLOCK_MONOTONIC (1)
-        #endif
-        struct {
-            uint64_t start;
-        } posix;
-    #endif
-} _sapp_tc_timestamp_t;
-
-_SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64_t denom) {
-    int64_t q = value / denom;
-    int64_t r = value % denom;
-    return q * numer + r * numer / denom;
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) {
-    #if defined(_SAPP_APPLE)
-        mach_timebase_info(&ts->mach.timebase);
-        ts->mach.start = mach_absolute_time();
-    #elif defined(_SAPP_EMSCRIPTEN)
-        (void)ts;
-    #elif defined(_SAPP_WIN32)
-        QueryPerformanceFrequency(&ts->win.freq);
-        QueryPerformanceCounter(&ts->win.start);
-    #else
-        struct timespec tspec;
-        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
-        ts->posix.start = (uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec;
-    #endif
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
-    #if defined(_SAPP_APPLE)
-        const uint64_t traw = mach_absolute_time() - ts->mach.start;
-        const uint64_t now = (uint64_t) _sapp_tc_int64_muldiv((int64_t)traw, (int64_t)ts->mach.timebase.numer, (int64_t)ts->mach.timebase.denom);
-        return (double)now / 1000000000.0;
-    #elif defined(_SAPP_EMSCRIPTEN)
-        (void)ts;
-        SOKOL_ASSERT(false);
-        return 0.0;
-    #elif defined(_SAPP_WIN32)
-        LARGE_INTEGER qpc;
-        QueryPerformanceCounter(&qpc);
-        const uint64_t now = (uint64_t)_sapp_tc_int64_muldiv(qpc.QuadPart - ts->win.start.QuadPart, 1000000000, ts->win.freq.QuadPart);
-        return (double)now / 1000000000.0;
-    #else
-        struct timespec tspec;
-        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
-        const uint64_t now = ((uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec) - ts->posix.start;
-        return (double)now / 1000000000.0;
-    #endif
-}
-
-typedef struct {
-    _sapp_tc_timestamp_t timestamp;
-    double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
-    double dt_max;          // config: max clamp value for unfiltered time delta (seconds)
-    double dt_threshold;    // config: threshold time delta for 'resetting' filtering (default: 0.004s, 4ms)
-    double alpha;           // config: smoothing constant, lower values smoother, higher values faster response
-    double last;        // last absolute time in seconds
-    double dt;          // unfiltered frame delta in seconds, clamped to dt_min/dt_max
-    double ema;         // intermediate ema-filter result
-    double smooth_dt;   // smoothed frame delta in seconds
-} _sapp_tc_timing_t;
-
-_SOKOL_PRIVATE void _sapp_tc_timing_init(_sapp_tc_timing_t* t) {
-    _sapp_tc_timestamp_init(&t->timestamp);
-    t->dt_min = 0.000001;       // 1 us
-    t->dt_max = 0.1;            // 100 ms
-    t->dt_threshold = 0.004;    // 4ms
-    t->alpha = 0.025;
-    t->dt = 1.0 / 60.0;         // a 'likely' non-null value
-    t->ema = t->dt;
-    t->smooth_dt = t->dt;
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timing_clamp(_sapp_tc_timing_t* t, double dt) {
-    SOKOL_ASSERT((t->dt_min > 0.0) && (t->dt_max > 0.0) && (t->dt_max >= t->dt_min));
-    if (dt < t->dt_min) {
-        return t->dt_min;
-    } else if (dt > t->dt_max) {
-        return t->dt_max;
-    } else {
-        return dt;
-    }
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timing_delta(_sapp_tc_timing_t* t, double dt) {
-    // first clamp raw dt against min/max (min avoid division by zero, max
-    // may avoids glitches and 'death-spirals' during debugging
-    dt = _sapp_tc_timing_clamp(t, dt);
-    t->dt = dt;
-    const double error = fabs(dt - t->smooth_dt);
-    if (error > t->dt_threshold) {
-        // 'reset' filter when new delta is outside threshold
-        t->ema = dt;
-        t->smooth_dt = dt;
-    } else {
-        // simple ema-filter with fixed alpha
-        t->ema = t->ema + t->alpha * (dt - t->ema);
-        t->smooth_dt = _sapp_tc_timing_clamp(t, t->ema);
-    }
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timing_update(_sapp_tc_timing_t* t, double external_now) {
-    double now;
-    if (external_now == 0.0) {
-        now = _sapp_tc_timestamp_now(&t->timestamp);
-    } else {
-        now = external_now;
-    }
-    if (t->last > 0.0) {
-        double dt = now - t->last;
-        _sapp_tc_timing_delta(t, dt);
-    }
-    t->last = now;
-
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
-    return t->smooth_dt;
-}
-
-#if defined(_SAPP_ANDROID)
-typedef enum {
-    _SOKOL_ANDROID_MSG_CREATE,
-    _SOKOL_ANDROID_MSG_RESUME,
-    _SOKOL_ANDROID_MSG_PAUSE,
-    _SOKOL_ANDROID_MSG_FOCUS,
-    _SOKOL_ANDROID_MSG_NO_FOCUS,
-    _SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW,
-    _SOKOL_ANDROID_MSG_SET_INPUT_QUEUE,
-    _SOKOL_ANDROID_MSG_DESTROY,
-} _sapp_tc_android_msg_t;
-
-typedef struct {
-    pthread_t thread;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    int read_from_main_fd;
-    int write_from_main_fd;
-} _sapp_tc_android_pt_t;
-
-typedef struct {
-    ANativeWindow* window;
-    AInputQueue* input;
-} _sapp_tc_android_resources_t;
-
-typedef struct {
-    ANativeActivity* activity;
-    _sapp_tc_android_pt_t pt;
-    _sapp_tc_android_resources_t pending;
-    _sapp_tc_android_resources_t current;
-    ALooper* looper;
-    bool is_thread_started;
-    bool is_thread_stopping;
-    bool is_thread_stopped;
-    bool has_created;
-    bool has_resumed;
-    bool has_focus;
-    EGLConfig config;
-    EGLDisplay display;
-    EGLContext context;
-    EGLSurface surface;
-    #if __ANDROID_API__ >= 29
-    AChoreographer* choreographer;
-    bool frame_callback_in_flight;
-    #endif
-} _sapp_tc_android_t;
-
-#endif // _SAPP_ANDROID
-
-typedef struct {
-    bool enabled;
-} _sapp_tc_clipboard_t;
-
-typedef struct {
-    bool enabled;
-} _sapp_tc_drop_t;
-
-typedef struct {
-    float x, y;
-    float dx, dy;
-    bool shown;
-    bool locked;
-    bool pos_valid;
-    sapp_mouse_cursor current_cursor;
-} _sapp_tc_mouse_t;
-
-typedef struct {
-    uint32_t framebuffer;
-} _sapp_tc_gl_t;
-
-/* per-app state -- an Android-sized subset of sokol_app.h's _sapp_t with the
-   same member names, so the lifted implementation code reads unchanged.
-   mouse / clipboard / drop / html5 / cursor members are inert on Android
-   (touch-only, no OS clipboard or dnd surface) but kept so the shared lifted
-   helpers and the lifted public API compile verbatim. */
-typedef struct {
-    sapp_desc desc;
-    bool valid;
-    bool fullscreen;            /* inert: Android is inherently fullscreen */
-    bool first_frame;
-    bool init_called;
-    bool constructing; // client publication uses the shared creation transaction
-    bool cleanup_called;
-    bool quit_requested;        /* inert: lifecycle is activity-driven */
-    bool quit_ordered;
-    bool event_consumed;
-    bool html5_ask_leave_site;  /* inert */
-    bool onscreen_keyboard_shown;   /* never set on Android (pre-existing quirk) */
-    bool skip_present;
-    int window_width;
-    int window_height;
-    int framebuffer_width;
-    int framebuffer_height;
-    int sample_count;
-    int swap_interval;
-    float dpi_scale;
-    uint64_t frame_count;
-    sapp_event event;
-    _sapp_tc_mouse_t mouse;
-    _sapp_tc_clipboard_t clipboard;
-    _sapp_tc_drop_t drop;
-    _sapp_tc_timing_t timing;
-    _sapp_tc_android_t android;
-    _sapp_tc_gl_t gl;
-    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
-    char window_title[_SAPP_MAX_TITLE_LENGTH];
-    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
-} _sapp_tc_t;
-static _sapp_tc_t _sapp_tc;
-_SOKOL_PRIVATE void _sapp_tc_clear(void* ptr, size_t size) {
-    SOKOL_ASSERT(ptr && (size > 0));
-    memset(ptr, 0, size);
-}
-
-_SOKOL_PRIVATE void* _sapp_tc_malloc(size_t size) {
-    SOKOL_ASSERT(size > 0);
-    void* ptr;
-    if (_sapp_tc.desc.allocator.alloc_fn) {
-        ptr = _sapp_tc.desc.allocator.alloc_fn(size, _sapp_tc.desc.allocator.user_data);
-    } else {
-        ptr = malloc(size);
-    }
-    if (0 == ptr) {
-        _SAPP_PANIC(MALLOC_FAILED);
-    }
-    return ptr;
-}
-
-_SOKOL_PRIVATE void* _sapp_tc_malloc_clear(size_t size) {
-    void* ptr = _sapp_tc_malloc(size);
-    _sapp_tc_clear(ptr, size);
-    return ptr;
-}
-
-_SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
-    if (_sapp_tc.desc.allocator.free_fn) {
-        _sapp_tc.desc.allocator.free_fn(ptr, _sapp_tc.desc.allocator.user_data);
-    } else {
-        free(ptr);
-    }
-}
 
 // ██   ██ ███████ ██      ██████  ███████ ██████  ███████
 // ██   ██ ██      ██      ██   ██ ██      ██   ██ ██
@@ -13916,15 +14019,6 @@ _SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
 // ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
 //
 // >>helpers
-
-// round float to int and at least 1
-_SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
-    int val = (int)roundf(f);
-    if (val <= 0) {
-        val = 1;
-    }
-    return val;
-}
 
 _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
     if (_sapp_tc.init_called || _sapp_tc.constructing) return;
@@ -13964,75 +14058,6 @@ _SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
 
 _SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* input) {
     return _sapp_tc_deliver_single_event(_sapp_tc, input);
-}
-
-
-
-
-/* Copy a string (either zero-terminated or with explicit length)
-   into a fixed size buffer with guaranteed zero-termination.
-
-   Return false if the string didn't fit into the buffer and had to be clamped.
-
-   FIXME: Currently UTF-8 strings might become invalid if the string
-   is clamped, because the last zero-byte might be written into
-   the middle of a multi-byte sequence.
-*/
-_SOKOL_PRIVATE bool _sapp_tc_strcpy_range(const char* src, size_t src_len, char* dst, size_t dst_buf_len) {
-    SOKOL_ASSERT(src && dst && (dst_buf_len > 0));
-    if (0 == src_len) {
-        src_len = dst_buf_len;
-    }
-    char* const end = &(dst[dst_buf_len-1]);
-    char c = 0;
-    for (size_t i = 0; i < dst_buf_len; i++) {
-        c = *src;
-        if (i >= src_len) {
-            c = 0;
-        }
-        if (c != 0) {
-            src++;
-        }
-        *dst++ = c;
-    }
-    // truncated?
-    if (c != 0) {
-        *end = 0;
-        return false;
-    } else {
-        return true;
-    }
-}
-
-_SOKOL_PRIVATE bool _sapp_tc_strcpy(const char* src, char* dst, size_t dst_buf_len) {
-    return _sapp_tc_strcpy_range(src, 0, dst, dst_buf_len);
-}
-
-_SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
-    SOKOL_ASSERT((desc->allocator.alloc_fn && desc->allocator.free_fn) || (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
-    sapp_desc res = *desc;
-    res.sample_count = _sapp_tc_def(res.sample_count, 1);
-    res.swap_interval = _sapp_tc_def(res.swap_interval, 1);
-    if (0 == res.gl.major_version) {
-        #if defined(SOKOL_GLCORE)
-            res.gl.major_version = 4;
-            #if defined(_SAPP_APPLE)
-                res.gl.minor_version = 1;
-            #else
-                res.gl.minor_version = 3;
-            #endif
-        #elif defined(SOKOL_GLES3)
-            res.gl.major_version = 3;
-            #if defined(_SAPP_ANDROID) || defined(_SAPP_LINUX)
-                res.gl.minor_version = 1;
-            #else
-                res.gl.minor_version = 0;
-            #endif
-        #endif
-    }
-    res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
-    res.window_title = _sapp_tc_def(res.window_title, "sokol");
-    return res;
 }
 
 _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
@@ -15564,8 +15589,6 @@ SOKOL_API_IMPL void sapp_skip_present(void) {
 }
 // end of modification
 
-
-
 /* ---- other-backend getters (zero stubs, same set as the native sections) - */
 #if defined(__cplusplus)
 extern "C" {
@@ -15616,299 +15639,6 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #endif
 
 #elif defined(__EMSCRIPTEN__)
-/*== Emscripten (web) =======================================================
-    Implements the public sokol_app.h API on the web plus the multi-window
-    API (as stubs -- the whole backend binds to ONE <canvas> element, so a
-    second window is not representable; sapp_create_window() returns the
-    invalid handle and logs).
-
-    Unlike every native backend there is NO owned loop: sapp_run() sets
-    everything up, hands a per-frame callback to
-    emscripten_request_animation_frame_loop() (or emscripten_set_main_loop())
-    and RETURNS IMMEDIATELY. Rendering, events and the quit dance all happen
-    later inside browser-driven callbacks; "quit" stops the rAF loop and
-    tears down sokol state -- the tab and the wasm module stay alive.
-
-    Structure mirrors sokol_app.h's emscripten backend (HTML5 event
-    callbacks on the canvas selector, code-string keymap, deferred
-    pointer-lock on user gesture, execCommand copy + paste-event clipboard,
-    dragndrop with FileReader fetch, CSS cursors + BMP-in-JS custom cursors,
-    favicon icon, resize tracking via CSS size x devicePixelRatio). Both
-    graphics backends are supported: SOKOL_WGPU (async adapter/device chain
-    gated by init_done, browser auto-presents the surface at rAF boundaries)
-    and SOKOL_GLES3 (WebGL2 context, swapchain = default framebuffer).
-
-    The TrussC keyboard-on-canvas patch is native here: key handlers are
-    registered on the canvas selector (NOT the window), so other page
-    elements (e.g. an editor besides the canvas) receive keyboard input
-    independently. The canvas element needs a tabindex attribute and focus
-    for keyboard events to arrive (the TrussC web shell provides both). */
-#if defined(SOKOL_WGPU)
-#include <webgpu/webgpu.h>   /* emdawnwebgpu (modern Dawn API), NOT -sUSE_WEBGPU */
-#elif defined(SOKOL_GLES3)
-#include <GLES3/gl3.h>
-#else
-#error "sokol_app_tc.h: web build requires SOKOL_WGPU or SOKOL_GLES3"
-#endif
-#include <emscripten/emscripten.h>
-#include <emscripten/html5.h>
-#include <stdio.h>
-
-#if defined(SOKOL_APP_IMPL_INCLUDED)
-#error "sokol_app_tc.h owns the web implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
-#endif
-
-#ifndef SOKOL_ASSERT
-#include <assert.h>
-#define SOKOL_ASSERT(c) assert(c)
-#endif
-#ifndef _SOKOL_PRIVATE
-#define _SOKOL_PRIVATE static
-#endif
-#ifndef _SOKOL_UNUSED
-#define _SOKOL_UNUSED(x) (void)(x)
-#endif
-
-/* the lifted upstream code keys web-only forks on this */
-#define _SAPP_EMSCRIPTEN (1)
-#if defined(SOKOL_GLES3)
-#define _SAPP_ANY_GL (1)
-#endif
-/* NOTE: _SAPP_WGPU_HAS_WAIT stays UNDEFINED on web -- the WGPU
-   adapter/device/swapchain chain is async-callback driven */
-
-#define _SAPP_MAX_TITLE_LENGTH (128)
-#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
-#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
-#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
-#if defined(__cplusplus)
-#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
-#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
-#else
-#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {0}
-#define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
-#endif
-
-/* controlled failure instead of sokol_app.h's log-item machinery, reported
-   through sapp_desc.logger (_sapp_tc_log) */
-#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
-#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
-#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
-#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
-#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
-
-/* the internal monotonic clock is deliberately unused on web: all timing
-   comes from the timestamp the browser hands to the frame callback */
-typedef struct { int _dummy; } _sapp_tc_timestamp_t;
-_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) { _SOKOL_UNUSED(ts); }
-_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) { _SOKOL_UNUSED(ts); SOKOL_ASSERT(false); return 0.0; }
-#ifndef SOKOL_API_IMPL
-#define SOKOL_API_IMPL
-#endif
-#ifndef SOKOL_UNREACHABLE
-#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
-#endif
-
-typedef struct {
-    _sapp_tc_timestamp_t timestamp;
-    double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
-    double dt_max;          // config: max clamp value for unfiltered time delta (seconds)
-    double dt_threshold;    // config: threshold time delta for 'resetting' filtering (default: 0.004s, 4ms)
-    double alpha;           // config: smoothing constant, lower values smoother, higher values faster response
-    double last;        // last absolute time in seconds
-    double dt;          // unfiltered frame delta in seconds, clamped to dt_min/dt_max
-    double ema;         // intermediate ema-filter result
-    double smooth_dt;   // smoothed frame delta in seconds
-} _sapp_tc_timing_t;
-
-_SOKOL_PRIVATE void _sapp_tc_timing_init(_sapp_tc_timing_t* t) {
-    _sapp_tc_timestamp_init(&t->timestamp);
-    t->dt_min = 0.000001;       // 1 us
-    t->dt_max = 0.1;            // 100 ms
-    t->dt_threshold = 0.004;    // 4ms
-    t->alpha = 0.025;
-    t->dt = 1.0 / 60.0;         // a 'likely' non-null value
-    t->ema = t->dt;
-    t->smooth_dt = t->dt;
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timing_clamp(_sapp_tc_timing_t* t, double dt) {
-    SOKOL_ASSERT((t->dt_min > 0.0) && (t->dt_max > 0.0) && (t->dt_max >= t->dt_min));
-    if (dt < t->dt_min) {
-        return t->dt_min;
-    } else if (dt > t->dt_max) {
-        return t->dt_max;
-    } else {
-        return dt;
-    }
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timing_delta(_sapp_tc_timing_t* t, double dt) {
-    // first clamp raw dt against min/max (min avoid division by zero, max
-    // may avoids glitches and 'death-spirals' during debugging
-    dt = _sapp_tc_timing_clamp(t, dt);
-    t->dt = dt;
-    const double error = fabs(dt - t->smooth_dt);
-    if (error > t->dt_threshold) {
-        // 'reset' filter when new delta is outside threshold
-        t->ema = dt;
-        t->smooth_dt = dt;
-    } else {
-        // simple ema-filter with fixed alpha
-        t->ema = t->ema + t->alpha * (dt - t->ema);
-        t->smooth_dt = _sapp_tc_timing_clamp(t, t->ema);
-    }
-}
-
-_SOKOL_PRIVATE void _sapp_tc_timing_update(_sapp_tc_timing_t* t, double external_now) {
-    double now;
-    if (external_now == 0.0) {
-        now = _sapp_tc_timestamp_now(&t->timestamp);
-    } else {
-        now = external_now;
-    }
-    if (t->last > 0.0) {
-        double dt = now - t->last;
-        _sapp_tc_timing_delta(t, dt);
-    }
-    t->last = now;
-
-}
-
-_SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
-    return t->smooth_dt;
-}
-
-// ███████ ████████ ██████  ██    ██  ██████ ████████ ███████
-// ██         ██    ██   ██ ██    ██ ██         ██    ██
-// ███████    ██    ██████  ██    ██ ██         ██    ███████
-//      ██    ██    ██   ██ ██    ██ ██         ██         ██
-// ███████    ██    ██   ██  ██████   ██████    ██    ███████
-
-#if defined(SOKOL_WGPU)
-typedef struct {
-    WGPUInstance instance;
-    WGPUAdapter adapter;
-    WGPUDevice device;
-    WGPUSurface surface;
-    WGPUTextureFormat render_format;
-    WGPUTexture msaa_tex;
-    WGPUTextureView msaa_view;
-    WGPUTexture depth_stencil_tex;
-    WGPUTextureView depth_stencil_view;
-    WGPUTextureView swapchain_view;
-    bool init_done;
-} _sapp_tc_wgpu_t;
-#endif
-
-#if defined(_SAPP_EMSCRIPTEN)
-
-typedef struct {
-    bool mouse_lock_requested;
-    uint16_t mouse_buttons;
-} _sapp_tc_emsc_t;
-#endif // _SAPP_EMSCRIPTEN
-
-#if defined(_SAPP_ANY_GL)
-typedef struct {
-    uint32_t framebuffer;
-} _sapp_tc_gl_t;
-#endif
-
-typedef struct {
-    bool enabled;
-} _sapp_tc_clipboard_t;
-
-typedef struct {
-    bool enabled;
-} _sapp_tc_drop_t;
-
-typedef struct {
-    float x, y;
-    float dx, dy;
-    bool shown;
-    bool locked;
-    bool pos_valid;
-    sapp_mouse_cursor current_cursor;
-} _sapp_tc_mouse_t;
-
-/* per-app state -- a web-sized subset of sokol_app.h's _sapp_t with the same
-   member names, so the lifted implementation code reads unchanged. A large
-   part of the web backend's real state lives in JavaScript on the Module
-   object (Module.sapp_emsc_target = the canvas, Module.sokol_dropped_files,
-   Module.__sapp_tc_custom_cursors), reachable only from the EM_JS blocks. */
-typedef struct {
-    sapp_desc desc;
-    bool valid;
-    bool fullscreen;
-    bool first_frame;
-    bool init_called;
-    bool constructing; // client publication uses the shared creation transaction
-    bool cleanup_called;
-    bool quit_requested;
-    bool quit_ordered;
-    bool event_consumed;
-    bool html5_ask_leave_site;
-    bool onscreen_keyboard_shown;
-    bool skip_present;      /* stored for API parity; the browser auto-presents at rAF (ignored) */
-    int window_width;
-    int window_height;
-    int framebuffer_width;
-    int framebuffer_height;
-    int sample_count;
-    int swap_interval;      /* stored for API parity; the browser paces via rAF (ignored) */
-    float dpi_scale;
-    uint64_t frame_count;
-    sapp_event event;
-    _sapp_tc_mouse_t mouse;
-    _sapp_tc_clipboard_t clipboard;
-    _sapp_tc_drop_t drop;
-    _sapp_tc_timing_t timing;
-    #if defined(SOKOL_WGPU)
-    _sapp_tc_wgpu_t wgpu;
-    #endif
-    _sapp_tc_emsc_t emsc;
-    #if defined(_SAPP_ANY_GL)
-    _sapp_tc_gl_t gl;
-    #endif
-    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
-    char window_title[_SAPP_MAX_TITLE_LENGTH];
-    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
-} _sapp_tc_t;
-static _sapp_tc_t _sapp_tc;
-
-_SOKOL_PRIVATE void _sapp_tc_clear(void* ptr, size_t size) {
-    SOKOL_ASSERT(ptr && (size > 0));
-    memset(ptr, 0, size);
-}
-
-_SOKOL_PRIVATE void* _sapp_tc_malloc(size_t size) {
-    SOKOL_ASSERT(size > 0);
-    void* ptr;
-    if (_sapp_tc.desc.allocator.alloc_fn) {
-        ptr = _sapp_tc.desc.allocator.alloc_fn(size, _sapp_tc.desc.allocator.user_data);
-    } else {
-        ptr = malloc(size);
-    }
-    if (0 == ptr) {
-        _SAPP_PANIC(MALLOC_FAILED);
-    }
-    return ptr;
-}
-
-_SOKOL_PRIVATE void* _sapp_tc_malloc_clear(size_t size) {
-    void* ptr = _sapp_tc_malloc(size);
-    _sapp_tc_clear(ptr, size);
-    return ptr;
-}
-
-_SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
-    if (_sapp_tc.desc.allocator.free_fn) {
-        _sapp_tc.desc.allocator.free_fn(ptr, _sapp_tc.desc.allocator.user_data);
-    } else {
-        free(ptr);
-    }
-}
 
 // ██   ██ ███████ ██      ██████  ███████ ██████  ███████
 // ██   ██ ██      ██      ██   ██ ██      ██   ██ ██
@@ -15917,15 +15647,6 @@ _SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
 // ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
 //
 // >>helpers
-
-// round float to int and at least 1
-_SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
-    int val = (int)roundf(f);
-    if (val <= 0) {
-        val = 1;
-    }
-    return val;
-}
 
 _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
     if (_sapp_tc.init_called || _sapp_tc.constructing) return;
@@ -15965,75 +15686,6 @@ _SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
 
 _SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* input) {
     return _sapp_tc_deliver_single_event(_sapp_tc, input);
-}
-
-
-
-
-/* Copy a string (either zero-terminated or with explicit length)
-   into a fixed size buffer with guaranteed zero-termination.
-
-   Return false if the string didn't fit into the buffer and had to be clamped.
-
-   FIXME: Currently UTF-8 strings might become invalid if the string
-   is clamped, because the last zero-byte might be written into
-   the middle of a multi-byte sequence.
-*/
-_SOKOL_PRIVATE bool _sapp_tc_strcpy_range(const char* src, size_t src_len, char* dst, size_t dst_buf_len) {
-    SOKOL_ASSERT(src && dst && (dst_buf_len > 0));
-    if (0 == src_len) {
-        src_len = dst_buf_len;
-    }
-    char* const end = &(dst[dst_buf_len-1]);
-    char c = 0;
-    for (size_t i = 0; i < dst_buf_len; i++) {
-        c = *src;
-        if (i >= src_len) {
-            c = 0;
-        }
-        if (c != 0) {
-            src++;
-        }
-        *dst++ = c;
-    }
-    // truncated?
-    if (c != 0) {
-        *end = 0;
-        return false;
-    } else {
-        return true;
-    }
-}
-
-_SOKOL_PRIVATE bool _sapp_tc_strcpy(const char* src, char* dst, size_t dst_buf_len) {
-    return _sapp_tc_strcpy_range(src, 0, dst, dst_buf_len);
-}
-
-_SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
-    SOKOL_ASSERT((desc->allocator.alloc_fn && desc->allocator.free_fn) || (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
-    sapp_desc res = *desc;
-    res.sample_count = _sapp_tc_def(res.sample_count, 1);
-    res.swap_interval = _sapp_tc_def(res.swap_interval, 1);
-    if (0 == res.gl.major_version) {
-        #if defined(SOKOL_GLCORE)
-            res.gl.major_version = 4;
-            #if defined(_SAPP_APPLE)
-                res.gl.minor_version = 1;
-            #else
-                res.gl.minor_version = 3;
-            #endif
-        #elif defined(SOKOL_GLES3)
-            res.gl.major_version = 3;
-            #if defined(_SAPP_ANDROID) || defined(_SAPP_LINUX)
-                res.gl.minor_version = 1;
-            #else
-                res.gl.minor_version = 0;
-            #endif
-        #endif
-    }
-    res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
-    res.window_title = _sapp_tc_def(res.window_title, "sokol");
-    return res;
 }
 
 _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
@@ -18565,7 +18217,6 @@ SOKOL_API_IMPL void sapp_skip_present(void) {
     _sapp_tc.skip_present = true;
 }
 // end of modification
-
 
 /* ---- multi-window API: explicit platform gap on the web ------------------
    the whole backend binds to ONE <canvas> element (Module.sapp_emsc_target);
