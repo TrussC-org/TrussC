@@ -351,6 +351,6 @@ peer that stops reading does not stall rendering. The default send timeout is
 
 ## Next steps
 
-Recipes for common TrussC uses, a phone control panel, a CLI tool and a resident app, are in [RECIPES.md](RECIPES.md).
+Once the basics feel familiar, [RECIPES.md](RECIPES.md) shows some applied uses: a phone control panel, a CLI tool and a resident app.
 
 If you get stuck, follow [DEBUGGING.md](guides/DEBUGGING.md) for logs, common symptoms, and finding a crash.

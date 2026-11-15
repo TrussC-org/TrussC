@@ -326,6 +326,6 @@ myProject/
 
 ## 次のステップ
 
-スマートフォンの操作パネル、CLI ツール、常駐アプリといった TrussC のよくある使い方は、[RECIPES_jp.md](RECIPES_jp.md) にまとめています。
+基本に慣れてきたら、応用的な使い方の例を [RECIPES_jp.md](RECIPES_jp.md) にまとめています：スマートフォンの操作パネル、CLI ツール、常駐アプリです。
 
 困ったら、[DEBUGGING.md（英語）](guides/DEBUGGING.md) でログの確認、よくある症状への対処、クラッシュ箇所の調べ方を確認してください。

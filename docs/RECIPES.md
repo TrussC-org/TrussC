@@ -1,6 +1,6 @@
 # Recipes
 
-Recipes introduces a phone control panel, a CLI tool, and a resident app.
+These recipes are applied uses of TrussC, not basics: a phone control panel, a CLI tool, and a resident app. For the basics, start with the projects in `examples/` and [GET_STARTED.md › Run Examples](GET_STARTED.md#5-run-examples).
 [日本語](RECIPES_jp.md) · [GET_STARTED.md › Get Started](GET_STARTED.md)
 
 ## Control a fullscreen app from a phone

@@ -1,6 +1,6 @@
 # レシピ
 
-レシピでは、スマートフォンの操作パネル、CLI ツール、常駐アプリを紹介します。
+ここで紹介するのは基本ではなく、TrussC の応用的な使い方です（スマートフォンの操作パネル、CLI ツール、常駐アプリ）。基本は `examples/` のサンプルと [GET_STARTED_jp.md › サンプルを実行する](GET_STARTED_jp.md#5-サンプルを実行する) から始めてください。
 [English](RECIPES.md) · [GET_STARTED_jp.md › はじめに](GET_STARTED_jp.md)
 
 ## スマートフォンから操作するパネル
