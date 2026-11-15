@@ -28,12 +28,10 @@ struct InjectedWindow {
             out = n.metadata; out.pointer_locked = n.pointerLocked; return true;
         };
         operations.closeRecorded = [](sapp_window, void* user) { return static_cast<InjectedWindow*>(user)->closed; };
-        operations.injectEvent = [](sapp_window handle, void* user, const sapp_event* input) {
+        operations.sendEvent = [](sapp_window handle, void* user, sapp_event* event) {
             auto& n = *static_cast<InjectedWindow*>(user);
-            if (handle.id != n.win_id || !input || !_sapp_tc_valid_injected_event(*input)) return false;
-            sapp_event event = *input;
-            event.source = input->source == SAPP_EVENTSOURCE_REPLAYED ? input->source : SAPP_EVENTSOURCE_INJECTED;
-            return n.send(event);
+            if (handle.id != n.win_id || !event) return false;
+            return n.send(*event);
         };
         trussc::internal::bindWindow(window, {win_id}, operations, this);
     }

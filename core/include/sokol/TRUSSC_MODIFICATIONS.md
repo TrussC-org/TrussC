@@ -328,10 +328,11 @@ while preserving ordinary multiwindow lifetimes and hidden startup.
 
 ### Native event context and retained TC notifications (#239, #258, #1262, #1398)
 
-**Classification:** MOVE to TrussC (event step 1 complete for target context;
-source/snapshot still planned); KEEP essential for device loss and redraw kinds.
+**Classification:** MOVE to TrussC (event steps 1 and 2 complete for target
+context and private input provenance); KEEP essential for device loss and
+redraw kinds.
 
-**Code locations:** `sapp_event` (`source`, `button_snapshot`, `device_lost_reason`);
+**Code locations:** `sapp_event.device_lost_reason`;
 `sapp_tc_window_metadata`, `sapp_tc_window_read_metadata`;
 `util/sokol_window_event.h`; Runtime `WindowEventContext` and `enterWindowEvent`;
 `SAPP_EVENTTYPE_TC_DEVICE_LOST`, `SAPP_EVENTTYPE_TC_REDRAW_REQUESTED`,
@@ -351,12 +352,14 @@ platform capability formerly stamped on events (Win32/X11/Web true,
 AppKit/iOS/Android false); the frozen lock flag suppresses lost-release recovery
 on EGL/Web. The single-window query now accepts only handle zero and reports
 native DPI/dimensions and Web's actual lock state, with no DPI-1/unlocked Web
-fallback. Native injection still passes through the same send gate and Runtime
-snapshot, preserving source, private drag snapshot, order and input wakes.
+fallback. Injected input passes through the same native send gate and Runtime
+snapshot, preserving private provenance, drag state, order and input wakes.
 
 The original six extra fields duplicated binding context or TrussC injection
-state. Event 2 will relocate the remaining `source`/`button_snapshot` and native
-injection hook; event 3a will mark surviving members. Keep `device_lost_reason`
+state. Completed event 2 removes the remaining `source`/`button_snapshot` and
+native injection hook from sokol; TrussC Runtime owns input validation and
+private provenance, with a TrussC platform adapter to the existing send gate.
+Event 3a will mark surviving members. Keep `device_lost_reason`
 and all three TC kinds: do not pursue byte-identical upstream events by removing
 required loss/resize/map notifications. The source and snapshot relocation is
 described by the injection feature below, not a second native event
@@ -365,19 +368,27 @@ surface and typed text/drop/ImGui coverage.
 
 ### Injected input provenance and private MCP drag snapshot
 
-**Classification:** MOVE to TrussC (planned).
+**Classification:** MOVE to TrussC (completed event 2).
 
-**Code locations:** `sapp_event_source`, `sapp_window_inject_event`, `sapp_event.source`, `sapp_event.button_snapshot`; `util/sokol_window_event.h` and Runtime converters.
+**Historical code locations (removed in event 2):** `sapp_event_source`, `sapp_window_inject_event`, `sapp_event.source`, `sapp_event.button_snapshot`; `util/sokol_window_event.h` and Runtime converters.
 
-**Planned slice:** event 2 Runtime injection/MCP; then #1404 A/B (event 4–5).
+**Current code locations:** Runtime `injectWindowEvent` and `WindowEventContext`;
+`core/platform/tcNativeWindowEvent.h`; MCP `InputTarget` in `tcStandardTools.cpp`.
 
-Keep `injected`/`sourceTag` only on TrussC typed arguments. Delete sokol's
-injection function and source enum in step 2; preserve state and raw-before-typed
-notification so simgui receives the same DOWN/MOVE/UP. Preserve the private MCP
-`tc_mouse_move(button)` drag-only held-button snapshot during relocation; full
-gestures still use press/move/release. Current scheduling stays, including the
-dev-tool wake limitation recorded with source admission. New public API usage
-goes to the owner before its later implementation.
+**Completed slice:** event 2 Runtime injection/MCP. Runtime validates input,
+copies the raw event and carries an internal injected flag and MCP held-button
+snapshot into the event 1 `WindowEventContext`. The TrussC platform adapter uses
+the existing native send gate, including admission, busy state and input wakes.
+Raw notification still precedes typed notification, so simgui receives the same
+DOWN/MOVE/UP. Raw `sapp_event` listeners no longer see source or snapshot fields.
+
+Provenance stays private in the Runtime. Public typed provenance is decided
+together with the #1404 A/B Window injection surface (event 4–5); typed arguments
+remain unchanged in event 2. The private MCP `tc_mouse_move(button)` drag-only
+held-button snapshot remains available; full gestures still use
+press/move/release. Current scheduling stays, including the dev-tool wake
+limitation recorded with source admission. New public API usage goes to the
+owner before its later implementation.
 
 ### Touch capacity
 

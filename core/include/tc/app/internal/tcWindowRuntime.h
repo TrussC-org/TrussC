@@ -60,7 +60,7 @@ struct WindowNativeOperations {
     uint32_t (*fullscreenPhase)(const Window&) = nullptr;
     void (*toggleFullscreen)(Window&) = nullptr;
     bool (*closeRecorded)(sapp_window, void*) = nullptr;
-    bool (*injectEvent)(sapp_window, void*, const sapp_event*) = nullptr;
+    bool (*sendEvent)(sapp_window, void*, sapp_event*) = nullptr;
     void (*bringToFront)(Window&) = nullptr;
 };
 struct WindowBinding {
@@ -106,6 +106,8 @@ private:
     bool entered_ = false, admitted_ = false, dispatch_ = false, requestsReady_ = false;
     void leave() noexcept;
 };
+bool sendNativeWindowEvent(sapp_window, sapp_event*);
+bool injectWindowEvent(Window&, const sapp_event*, bool heldButtonSnapshot = false);
 void windowEvent(const sapp_event*, sapp_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
 // Frozen at native entry before any App or raw callback. Routing stays in the binding.
@@ -113,6 +115,8 @@ struct WindowEventContext {
     float dpiScale;
     bool pointerLocked;
     bool reliableButtonBits;
+    bool injected = false;
+    bool heldButtonSnapshot = false;
 };
 void enterWindowEvent(const sapp_event*, sapp_window, void*, const WindowEventContext* = nullptr) noexcept;
 void convertWindowEvent(const sapp_event*, Window&, const WindowEventContext&);
