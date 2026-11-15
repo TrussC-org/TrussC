@@ -37,6 +37,7 @@
 #include <TrussC.h>
 #ifndef __EMSCRIPTEN__
 #include "impl/httplib.h"
+static_assert(CPPHTTPLIB_LISTEN_BACKLOG == 32);
 #endif
 #include "../../common/tcCoreTest.h"
 #if defined(__APPLE__)
@@ -241,16 +242,29 @@ static void testConcurrentCompleteRefusals(int port, const string& name,
         sent = httplib::detail::write_data(stream, request.data(), request.size()) && sent;
     }
     check(name + " sends complete refusals", sent);
+    const auto sentAt = chrono::steady_clock::now();
     httplib::Client valid("127.0.0.1", port);
     valid.set_connection_timeout(5);
     valid.set_read_timeout(5);
+    auto connectedAt = sentAt;
+    valid.set_header_writer([&](httplib::Stream& stream, httplib::Headers& headers) {
+        connectedAt = chrono::steady_clock::now();
+        return httplib::detail::write_headers(stream, headers);
+    });
     const auto response = valid.Get("/");
-    const auto elapsed = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start).count();
+    const auto finishedAt = chrono::steady_clock::now();
+    const auto elapsed = chrono::duration_cast<chrono::milliseconds>(finishedAt - start).count();
     const int status = response ? response->status : -1;
     check(name + " concurrent GET -> 200", status == 200, to_string(status));
     // Bound (test latency): allow 1 s on slow CI, 750 ms below seven serialized 250 ms drains (1.75 s).
     check(name + " GET avoids serialized drains", elapsed < 1000, to_string(elapsed) + " ms");
     printf("concurrent refusals (%s): %lld ms including sends\n", name.c_str(), static_cast<long long>(elapsed));
+    printf("refusal phases (%s): sends=%lld us connect=%lld us response=%lld us total=%lld us\n",
+        name.c_str(),
+        static_cast<long long>(chrono::duration_cast<chrono::microseconds>(sentAt - start).count()),
+        static_cast<long long>(chrono::duration_cast<chrono::microseconds>(connectedAt - sentAt).count()),
+        static_cast<long long>(chrono::duration_cast<chrono::microseconds>(finishedAt - connectedAt).count()),
+        static_cast<long long>(chrono::duration_cast<chrono::microseconds>(finishedAt - start).count()));
     bool complete = true;
     for (const auto sock : group.sockets) {
         // No client FIN: retirement must use the completed request rather than the peer's send-side close.
@@ -787,6 +801,20 @@ string quoteArgument(const string& value) {
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+#ifndef __EMSCRIPTEN__
+    // Focused sweep for refusal teardown; keep the normal suite unchanged.
+    if (argc == 2 && string(argv[1]) == "--refusals-only") {
+        mcp::startHttpServer(0, "127.0.0.1", kToken);
+        const int port = mcp::getHttpPort();
+        check("refusal sweep server bound", port > 0);
+        if (port > 0) {
+            testCompleteRefusals(port);
+            testIncompleteRefusal(port);
+        }
+        mcp::stopHttpServer();
+        return g_fail ? 1 : 0;
+    }
+#endif
     if (argc == 3 && string(argv[1]) == "--environment") return environmentCase(argv[2]);
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     printf("SKIP environment subprocess cases: system() unavailable on iOS\n");

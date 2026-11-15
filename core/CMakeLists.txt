@@ -158,6 +158,11 @@ set_source_files_properties(include/tc/utils/tcVersion.cpp PROPERTIES
 # Direct header use without CMake keeps the inline "unknown" fallback.
 target_compile_definitions(TrussC PUBLIC TC_VERSION_LINKED)
 
+if(NOT TC_PLATFORM_EMSCRIPTEN)
+    # Bound (connection bursts): match MCP's default outstanding budget; larger budgets keep a 32-deep kernel queue.
+    target_compile_definitions(TrussC PUBLIC CPPHTTPLIB_LISTEN_BACKLOG=32)
+endif()
+
 # CI gate: promote uses of [[deprecated]] TrussC API to errors in the
 # framework's OWN sources (core lib TUs here; bundled examples/tests get the
 # same flag via trussc_app.cmake). Opt-in through -DTC_DEPRECATED_ERRORS=ON or

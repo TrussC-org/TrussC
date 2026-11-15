@@ -28,6 +28,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #else
 #include <process.h>
 #include <io.h>
@@ -1415,6 +1418,56 @@ static void printUpgradeHelp() {
          << "  -h, --help                 Show this help\n";
 }
 
+// =============================================================================
+// Parallel build jobs
+// =============================================================================
+
+// The --parallel argument for cmake --build. -j wins. Without it, jobs are
+// limited by RAM (~1.5 GB per compile job) to prevent memory exhaustion on
+// small machines (SBCs, 8 GB Macs), capped at CPU count + 2. Linux uses
+// available RAM, macOS total RAM; elsewhere the build tool decides.
+static string parallelBuildArg(int jobs) {
+    if (jobs > 0) {
+        cout << "  * Parallel jobs: " << jobs << " (-j)\n";
+        return "--parallel=" + to_string(jobs);
+    }
+#if defined(__linux__) || defined(__APPLE__)
+    const double bytesPerJob = 1.5 * 1024 * 1024 * 1024;
+    double ramBytes = 0;
+#ifdef __linux__
+    ifstream meminfo("/proc/meminfo");
+    string line;
+    while (getline(meminfo, line)) {
+        long availKB = 0;
+        if (sscanf(line.c_str(), "MemAvailable: %ld", &availKB) == 1) {
+            ramBytes = availKB * 1024.0;
+            break;
+        }
+    }
+#else
+    int64_t memsize = 0;
+    size_t len = sizeof(memsize);
+    if (sysctlbyname("hw.memsize", &memsize, &len, nullptr, 0) == 0) {
+        ramBytes = (double)memsize;
+    }
+#endif
+    if (ramBytes > 0) {
+        int ramJobs = max(1, (int)(ramBytes / bytesPerJob));
+        long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+        if (cpus > 0 && ramJobs >= (int)cpus + 2) {
+            ramJobs = (int)cpus + 2;
+        } else {
+            // RAM is the limiting factor
+            cout << "  * Parallel jobs limited to " << ramJobs
+                 << " (" << fixed << setprecision(1) << ramBytes / (1024.0 * 1024 * 1024)
+                 << " GB RAM, ~1.5 GB per job)\n";
+        }
+        return "--parallel=" + to_string(ramJobs);
+    }
+#endif
+    return "--parallel";
+}
+
 static int cmdUpgrade(const vector<string>& args) {
     string tcRoot;
     int jobs = 0;           // 0 = not given
@@ -1519,8 +1572,8 @@ static int cmdUpgrade(const vector<string>& args) {
         return 1;
     }
 
-    rc = runInherited({cmake, "--build", buildDir,
-                     jobs > 0 ? "--parallel=" + to_string(jobs) : string("--parallel")});
+    string parallelArg = parallelBuildArg(jobs);
+    rc = runInherited({cmake, "--build", buildDir, parallelArg});
     if (rc != 0) {
         cerr << "Error: build failed.\n";
         return 1;
@@ -3696,42 +3749,7 @@ static int cmdBuild(const vector<string>& args) {
 
     string cmake = findCMake();
 
-    // Determine the parallel job count. -j wins. Without it, Linux limits jobs
-    // by available RAM (~1.5 GB per compile job) to prevent OOM on
-    // memory-constrained SBCs; elsewhere the build tool decides.
-    string parallelArg = "--parallel";
-    if (jobs > 0) {
-        parallelArg = "--parallel=" + to_string(jobs);
-        cout << "  * Parallel jobs: " << jobs << " (-j)\n";
-    }
-#ifdef __linux__
-    else {
-        ifstream meminfo("/proc/meminfo");
-        string line;
-        long availKB = 0;
-        while (getline(meminfo, line)) {
-            if (line.rfind("MemAvailable:", 0) == 0) {
-                sscanf(line.c_str(), "MemAvailable: %ld", &availKB);
-                break;
-            }
-        }
-        if (availKB > 0) {
-            const long kbPerJob = 1572864; // 1.5 GiB
-            int ramJobs = max(1, (int)(availKB / kbPerJob));
-            // Cap at CPU count + 2
-            long cpus = sysconf(_SC_NPROCESSORS_ONLN);
-            if (cpus > 0 && ramJobs > (int)cpus + 2) ramJobs = (int)cpus + 2;
-            // Only show message if RAM is the limiting factor
-            if (availKB < kbPerJob * (cpus > 0 ? cpus : 4)) {
-                float availGB = availKB / 1048576.0f;
-                cout << "  * Parallel jobs limited to " << ramJobs
-                     << " (" << fixed << setprecision(1) << availGB
-                     << " GB RAM available, ~1.5 GB per job)\n";
-            }
-            parallelArg = "--parallel=" + to_string(ramJobs);
-        }
-    }
-#endif
+    string parallelArg = parallelBuildArg(jobs);
 
     // cmake --build --preset <target> --parallel[=N] --config <type> [--clean-first]
     vector<string> cmd = {cmake, "--build", "--preset", targetPreset, parallelArg};

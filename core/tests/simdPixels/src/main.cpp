@@ -331,7 +331,8 @@ int benchmark() {
             [](auto s, auto d) { simd::yuyvToRgba(s, d, benchPixels); }},
     };
     // Initialize the module's dispatch before reporting the chosen target.
-    simd::bgraToRgba(src.data(), after.data(), benchPixels);
+    // YUYV always dispatches; swizzle is scalar on native MSVC.
+    simd::yuyvToRgba(src.data(), after.data(), benchPixels);
     const char* target = "SCALAR";
 #ifdef TC_BENCH_HIGHWAY
     const auto index = hwy::GetChosenTarget().GetIndex();
@@ -349,6 +350,9 @@ int benchmark() {
     std::printf("compiler=GCC %s\n", __VERSION__);
 #endif
     std::printf("target=%s size=1920x1080 batches=9 frames_per_batch=20 warmup_frames=3\n", target);
+#if defined(_MSC_VER) && !defined(__clang__)
+    std::printf("swizzle=scalar (MSVC guard)\n");
+#endif
     std::puts("site before_ms after_ms speedup");
     for (const auto& site : sites) {
         std::fill(before.begin(), before.end(), 0xA5);

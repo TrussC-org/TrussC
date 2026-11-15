@@ -87,6 +87,10 @@ public:
     void nextFrame();
     void previousFrame();
 
+    internal::VideoRotation rotation_;
+    int encodedWidth_ = 0, encodedHeight_ = 0;
+    std::vector<uint8_t> rotationBuffer_;
+
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
 
@@ -138,7 +142,7 @@ private:
         else playbackErrors_.report(std::string(operation) + ": " + message, code);
     }
     void seekToTime(double seconds);
-    void probeHwOutputFormat();
+    bool probeHwOutputFormat();
 
     // FFmpeg context
     AVFormatContext* formatCtx_ = nullptr;
@@ -329,14 +333,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
         if (hwType_ != AV_HWDEVICE_TYPE_NONE) {
             logWarning("VideoPlayer") << "HW codec open failed, falling back to SW";
-            hwType_ = AV_HWDEVICE_TYPE_NONE;
-            av_buffer_unref(&hwDeviceCtx_);
-            avcodec_free_context(&codecCtx_);
-            codecCtx_ = avcodec_alloc_context3(codec);
-            if (!codecCtx_ || avcodec_parameters_to_context(codecCtx_, codecPar) < 0) return false;
-            internal::configureVideoCodec(codecCtx_);
         }
-        if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
+        if (hwType_ == AV_HWDEVICE_TYPE_NONE ||
+            !internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_, codecPar)) {
             logError("VideoPlayer") << "Failed to open codec";
             avcodec_free_context(&codecCtx_);
             avformat_close_input(&formatCtx_);
@@ -344,9 +343,14 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         }
     }
 
+    rotation_ = internal::videoStreamRotation(videoStream);
+
     // Get video properties
     width_ = codecCtx_->width;
     height_ = codecCtx_->height;
+    encodedWidth_ = width_;
+    encodedHeight_ = height_;
+    rotation_.size(width_, height_);
     size_t openedBytes = 0;
     if (!internal::VideoDecodeLimits::rgba(width_, height_, openedBytes)) {
         status_->reject(openedBytes, 0); return false;
@@ -378,6 +382,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     packet_ = av_packet_alloc();
     if (!frame_ || !packet_) { close(); return false; }
 
+    // Select a usable decoder before exposing the loaded player or starting audio.
+    if (!probeHwOutputFormat()) { close(); return false; }
+
     isLoaded_ = true;
 
     // Audio uses the shared stream worker unless the app opts into preloading.
@@ -396,10 +403,6 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
             logWarning("VideoPlayer") << "Failed to decode audio";
         }
     }
-
-    // Probe the first decoded frame so callers can see the post-transfer
-    // pixel format and pick NV12 fast path vs RGBA fallback accurately.
-    probeHwOutputFormat();
 
     return true;
 }
@@ -601,8 +604,8 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
                 if (front.isNV12) {
                     unsigned char* yBuf  = player->getPixelsY();
                     unsigned char* uvBuf = player->getPixelsUV();
-                    if (yBuf  && front.pixels.size()   == size_t(width_) * height_ &&
-                        uvBuf && front.pixelsUV.size() == size_t(width_) * height_ / 2) {
+                    if (yBuf  && front.pixels.size()   == size_t(encodedWidth_) * encodedHeight_ &&
+                        uvBuf && front.pixelsUV.size() == size_t(encodedWidth_) * encodedHeight_ / 2) {
                         memcpy(yBuf,  front.pixels.data(),   front.pixels.size());
                         memcpy(uvBuf, front.pixelsUV.data(), front.pixelsUV.size());
                         hasNewFrame_ = true;
@@ -709,15 +712,19 @@ void TCVideoPlayerImpl::decodeThread() {
 // V4L2M2M). The frames context and its transfer formats determine the CPU
 // layout; it cannot be inferred from hwType_ alone. The demuxer is rewound
 // and the codec flushed afterwards so playback starts cleanly from frame 0.
-void TCVideoPlayerImpl::probeHwOutputFormat() {
+bool TCVideoPlayerImpl::probeHwOutputFormat() {
     probedFormat_ = AV_PIX_FMT_NONE;
-    if (hwType_ == AV_HWDEVICE_TYPE_NONE) return;  // SW decode: nothing to probe
+    if (hwType_ == AV_HWDEVICE_TYPE_NONE) return true;  // SW decode: nothing to probe
 
     bool captured = false;
+    bool transferFailed = false;
+    // An unsupported probe transfer is an expected decoder fallback, not a
+    // dropped playback frame. Keep its admission diagnostics out of status_.
+    auto probeStatus = std::make_shared<internal::VideoDecodeStatus>();
     // Bound (security): untrusted file packets may never yield a frame; a probe cap bounds startup work. Overflow ends the probe without a captured frame.
     constexpr int kMaxPackets = 64;  // keep probe bounded
 
-    for (int i = 0; i < kMaxPackets && !captured; ++i) {
+    for (int i = 0; i < kMaxPackets && !captured && !transferFailed; ++i) {
         int ret = av_read_frame(formatCtx_, packet_);
         if (ret < 0) break;
         if (packet_->size < 0 || size_t(packet_->size) > internal::VideoDecodeLimits::inputBytes) {
@@ -744,10 +751,14 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
                 av_frame_unref(frame_); break;
             }
             if (frame_->hw_frames_ctx) {
-                internal::VideoCPUTransfer transfer(status_);
+                internal::VideoCPUTransfer transfer(probeStatus);
                 if (transfer.transfer(frame_) >= 0) {
                     probedFormat_ = AVPixelFormat(transfer.frame()->format);
                     captured = true;
+                } else {
+                    transferFailed = true;
+                    av_frame_unref(frame_);
+                    break;
                 }
             } else {
                 probedFormat_ = (AVPixelFormat)frame_->format;
@@ -760,7 +771,10 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
     av_frame_unref(frame_);
 
     // Reset demuxer + codec state so the decode thread starts from frame 0.
-    av_seek_frame(formatCtx_, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
+    if (av_seek_frame(formatCtx_, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+        logError("VideoPlayer") << "Failed to rewind video after HW format probe";
+        return false;
+    }
     avcodec_flush_buffers(codecCtx_);
     packetPending_ = false;
 
@@ -768,9 +782,17 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
         const char* name = av_get_pix_fmt_name(probedFormat_);
         logNotice("VideoPlayer") << "HW transfer format: "
                                   << (name ? name : "unknown");
+    } else if (transferFailed) {
+        logNotice("VideoPlayer") << "HW frame transfer failed; falling back to software decoding";
+        if (!internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_,
+                formatCtx_->streams[videoStreamIndex_]->codecpar)) {
+            logError("VideoPlayer") << "Failed to open software codec after HW format probe";
+            return false;
+        }
     } else {
         logWarning("VideoPlayer") << "HW format probe failed; using RGBA fallback";
     }
+    return true;
 }
 
 bool TCVideoPlayerImpl::decodeNextFrame() {
@@ -900,27 +922,31 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         double pts = frame_->pts == AV_NOPTS_VALUE ? 0.0 : frame_->pts * av_q2d(timeBase_);
         // Keep the presentation dimensions stable across stream changes. Scale
         // the actual admitted input dimensions, rather than reading old rows.
-        const size_t outputBytes = nv12Mode_ ? size_t(width_) * height_ * 3 / 2
+        const size_t outputBytes = nv12Mode_ ? size_t(encodedWidth_) * encodedHeight_ * 3 / 2
                                              : size_t(width_) * height_ * 4;
         FrameData data;
         data.pts = pts;
         data.isNV12 = nv12Mode_;
-        data.pixels.resize(nv12Mode_ ? size_t(width_) * height_ : outputBytes);
-        if (nv12Mode_) data.pixelsUV.resize(size_t(width_) * height_ / 2);
+        data.pixels.resize(nv12Mode_ ? size_t(encodedWidth_) * encodedHeight_ : outputBytes);
+        if (nv12Mode_) data.pixelsUV.resize(size_t(encodedWidth_) * encodedHeight_ / 2);
         const AVPixelFormat destination = nv12Mode_ ? AV_PIX_FMT_NV12 : AV_PIX_FMT_RGBA;
         swsCtx_ = sws_getCachedContext(swsCtx_, srcFrame->width, srcFrame->height,
-            AVPixelFormat(srcFrame->format), width_, height_, destination,
+            AVPixelFormat(srcFrame->format), encodedWidth_, encodedHeight_, destination,
             SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!swsCtx_) {
             av_frame_unref(frame_);
             decodeError("video scaler", AVERROR(ENOMEM));
             return false;
         }
-        uint8_t* output[4] = {data.pixels.data(), nv12Mode_ ? data.pixelsUV.data() : nullptr, nullptr, nullptr};
-        int strides[4] = {width_ * (nv12Mode_ ? 1 : 4), nv12Mode_ ? width_ : 0, 0, 0};
+        const bool rotateRGBA = !nv12Mode_ && rotation_.active();
+        if (rotateRGBA) rotationBuffer_.resize(outputBytes);
+        uint8_t* output[4] = {rotateRGBA ? rotationBuffer_.data() : data.pixels.data(), nv12Mode_ ? data.pixelsUV.data() : nullptr, nullptr, nullptr};
+        int strides[4] = {encodedWidth_ * (nv12Mode_ ? 1 : 4), nv12Mode_ ? encodedWidth_ : 0, 0, 0};
         int rows = sws_scale(swsCtx_, srcFrame->data, srcFrame->linesize, 0, srcFrame->height, output, strides);
         av_frame_unref(frame_);
-        if (rows != height_) { decodeError("video conversion", AVERROR(EINVAL)); return false; }
+        if (rows != encodedHeight_) { decodeError("video conversion", AVERROR(EINVAL)); return false; }
+        if (rotateRGBA)
+            rotation_.apply(rotationBuffer_.data(), data.pixels.data(), encodedWidth_, encodedHeight_);
         std::lock_guard<std::mutex> lock(mutex_);
         frameQueue_.push(std::move(data));
         return true;
@@ -1281,21 +1307,24 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     decodeStatus_ = impl->status();
     width_  = impl->getWidth();
     height_ = impl->getHeight();
+    rotationDeg_ = impl->rotation_.degrees;
 
     if (width_ > 0 && height_ > 0) {
-        if (impl->isNV12Capable() && width_ % 2 == 0 && height_ % 2 == 0) {
+        if (impl->isNV12Capable() && impl->encodedWidth_ % 2 == 0 && impl->encodedHeight_ % 2 == 0) {
             impl->nv12Mode_ = true;
             nv12Mode_  = true;
-            pixelsY_   = new (std::nothrow) unsigned char[size_t(width_) * height_];
-            pixelsUV_  = new (std::nothrow) unsigned char[size_t(width_) * height_ / 2];
+            nv12Width_ = impl->encodedWidth_;
+            nv12Height_ = impl->encodedHeight_;
+            pixelsY_   = new (std::nothrow) unsigned char[size_t(nv12Width_) * nv12Height_];
+            pixelsUV_  = new (std::nothrow) unsigned char[size_t(nv12Width_) * nv12Height_ / 2];
             if (!pixelsY_ || !pixelsUV_) {
                 delete[] pixelsY_; delete[] pixelsUV_; pixelsY_ = pixelsUV_ = nullptr;
                 closePlatform(); return false;
             }
-            std::memset(pixelsY_,  0, size_t(width_) * height_);
-            std::memset(pixelsUV_, 128, size_t(width_) * height_ / 2);  // 128 = neutral chroma in NV12
+            std::memset(pixelsY_,  0, size_t(nv12Width_) * nv12Height_);
+            std::memset(pixelsUV_, 128, size_t(nv12Width_) * nv12Height_ / 2);  // 128 = neutral chroma in NV12
 
-            auto* shader = new internal::NV12VideoShader();
+            auto* shader = new internal::NV12VideoShader(impl->rotation_);
             shader->loadShader();
             nv12ShaderHandle_ = shader;
         } else {
@@ -1643,7 +1672,23 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
             int      dstStride[4] = { w * 4, 0, 0, 0 };
             if (decoded.getData()) ok = sws_scale(sws, frame->data, frame->linesize, 0, h, dstData, dstStride) == h;
             sws_freeContext(sws);
-            if (ok) outPixels = std::move(decoded);
+            if (ok) {
+                const auto rotation = internal::videoStreamRotation(fmtCtx->streams[videoIdx]);
+                if (rotation.active()) {
+                    int outputWidth = w, outputHeight = h;
+                    rotation.size(outputWidth, outputHeight);
+                    Pixels rotated;
+                    try { rotated.allocate(outputWidth, outputHeight, 4); }
+                    catch (const std::bad_alloc&) {
+                        status->reject(size_t(w) * h * 4, 0);
+                        cleanup(); return false;
+                    }
+                    if (!rotated.getData()) { cleanup(); return false; }
+                    rotation.apply(decoded.getData(), rotated.getData(), w, h);
+                    decoded = std::move(rotated);
+                }
+                outPixels = std::move(decoded);
+            }
         }
     }
 

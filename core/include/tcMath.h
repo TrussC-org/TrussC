@@ -3,6 +3,10 @@
 #include <cmath>
 #include <algorithm>
 #include <random>
+#include <span>
+#include <utility>
+#include <vector>
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // TrussC Math Library
@@ -1179,6 +1183,48 @@ inline int randomInt(int min, int max) {
     std::uniform_int_distribution<int> dist(min, max);
     return dist(internal::getRandomEngine());
 }
+
+// Normally distributed samples; stddev <= 0 returns mean.
+// The distribution is local so randomSeed also resets any cached sample.
+inline float randomGaussian(float mean, float stddev) {
+    if (!(stddev > 0.0f)) return mean;
+    std::normal_distribution<float> distribution(mean, stddev);
+    return distribution(internal::getRandomEngine());
+}
+
+inline float randomGaussian() {
+    return randomGaussian(0.0f, 1.0f);
+}
+
+template <typename T>
+inline void shuffle(std::vector<T>& values) {
+    std::shuffle(values.begin(), values.end(), internal::getRandomEngine());
+}
+
+// GLSL smoothstep: edge0 must be less than edge1.
+inline float smoothstep(float edge0, float edge1, float x) {
+    const float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+inline float sigmoid(float x) {
+    // This form avoids overflowing exp for large negative inputs.
+    if (x >= 0.0f) return 1.0f / (1.0f + std::exp(-x));
+    const float e = std::exp(x);
+    return e / (1.0f + e);
+}
+
+// Float statistics with double accumulation. Variance is population variance.
+// Empty inputs return zero (minMax returns {0, 0}).
+// Non-owning spans are C++ API; Lua has no corresponding buffer argument.
+TC_LUA_SKIP float sum(std::span<const float> values);
+TC_LUA_SKIP float mean(std::span<const float> values);
+TC_LUA_SKIP float variance(std::span<const float> values);
+TC_LUA_SKIP float stddev(std::span<const float> values);
+TC_LUA_SKIP std::pair<float, float> minMax(std::span<const float> values);
+TC_LUA_SKIP float rms(std::span<const float> values);
+// Different lengths produce a warning and return zero.
+TC_LUA_SKIP float mse(std::span<const float> a, std::span<const float> b);
 
 // Set seed
 inline void randomSeed(unsigned int seed) {
