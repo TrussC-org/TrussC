@@ -20,6 +20,11 @@ import queue
 import time
 from contextlib import nullcontext
 
+# Redirected Windows consoles may otherwise inherit cp932 and reject diagnostics.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='replace')
+
 ALLOWLIST = Path(__file__).with_name('build_warning_allowlist.json')
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 # Only build output belongs here. Runtime output must never reach this scanner.

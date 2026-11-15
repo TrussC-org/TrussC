@@ -13,7 +13,12 @@ Connect the phone to the same LAN and open the complete URL shown on screen, inc
 
 The short handling code shows these essentials:
 
-- Bind the first up private IPv4 interface on port 8088, falling back to `127.0.0.1` for local use.
+- Bind one interface on port 8088 using `getLocalIp()`, but only if it is a private LAN address; otherwise bind `127.0.0.1`. Never expose the panel on a public address:
+
+  ```cpp
+  string address = getLocalIp();
+  if (!isPrivate(address)) address = "127.0.0.1";
+  ```
 - Generate a random token per launch, display it only on screen, and check it on every route.
 - Cap bodies at 64 bytes, parse and validate radio indices and finite levels, and clamp brightness to 0–1.
 - Send scene changes through `runOnMainThread()` with a weak app owner.

@@ -17,6 +17,11 @@
 using namespace std;
 using namespace tc;
 
+// Internal implementation helper, deliberately absent from the public headers.
+namespace trussc::detail {
+std::string selectLocalIp(const std::vector<NetworkInterface>&, const std::string&);
+}
+
 namespace {
 
 static int g_fail = 0;
@@ -58,6 +63,41 @@ TC_CORE_TEST_MAIN() {
     check("getOui too short",      getOui("a4:83") == "");
     check("isLocallyAdministered 02:..", isLocallyAdministered("02:00:00:00:00:01"));
     check("isLocallyAdministered a4:.. false", !isLocallyAdministered("a4:83:e7:11:22:33"));
+
+    // Selection is independent of this machine's adapters and route availability.
+    NetworkInterface virtualNic;
+    virtualNic.address = "172.30.128.1";
+    NetworkInterface wifi;
+    wifi.address = "192.168.10.8";
+    NetworkInterface publicNic;
+    publicNic.address = "203.0.113.8";
+    NetworkInterface ipv6;
+    ipv6.address = "2001:db8::1";
+    ipv6.isIPv4 = false;
+    using trussc::detail::selectLocalIp;
+    const vector<NetworkInterface> adapters{virtualNic, wifi, publicNic, ipv6};
+    check("default route beats first private (WSL/Wi-Fi)",
+          selectLocalIp(adapters, wifi.address) == wifi.address);
+    check("public default route beats private",
+          selectLocalIp(adapters, publicNic.address) == publicNic.address);
+    check("missing default route preserves private order",
+          selectLocalIp(adapters, "") == virtualNic.address);
+    check("unknown default route preserves private order",
+          selectLocalIp(adapters, "192.0.2.9") == virtualNic.address);
+    check("IPv4 fallback precedes IPv6",
+          selectLocalIp({ipv6, publicNic}, "") == publicNic.address);
+    check("IPv6 fallback preserved", selectLocalIp({ipv6}, "") == ipv6.address);
+    check("IPv6 route hint cannot override IPv4",
+          selectLocalIp(adapters, ipv6.address) == virtualNic.address);
+    wifi.isUp = false;
+    check("down route interface ignored",
+          selectLocalIp({wifi, virtualNic}, wifi.address) == virtualNic.address);
+    wifi.isUp = true;
+    wifi.isLoopback = true;
+    check("loopback route interface ignored",
+          selectLocalIp({wifi, virtualNic}, wifi.address) == virtualNic.address);
+    check("no eligible address returns empty", selectLocalIp({wifi}, wifi.address).empty());
+    check("no interfaces returns empty", selectLocalIp({}, "").empty());
 
     // --- 6. Enumeration smoke test (any real host has a loopback) ---
     auto ifs = listNetworkInterfaces();
