@@ -100,6 +100,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 | Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions. **Patched** (value hook for the MCP tools) — update by 3-way merge, see [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) |
 
 **Update Checklist:**
+- Run `.github/workflows/release-check.yml` for the release revision and review its OSV summary (matches, not checkable entries, or a failed check). It queries the same inventory and OSV mapping as the weekly upstream check.
 - Check GitHub Release Notes / Security Advisories
 - For stb, check commit history at https://github.com/nothings/stb (no tags)
 - Update the library's row in [LICENSE.md](LICENSE.md#third-party-libraries) (and its provenance file, where the row links one) in the same pull request

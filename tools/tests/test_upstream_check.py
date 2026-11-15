@@ -42,7 +42,7 @@ FIXTURE_LIST = """# License
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization |
 |---------|---------|----------------------|----------|---------|---------------------|
-| **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+| **earcut.hpp** | commit `365be263bfed498f9d3d3bf065bcb39b0d0e4ba6` (untagged; 16 commits after v2.2.4 and 16 before v3.2.3) | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
 | **LuaJIT** | 2.1 (rolling), commit not recorded | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall |
 | **branchlib** | branch `x` (not pinned) | `branchlib.h` | https://github.com/owner/branchlib | MIT | Someone |
 
@@ -85,9 +85,9 @@ class UpstreamTests(unittest.TestCase):
         self.assertEqual(set(by_name), {"earcut.hpp", "LuaJIT", "branchlib",
                                         "sokol-shdc (sokol-tools-bin)", "mbedTLS", "libcurl",
                                         "tinyobjloader", "HAP"})
-        self.assertTrue(by_name["earcut.hpp"]["not_recorded"])
+        self.assertFalse(by_name["earcut.hpp"]["not_recorded"])
         self.assertIsNone(by_name["earcut.hpp"]["version"])
-        self.assertIsNone(by_name["earcut.hpp"]["commit"])
+        self.assertEqual(by_name["earcut.hpp"]["commit"], "365be263bfed498f9d3d3bf065bcb39b0d0e4ba6")
         self.assertEqual(by_name["LuaJIT"]["version"], "2.1")
         self.assertTrue(by_name["LuaJIT"]["not_recorded"])
         self.assertEqual(by_name["branchlib"]["branch"], "x")
@@ -157,13 +157,15 @@ class UpstreamTests(unittest.TestCase):
             self.assertEqual(check.check_row(row())[0], "error")
         self.assertEqual(check.check_row(row(name="dr_mp3"))[0], "skip")
 
-    def report(self, rows, states):
+    def report(self, rows, states, osv=None):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             body = Path(directory) / "report.md"
             key = Path(directory) / "report.key"
             args = ["check", "--root", str(ROOT), "--body", str(body), "--fingerprint", str(key)]
             with patch.object(sys, "argv", args), patch.object(check, "parse_list", return_value=rows), \
-                    patch.object(check, "check_row", side_effect=states), contextlib.redirect_stderr(io.StringIO()):
+                    patch.object(check, "check_row", side_effect=states), \
+                    patch.object(check, "check_osv", return_value=osv if osv is not None else []), \
+                    contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(check.main(), 0)
             return body.read_text(encoding="utf-8"), key.read_text(encoding="utf-8").strip()
 
@@ -185,6 +187,109 @@ class UpstreamTests(unittest.TestCase):
         self.assertNotIn("Every checked entry", body)
         _, key = self.report([row("a"), row("b")], [("newer", "release 2"), ("error", "offline")])
         self.assertEqual(key, "incomplete")
+
+
+    def test_osv_inventory_has_explicit_mapping_for_every_entry(self):
+        rows = check.parse_list((ROOT / check.LIST_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(set(check.OSV), {r["name"] for r in rows})
+
+    def test_osv_one_bounded_batch_and_safe_report(self):
+        current = row("earcut.hpp", version=None, commit="a" * 40)
+        fixture = ROOT / "tools/tests/fixtures/osv/hit.json"
+        response = io.BytesIO(fixture.read_bytes())
+        with patch.object(check.urllib.request, "urlopen", return_value=response) as call:
+            results = check.check_osv([current, row("bcdec")])
+        call.assert_called_once()
+        request = call.call_args.args[0]
+        self.assertEqual(request.full_url, check.OSV_URL)
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(json.loads(request.data), {"queries": [{"commit": "a" * 40}]})
+        self.assertEqual(call.call_args.kwargs["timeout"], check.OSV_TIMEOUT)
+        report = "\n".join(check.osv_report(results))
+        self.assertIn("[TEST-OSV-1](https://osv.dev/vulnerability/TEST-OSV-1)", report)
+        self.assertIn("bcdec: not checkable (", report)
+        self.assertNotIn("PRIVATE_FIXTURE_TEXT", report)
+
+    def test_osv_no_hit_and_unmatchable(self):
+        current = row("earcut.hpp", version=None, commit="a" * 40)
+        response = io.BytesIO((ROOT / "tools/tests/fixtures/osv/no-hit.json").read_bytes())
+        with patch.object(check.urllib.request, "urlopen", return_value=response):
+            results = check.check_osv([current])
+        self.assertEqual(results, [(current, "checked", [])])
+        self.assertIn("No OSV matches", "\n".join(check.osv_report(results)))
+        with patch.object(check.urllib.request, "urlopen", side_effect=AssertionError("must stay offline")):
+            results = check.check_osv([row("unknown"), row("LuaJIT")])
+        self.assertTrue(all(state == "skip" for _, state, _ in results))
+        self.assertIn("unknown: not checkable (no OSV mapping", "\n".join(check.osv_report(results)))
+
+    def test_osv_errors_never_claim_clean_results(self):
+        current = row("earcut.hpp", version=None, commit="a" * 40)
+        fixture = ROOT / "tools/tests/fixtures/osv/error.json"
+        responses = [TimeoutError("PRIVATE_FIXTURE_TEXT"), fixture.read_bytes(),
+                     b'{"results": []}', b'{"results": [{"next_page_token": "more"}]}',
+                     b'{"results": [{"vulns": [{"id": "bad|id"}]}]}', b'not json']
+        for value in responses:
+            with self.subTest(value=value):
+                kwargs = {"side_effect": value} if isinstance(value, Exception) else {"return_value": io.BytesIO(value)}
+                with patch.object(check.urllib.request, "urlopen", **kwargs):
+                    results = check.check_osv([current])
+                self.assertEqual(results[0][1], "error")
+                report, key = self.report([current], [("current", None)], osv=results)
+                self.assertEqual(key, "incomplete")
+                self.assertIn("OSV check failed", report)
+                self.assertNotIn("No OSV matches", report)
+                self.assertNotIn("PRIVATE_FIXTURE_TEXT", report)
+
+    def test_osv_resolves_tags_and_short_commits_to_full_sha(self):
+        for current, ref in [(row("libcurl", version="8.23.0"), "curl-8_23_0"),
+                             (row("stb_image", commit="abcdef0"), "abcdef0")]:
+            with self.subTest(ref=ref), patch.object(check.urllib.request, "urlopen",
+                    return_value=io.BytesIO(json.dumps({"sha": "b" * 40}).encode())) as call:
+                self.assertEqual(check.osv_commit(current, check.OSV[current["name"]]), "b" * 40)
+                self.assertEqual(call.call_args.args[0].full_url,
+                                 "https://api.github.com/repos/owner/library/commits/" + ref)
+                self.assertEqual(call.call_args.kwargs["timeout"], check.OSV_TIMEOUT)
+        with patch.object(check.urllib.request, "urlopen", side_effect=TimeoutError):
+            results = check.check_osv([row("libcurl")])
+        self.assertEqual(results[0][1], "error")
+
+    def test_osv_fingerprint_tracks_advisories_and_version(self):
+        current = row("earcut.hpp", version=None, commit="a" * 40)
+        def report(ids, pin=current):
+            return self.report([pin], [("current", None)], [(pin, "checked", ids)])[1]
+        key = report(["TEST-OSV-1"])
+        self.assertNotEqual(key, "none")
+        self.assertEqual(key, report(["TEST-OSV-1"]))
+        self.assertNotEqual(key, report(["TEST-OSV-2"]))
+        self.assertNotEqual(key, report(["TEST-OSV-1"], dict(current, commit="b" * 40)))
+        self.assertEqual(report([]), "none")
+
+    def test_earcut_checks_only_vendored_upstream_file(self):
+        current = next(r for r in check.parse_list(FIXTURE_LIST) if r["name"] == "earcut.hpp")
+        with patch.object(check, "ls_remote", return_value=[("a" * 40, "refs/heads/master")]), \
+                patch.object(check, "raw", side_effect=[b"old", b"new"]) as raw:
+            self.assertEqual(check.check_row(current)[0], "newer")
+        self.assertEqual([c.args[2] for c in raw.call_args_list], ["include/mapbox/earcut.hpp"] * 2)
+
+    def test_release_osv_only_does_not_read_upstreams(self):
+        current = row("earcut.hpp", version=None, commit="a" * 40)
+        with patch.object(sys, "argv", ["check", "--osv-only"]), \
+                patch.object(check, "parse_list", return_value=[current]), \
+                patch.object(check, "check_row", side_effect=AssertionError("no upstream version reads")), \
+                patch.object(check, "check_osv", return_value=[(current, "checked", [])]), \
+                contextlib.redirect_stdout(io.StringIO()) as output, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(check.main(), 0)
+        self.assertIn("OSV release check", output.getvalue())
+        self.assertIn("No OSV matches", output.getvalue())
+        self.assertNotIn("no newer upstream", output.getvalue())
+
+    def test_release_check_runs_same_osv_tool_and_records_summary(self):
+        import yaml
+        workflow = yaml.load((ROOT / ".github/workflows/release-check.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        steps = workflow["jobs"]["osv-check"]["steps"]
+        self.assertIn("--osv-only --body osv.md", steps[2]["run"])
+        self.assertIn('cat osv.md >> "$GITHUB_STEP_SUMMARY"', steps[3]["run"])
 
 
 class PublishingTests(unittest.TestCase):

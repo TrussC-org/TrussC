@@ -2,7 +2,7 @@
 # list (docs/LICENSE.md, "Third-Party Libraries") whether something newer
 # exists, with tools/check_upstream_versions.py, and comments on one tracking
 # issue, "Third-party updates available", the same way daily.yml reports
-# failures. It comments only when the set of entries with something newer
+# failures. It comments only when the set of entries with something newer or OSV results
 # changes, so the issue does not get the same comment every week. It never
 # changes a version and never blocks anything: a person reads the upstream
 # release notes and decides. The PR-time check that the list matches the
@@ -35,7 +35,9 @@ jobs:
       - name: Test upstream reporting without network
         run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
 
-      - name: Ask each upstream for its newest release
+      - name: Check upstream releases and OSV advisories
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 tools/check_upstream_versions.py --body upstream.md --fingerprint upstream.key
 
       - name: Comment on the tracking issue when the set changes
