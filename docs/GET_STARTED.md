@@ -348,3 +348,5 @@ Repeated `connectAsync()` calls to the same pending host and port do nothing;
 `isConnecting()` shows that attempt. Use `sendAsync()` in the frame loop so a
 peer that stops reading does not stall rendering. The default send timeout is
 60 seconds without progress; a timeout reports an error and disconnects.
+
+If you get stuck, follow [DEBUGGING.md](guides/DEBUGGING.md) for logs, common symptoms, and finding a crash.
