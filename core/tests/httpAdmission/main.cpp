@@ -13,7 +13,9 @@ struct Input : httplib::Stream {
     std::string output;
     explicit Input(std::string text) : data(std::move(text)) {}
     bool is_readable() const override { return true; }
-    bool is_writable() const override { return true; }
+    bool wait_readable() const override { return true; }
+    bool wait_writable() const override { return true; }
+    time_t duration() const override { return 0; }
     ssize_t read(char* out, size_t n) override {
         n = std::min(n, data.size() - readBytes);
         std::memcpy(out, data.data() + readBytes, n);
@@ -41,10 +43,10 @@ int main() {
             res.set_content("ok", "text/plain");
         });
         server.set_payload_max_length(32);
-        Input oversized("POST / HTTP/1.1\r\nContent-Length: 33\r\n\r\n" + std::string(33, 'a'));
+        Input oversized("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 33\r\n\r\n" + std::string(33, 'a'));
         server.process(oversized);
         check("upstream payload setting returns 413 before dispatch", oversized.output.find("413") != std::string::npos && handled == 0);
-        Input boundary("POST / HTTP/1.1\r\nContent-Length: 32\r\n\r\n" + std::string(32, 'a'));
+        Input boundary("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 32\r\n\r\n" + std::string(32, 'a'));
         server.process(boundary);
         check("exact payload allowance reaches handler", boundary.output.find("200 OK") != std::string::npos && handled == 1);
     }
