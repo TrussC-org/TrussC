@@ -130,6 +130,15 @@ class UpstreamTests(unittest.TestCase):
             self.assertEqual(check.latest_release(row(version="8.12.1"), {"tag_prefix": "curl-"}),
                              "8.13.0 (tag `curl-8_13_0`)")
 
+    def test_box2d_v2_is_frozen_while_v3_tracks_releases(self):
+        tags = ["v2.4.2", "v2.4.3", "v3.2.0", "v3.2.1"]
+        with patch.object(check, "ls_remote", return_value=[("sha", "refs/tags/" + t) for t in tags]):
+            self.assertEqual(check.latest_release(row(name="Box2D", version="2.4.2"), check.UPSTREAM["Box2D"]),
+                             "2.4.3 (tag `v2.4.3`)")
+            self.assertIsNone(check.latest_release(row(name="Box2D", version="2.4.3"), check.UPSTREAM["Box2D"]))
+            self.assertEqual(check.latest_release(row(name="Box2D v3", version="3.2.0"), check.UPSTREAM.get("Box2D v3", {})),
+                             "3.2.1 (tag `v3.2.1`)")
+
     def test_imgui_letter_patch(self):
         with patch.object(check, "ls_remote", return_value=[("sha", "refs/tags/v1.92.9b")]):
             self.assertIsNone(check.latest_release(row(version="1.92.9b"), {}))
