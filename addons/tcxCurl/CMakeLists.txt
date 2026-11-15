@@ -61,11 +61,12 @@ else()
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
     set(CURL_ZLIB OFF CACHE BOOL "" FORCE)
     set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
-    set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+    # curl 8.23 removed HTTP_ONLY; disable the same protocols it did.
+    foreach(_tc_curl_protocol DICT FILE FTP GOPHER IMAP IPFS MQTT POP3 RTSP SMTP TELNET TFTP WEBSOCKETS)
+        set(CURL_DISABLE_${_tc_curl_protocol} ON CACHE BOOL "" FORCE)
+    endforeach()
     set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
     set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_LIBRTMP OFF CACHE BOOL "" FORCE)
     set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
     set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
     set(CURL_USE_GSASL OFF CACHE BOOL "" FORCE)
@@ -75,7 +76,6 @@ else()
     set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
     set(CURL_DISABLE_LDAPS ON CACHE BOOL "" FORCE)
     set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_SECTRANSP OFF CACHE BOOL "" FORCE)
     set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
     set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
 
@@ -86,8 +86,8 @@ else()
 
     FetchContent_Declare(
         curl
-        URL https://github.com/curl/curl/releases/download/curl-8_22_0/curl-8.22.0.tar.xz
-        URL_HASH SHA256=f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7
+        URL https://github.com/curl/curl/releases/download/curl-8_23_0/curl-8.23.0.tar.xz
+        URL_HASH SHA256=8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(curl)

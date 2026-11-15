@@ -9,7 +9,17 @@ ROOT = Path(__file__).resolve().parents[3]
 class RedirectPolicyTest(unittest.TestCase):
     def test_windows_bundled_curl_stays_http_only(self):
         cmake = (ROOT / 'addons/tcxCurl/CMakeLists.txt').read_text(encoding='utf-8')
-        self.assertIn('set(HTTP_ONLY ON CACHE BOOL "" FORCE)', cmake)
+        # curl 8.23 removed HTTP_ONLY. Keep its protocol exclusions explicit.
+        protocols = re.search(r'foreach\(_tc_curl_protocol ([^)]+)\)', cmake)
+        self.assertIsNotNone(protocols)
+        self.assertEqual(set(protocols.group(1).split()), {
+            'DICT', 'FILE', 'FTP', 'GOPHER', 'IMAP', 'IPFS', 'MQTT', 'POP3',
+            'RTSP', 'SMTP', 'TELNET', 'TFTP', 'WEBSOCKETS',
+        })
+        self.assertIn('set(CURL_DISABLE_${_tc_curl_protocol} ON CACHE BOOL "" FORCE)', cmake)
+        for protocol in ('LDAP', 'LDAPS'):
+            self.assertIn(f'set(CURL_DISABLE_{protocol} ON CACHE BOOL "" FORCE)', cmake)
+        self.assertIn('set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)', cmake)
 
     def test_header_value_validation_before_android_io(self):
         java = (ROOT / 'addons/tcxCurl/android/java/com/trussc/tcx/curl/AndroidHttpClient.java').read_text(encoding='utf-8')
