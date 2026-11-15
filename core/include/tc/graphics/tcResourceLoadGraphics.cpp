@@ -405,6 +405,8 @@ bool FontAtlasManager::uploadCompactedAtlas(AtlasState& atlas, sg_image& scratch
     desc.width = atlas.width_;
     desc.height = atlas.height_;
     desc.pixel_format = SG_PIXELFORMAT_R8;
+    // Atlas copies and mip passes are single-sample, independent of window MSAA.
+    desc.sample_count = 1;
     desc.data = {atlas.pixels_.data(), atlas.pixels_.size()};
     const sg_image upload = temporary.upload = sg_make_image(&desc);
     desc.data = {};
