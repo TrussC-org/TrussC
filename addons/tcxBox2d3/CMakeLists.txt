@@ -18,6 +18,6 @@ tc_fetch_quiet(box2d3)
 set_property(TARGET box2d PROPERTY C_STANDARD 17)
 set_property(TARGET box2d PROPERTY C_STANDARD_REQUIRED ON)
 
-add_library(tcxBox2d3 STATIC src/tcxBox2dWorld.cpp)
+add_library(tcxBox2d3 STATIC src/tcxBox2dWorld.cpp src/tcxBox2dMod.cpp)
 target_include_directories(tcxBox2d3 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(tcxBox2d3 PUBLIC box2d TrussC)

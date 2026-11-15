@@ -2,10 +2,14 @@
 
 #include <tcMath.h>
 #include <box2d/box2d.h>
+#include <memory>
+#include <unordered_set>
 
 namespace tc = trussc;
 
 namespace tcx::box2d {
+
+class RigidBody2D;
 
 // Experimental v3 world. Pixel methods use 30 pixels per meter.
 // Raw ids use Box2D units (meters); the World owns its id.
@@ -34,6 +38,12 @@ public:
     b2WorldId id() const { return worldId_; }
 
 private:
+    friend class RigidBody2D;
+    struct Owners {
+        b2WorldId worldId = b2_nullWorldId;
+        std::unordered_set<RigidBody2D*> bodies;
+    };
+    std::shared_ptr<Owners> owners_ = std::make_shared<Owners>();
     b2WorldId worldId_ = b2_nullWorldId;
     tc::Vec2 gravity_{0.0f, 300.0f}; // 10 m/s^2 downward in TrussC's y-down pixels
     int subSteps_ = 4;
