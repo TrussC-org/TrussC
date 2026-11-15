@@ -369,36 +369,48 @@ class McpIngressStream final : public httplib::Stream {
 public:
     explicit McpIngressStream(httplib::Stream& stream) : stream_(stream) {}
     bool is_readable() const override { return !overflow_ && stream_.is_readable(); }
-    bool is_writable() const override { return stream_.is_writable(); }
+    bool wait_readable() const override { return !overflow_ && stream_.wait_readable(); }
+    bool wait_writable() const override { return stream_.wait_writable(); }
+    bool is_peer_alive() const override { return stream_.is_peer_alive(); }
+    time_t duration() const override { return stream_.duration(); }
+    void set_max_timeout(time_t msec) override { stream_.set_max_timeout(msec); }
+    void set_read_timeout(time_t sec, time_t usec = 0) override { stream_.set_read_timeout(sec, usec); }
+    void set_read_interrupt(std::function<bool()> interrupted) override { stream_.set_read_interrupt(std::move(interrupted)); }
     void get_remote_ip_and_port(std::string& ip, int& port) const override { stream_.get_remote_ip_and_port(ip, port); }
     void get_local_ip_and_port(std::string& ip, int& port) const override { stream_.get_local_ip_and_port(ip, port); }
     socket_t socket() const override { return stream_.socket(); }
     void body(const httplib::Request& req) {
         bodyConfigured_ = true;
         phase_ = httplib::detail::is_chunked_transfer_encoding(req.headers) ? Phase::ChunkSize : Phase::Body;
-        bodyLengthKnown_ = !req.has_header("Transfer-Encoding");
-        bodyRemaining_ = req.get_header_value_u64("Content-Length");
+        bool invalidLength = false;
+        bodyRemaining_ = httplib::detail::get_header_value_u64(req.headers, "Content-Length", 0, 0, invalidLength);
+        bodyLengthKnown_ = !req.has_header("Transfer-Encoding") && !invalidLength &&
+            !httplib::detail::has_conflicting_content_length(req.headers);
     }
     bool headersComplete() const { return bodyConfigured_; }
     bool refused() const { return refused_ || overflow_; }
     bool overflowed() const { return overflow_; }
     void response(const httplib::Request& req) {
-        // httplib can refuse a Range header before the body setup callback runs.
+        // Upstream can reject framing, Host or Range before setup_request.
+        // Only complete raw headers allow bounded body teardown; invalid framing stays unknown-length.
         if (!bodyConfigured_ && phase_ == Phase::Body && !req.method.empty()) body(req);
     }
     uint64_t refusalRemainder() const {
         if (!bodyLengthKnown_) return (std::numeric_limits<uint64_t>::max)();
-        // Read-ahead has already left the socket, even if the body reader never ran.
-        return bodyRemaining_ - (std::min)(bodyRemaining_, static_cast<uint64_t>(bufferSize_ - bufferOffset_));
+        // The connection's SocketStream owns read-ahead across requests. Those bytes have left the socket.
+        size_t buffered = 0;
+        stream_.buffered_data(buffered);
+        return bodyRemaining_ - (std::min)(bodyRemaining_, static_cast<uint64_t>(buffered));
     }
     ssize_t read(char* data, size_t size) override {
         if (overflow_) return -1;
-        const auto n = readBuffered(data, size);
+        if (!size) return 0;
+        const auto n = stream_.read(data, size);
         if (n > 0 && bodyLengthKnown_)
             bodyRemaining_ -= (std::min)(bodyRemaining_, static_cast<uint64_t>(n));
         if (n <= 0 || phase_ == Phase::Body) return n;
         if (phase_ == Phase::ChunkData && static_cast<size_t>(n) <= remaining_) {
-            remaining_ -= static_cast<unsigned long>(n);
+            remaining_ -= static_cast<size_t>(n);
             if (!remaining_) phase_ = Phase::ChunkEnd;
             return n;
         }
@@ -414,13 +426,14 @@ public:
             // Bound (network input): chunk-size/extension lines stop at 1 KiB before upstream line storage grows.
             if (phase_ == Phase::ChunkSize && lineBytes_ == 1024) { overflow_ = true; return -1; }
             if (phase_ == Phase::Headers || phase_ == Phase::Trailers) {
-                // Bound (security): upstream bounds individual lines, not raw aggregate bytes or field count before storage.
-                // Initial headers and chunked trailers each get 64 KiB / 128 fields, including whitespace and CRLF bytes.
+                // Bound (security): initial headers and trailers each get 64 KiB / 100 fields, including whitespace and CRLF.
+                // 100 fields and exactly 64 KiB pass; field 101 or byte 65537 yields 431 before upstream stores the line.
+                // Upstream rejects malformed fields / lines over 8192 bytes with 400; its line reader stops at 32768.
                 const bool startsField = (lineBytes_ == 0 && c != '\r') ||
                     (lineBytes_ == 1 && previous_ == '\r' && c != '\n');
-                if (++bytes_ > 64 * 1024 || (startsField && ++fields_ > 128)) {
+                if (++bytes_ > 64 * 1024 || (startsField && ++fields_ > 100)) {
                     overflow_ = true;
-                    admissionRejected(AdmissionStore::Headers, bytes_ > 64 * 1024 ? 64 * 1024 : 128,
+                    admissionRejected(AdmissionStore::Headers, bytes_ > 64 * 1024 ? 64 * 1024 : 100,
                         bytes_ > 64 * 1024 ? bytes_ : fields_, bytes_ > 64 * 1024 ? "bytes" : "headers");
                     return -1;
                 }
@@ -428,11 +441,14 @@ public:
             if (phase_ == Phase::ChunkSize) observeChunkSize(c);
             ++lineBytes_;
             if (previous_ == '\r' && c == '\n') {
-                if (phase_ == Phase::RequestLine) phase_ = Phase::Headers;
+                if (phase_ == Phase::RequestLine) {
+                    // Upstream skips a leading CRLF; keep the actual request line under its 8192-byte bound.
+                    if (lineBytes_ != 2) phase_ = Phase::Headers;
+                }
                 else if ((phase_ == Phase::Headers || phase_ == Phase::Trailers) && lineBytes_ == 2) phase_ = Phase::Body;
                 else if (phase_ == Phase::ChunkEnd) { phase_ = Phase::ChunkSize; resetChunkSize(); }
                 else if (phase_ == Phase::ChunkSize) {
-                    remaining_ = negative_ ? 0UL - chunkSize_ : chunkSize_;
+                    remaining_ = chunkSize_;
                     phase_ = remaining_ ? Phase::ChunkData : Phase::Trailers;
                     bytes_ = fields_ = 0;
                 }
@@ -453,62 +469,38 @@ public:
             }
             return static_cast<ssize_t>(size);
         }
-        // Bound (framing): upstream's keep-alive loop ignores response refusal/close headers; stop after every refusal.
+        // Track refusals for our bounded teardown as well as upstream's Connection: close handling.
         if (size >= 12 && std::memcmp(data, "HTTP/1.", 7) == 0 && data[9] >= '4' && data[9] <= '5') refused_ = true;
         return stream_.write(data, size);
     }
 private:
-    ssize_t readBuffered(char* data, size_t size) {
-        if (!size) return 0;
-        if (bufferOffset_ == bufferSize_) {
-            // Read at least httplib's read-ahead size so it leaves no hidden buffered bytes.
-            if (size >= sizeof(buffer_)) return stream_.read(data, size);
-            const auto n = stream_.read(buffer_, sizeof(buffer_));
-            if (n <= 0) return n;
-            bufferOffset_ = 0;
-            bufferSize_ = static_cast<size_t>(n);
-        }
-        const auto count = (std::min)(size, bufferSize_ - bufferOffset_);
-        std::memcpy(data, buffer_ + bufferOffset_, count);
-        bufferOffset_ += count;
-        return static_cast<ssize_t>(count);
-    }
-    // Mirror only strtoul's hexadecimal prefix/value so body bytes never count as trailer fields.
+    // Observe the hexadecimal chunk length so body bytes never count as trailer fields.
     // Upstream remains responsible for rejecting malformed/overflowing chunk-size lines.
     void observeChunkSize(unsigned char c) {
         if (numberDone_) return;
-        if (!numberStarted_) {
-            if (std::isspace(c)) return;
-            numberStarted_ = true;
-            if (c == '+' || c == '-') { negative_ = c == '-'; return; }
-        }
-        if (digits_ == 1 && chunkSize_ == 0 && (c == 'x' || c == 'X') && !hexPrefix_) {
-            hexPrefix_ = true; digits_ = 0; return;
-        }
         const int digit = c >= '0' && c <= '9' ? c - '0' :
             c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
         if (digit < 0) { numberDone_ = true; return; }
-        if (chunkSize_ > (ULONG_MAX - static_cast<unsigned long>(digit)) / 16) chunkSize_ = ULONG_MAX;
-        else chunkSize_ = chunkSize_ * 16 + static_cast<unsigned long>(digit);
-        if (digits_ < 2) ++digits_;
+        // Bound (chunk accounting): saturate at upstream's size_t maximum, including 64-bit Windows; upstream rejects overflow.
+        constexpr auto maximum = (std::numeric_limits<size_t>::max)();
+        if (chunkSize_ > (maximum - static_cast<size_t>(digit)) / 16) chunkSize_ = maximum;
+        else chunkSize_ = chunkSize_ * 16 + static_cast<size_t>(digit);
     }
     void resetChunkSize() {
-        chunkSize_ = 0; digits_ = 0;
-        numberStarted_ = numberDone_ = negative_ = hexPrefix_ = false;
+        chunkSize_ = 0;
+        numberDone_ = false;
     }
     enum class Phase { RequestLine, Headers, Body, ChunkSize, ChunkData, ChunkEnd, Trailers };
     httplib::Stream& stream_;
-    // Bound (read-ahead accounting): match httplib's 4096-byte buffer with fixed storage visible to refusal teardown.
-    char buffer_[4096];
-    size_t bufferOffset_ = 0, bufferSize_ = 0;
+    // Keep buffered_data/consume_buffered at their empty defaults: upstream's line reader must use guarded read().
+    // Read-ahead remains in the connection's 4096-byte SocketStream buffer, visible to its keep-alive readiness check.
     uint64_t bodyRemaining_ = 0;
     bool bodyConfigured_ = false, bodyLengthKnown_ = false;
     Phase phase_ = Phase::RequestLine;
     size_t bytes_ = 0, fields_ = 0, lineBytes_ = 0;
-    unsigned long remaining_ = 0, chunkSize_ = 0;
+    size_t remaining_ = 0, chunkSize_ = 0;
     unsigned char previous_ = 0;
-    int digits_ = 0;
-    bool numberStarted_ = false, numberDone_ = false, negative_ = false, hexPrefix_ = false;
+    bool numberDone_ = false;
     bool overflow_ = false, overflowWritten_ = false, refused_ = false, requestLineOverflow_ = false;
 };
 
@@ -559,7 +551,7 @@ class McpSocketServer final : public httplib::Server {
         bool result = false;
         bool refusalClose = false;
         uint64_t refusalRemainder = 0;
-        // Upstream catches routing exceptions only; parsing and response writing can also throw on a worker.
+        // Retain our connection exception boundary: this override bypasses upstream's serve_guarded boundary.
         try {
             std::string remote, local;
             int remotePort = 0, localPort = 0;

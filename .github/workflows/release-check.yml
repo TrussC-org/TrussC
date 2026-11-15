@@ -9,6 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  osv-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test OSV reporting without network
+        run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
+      - name: Check shipped dependency commits with OSV
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/check_upstream_versions.py --osv-only --body osv.md
+      - name: Record OSV release checklist result
+        run: cat osv.md >> "$GITHUB_STEP_SUMMARY"
+
   release-check:
     # A caller must grant every permission a called job requests, even one that
     # is skipped: release.yml's release job asks for contents: write (it is

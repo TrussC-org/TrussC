@@ -21,6 +21,12 @@ spec.loader.exec_module(deps)
 
 
 class DependencyTests(unittest.TestCase):
+    def test_earcut_recorded_commit(self):
+        current = next(r for r in self.rows if r["name"] == "earcut.hpp")
+        self.assertEqual(current["commit"], "365be263bfed498f9d3d3bf065bcb39b0d0e4ba6")
+        self.assertIsNone(current["version"])
+        self.assertFalse(current["not_recorded"])
+
     def test_nlohmann_is_unmodified_upstream_3_12_0(self):
         header = ROOT / "core/include/nlohmann/json.hpp"
         self.assertEqual(hashlib.sha256(header.read_bytes()).hexdigest(),
