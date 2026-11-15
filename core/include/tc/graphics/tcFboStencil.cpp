@@ -20,8 +20,8 @@ StencilResources& stencilResources() {
 }
 
 // Ordered draw, rather than a native load clear: preserve color/depth and
-// replace only the requested bits, independently of transforms and scissor.
-bool clearTargetStencil(uint8_t value, uint8_t mask) {
+// replace the whole byte, independently of transforms and scissor.
+bool clearTargetStencil(uint8_t value) {
     auto& target = currentTarget();
     if (!ensureCurrentPass()) return false;
     target.flushLayers();
@@ -37,15 +37,14 @@ bool clearTargetStencil(uint8_t value, uint8_t mask) {
     desc.stencil.front.pass_op = SG_STENCILOP_REPLACE;
     desc.stencil.back = desc.stencil.front;
     desc.stencil.read_mask = 0xFF;
-    desc.stencil.write_mask = mask;
+    desc.stencil.write_mask = 0xFF;
     desc.stencil.ref = value;
     const auto selected = target.pipeline(PipelineKey::raw(PipelineRole::StencilClear, desc));
     if (!selected.raw.id) return false;
     sg_apply_pipeline(selected.raw);
     sg_apply_viewport(0, 0, target.width, target.height, true);
     sg_apply_scissor_rect(0, 0, target.width, target.height, true);
-    sg_bindings bindings = {};
-    sg_apply_bindings(&bindings);
+    // The fullscreen triangle has no bindings; applying empty ones fails validation.
     sg_draw(0, 3, 1);
     applyTargetDrawingState();
     return true;
@@ -189,45 +188,27 @@ void FboStencilAccess::shutdown() {
 
 namespace trussc {
 bool beginStencil() {
-    auto& target = internal::currentTarget();
-    if (!target.hasDepth || target.depthFormat != SG_PIXELFORMAT_DEPTH_STENCIL ||
-        (target.passKind == internal::TargetPassKind::Swapchain &&
-         !internal::currentWindowContext().hostWindow)) {
-        logWarning("Stencil") << "beginStencil() requires a stencil attachment";
-        return false;
-    }
-    if (target.stencilOwned || target.frameworkStencilClipDepth) {
-        logWarning("Stencil") << "beginStencil() refused: already owned or framework stencil clip scope active";
-        return false;
-    }
-    if (!internal::ensureCurrentPass()) return false;
-    target.flushLayers();
-    target.savedStencil = target.stencil;
-    target.stencil = {};
-    target.stencilOwned = true;
-    internal::restoreCurrentPipeline();
-    return true;
+    const auto& target = internal::currentTarget();
+    return target.hasStencil() &&
+        (target.passKind != internal::TargetPassKind::Swapchain || internal::currentWindowContext().hostWindow);
 }
 
 void endStencil() {
-    auto& target = internal::currentTarget();
-    if (!target.stencilOwned) {
-        logWarning("Stencil") << "endStencil() requires successful beginStencil() on this target";
-        return;
-    }
-    if (!internal::clearTargetStencil(0, 0xFF)) return;
-    target.stencil = target.savedStencil;
-    target.savedStencil = {};
-    target.stencilOwned = false;
-    internal::restoreCurrentPipeline();
+    clearStencil(0);
+    resetStencilDesc();
 }
 
 void clearStencil(uint8_t value) {
-    if (!internal::currentTarget().stencilOwned) {
-        logWarning("Stencil") << "clearStencil() requires successful beginStencil() on this target";
+    auto& target = internal::currentTarget();
+    if (!target.hasStencil() ||
+        (target.passKind == internal::TargetPassKind::Swapchain && !internal::currentWindowContext().hostWindow)) {
+        if (!target.warnedStencilClear) {
+            target.warnedStencilClear = true;
+            logWarning("Stencil") << "clearStencil() requires a stencil attachment";
+        }
         return;
     }
-    internal::clearTargetStencil(value, 0xFF);
+    internal::clearTargetStencil(value);
 }
 
 Fbo* Fbo::captureStencil_(bool perFrame) const {

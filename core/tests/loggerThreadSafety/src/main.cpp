@@ -436,8 +436,8 @@ static void testSokolBridge() {
               seen[0].level == LogLevel::Error && seen[0].message == "[sg] id:12 line:345");
         check("bridge: sapp warning",
               seen[1].level == LogLevel::Warning && seen[1].message == "[sapp] warned");
-        check("bridge: sgl info -> Verbose",
-              seen[2].level == LogLevel::Verbose && seen[2].message == "[sgl] info message");
+        check("bridge: sgl growth info -> Notice",
+              seen[2].level == LogLevel::Notice && seen[2].message == "[sgl] info message");
         check("bridge: simgui error",
               seen[3].level == LogLevel::Error && seen[3].message == "[simgui] imgui error");
         check("bridge: drop type notice", seen[4].level == LogLevel::Notice && seen[4].message == "[sapp] 1024 4");
@@ -445,12 +445,33 @@ static void testSokolBridge() {
     }
     const vector<string> lines = readLines(f);
     check("bridge: the file gets errors, warnings and application notices",
-          lines.size() == 4 &&
+          lines.size() == 5 &&
           contains(lines, "] [ERROR] [sg] id:12 line:345") &&
           contains(lines, "] [WARNING] [sapp] warned") &&
           contains(lines, "] [ERROR] [simgui] imgui error") &&
           contains(lines, "] [NOTICE] [sapp] 1024 4") &&
-          !contains(lines, "info message") && !contains(lines, "ordinary info"));
+          contains(lines, "] [NOTICE] [sgl] info message") && !contains(lines, "ordinary info"));
+    seen.clear();
+    {
+        EventListener l = lg.onLog.listen([&](LogEventArgs& e) { seen.push_back({e.level, e.message}); });
+        const uint32_t growthItems[] = {SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN,
+            SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN, SGL_LOGITEM_CONTEXT_POOL_GROWN};
+        const char* growthTags[] = {"sg", "sg", "sgl"};
+        for (size_t i = 0; i < 3; ++i) {
+            const auto item = growthItems[i];
+            const auto tag = growthTags[i];
+            internal::sokolLog(tag, 3, item, "grown", 1, nullptr, nullptr);
+            internal::sokolLog(tag, 1, item, "failed", 1, nullptr, nullptr);
+            internal::sokolLog(tag, 2, item, "capped", 1, nullptr, nullptr);
+            internal::sokolLog("other", 3, item, "other tag", 1, nullptr, nullptr);
+        }
+    }
+    bool growthLevels = seen.size() == 12;
+    for (size_t i = 0; i + 3 < seen.size(); i += 4) {
+        growthLevels &= seen[i].level == LogLevel::Notice && seen[i+1].level == LogLevel::Error &&
+            seen[i+2].level == LogLevel::Warning && seen[i+3].level == LogLevel::Verbose;
+    }
+    check("bridge: growth notices preserve failures, caps and unrelated tags", growthLevels);
     seen.clear();
     {
         EventListener l = lg.onLog.listen([&](LogEventArgs& e) { seen.push_back({e.level, e.message}); });

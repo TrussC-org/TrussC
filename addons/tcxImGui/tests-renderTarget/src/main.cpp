@@ -614,10 +614,6 @@ public:
     void draw() override {
 #ifndef TC_IMGUI_BASE_FIXTURE
         if(frame_==1 && !screenOnly && !pendingChecked_) {
-            const auto generation=internal::currentTarget().resources().generation;
-            const auto budget=internal::sglBudget();
-            internal::resizeSgl(budget.maxVertices+32,budget.maxCommands+16);
-            check("actual sgl rebuild replaces generation",internal::currentTarget().resources().generation!=generation);
             // Present the intermediate blue marker before the ordinary screen
             // scene clears it. Keep frame_ at 1 until afterFrame has read it;
             // screenUi() is still called exactly once for each original scene.

@@ -18685,7 +18685,7 @@ _SOKOL_PRIVATE bool _sg_mtl_grow_uniform_buffer(size_t data_size) {
     snprintf(log_msg, sizeof(log_msg),
         "per-frame uniform buffer overflowed, auto-grown %d -> %d bytes (metal); use sg_desc.uniform_buffer_size to pre-allocate",
         old_size, new_size);
-    _sg_log(SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN, 2, log_msg, __LINE__);
+    _sg_log(SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN, 3, log_msg, __LINE__);
     return true;
 }
 // <<[TrussC modification]
@@ -19687,7 +19687,7 @@ _SOKOL_PRIVATE bool _sg_wgpu_uniform_reserve(uint64_t required) {
         snprintf(message, sizeof(message),
             "per-frame uniform buffer auto-grown %u -> %u bytes (webgpu); use sg_desc.uniform_buffer_size to pre-allocate",
             (unsigned)previous_size, (unsigned)u->num_bytes);
-        _sg_log(SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN, 2, message, __LINE__);
+        _sg_log(SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN, 3, message, __LINE__);
     }
     return true;
 }

@@ -284,10 +284,8 @@ public:
             return;
         }
         stencilCache_.reset();
-        target_.stencil = {};
-        target_.savedStencil = {};
-        target_.stencilOwned = false;
-        target_.frameworkStencilClipDepth = 0;
+        target_.requestedStencilDescKey = target_.stencilDescKey = 0;
+        target_.warnedStencilDesc = target_.warnedStencilClear = false;
         // Also release partial allocations, before allocated_ is published.
         // Shared context/pipelines are NOT destroyed here (shared across FBOs)
         if (depthAttView_.id) sg_destroy_view(depthAttView_);

@@ -282,7 +282,7 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
 - `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
   `allCoreTests shaderStreamDraws --gpu-check` (OpenGL Core display required)
   also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
-  passes, checks the growth warning, and exercises Shader moves/clear with
+  passes, checks the growth notice, and exercises Shader moves/clear with
   a pending swapchain draw. On Linux, run it with Xvfb.
 - `stringPatterns/` — empty substring patterns count as zero or leave the
   input unchanged (#405); replacements are left-to-right and nonoverlapping,

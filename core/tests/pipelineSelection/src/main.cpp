@@ -478,8 +478,6 @@ void lazyResizeChecks() {
     // This synthetic window probe commits several times in one app tick.
     // Metal retains one drawable per tick, so keep it on the GL backend.
     auto& main = internal::currentWindowContext();
-    auto& budget = internal::sglBudget();
-    const int oldVertices = budget.maxVertices, oldCommands = budget.maxCommands;
     const bool statsEnabled = sg_stats_enabled();
     sg_enable_stats();
     auto triangle = [] {
@@ -503,21 +501,7 @@ void lazyResizeChecks() {
             !owner.swapchainTarget.inPass && !owner.swapchainTarget.passStartedThisFrame && owner.renderEpoch==epoch);
         if (captured) expect(pixels,pixels.getWidth()/5,pixels.getHeight()/5,Color(1,0,0),label);
     };
-    triangle();
-    const int budgetCommands=sgl_num_commands();
-    const auto before = main.swapchainTarget.resources().context.id;
-    const auto generationBefore = main.swapchainTarget.resources().generation;
-    internal::resizeSgl(1024,256);
-    check("budget rebuild retains lazy recording",main.swapchainTarget.resources().context.id==before && sgl_num_vertices()==3 && sgl_num_commands()==budgetCommands);
-    present();
-    auto draws = sg_query_stats().prev_frame.num_draw;
-    std::printf("LAZY RESIZE GPU budget draws=%u expected=1\n",draws);
-    check("budget resize submits exactly one backend draw",draws==1);
-    backendPixels("budget resize triangle reached backend");
-    beginFrame();
-    check("budget rebuild retries after present",main.swapchainTarget.resources().generation!=generationBefore && budget.maxVertices==1024 && budget.maxCommands==256 && !budget.pendingResize);
-    internal::resizeSgl(oldVertices,oldCommands);
-    beginFrame();
+    unsigned draws = 0;
     {
         // A secondary-window coordinator using this native drawable. Alter its
         // reported dimensions exactly as the reviewer's windowless probe did.
@@ -561,23 +545,22 @@ void lazyResizeChecks() {
 #endif
 }
 class PipelineApp : public App {
-    int frame_=0, baseVertices_=0, baseCommands_=0;
+    int frame_=0;
     Fbo survivor_, otherSurvivor_;
     RecipeShader survivorShader_;
     std::shared_ptr<Window> secondary_;
     EventListener after_;
 public:
     void setup() override {
-        baseVertices_=internal::sglBudget().maxVertices; baseCommands_=internal::sglBudget().maxCommands;
         survivor_.allocate(32,24); otherSurvivor_.allocate(29,19,4);
         check("generation-surviving shader loads",survivorShader_.load(pipeline_mesh_shader_desc));
         if (internal::supportsSecondaryWindows()) {
             WindowSettings secondary; secondary.setSize(80,60);
             secondary_ = createWindow(secondary);
-            check("secondary window created for global resize",bool(secondary_));
+            check("secondary window created",bool(secondary_));
         } else {
-            // Omits creation + 50 generation checks: 51 fewer assertions.
-            std::puts("SKIP secondary window created for global resize: secondary windows unsupported");
+            // Secondary windows are unavailable on this platform.
+            std::puts("SKIP secondary window created: secondary windows unsupported");
         }
         after_=events().afterFrame.listen([this] {
             if(frame_==2) {
@@ -607,18 +590,12 @@ public:
             }
         }
         if(frame_>=2 && frame_<52) {
-            // Real sgl rebuild, fifty separate frames; two surviving Fbos and
-            // the window must never retain contexts from the previous setup.
+            // Change the Fbo signature across fifty frames.
             survivor_.begin(1,0,0);
             const auto old=internal::currentTarget().resources().generation;
             const auto oldSelection=survivorShader_.selection();
             survivor_.end();
             otherSurvivor_.begin(0,0,1); otherSurvivor_.end();
-            const auto windowGeneration = secondary_ ? trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().generation : 0;
-            internal::resizeSgl(baseVertices_+(frame_%2?0:64),baseCommands_+(frame_%2?0:16));
-            if(secondary_) check("sgl resize replaces secondary window generation",trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().generation != windowGeneration && trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().context.id != 0);
-            otherSurvivor_.begin(0,0,1); otherSurvivor_.end();
-            expect(read(otherSurvivor_),4,4,Color(0,0,1),"second surviving lease after global resize");
             survivor_.allocate(frame_%2?113:160,frame_%2?79:96,frame_%2?4:1,frame_%2?TextureFormat::RGBA16F:TextureFormat::RGBA8);
             survivor_.begin(0,1,0);
             auto& target=internal::currentTarget();
@@ -642,5 +619,5 @@ TC_CORE_TEST_MAIN(int argc,char** argv) {
         if(std::strcmp(argv[i],"--msaa4")==0) settings.sampleCount=4;
         if(std::strcmp(argv[i],"--record")==0 && i+1<argc) output=fs::absolute(argv[++i]).lexically_normal();
     }
-    return tcCoreTest::runDisplayTest<PipelineApp>(settings,failures,[]{ check("pipeline suite and resize x50 completed",completed); });
+    return tcCoreTest::runDisplayTest<PipelineApp>(settings,failures,[]{ check("pipeline suite and Fbo resize x50 completed",completed); });
 }

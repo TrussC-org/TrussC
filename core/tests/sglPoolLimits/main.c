@@ -11,6 +11,8 @@
 //   (c) the sgl context pool grows when full: more contexts than
 //       context_pool_size can be made, and the current context keeps working
 //       across the grow (drawing, commit rewind).
+//   (d) GPU flush buffers grow even when the sg buffer pool is full, and
+//       normal drawing continues on the next frame.
 //
 // Standalone target (not a TrussC project): it needs its own SOKOL_IMPL with
 // the dummy backend, which would clash with libTrussC's sokol implementation.
@@ -48,13 +50,13 @@ static void check(const char* name, bool ok) {
     if (!ok) ++g_fail;
 }
 
-static int g_growth_warnings = 0;
+static int g_growth_notices = 0;
 static unsigned g_growth_sizes = 0;
 static void grow_logger(const char* tag, uint32_t level, uint32_t item,
                         const char* message, uint32_t line, const char* filename,
                         void* user_data) {
-    if (item == SGL_LOGITEM_CONTEXT_POOL_GROWN && level == 2 && message) {
-        ++g_growth_warnings;
+    if (item == SGL_LOGITEM_CONTEXT_POOL_GROWN && level == 3 && message) {
+        ++g_growth_notices;
         if (strstr(message, "2 -> 4 contexts")) g_growth_sizes |= 1;
         if (strstr(message, "4 -> 8 contexts")) g_growth_sizes |= 2;
     }
@@ -155,7 +157,7 @@ static void test_failed_pipeline_rollback(void) {
 // (c) context_pool_size = 2 (the default context plus one).
 static void test_context_pool_grow(void) {
     sg_setup(&(sg_desc){ .logger.func = slog_func });
-    g_growth_warnings = 0;
+    g_growth_notices = 0;
     g_growth_sizes = 0;
     sgl_setup(&(sgl_desc_t){ .context_pool_size = 2, .logger.func = grow_logger });
 
@@ -170,8 +172,8 @@ static void test_context_pool_grow(void) {
         if (more[i].id == SG_INVALID_ID) all_valid = false;
     }
     check("(c) 4 contexts besides the default with a pool of 2 (grows)", all_valid);
-    check("(c) each grow warns with the new size (also in Release)",
-          g_growth_warnings == 2 && g_growth_sizes == 3);
+    check("(c) each grow reports info with the new size (also in Release)",
+          g_growth_notices == 2 && g_growth_sizes == 3);
     check("(c) current context still set after the grow",
           a.id != SG_INVALID_ID && sgl_get_context().id == a.id && !sgl_error().no_context);
     push_tri();
@@ -284,11 +286,56 @@ static void test_skip_invalid_pipeline(void) {
     sg_shutdown();
 }
 
+// (d) The initial sgl buffer plus three plain buffers fill the sg pool.
+static void test_full_buffer_pool_growth(void) {
+    sg_setup(&(sg_desc){ .buffer_pool_size = 4, .logger.func = slog_func });
+    sgl_setup(&(sgl_desc_t){ .max_vertices = 3, .logger.func = slog_func });
+    sg_enable_stats();
+    _sgl_context_t* ctx = _sgl_lookup_context(sgl_default_context().id);
+    const sg_buffer initial = ctx->vbuf;
+    sg_buffer fillers[3];
+    for (int i = 0; i < 3; ++i) {
+        fillers[i] = sg_make_buffer(&(sg_buffer_desc){
+            .size = 16, .usage.vertex_buffer = true, .usage.write_transient = true });
+        check("(d) filler buffer is valid",
+              sg_query_buffer_state(fillers[i]) == SG_RESOURCESTATE_VALID);
+    }
+    check("(d) sg buffer pool is full", sg_query_stats().total.buffers.alive == 4);
+
+    for (int frame = 0; frame < 2; ++frame) {
+        push_tri();
+        if (frame == 0) push_tri();               // six vertices outgrow the initial three
+        sg_begin_pass(&(sg_pass){ .swapchain = { .width = 16, .height = 16,
+            .color_format = SG_PIXELFORMAT_RGBA8,
+            .depth_format = SG_PIXELFORMAT_DEPTH_STENCIL, .sample_count = 1 } });
+        sgl_draw();
+        const sgl_error_t error = sgl_error();
+        check(frame == 0 ? "(d) frame N grows a flush buffer with a full sg pool"
+                         : "(d) frame N+1 draws normally with a valid flush buffer",
+              !error.any && !error.vertices_full && ctx->flush_count == 1 &&
+              sg_query_buffer_state(ctx->flush_buffers[0]) == SG_RESOURCESTATE_VALID &&
+              ctx->vbuf.id == ctx->flush_buffers[0].id &&
+              ctx->bind.vertex_buffers[0].id == ctx->vbuf.id &&
+              sg_query_stats().cur_frame.num_draw == 1);
+        sg_end_pass();
+        sg_commit();
+    }
+    check("(d) initial buffer was replaced with sufficient capacity",
+          sg_query_buffer_state(initial) == SG_RESOURCESTATE_INVALID &&
+          sg_query_buffer_size(ctx->vbuf) >= 6 * sizeof(_sgl_vertex_t));
+    sgl_shutdown();
+    check("(d) shutdown frees only sgl's buffer",
+          sg_query_stats().total.buffers.alive == 3);
+    for (int i = 0; i < 3; ++i) sg_destroy_buffer(fillers[i]);
+    sg_shutdown();
+}
+
 int main(void) {
     test_pipeline_rollback();
     test_failed_pipeline_rollback();
     test_context_pool_grow();
     test_context_pool_grow_failure();
+    test_full_buffer_pool_growth();
     test_skip_invalid_pipeline();   // last: a draw with pipeline 0 aborts in sokol
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",
