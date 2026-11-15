@@ -1,6 +1,6 @@
 # Phone control panel
 
-phonePanelExample lets a phone choose a mode and adjust a level while a desktop app runs fullscreen. The page contains radio buttons, one fader, and a scrolling log. Use a trusted LAN: this example serves plain HTTP, so anyone on the network path can see the startup token. There is no TLS configuration in this example.
+phonePanelExample lets a phone control a fullscreen app on the same trusted LAN. Radio buttons select red, green, or blue; a fader sets the brightness of a large rectangle. The page also shows a scrolling log. Use a trusted LAN: plain HTTP exposes the startup token to anyone on the network path. This example has no TLS API configuration.
 
 From this directory, build and run with an installed `trusscli`:
 
@@ -9,24 +9,15 @@ trusscli build
 trusscli run
 ```
 
-Connect the phone to the same LAN and open the complete URL shown on the app screen, including `?token=...`. Escape closes the desktop app and stops the server. The page and its JavaScript are inline in [src/tcApp.cpp](src/tcApp.cpp); no external assets are needed.
+Connect the phone to the same LAN and open the complete URL shown on screen, including `?token=...`. Escape closes the app and stops the server. [src/tcApp.cpp](src/tcApp.cpp) contains the server and app; [src/panelPage.h](src/panelPage.h) contains the page and JavaScript, with no external assets.
 
-The app picks one up, private IPv4 interface. If it picks the wrong LAN, select an address belonging to this computer (port 8088):
+The short handling code shows these essentials:
 
-```sh
-PHONE_PANEL_BIND=192.168.1.20 ./bin/phonePanelExample
-```
+- Bind the first up private IPv4 interface on port 8088, falling back to `127.0.0.1` for local use.
+- Generate a random token per launch, display it only on screen, and check it on every route.
+- Cap bodies at 64 bytes, parse and validate radio indices and finite levels, and clamp brightness to 0–1.
+- Send scene changes through `runOnMainThread()` with a weak app owner.
+- Feed a mutex-protected ring from `getLogger().onLog`: at most 100 lines of 512 bytes, displayed with `textContent`.
+- Stop the server and join its thread in the framework's `exit()` callback, before member destruction.
 
-For a local test, use `PHONE_PANEL_BIND=127.0.0.1` instead. On Windows, set the environment variable before running `bin/phonePanelExample.exe`; on macOS the executable is `bin/phonePanelExample.app/Contents/MacOS/phonePanelExample`.
-
-HTTP handlers run on worker threads. Scene changes go to the main thread through `runOnMainThread()`. `getLogger().onLog` feeds a mutex-protected log ring, and the phone polls it once per second. Shutdown calls `stop()` before joining the server thread.
-
-Security points implemented beside the handling code:
-
-- Bind one local interface rather than exposing every interface.
-- Generate a fresh random token each launch, show it only on screen, and check every route without exiting on the first mismatched byte. Treat the full URL as a secret.
-- Limit bodies to 64 bytes; validate radio indices and finite numbers; clamp the fader to 0–1.
-- Bound workers, queued connections, timeouts, and authenticated requests (30/second).
-- Retain at most 100 log lines of 512 bytes; render them with `textContent`.
-
-This is a desktop HTTP server example; it cannot host the panel from a browser build.
+This example requires a desktop HTTP server; there is no browser-build API for hosting the panel.
