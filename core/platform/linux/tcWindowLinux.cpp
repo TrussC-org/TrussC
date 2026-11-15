@@ -112,7 +112,7 @@ const std::vector<unsigned long>& windowIcon() {
 
 void nativeWindowSetClass(uint32_t id) {
     auto* display = (Display*)sapp_x11_get_display();
-    const auto window = (::Window)(uintptr_t)sapp_window_x11_get_window({id});
+    const auto window = (::Window)(uintptr_t)sapp_tc_window_x11_get_window({id});
     if (!display || !window) return;
     static std::string name = [] {
         // Bound (procfs): a path that fills PATH_MAX may be truncated, so fall back to "TrussC App".
@@ -138,22 +138,22 @@ void nativeWindowSetClass(uint32_t id) {
 namespace {
 sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
 }
-void nativeWindowSetTitle(Window& w, const char* title) { sapp_window_set_title(handle(w), title); }
+void nativeWindowSetTitle(Window& w, const char* title) { sapp_tc_window_set_title(handle(w), title); }
 void nativeWindowSetFullscreen(Window& w, bool full) { sapp_tc_window_set_fullscreen(handle(w), full); }
 uint32_t nativeWindowFullscreenPhase(const Window& w) { return sapp_tc_window_fullscreen_phase(handle(w)); }
 void nativeWindowToggleFullscreen(Window& w) { sapp_tc_window_toggle_fullscreen(handle(w)); }
 void nativeWindowSetSize(Window& w, double width, double height, bool pixelSize) {
     x11Geometry((Display*)sapp_x11_get_display(),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
+        (::Window)(uintptr_t)sapp_tc_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
         false, 0, 0, width, height, trussc::internal::WindowRequestAccess::context(w).dpiScale, w.isFullscreen(), pixelSize);
 }
 void nativeWindowSetPosition(Window& w, int x, int y) {
     x11Geometry((Display*)sapp_x11_get_display(),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
+        (::Window)(uintptr_t)sapp_tc_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
         true, x, y, 0, 0, trussc::internal::WindowRequestAccess::context(w).dpiScale, w.isFullscreen());
 }
 IVec2 nativeWindowPosition(const Window& w) {
-    return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)),
+    return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_tc_window_x11_get_window(handle(w)),
         &WindowRequestAccess::binding(w).geometry);
 }
 // True when an EWMH window manager runs (it owns stacking and focus).
@@ -169,7 +169,7 @@ static bool hasEwmhWindowManager(Display* display, ::Window root) {
 void nativeWindowBringToFront(Window& w) {
     Display* display = (Display*)sapp_x11_get_display();
     // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
-    ::Window window = (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w));
+    ::Window window = (::Window)(uintptr_t)sapp_tc_window_x11_get_window(handle(w));
     if (!display || !window) return;
     const ::Window root = DefaultRootWindow(display);
     if (hasEwmhWindowManager(display, root)) {
@@ -228,7 +228,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);
-        st->win = sapp_create_window(&d);
+        st->win = sapp_tc_create_window(&d);
     }
     if (st->win.id == 0) {
         win->native_ = nullptr;

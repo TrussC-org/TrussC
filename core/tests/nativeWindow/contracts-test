@@ -193,9 +193,9 @@ for name in ('static uint32_t _sapp_tc_x11_surface_window_id(', 'static bool _sa
         code += helper + '\n'
 code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
 for name in ('static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {',
-             'static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
+             'static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_tc_create_window(',
              'void sapp_destroy_window(sapp_window win) {',
-             'static void _sapp_tc_x11_update_window_title(', 'void sapp_window_set_title(',
+             'static void _sapp_tc_x11_update_window_title(', 'void sapp_tc_window_set_title(',
              'void sapp_set_window_title(', 'void sapp_tc_window_skip_present(',
              'static void _sapp_tc_x11_scroll_event(', 'static void _sapp_tc_x11_init_client(void) {',
              'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'):
@@ -211,7 +211,7 @@ int main() {
     desc.bind_cb = bindHost; desc.user_data = &bindingCalls;
     for (bool reject : {false, true}) {
         rejectBinding = reject; bindingCalls = shows = 0;
-        const auto created = sapp_create_window(&desc);
+        const auto created = sapp_tc_create_window(&desc);
         check("host binding runs once and rejection unwinds before publication", bindingCalls == 1 && bool(created.id) == !reject && shows == int(!reject));
         if (created.id) { auto* w = _sapp_tc_lookup(created); _sapp_tc.windows[2] = nullptr; _sapp_tc_x11_unwind(w); }
         else check("failed host binding leaves no native registry slot", _sapp_tc.windows[2] == nullptr);
@@ -220,14 +220,14 @@ int main() {
         shows = 0; throwBinding = true;
         const auto before = unwinds;
         bool caught = false;
-        try { (void)sapp_create_window(&desc); } catch (const std::runtime_error&) { caught = true; }
+        try { (void)sapp_tc_create_window(&desc); } catch (const std::runtime_error&) { caught = true; }
         throwBinding = false;
         check("throwing binder rolls back publication/resources once without show", caught && unwinds == before + 1 && !shows && !_sapp_tc.windows[2]);
     }
     desc.bind_cb = nullptr; desc.user_data = nullptr;
     {
         duringShow = true;
-        const auto created = sapp_create_window(&desc);
+        const auto created = sapp_tc_create_window(&desc);
         duringShow = false;
         auto* w = _sapp_tc_lookup(created);
         check("show-time close waits until construction returns", w && !w->constructing && w->close_requested);
@@ -239,7 +239,7 @@ int main() {
         failAt = failure;
         _sapp_tc.next_id = failure == 6 ? UINT32_MAX : 2;
         glXMakeContextCurrent((Display*)9, bound ? 31 : 0, bound ? 32 : 0, bound ? (GLXContext)8 : nullptr);
-        const auto created = sapp_create_window(&desc);
+        const auto created = sapp_tc_create_window(&desc);
         check("constructor restores display/draw/read/context on every exit",
             currentDisplay == (bound ? (Display*)9 : nullptr) && currentDraw == (bound ? 31u : 0u) &&
             currentRead == (bound ? 32u : 0u) && currentContext == (bound ? (GLXContext)8 : nullptr));
@@ -284,7 +284,7 @@ int main() {
     char title[401]; memset(title, 't', 400); title[400] = 0;
     for (auto* target : {&first, &second}) {
         titleCalls = 0;
-        sapp_window_set_title({target->win_id}, title);
+        sapp_tc_window_set_title({target->win_id}, title);
         check("handle title keeps all 400 bytes for either window", titleCalls == 2 && titleBytes == 400 && titleWindow == target->xwin);
         // The legacy entry point always addresses first, even while secondary is current.
         glXMakeCurrent(_sapp_tc.display, target->xwin, (GLXContext)_sapp_tc.ctx);
@@ -294,8 +294,8 @@ int main() {
             titleBytes == int(first.title_limit - 1) && titleWindow == first.xwin);
     }
     titleCalls = 0;
-    sapp_window_set_title({0}, title); sapp_window_set_title({999}, title);
-    sapp_window_set_title({1}, nullptr); sapp_set_window_title(nullptr);
+    sapp_tc_window_set_title({0}, title); sapp_tc_window_set_title({999}, title);
+    sapp_tc_window_set_title({1}, nullptr); sapp_set_window_title(nullptr);
     check("title null/invalid validation preserved", titleCalls == 0);
     for (auto* target : {&first, &second}) {
         target->mouse_x = 30; target->mouse_y = 40; target->mouse_dx = 2; target->mouse_dy = 3;

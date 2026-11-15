@@ -76,7 +76,7 @@
 
     Rendering: all windows share the one sokol_gfx context (post-2024
     sokol_gfx takes the swapchain per-pass). During `tick_cb`, acquire this
-    window's swapchain handles via sapp_window_metal_current_drawable() /
+    window's swapchain handles via sapp_tc_window_metal_current_drawable() /
     ..._depth_stencil_texture() / ..._msaa_color_texture() and start a pass
     with them. The drawable is acquired lazily right before tick_cb and is
     valid only for that callback.
@@ -88,7 +88,7 @@
     are identical across the main window and secondary windows.
 
     Coordinates follow sokol_app.h conventions: mouse positions arrive in
-    framebuffer pixels (divide by sapp_window_dpi_scale() for logical
+    framebuffer pixels (divide by sapp_tc_window_dpi_scale() for logical
     points). dpi_scale is derived from ONE source (the ratio actually used
     to size the layer's drawable), never assumed to be 2.
 
@@ -106,10 +106,10 @@
     timers based on main presents. No X11 display/KMS: secondary creation
     warns and returns an invalid handle.
     Web: implemented, single-window (one <canvas>, rAF frame loop, WebGPU or
-    WebGL2; sapp_create_window() returns the invalid handle -- a second
+    WebGL2; sapp_tc_create_window() returns the invalid handle -- a second
     window is not representable in a browser tab).
     iOS: implemented, single-window (UIApplicationMain + UIWindowScene +
-    CAMetalLayer + CADisplayLink, Metal only; sapp_create_window() returns
+    CAMetalLayer + CADisplayLink, Metal only; sapp_tc_create_window() returns
     the invalid handle -- one UIWindow per scene).
     Others (Android): stubs that return an invalid handle (explicit
     platform gap).
@@ -791,7 +791,7 @@
         uint32_t sapp_html5_get_dropped_file_size(int index)
             Returns the size in bytes, saturated at UINT32_MAX.
 
-        uint64_t sapp_html5_get_dropped_file_size64(int index)
+        uint64_t sapp_tc_html5_get_dropped_file_size64(int index)
             Returns the full size in bytes of a dropped file, or zero for an
             unavailable file or a size outside the JavaScript safe integer range.
             Returns zero on non-HTML5 platforms.
@@ -1747,7 +1747,7 @@ typedef struct sapp_event {
     int window_height;
     int framebuffer_width;              // = window_width * dpi_scale
     int framebuffer_height;             // = window_height * dpi_scale
-    uint32_t device_lost_reason;       // GetDeviceRemovedReason HRESULT bits, TC_DEVICE_LOST only
+    uint32_t device_lost_reason;       // [TrussC] GetDeviceRemovedReason HRESULT bits, TC_DEVICE_LOST only
 } sapp_event;
 
 /*
@@ -2142,7 +2142,7 @@ typedef struct sapp_html5_desc {
     const char* canvas_selector;  // css selector of the HTML5 canvas element, default is "#canvas"
     bool canvas_resize;           // if true, the HTML5 canvas size is set to sapp_desc.width/height, otherwise canvas size is tracked
     bool preserve_drawing_buffer; // HTML5 only: whether to preserve default framebuffer content between frames
-    bool premultiplied_alpha;     // HTML5 only: whether the rendered pixels use premultiplied alpha convention
+    bool premultiplied_alpha;     // [TrussC] HTML5 only: whether the rendered pixels use premultiplied alpha convention
     bool ask_leave_site;          // initial state of the internal html5_ask_leave_site flag (see sapp_html5_ask_leave_site())
     bool update_document_title;   // if true, update the HTML document.title with sapp_desc.window_title
     bool bubble_mouse_events;     // if true, mouse events will bubble up to the web page
@@ -2158,6 +2158,7 @@ typedef struct sapp_ios_desc {
     bool keyboard_resizes_canvas; // if true, showing the iOS keyboard shrinks the canvas
 } sapp_ios_desc;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct sapp_window { uint32_t id; } sapp_window;
 
 typedef struct sapp_desc {
@@ -2175,13 +2176,14 @@ typedef struct sapp_desc {
     int width;                          // the preferred width of the window / canvas
     int height;                         // the preferred height of the window / canvas
     // TrussC internal: positive framebuffer requests, converted at native DPI.
-    int _tc_pixel_width, _tc_pixel_height;
+    int _tc_pixel_width;  // [TrussC] requested framebuffer width
+    int _tc_pixel_height; // [TrussC] requested framebuffer height
     int sample_count;                   // MSAA sample count
     int swap_interval;                  // the preferred swap interval (ignored on some platforms)
     int max_frame_latency;              /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (2); ignored elsewhere */
     bool high_dpi;                      // whether the rendering canvas is full-resolution on HighDPI displays
     bool fullscreen;                    // whether the window should be created in fullscreen mode
-    bool alpha;                         // whether the framebuffer should have an alpha channel (ignored on some platforms)
+    bool alpha;                         // [TrussC] whether the framebuffer should have an alpha channel (ignored on some platforms)
     const char* window_title;           // the window title as UTF-8 encoded string
     bool enable_clipboard;              // enable clipboard access, default is false
     bool enable_dragndrop;              // enable file dropping (drag'n'drop), default is false
@@ -2196,18 +2198,18 @@ typedef struct sapp_desc {
     sapp_ios_desc ios;
     // TrussC internal launch data: +1 draws while hidden, -1 pauses drawing.
     // Zero preserves legacy sapp launch behavior (draw while hidden).
-    int _tc_draw_while_hidden;
+    int _tc_draw_while_hidden; // [TrussC]
     bool _tc_start_hidden;           // [TrussC] never show the launch window before requested (#1262)
     // Host binding runs after native metadata initialization, before callback readiness.
-    bool (*_tc_bind_cb)(uint32_t id, void* user);
-    void* _tc_bind_user;
-    void (*_tc_tick_cb)(sapp_window, void*);
-    void (*_tc_event_cb)(const sapp_event*, sapp_window, void*);
-    void (*_tc_close_cb)(sapp_window, void*);
-    bool (*_tc_close_request_cb)(sapp_window, void*);
-    void (*_tc_before_turn)(void);
-    void (*_tc_after_turn)(void);
-    bool (*_tc_callbacks_active)(void);
+    bool (*_tc_bind_cb)(uint32_t id, void* user); // [TrussC]
+    void* _tc_bind_user; // [TrussC]
+    void (*_tc_tick_cb)(sapp_window, void*); // [TrussC]
+    void (*_tc_event_cb)(const sapp_event*, sapp_window, void*); // [TrussC]
+    void (*_tc_close_cb)(sapp_window, void*); // [TrussC]
+    bool (*_tc_close_request_cb)(sapp_window, void*); // [TrussC]
+    void (*_tc_before_turn)(void); // [TrussC]
+    void (*_tc_after_turn)(void); // [TrussC]
+    bool (*_tc_callbacks_active)(void); // [TrussC]
 } sapp_desc;
 
 /* HTML5 specific: request and response structs for
@@ -2367,7 +2369,7 @@ SOKOL_APP_API_DECL void sapp_html5_ask_leave_site(bool ask);
 /* HTML5: get byte size of a dropped file, saturated at UINT32_MAX */
 SOKOL_APP_API_DECL uint32_t sapp_html5_get_dropped_file_size(int index);
 /* HTML5: get full byte size of a dropped file (zero if unavailable) */
-SOKOL_APP_API_DECL uint64_t sapp_html5_get_dropped_file_size64(int index);
+SOKOL_APP_API_DECL uint64_t sapp_tc_html5_get_dropped_file_size64(int index);
 /* HTML5: asynchronously load the content of a dropped file */
 SOKOL_APP_API_DECL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request);
 
@@ -2376,7 +2378,7 @@ SOKOL_APP_API_DECL const void* sapp_macos_get_window(void);
 /* iOS: get bridged pointer to iOS UIWindow */
 SOKOL_APP_API_DECL const void* sapp_ios_get_window(void);
 /* iOS: set supported interface orientations (UIInterfaceOrientationMask values) */
-SOKOL_APP_API_DECL void sapp_ios_set_supported_orientations(uint32_t mask);
+SOKOL_APP_API_DECL void sapp_tc_ios_set_supported_orientations(uint32_t mask);
 
 /* D3D11: get pointer to IDXGISwapChain object */
 SOKOL_APP_API_DECL const void* sapp_d3d11_get_swap_chain(void);
@@ -2404,7 +2406,7 @@ SOKOL_APP_API_DECL const void* sapp_x11_get_display(void);
 SOKOL_APP_API_DECL const void* sapp_android_get_native_activity(void);
 
 // Modified by tettou771 for TrussC: skip the next present call (for event-driven rendering)
-SOKOL_APP_API_DECL void sapp_skip_present(void);
+SOKOL_APP_API_DECL void sapp_tc_skip_present(void);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -2424,6 +2426,7 @@ extern "C" {
    use positive, non-reused IDs. Zero is not a desktop window. */
 #include "util/sokol_window_size.h"
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct sapp_window_desc {
     int x, y;                   /* top-left position in screen points (-1 = default) */
     int width, height;          /* content size in logical points (0 = 640x480) */
@@ -2454,6 +2457,7 @@ typedef struct sapp_window_desc {
 } sapp_window_desc;
 
 // Private host metadata boundary. Reading it never acquires a drawable.
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct sapp_tc_window_metadata {
     int fb_width, fb_height, width, height, sample_count;
     float dpi_scale;
@@ -2466,21 +2470,21 @@ typedef struct sapp_tc_window_metadata {
 } sapp_tc_window_metadata;
 SOKOL_APP_API_DECL bool sapp_tc_window_close_recorded(sapp_window win);
 SOKOL_APP_API_DECL bool sapp_tc_window_read_metadata(sapp_window win, sapp_tc_window_metadata* out);
-SOKOL_APP_API_DECL sapp_window sapp_create_window(const sapp_window_desc* desc);
+SOKOL_APP_API_DECL sapp_window sapp_tc_create_window(const sapp_window_desc* desc);
 SOKOL_APP_API_DECL void sapp_destroy_window(sapp_window win);
 /* ask for the window to be closed, like a click on its close button: sets a
    per-window flag that the backend handles where it handles quit_requested
    (outside any tick / event of the window), which then calls close_cb.
    Safe to call from the window's own tick_cb / event_cb. */
 SOKOL_APP_API_DECL void sapp_window_request_close(sapp_window win);
-SOKOL_APP_API_DECL bool sapp_window_valid(sapp_window win);
+SOKOL_APP_API_DECL bool sapp_tc_window_valid(sapp_window win);
 
 /* geometry (valid whenever the window is alive) */
 SOKOL_APP_API_DECL int sapp_window_width(sapp_window win);               /* logical points */
 SOKOL_APP_API_DECL int sapp_window_height(sapp_window win);
-SOKOL_APP_API_DECL int sapp_window_framebuffer_width(sapp_window win);   /* pixels */
-SOKOL_APP_API_DECL int sapp_window_framebuffer_height(sapp_window win);
-SOKOL_APP_API_DECL float sapp_window_dpi_scale(sapp_window win);         /* fb / logical, ONE source */
+SOKOL_APP_API_DECL int sapp_tc_window_framebuffer_width(sapp_window win);   /* pixels */
+SOKOL_APP_API_DECL int sapp_tc_window_framebuffer_height(sapp_window win);
+SOKOL_APP_API_DECL float sapp_tc_window_dpi_scale(sapp_window win);         /* fb / logical, ONE source */
 SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
 /* Native visibility flags used by drawable admission. Secondary gated
    callbacks consult TrussC's update policy without acquiring a drawable:
@@ -2493,8 +2497,8 @@ SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
      X11:   iconified (WM_STATE IconicState), or VisibilityFullyObscured
             (reports visible when native trust_hidden_signals is disabled)
    Internal: zero queries the main window; unsupported queries return false. */
-SOKOL_APP_API_DECL bool sapp_window_occluded(sapp_window win);
-SOKOL_APP_API_DECL void sapp_window_set_title(sapp_window win, const char* title);
+SOKOL_APP_API_DECL bool sapp_tc_window_occluded(sapp_window win);
+SOKOL_APP_API_DECL void sapp_tc_window_set_title(sapp_window win, const char* title);
 // [TrussC] Requested visibility, separate from native occlusion (#1262).
 SOKOL_APP_API_DECL void sapp_tc_window_set_visible(sapp_window win, bool visible);
 SOKOL_APP_API_DECL bool sapp_tc_window_visible(sapp_window win);
@@ -2503,12 +2507,12 @@ SOKOL_APP_API_DECL bool sapp_tc_window_map_complete(sapp_window win);
 
 /* measured interval between this window's ticks in seconds (its display's
    refresh period; a best-effort estimate before the second tick) */
-SOKOL_APP_API_DECL double sapp_window_frame_duration(sapp_window win);
+SOKOL_APP_API_DECL double sapp_tc_window_frame_duration(sapp_window win);
 
 /* Metal swapchain handles -- valid ONLY inside this window's tick_cb */
-SOKOL_APP_API_DECL const void* sapp_window_metal_current_drawable(sapp_window win);
-SOKOL_APP_API_DECL const void* sapp_window_metal_depth_stencil_texture(sapp_window win);
-SOKOL_APP_API_DECL const void* sapp_window_metal_msaa_color_texture(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_metal_current_drawable(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win);
 
 /* D3D11 swapchain handles -- borrowed until resize or window destruction.
    Unlike Metal drawables these views persist outside tick_cb, allowing the
@@ -2516,16 +2520,17 @@ SOKOL_APP_API_DECL const void* sapp_window_metal_msaa_color_texture(sapp_window 
    (render_view is the MSAA target and resolve_view the backbuffer when
    sample_count > 1; otherwise render_view is the backbuffer and
    resolve_view is 0 -- same contract as sapp_swapchain.d3d11) */
-SOKOL_APP_API_DECL const void* sapp_window_d3d11_render_view(sapp_window win);
-SOKOL_APP_API_DECL const void* sapp_window_d3d11_resolve_view(sapp_window win);
-SOKOL_APP_API_DECL const void* sapp_window_d3d11_depth_stencil_view(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_d3d11_render_view(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_d3d11_resolve_view(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win);
 
 /* GL swapchain handle -- the default-framebuffer id (Linux X11: rendering
    targets the current drawable, which is this window's during its tick_cb) */
-SOKOL_APP_API_DECL uint32_t sapp_window_gl_framebuffer(sapp_window win);
+SOKOL_APP_API_DECL uint32_t sapp_tc_window_gl_framebuffer(sapp_window win);
 // [TrussC] GLX/EGL drawable restore for nested window execution; id 0 = main.
 // [TrussC] Framework seam, not app API.
 SOKOL_APP_API_DECL void sapp_tc_gl_make_current(sapp_window win);
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct sapp_tc_gl_state {
     void* display;
     void* context;
@@ -2552,9 +2557,9 @@ SOKOL_APP_API_DECL void sapp_tc_window_draw_while_hidden(sapp_window win, bool a
 #endif
 
 /* native escape hatches (macOS: NSWindow*; Windows: HWND; Linux: X11 Window XID) */
-SOKOL_APP_API_DECL const void* sapp_window_macos_get_window(sapp_window win);
-SOKOL_APP_API_DECL const void* sapp_window_win32_get_hwnd(sapp_window win);
-SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_macos_get_window(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_win32_get_hwnd(sapp_window win);
+SOKOL_APP_API_DECL const void* sapp_tc_window_x11_get_window(sapp_window win);
 
 #if defined(__cplusplus)
 } /* extern "C" */
@@ -2593,7 +2598,7 @@ static std::vector<std::string> _sapp_tc_dropped_paths;
 
 /* The fork's own diagnostics -- the _SAPP_* log macros of the iOS, GLES3
    Linux, Android and web backends, the X11 / GLX init failures and the
-   sapp_create_window() "not supported" stubs -- go through sapp_desc.logger,
+   sapp_tc_create_window() "not supported" stubs -- go through sapp_desc.logger,
    the way upstream sokol_app.h reports everything, so the host's logger (and
    its log file) sees them too. The desktop / web / iOS backends store the
    desc at the very start of sapp_run(), before any of them can fire; Android
@@ -2637,7 +2642,7 @@ static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint3
 #define _SAPP_TC_MAX_DROP_READERS (4)
 
 #if !defined(__EMSCRIPTEN__)
-uint64_t sapp_html5_get_dropped_file_size64(int index) {
+uint64_t sapp_tc_html5_get_dropped_file_size64(int index) {
     (void)index;
     return 0;
 }
@@ -2662,7 +2667,7 @@ _SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64
     Implements the public sokol_app.h API on iOS plus the multi-window API
     (as stubs -- there is exactly ONE UIWindow bound to the connecting
     UIWindowScene, so a second window is not representable;
-    sapp_create_window() returns the invalid handle and logs).
+    sapp_tc_create_window() returns the invalid handle and logs).
 
     UIKit owns the loop: sapp_run() -> UIApplicationMain() never returns.
     The real setup (UIWindow + CAMetalLayer + CADisplayLink) happens later,
@@ -2676,8 +2681,8 @@ _SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64
 
     Structure mirrors sokol_app.h's iOS backend including all TrussC
     patches: runtime orientation control (_sapp_tc_ios_view_ctrl +
-    sapp_ios_set_supported_orientations), immersive mode (the NON-STATIC
-    global _sapp_ios_immersive_mode -- tcPlatform_ios.mm externs it by
+    sapp_tc_ios_set_supported_orientations), immersive mode (the NON-STATIC
+    global _sapp_tc_ios_immersive_mode -- tcPlatform_ios.mm externs it by
     name, keep it), view-bounds dimension update, drawable-size readback
     after resize (sapp_width/height must match what Metal actually
     renders), RGB10A2 10-bit layer + MSAA format, framebufferOnly=false
@@ -2745,8 +2750,10 @@ _SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64
 #define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
 #define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
 #define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     #if defined(_SAPP_APPLE)
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             mach_timebase_info_data_t timebase;
             uint64_t start;
@@ -2754,6 +2761,7 @@ typedef struct {
     #elif defined(_SAPP_EMSCRIPTEN)
         int _dummy;
     #elif defined(_SAPP_WIN32)
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             LARGE_INTEGER freq;
             LARGE_INTEGER start;
@@ -2765,6 +2773,7 @@ typedef struct {
         // on some embedded platforms, CLOCK_MONOTONIC isn't defined
         #define _SAPP_CLOCK_MONOTONIC (1)
         #endif
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             uint64_t start;
         } posix;
@@ -2814,7 +2823,7 @@ _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
 /*== Android (GLES3 / NativeActivity) =======================================
     Implements the public sokol_app.h API on Android plus the multi-window
     API (as stubs -- the activity owns exactly ONE ANativeWindow, so a
-    second window is not representable; sapp_create_window() returns the
+    second window is not representable; sapp_tc_create_window() returns the
     invalid handle and logs).
 
     The entry point is INVERTED relative to every other platform: this
@@ -2908,8 +2917,10 @@ _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
 #define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
 #define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
 #define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     #if defined(_SAPP_APPLE)
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             mach_timebase_info_data_t timebase;
             uint64_t start;
@@ -2917,6 +2928,7 @@ typedef struct {
     #elif defined(_SAPP_EMSCRIPTEN)
         int _dummy;
     #elif defined(_SAPP_WIN32)
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             LARGE_INTEGER freq;
             LARGE_INTEGER start;
@@ -2928,6 +2940,7 @@ typedef struct {
         // on some embedded platforms, CLOCK_MONOTONIC isn't defined
         #define _SAPP_CLOCK_MONOTONIC (1)
         #endif
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             uint64_t start;
         } posix;
@@ -2977,7 +2990,7 @@ _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
 /*== Emscripten (web) =======================================================
     Implements the public sokol_app.h API on the web plus the multi-window
     API (as stubs -- the whole backend binds to ONE <canvas> element, so a
-    second window is not representable; sapp_create_window() returns the
+    second window is not representable; sapp_tc_create_window() returns the
     invalid handle and logs).
 
     Unlike every native backend there is NO owned loop: sapp_run() sets
@@ -3057,6 +3070,7 @@ _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
 
 /* the internal monotonic clock is deliberately unused on web: all timing
    comes from the timestamp the browser hands to the frame callback */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct { int _dummy; } _sapp_tc_timestamp_t;
 _SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) { _SOKOL_UNUSED(ts); }
 _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) { _SOKOL_UNUSED(ts); SOKOL_ASSERT(false); return 0.0; }
@@ -3069,6 +3083,7 @@ _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) { _SOKOL_
 
 #endif
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     _sapp_tc_timestamp_t timestamp;
     double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
@@ -3163,29 +3178,32 @@ _SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
     @end
 #endif
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     UIWindow* window;
     _sapp_tc_ios_view* view;
     UITextField* textfield;
     _sapp_tc_textfield_dlg* textfield_dlg;
-    NSUInteger supported_orientations;  // UIInterfaceOrientationMask (default: all)
+    NSUInteger supported_orientations;  // [TrussC] UIInterfaceOrientationMask (default: all)
     #if defined(SOKOL_METAL)
         UIViewController* view_ctrl;
     #else
         GLKViewController* view_ctrl;
     #endif
     #if defined(SOKOL_METAL)
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct {
         id<MTLDevice> device;
         CAMetalLayer* layer;
         CADisplayLink* display_link;
         id<MTLTexture> depth_tex;
         id<MTLTexture> msaa_tex;
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct {
             CFTimeInterval timestamp;
             CFTimeInterval frame_duration_sec;
         } timing;
-    } mtl;
+    } mtl; // [TrussC] native Metal state
     #else
     EAGLContext* eagl_ctx;
     #endif
@@ -3194,14 +3212,17 @@ typedef struct {
 
 #endif // _SAPP_IOS
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool enabled;
 } _sapp_tc_clipboard_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool enabled;
 } _sapp_tc_drop_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     float x, y;
     float dx, dy;
@@ -3216,26 +3237,27 @@ typedef struct {
    clipboard / drop / html5 / cursor members are inert on iOS (touch-only, no
    OS clipboard or dnd surface) but kept so the shared lifted helpers and the
    lifted public API compile verbatim. */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     sapp_desc desc;
     bool valid;
     bool fullscreen;            /* inert: iOS is inherently fullscreen */
     bool first_frame;
     bool init_called;
-    bool constructing; // client publication uses the shared creation transaction
+    bool constructing; // [TrussC] client publication uses the shared creation transaction
     bool cleanup_called;
     bool quit_requested;        /* inert: no user-driven quit path on iOS */
     bool quit_ordered;
     bool event_consumed;
     bool html5_ask_leave_site;  /* inert */
     bool onscreen_keyboard_shown;
-    bool skip_present;          /* inert: Metal presents via sokol_gfx commit */
+    bool skip_present;          /* inert: Metal presents via sokol_gfx commit */ // [TrussC]
     int window_width;
     int window_height;
     int framebuffer_width;
     int framebuffer_height;
-    int sample_count;
-    int swap_interval;
+    int sample_count; // [TrussC]
+    int swap_interval; // [TrussC]
     float dpi_scale;
     uint64_t frame_count;
     sapp_event event;
@@ -3264,6 +3286,7 @@ typedef enum {
     _SOKOL_ANDROID_MSG_DESTROY,
 } _sapp_tc_android_msg_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     pthread_t thread;
     pthread_mutex_t mutex;
@@ -3272,11 +3295,13 @@ typedef struct {
     int write_from_main_fd;
 } _sapp_tc_android_pt_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     ANativeWindow* window;
     AInputQueue* input;
 } _sapp_tc_android_resources_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     ANativeActivity* activity;
     _sapp_tc_android_pt_t pt;
@@ -3301,14 +3326,17 @@ typedef struct {
 
 #endif // _SAPP_ANDROID
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool enabled;
 } _sapp_tc_clipboard_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool enabled;
 } _sapp_tc_drop_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     float x, y;
     float dx, dy;
@@ -3318,6 +3346,7 @@ typedef struct {
     sapp_mouse_cursor current_cursor;
 } _sapp_tc_mouse_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     uint32_t framebuffer;
 } _sapp_tc_gl_t;
@@ -3327,26 +3356,27 @@ typedef struct {
    mouse / clipboard / drop / html5 / cursor members are inert on Android
    (touch-only, no OS clipboard or dnd surface) but kept so the shared lifted
    helpers and the lifted public API compile verbatim. */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     sapp_desc desc;
     bool valid;
     bool fullscreen;            /* inert: Android is inherently fullscreen */
     bool first_frame;
     bool init_called;
-    bool constructing; // client publication uses the shared creation transaction
+    bool constructing; // [TrussC] client publication uses the shared creation transaction
     bool cleanup_called;
     bool quit_requested;        /* inert: lifecycle is activity-driven */
     bool quit_ordered;
     bool event_consumed;
     bool html5_ask_leave_site;  /* inert */
     bool onscreen_keyboard_shown;   /* never set on Android (pre-existing quirk) */
-    bool skip_present;
+    bool skip_present; // [TrussC]
     int window_width;
     int window_height;
     int framebuffer_width;
     int framebuffer_height;
-    int sample_count;
-    int swap_interval;
+    int sample_count; // [TrussC]
+    int swap_interval; // [TrussC]
     float dpi_scale;
     uint64_t frame_count;
     sapp_event event;
@@ -3371,12 +3401,13 @@ static _sapp_tc_t _sapp_tc;
 // ███████    ██    ██   ██  ██████   ██████    ██    ███████
 
 #if defined(SOKOL_WGPU)
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     WGPUInstance instance;
     WGPUAdapter adapter;
     WGPUDevice device;
     WGPUSurface surface;
-    WGPUTextureFormat render_format;
+    WGPUTextureFormat render_format; // [TrussC]
     WGPUTexture msaa_tex;
     WGPUTextureView msaa_view;
     WGPUTexture depth_stencil_tex;
@@ -3388,6 +3419,7 @@ typedef struct {
 
 #if defined(_SAPP_EMSCRIPTEN)
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool mouse_lock_requested;
     uint16_t mouse_buttons;
@@ -3395,19 +3427,23 @@ typedef struct {
 #endif // _SAPP_EMSCRIPTEN
 
 #if defined(_SAPP_ANY_GL)
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     uint32_t framebuffer;
 } _sapp_tc_gl_t;
 #endif
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool enabled;
 } _sapp_tc_clipboard_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     bool enabled;
 } _sapp_tc_drop_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     float x, y;
     float dx, dy;
@@ -3422,26 +3458,27 @@ typedef struct {
    part of the web backend's real state lives in JavaScript on the Module
    object (Module.sapp_emsc_target = the canvas, Module.sokol_dropped_files,
    Module.__sapp_tc_custom_cursors), reachable only from the EM_JS blocks. */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct {
     sapp_desc desc;
     bool valid;
     bool fullscreen;
     bool first_frame;
     bool init_called;
-    bool constructing; // client publication uses the shared creation transaction
+    bool constructing; // [TrussC] client publication uses the shared creation transaction
     bool cleanup_called;
     bool quit_requested;
     bool quit_ordered;
     bool event_consumed;
     bool html5_ask_leave_site;
     bool onscreen_keyboard_shown;
-    bool skip_present;      /* stored for API parity; the browser auto-presents at rAF (ignored) */
+    bool skip_present;      /* stored for API parity; the browser auto-presents at rAF (ignored) */ // [TrussC]
     int window_width;
     int window_height;
     int framebuffer_width;
     int framebuffer_height;
-    int sample_count;
-    int swap_interval;      /* stored for API parity; the browser paces via rAF (ignored) */
+    int sample_count; // [TrussC]
+    int swap_interval;      /* stored for API parity; the browser paces via rAF (ignored) */ // [TrussC]
     float dpi_scale;
     uint64_t frame_count;
     sapp_event event;
@@ -3594,6 +3631,7 @@ _SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
 @class _sapp_tc_app_delegate;
 
 // One native record per window, main included; AppKit/Metal handles stay here.
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     NSWindow* window;
     _sapp_tc_view* view;
@@ -3615,6 +3653,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
 };
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_mac_pending_key {
     uint32_t win_id;
     sapp_event_type type;
@@ -3622,6 +3661,7 @@ struct _sapp_tc_mac_pending_key {
 
 #define _SAPP_TC_MAX_WINDOWS (32)
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 static struct {
     bool keytable_valid;
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
@@ -3639,6 +3679,7 @@ static struct {
     int pending_key_count;
 
     /* ---- process state (this header owns sapp_run on macOS) ---- */
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct {
         sapp_desc desc;                 /* sanitized copy; window_title borrows the first window's title */
         bool valid;
@@ -3868,6 +3909,7 @@ static uint32_t _sapp_tc_mods(NSEvent* ev) {
    close and quit wait until none is), the mark is cleared through the window's
    identity even if the callback disposed it, and no exception crosses into
    AppKit, CADisplayLink or NSTimer frames. */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_mac_callback_scope {
     uint32_t win_id;
     explicit _sapp_tc_mac_callback_scope(_sapp_tc_window_t* w) : win_id(w ? w->win_id : 0) {
@@ -4816,6 +4858,7 @@ static void _sapp_tc_mac_init_client(void) {
    (visibility sampling, fullscreen reconciliation, RESIZED, tick_cb), so a run
    loop spun inside any of them cannot start a nested tick of this window. It is
    cleared through the window's identity, also when the window was disposed. */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_mac_tick_scope {
     uint32_t win_id;
     explicit _sapp_tc_mac_tick_scope(_sapp_tc_window_t* w) : win_id(w->win_id) { w->in_tick = true; }
@@ -4958,8 +5001,9 @@ static _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t* w, const char* re
 }
 
 /* macOS-only creation data beside the shared descriptor (which is frozen).
-   The legacy run path passes true for all three, sapp_create_window false.
+   The legacy run path passes true for all three, sapp_tc_create_window false.
    Step (b)'s common adapter takes these fields over. */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_mac_window_attrs {
     bool restorable;                /* NSWindow state restoration */
     bool nearest_magnification;     /* nearest-filter layer scaling during live resize */
@@ -4972,6 +5016,7 @@ struct _sapp_tc_mac_window_attrs {
 static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,
                                                         const _sapp_tc_mac_window_attrs* attrs) {
     _sapp_tc.create_error = 0;
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct constructing_scope {
         constructing_scope() { ++_sapp_tc.constructing; }
         ~constructing_scope() {
@@ -5260,6 +5305,7 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
     static bool terminating = false;
     if (terminating) return;
     terminating = true;
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct Reset {
         bool& flag;
         ~Reset() { flag = false; }
@@ -5473,7 +5519,7 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 /*-- public API -------------------------------------------------------------*/
 extern "C" {
 
-sapp_window sapp_create_window(const sapp_window_desc* desc) {
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };
     if (!desc) return invalid;
     _sapp_tc_init_keytable();
@@ -5504,7 +5550,7 @@ void sapp_window_request_close(sapp_window win) {
     w->close_requested = true;
 }
 
-bool sapp_window_valid(sapp_window win) {
+bool sapp_tc_window_valid(sapp_window win) {
     return _sapp_tc_lookup(win) != 0;
 }
 
@@ -5520,17 +5566,17 @@ int sapp_window_height(sapp_window win) {
     return (int)w->view.bounds.size.height;
 }
 
-int sapp_window_framebuffer_width(sapp_window win) {
+int sapp_tc_window_framebuffer_width(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->fb_width : 0;
 }
 
-int sapp_window_framebuffer_height(sapp_window win) {
+int sapp_tc_window_framebuffer_height(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->fb_height : 0;
 }
 
-float sapp_window_dpi_scale(sapp_window win) {
+float sapp_tc_window_dpi_scale(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 1.0f;
     if (w->dpi_scale > 0.0f && w->fb_width > 0) return w->dpi_scale;
@@ -5552,12 +5598,12 @@ void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow) {
     if (w) w->draw_while_hidden = allow;
 }
 
-bool sapp_window_occluded(sapp_window win) {
+bool sapp_tc_window_occluded(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_resolve(win);
     return w ? _sapp_tc_native_hidden(w) : false;
 }
 
-void sapp_window_set_title(sapp_window win, const char* title) {
+void sapp_tc_window_set_title(sapp_window win, const char* title) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (w && w->window && title) {
         NSString* ns_title = [NSString stringWithUTF8String:title];
@@ -5565,41 +5611,41 @@ void sapp_window_set_title(sapp_window win, const char* title) {
     }
 }
 
-double sapp_window_frame_duration(sapp_window win) {
+double sapp_tc_window_frame_duration(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 1.0 / 60.0;
     if (w->fallback_active) return w->timing.smooth_dt;
     return (w->frame_duration > 0.0) ? w->frame_duration : 1.0 / 60.0;
 }
 
-const void* sapp_window_metal_current_drawable(sapp_window win) {
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) {
     return (__bridge const void*)_sapp_tc_mac_drawable(_sapp_tc_lookup(win));
 }
 
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) {
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w || !w->in_tick || !w->draw_admitted) return 0;
     return (__bridge const void*)w->depth_tex;
 }
 
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) {
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w || !w->in_tick || !w->draw_admitted || w->desc.sample_count <= 1) return 0;
     return (__bridge const void*)w->msaa_tex;
 }
 
-const void* sapp_window_macos_get_window(sapp_window win) {
+const void* sapp_tc_window_macos_get_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? (__bridge const void*)w->window : 0;
 }
 
 /* D3D11 / Win32 / GL / X11 handles do not exist on macOS */
-const void* sapp_window_d3d11_render_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_resolve_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_win32_get_hwnd(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_x11_get_window(sapp_window win) { (void)win; return 0; }
-uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_x11_get_window(sapp_window win) { (void)win; return 0; }
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 
 /*-- sokol_app.h public API (macOS implementation lives here) ---------------*/
 
@@ -5725,7 +5771,7 @@ void sapp_consume_event(void) {
     _sapp_tc.app.event_consumed = true;
 }
 
-void sapp_skip_present(void) {
+void sapp_tc_skip_present(void) {
     /* API parity: stored on window #1 and consumed by its tick, otherwise
        ignored on Metal (upstream behaves the same; not starting a swapchain
        pass already skips the present) */
@@ -5951,6 +5997,7 @@ _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
     if (_sapp_tc.init_called || _sapp_tc.constructing) return;
     // These OS-owned sole surfaces have no sapp_window identity/registry.
     // Native resources and dimensions already exist at this client boundary.
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct { bool& ready; bool& constructing; } publication{_sapp_tc.init_called, _sapp_tc.constructing};
     _sapp_tc_creation_transaction creation(&publication, [](auto*) {});
     if (_sapp_tc.desc.init_cb) {
@@ -6701,16 +6748,16 @@ _SOKOL_PRIVATE void _sapp_tc_ios_show_keyboard(bool shown) {
 
 // Modified by tettou771 for TrussC: custom view controller for runtime orientation + immersive mode
 // Modified by tettou771 for TrussC: non-static so tcPlatform_ios.mm can access
-bool _sapp_ios_immersive_mode = false;
+bool _sapp_tc_ios_immersive_mode = false;
 @implementation _sapp_tc_ios_view_ctrl
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
     return _sapp_tc.ios.supported_orientations;
 }
 - (BOOL)prefersStatusBarHidden {
-    return _sapp_ios_immersive_mode;
+    return _sapp_tc_ios_immersive_mode;
 }
 - (BOOL)prefersHomeIndicatorAutoHidden {
-    return _sapp_ios_immersive_mode;
+    return _sapp_tc_ios_immersive_mode;
 }
 @end
 
@@ -7112,7 +7159,7 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    const uint64_t size = sapp_tc_html5_get_dropped_file_size64(index);
     return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
@@ -7128,7 +7175,7 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
         } else {
-            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            const uint64_t size = sapp_tc_html5_get_dropped_file_size64(index);
             if (size > request->buffer.size) {
                 error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
             } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
@@ -7283,7 +7330,7 @@ SOKOL_API_IMPL const void* sapp_ios_get_window(void) {
 }
 
 // Modified by tettou771 for TrussC: runtime orientation control
-SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
+SOKOL_API_IMPL void sapp_tc_ios_set_supported_orientations(uint32_t mask) {
     #if defined(_SAPP_IOS)
         _sapp_tc.ios.supported_orientations = (NSUInteger)mask;
         #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
@@ -7371,7 +7418,7 @@ SOKOL_API_IMPL void sapp_html5_ask_leave_site(bool ask) {
 }
 
 // Modified by tettou771 for TrussC: skip the next present call (fix D3D11 flickering)
-SOKOL_API_IMPL void sapp_skip_present(void) {
+SOKOL_API_IMPL void sapp_tc_skip_present(void) {
     _sapp_tc.skip_present = true;
 }
 // end of modification
@@ -7400,35 +7447,35 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
 /* ---- multi-window API: explicit platform gap on iOS ----------------------
    there is exactly one UIWindow bound to the connecting UIWindowScene;
    a second window is not representable */
-sapp_window sapp_create_window(const sapp_window_desc* desc) {
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
     _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                 "", "sapp_create_window() is not supported on iOS (single-window platform)");
+                 "", "sapp_tc_create_window() is not supported on iOS (single-window platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
 void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
-bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
+bool sapp_tc_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-int sapp_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-int sapp_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-float sapp_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
+int sapp_tc_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+int sapp_tc_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+float sapp_tc_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
 int sapp_window_sample_count(sapp_window win) { _SOKOL_UNUSED(win); return 1; }
-bool sapp_window_occluded(sapp_window win) { return win.id == 0 && _sapp_tc.ios.suspended; }
-void sapp_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
-double sapp_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
-const void* sapp_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+bool sapp_tc_window_occluded(sapp_window win) { return win.id == 0 && _sapp_tc.ios.suspended; }
+void sapp_tc_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
+double sapp_tc_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
@@ -7485,6 +7532,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_TC_MODAL_TIMER (1)
 #define _SAPP_TC_RELEASE(obj) do { if (obj) { (obj)->Release(); (obj) = 0; } } while (0)
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     HWND hwnd;
     HMONITOR hmonitor;
@@ -7518,6 +7566,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     RECT stored_window_rect;    /* windowed rect for fullscreen restore */
 } _sapp_tc_window_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 static struct {
     bool keytable_valid;
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
@@ -7532,6 +7581,7 @@ static struct {
     BOOL (WINAPI* AdjustWindowRectExForDpi)(LPRECT, DWORD, BOOL, DWORD, UINT);
 
     /* ---- app / main-window state (this header owns sapp_run on Windows) -- */
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct {
         sapp_desc desc;             /* normalized launch data; title borrows the first record */
         bool valid;
@@ -7926,7 +7976,7 @@ static void _sapp_tc_win32_init_dpi(void) {
 }
 
 /* one dpi ratio source per window: the scale used to size the framebuffer is
-   the scale reported by sapp_window_dpi_scale() and applied to mouse coords */
+   the scale reported by sapp_tc_window_dpi_scale() and applied to mouse coords */
 static void _sapp_tc_win32_update_scale(_sapp_tc_window_t* w) {
     UINT dpi = 96;
     if (_sapp_tc.app.dpi_aware && _sapp_tc.GetDpiForWindow && w->hwnd) {
@@ -8466,6 +8516,7 @@ static void _sapp_tc_win32_init_client(void) {
         auto* target = _sapp_tc_lookup(handle);
         const bool was_busy = target && target->in_tick;
         if (target) target->in_tick = true;
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct InitScope {
             sapp_window handle;
             bool previous;
@@ -8516,6 +8567,7 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     w->in_tick = true;
     w->cancel_tick = false;
     const sapp_window tick_handle{w->win_id};
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct TickScope {
         sapp_window handle;
         ~TickScope() { if (auto* live = _sapp_tc_lookup(handle)) live->in_tick = false; }
@@ -8581,6 +8633,7 @@ static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {
     // unbind) until that callback has returned and parked its geometry.
     if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return;
     w->from_modal = true;
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct SourceScope {
         sapp_window handle;
         ~SourceScope() { if (auto* live = _sapp_tc_lookup(handle)) live->from_modal = false; }
@@ -9209,7 +9262,7 @@ static void _sapp_tc_win32_run_loop(void) {
 /*-- public API ---------------------------------------------------------------*/
 extern "C" {
 
-sapp_window sapp_create_window(const sapp_window_desc* desc) {
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };
     if (!desc || !_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
     _sapp_tc_native_desc native = {};
@@ -9236,7 +9289,7 @@ void sapp_window_request_close(sapp_window win) {
     if (w) w->close_requested = true;
 }
 
-bool sapp_window_valid(sapp_window win) {
+bool sapp_tc_window_valid(sapp_window win) {
     return _sapp_tc_lookup(win) != 0;
 }
 
@@ -9250,17 +9303,17 @@ int sapp_window_height(sapp_window win) {
     return w ? w->win_height : 0;
 }
 
-int sapp_window_framebuffer_width(sapp_window win) {
+int sapp_tc_window_framebuffer_width(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->fb_width : 0;
 }
 
-int sapp_window_framebuffer_height(sapp_window win) {
+int sapp_tc_window_framebuffer_height(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->fb_height : 0;
 }
 
-float sapp_window_dpi_scale(sapp_window win) {
+float sapp_tc_window_dpi_scale(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->dpi_scale : 1.0f;
 }
@@ -9295,12 +9348,12 @@ void sapp_tc_window_toggle_fullscreen(sapp_window win) {
     if (w) _sapp_tc_win32_set_fullscreen(w, !w->fullscreen, w->desc.hidden ? SWP_HIDEWINDOW : SWP_SHOWWINDOW);
 }
 
-bool sapp_window_occluded(sapp_window win) {
+bool sapp_tc_window_occluded(sapp_window win) {
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
     return w ? _sapp_tc_native_hidden(w) : false;
 }
 
-void sapp_window_set_title(sapp_window win, const char* title) {
+void sapp_tc_window_set_title(sapp_window win, const char* title) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w || !w->hwnd || !title) return;
     WCHAR wide[256];
@@ -9309,44 +9362,44 @@ void sapp_window_set_title(sapp_window win, const char* title) {
     }
 }
 
-double sapp_window_frame_duration(sapp_window win) {
+double sapp_tc_window_frame_duration(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 1.0 / 60.0;
     return (w->frame_duration > 0.0) ? w->frame_duration : w->refresh_period;
 }
 
 /* Metal handles do not exist on Windows */
-const void* sapp_window_metal_current_drawable(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_macos_get_window(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_macos_get_window(sapp_window win) { (void)win; return 0; }
 
-const void* sapp_window_d3d11_render_view(sapp_window win) {
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 0;
     return (w->desc.sample_count > 1) ? (const void*)w->msaa_rtv : (const void*)w->rtv;
 }
 
-const void* sapp_window_d3d11_resolve_view(sapp_window win) {
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w || (w->desc.sample_count <= 1)) return 0;
     return (const void*)w->rtv;
 }
 
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) {
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 0;
     return (const void*)w->dsv;
 }
 
-const void* sapp_window_win32_get_hwnd(sapp_window win) {
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? (const void*)w->hwnd : 0;
 }
 
 /* GL / X11 handles do not exist on Windows (D3D11 backend) */
-const void* sapp_window_x11_get_window(sapp_window win) { (void)win; return 0; }
-uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_x11_get_window(sapp_window win) { (void)win; return 0; }
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 
 /*-- sokol_app.h public API (Windows implementation lives here) --------------*/
 
@@ -9474,7 +9527,7 @@ void sapp_consume_event(void) {
     _sapp_tc.app.event_consumed = true;
 }
 
-void sapp_skip_present(void) {
+void sapp_tc_skip_present(void) {
     /* one-shot; HONORED on D3D11 (TrussC patch: event-driven present
        suppression -- keeps the last image on screen, prevents flicker) */
     sapp_tc_window_skip_present(sapp_window{0});
@@ -9795,6 +9848,7 @@ enum _sapp_tc_x11_visibility_op {
     _SAPP_TC_X11_VISIBILITY_WITHDRAWING,
 };
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     _sapp_tc_x11_visibility_op visibility_op;
     double visibility_started;
@@ -9821,6 +9875,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool key_repeat[_SAPP_X11_MAX_X11_KEYCODES];
 } _sapp_tc_window_t;
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 static struct {
     bool keytable_valid;
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
@@ -9852,6 +9907,7 @@ static struct {
     Atom NET_WM_STATE_FULLSCREEN;
     Atom MOTIF_WM_HINTS;
     Atom SAPP_TC_SELECTION;     /* scratch property for clipboard transfers */
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct {
         int version;
         Window source;
@@ -9869,6 +9925,7 @@ static struct {
     EGLDisplay egl_display;
     EGLConfig fbconfig;
     EGLContext ctx;
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct { bool available; int major_opcode; } xi;
     bool mouse_locked;
     _sapp_tc_window_t* lock_owner;
@@ -9888,6 +9945,7 @@ static struct {
     sapp_window pacer;          /* [TrussC #997] creation identity, independent of app.main */
 
     /* ---- app / main-window state (this header owns sapp_run on Linux) ---- */
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct {
         sapp_desc desc;             /* sanitized copy; window_title points at the buffer below */
         bool valid;
@@ -10044,6 +10102,7 @@ static void _sapp_tc_main_event_tramp(const sapp_event* ev, sapp_window win, voi
 }
 
 /* see GLFW's xkb_unicode.c */
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 static const struct _sapp_tc_x11_codepair {
   uint16_t keysym;
   uint16_t ucs;
@@ -11488,6 +11547,7 @@ static void _sapp_tc_x11_update_window_title(_sapp_tc_window_t* w, const char* t
 }
 
 static void _sapp_tc_x11_set_decorated(_sapp_tc_window_t* w, bool decorated) {
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct {
         unsigned long flags;
         unsigned long functions;
@@ -11588,6 +11648,7 @@ static bool _sapp_tc_x11_wait_for_event(Window xwin, int type, double timeout_se
 }
 
 /*-- clipboard (CLIPBOARD selection, UTF8_STRING and INCR) -------------------*/
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_x11_clipboard_transfer {
     Window requestor;
     Atom property;
@@ -11685,6 +11746,7 @@ static bool _sapp_tc_x11_read_text_property(Window window, Atom property, Atom t
     return true;
 }
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_x11_property_match { Window window; Atom property; };
 static Bool _sapp_tc_x11_clipboard_property_ready(Display*, XEvent* event, XPointer context) {
     const auto* match = (const _sapp_tc_x11_property_match*)context;
@@ -11716,6 +11778,7 @@ static bool _sapp_tc_x11_receive_incr(Window window, Atom property, Atom text_ty
 }
 
 /*-- drag & drop (XDND v5, text/uri-list) -------------------------------------*/
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_x11_uri_reader {
     Window window;
     Atom property, type;
@@ -12348,6 +12411,7 @@ static bool _sapp_tc_x11_saved_surface_alive(uint32_t id, _sapp_tc_x11_surface_t
     return w && w->drawable;
 }
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 struct _sapp_tc_x11_surface_scope {
 #if defined(SOKOL_GLES3)
     EGLDisplay display = eglGetCurrentDisplay();
@@ -12992,6 +13056,7 @@ static void _sapp_tc_x11_init_client(void) {
         auto* target = _sapp_tc_lookup(handle);
         const bool was_busy = target && target->in_tick;
         if (target) target->in_tick = true;
+        // [TrussC] Native fork record (retains upstream lineage where applicable).
         struct InitScope {
             sapp_window handle;
             bool previous;
@@ -13022,6 +13087,7 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     w->pacing_ticks = 0;
     const sapp_window handle = {w->win_id};
     w->in_tick = true;
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct TickGuard {
         sapp_window handle;
         ~TickGuard() { if (auto* live = _sapp_tc_lookup(handle)) live->in_tick = false; }
@@ -13402,7 +13468,7 @@ void sapp_tc_gl_make_current(sapp_window win) {
         _sapp_tc_x11_make_current(w);
 }
 
-sapp_window sapp_create_window(const sapp_window_desc* desc) {
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };
     if (!desc) return invalid;
     if (!_sapp_tc.display) {
@@ -13444,7 +13510,7 @@ void sapp_window_request_close(sapp_window win) {
     w->close_requested = true;
 }
 
-bool sapp_window_valid(sapp_window win) {
+bool sapp_tc_window_valid(sapp_window win) {
     return _sapp_tc_lookup(win) != 0;
 }
 
@@ -13458,17 +13524,17 @@ int sapp_window_height(sapp_window win) {
     return w ? w->win_height : 0;
 }
 
-int sapp_window_framebuffer_width(sapp_window win) {
+int sapp_tc_window_framebuffer_width(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->fb_width : 0;
 }
 
-int sapp_window_framebuffer_height(sapp_window win) {
+int sapp_tc_window_framebuffer_height(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->fb_height : 0;
 }
 
-float sapp_window_dpi_scale(sapp_window win) {
+float sapp_tc_window_dpi_scale(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? w->dpi_scale : 1.0f;
 }
@@ -13502,41 +13568,41 @@ void sapp_tc_window_skip_present(sapp_window win) {
     if (w) w->skip_present = true;
 }
 
-bool sapp_window_occluded(sapp_window win) {
+bool sapp_tc_window_occluded(sapp_window win) {
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
     return w ? _sapp_tc_native_hidden(w) : false;
 }
 
-void sapp_window_set_title(sapp_window win, const char* title) {
+void sapp_tc_window_set_title(sapp_window win, const char* title) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w || !w->xwin || !title) return;
     _sapp_tc_x11_update_window_title(w, title);
 }
 
-double sapp_window_frame_duration(sapp_window win) {
+double sapp_tc_window_frame_duration(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 1.0 / 60.0;
     return (w->frame_duration > 0.0) ? w->frame_duration : _sapp_tc.refresh_period;
 }
 
 /* Metal / D3D11 handles do not exist on Linux */
-const void* sapp_window_metal_current_drawable(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_macos_get_window(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_render_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_resolve_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_win32_get_hwnd(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_macos_get_window(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) { (void)win; return 0; }
 
-uint32_t sapp_window_gl_framebuffer(sapp_window win) {
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) {
     /* the GL "swapchain" is just the default framebuffer of whatever drawable
        is current -- which is this window's during its tick_cb */
     (void)win;
     return _sapp_tc.gl_framebuffer;
 }
 
-const void* sapp_window_x11_get_window(sapp_window win) {
+const void* sapp_tc_window_x11_get_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     return w ? (const void*)(uintptr_t)w->xwin : 0;
 }
@@ -13734,7 +13800,7 @@ void sapp_consume_event(void) {
     _sapp_tc.app.event_consumed = true;
 }
 
-void sapp_skip_present(void) {
+void sapp_tc_skip_present(void) {
     /* one-shot; HONORED on glXSwapBuffers (TrussC patch: event-driven present
        suppression -- keeps the last image on screen, prevents flicker) */
     if (_sapp_tc.app.main) _sapp_tc.app.main->skip_present = true;
@@ -13984,7 +14050,7 @@ double sapp_frame_duration_unfiltered(void) {
     return _sapp_tc.app.main ? _sapp_tc.app.main->timing.dt : 1.0 / 60.0;
 }
 const void* sapp_ios_get_window(void) { return 0; }
-void sapp_ios_set_supported_orientations(uint32_t mask) { (void)mask; }
+void sapp_tc_ios_set_supported_orientations(uint32_t mask) { (void)mask; }
 const void* sapp_android_get_native_activity(void) { return 0; }
 void sapp_html5_ask_leave_site(bool ask) { (void)ask; }
 uint32_t sapp_html5_get_dropped_file_size(int index) { (void)index; return 0; }
@@ -14015,6 +14081,7 @@ _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
     if (_sapp_tc.init_called || _sapp_tc.constructing) return;
     // These OS-owned sole surfaces have no sapp_window identity/registry.
     // Native resources and dimensions already exist at this client boundary.
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct { bool& ready; bool& constructing; } publication{_sapp_tc.init_called, _sapp_tc.constructing};
     _sapp_tc_creation_transaction creation(&publication, [](auto*) {});
     if (_sapp_tc.desc.init_cb) {
@@ -15316,7 +15383,7 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    const uint64_t size = sapp_tc_html5_get_dropped_file_size64(index);
     return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
@@ -15332,7 +15399,7 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
         } else {
-            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            const uint64_t size = sapp_tc_html5_get_dropped_file_size64(index);
             if (size > request->buffer.size) {
                 error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
             } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
@@ -15487,7 +15554,7 @@ SOKOL_API_IMPL const void* sapp_ios_get_window(void) {
 }
 
 // Modified by tettou771 for TrussC: runtime orientation control
-SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
+SOKOL_API_IMPL void sapp_tc_ios_set_supported_orientations(uint32_t mask) {
     #if defined(_SAPP_IOS)
         _sapp_tc.ios.supported_orientations = (NSUInteger)mask;
         #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
@@ -15575,7 +15642,7 @@ SOKOL_API_IMPL void sapp_html5_ask_leave_site(bool ask) {
 }
 
 // Modified by tettou771 for TrussC: skip the next present call (fix D3D11 flickering)
-SOKOL_API_IMPL void sapp_skip_present(void) {
+SOKOL_API_IMPL void sapp_tc_skip_present(void) {
     _sapp_tc.skip_present = true;
 }
 // end of modification
@@ -15594,37 +15661,37 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
 /* ---- multi-window API: explicit platform gap on Android ------------------
    the activity owns exactly one ANativeWindow; a second window is not
    representable */
-sapp_window sapp_create_window(const sapp_window_desc* desc) {
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
     _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                 "", "sapp_create_window() is not supported on Android (single-window platform)");
+                 "", "sapp_tc_create_window() is not supported on Android (single-window platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
 void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
-bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
+bool sapp_tc_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-int sapp_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-int sapp_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-float sapp_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
+int sapp_tc_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+int sapp_tc_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+float sapp_tc_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
 int sapp_window_sample_count(sapp_window win) { _SOKOL_UNUSED(win); return 1; }
-bool sapp_window_occluded(sapp_window win) {
+bool sapp_tc_window_occluded(sapp_window win) {
     return win.id == 0 && (!_sapp_tc.android.has_resumed || !_sapp_tc.android.has_focus);
 }
-void sapp_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
-double sapp_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
-const void* sapp_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+void sapp_tc_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
+double sapp_tc_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
@@ -15643,6 +15710,7 @@ _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
     if (_sapp_tc.init_called || _sapp_tc.constructing) return;
     // These OS-owned sole surfaces have no sapp_window identity/registry.
     // Native resources and dimensions already exist at this client boundary.
+    // [TrussC] Native fork record (retains upstream lineage where applicable).
     struct { bool& ready; bool& constructing; } publication{_sapp_tc.init_called, _sapp_tc.constructing};
     _sapp_tc_creation_transaction creation(&publication, [](auto*) {});
     if (_sapp_tc.desc.init_cb) {
@@ -16558,7 +16626,7 @@ EM_JS(void, _sapp_tc_js_cancel_dropped_file_reads, (void), {
     }
 })
 
-SOKOL_API_IMPL uint64_t sapp_html5_get_dropped_file_size64(int index) {
+SOKOL_API_IMPL uint64_t sapp_tc_html5_get_dropped_file_size64(int index) {
     if (!_sapp_tc.drop.enabled || (index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
         return 0;
     }
@@ -17051,6 +17119,7 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_wheel_cb(int emsc_type, const EmscriptenWhe
     return consume_event;
 }
 
+// [TrussC] Native fork record (retains upstream lineage where applicable).
 static struct {
     const char* str;
     sapp_keycode code;
@@ -17945,7 +18014,7 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    const uint64_t size = sapp_tc_html5_get_dropped_file_size64(index);
     return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
@@ -17961,7 +18030,7 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
         } else {
-            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            const uint64_t size = sapp_tc_html5_get_dropped_file_size64(index);
             if (size > request->buffer.size) {
                 error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
             } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
@@ -18116,7 +18185,7 @@ SOKOL_API_IMPL const void* sapp_ios_get_window(void) {
 }
 
 // Modified by tettou771 for TrussC: runtime orientation control
-SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
+SOKOL_API_IMPL void sapp_tc_ios_set_supported_orientations(uint32_t mask) {
     #if defined(_SAPP_IOS)
         _sapp_tc.ios.supported_orientations = (NSUInteger)mask;
         #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
@@ -18204,7 +18273,7 @@ SOKOL_API_IMPL void sapp_html5_ask_leave_site(bool ask) {
 }
 
 // Modified by tettou771 for TrussC: skip the next present call (fix D3D11 flickering)
-SOKOL_API_IMPL void sapp_skip_present(void) {
+SOKOL_API_IMPL void sapp_tc_skip_present(void) {
     _sapp_tc.skip_present = true;
 }
 // end of modification
@@ -18212,38 +18281,38 @@ SOKOL_API_IMPL void sapp_skip_present(void) {
 /* ---- multi-window API: explicit platform gap on the web ------------------
    the whole backend binds to ONE <canvas> element (Module.sapp_emsc_target);
    a second window is not representable in a browser tab */
-sapp_window sapp_create_window(const sapp_window_desc* desc) {
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
     _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                 "", "sapp_create_window() is not supported on the web (single-canvas platform)");
+                 "", "sapp_tc_create_window() is not supported on the web (single-canvas platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
 void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
-bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
+bool sapp_tc_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-int sapp_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-int sapp_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-float sapp_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
+int sapp_tc_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+int sapp_tc_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+float sapp_tc_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
 int sapp_window_sample_count(sapp_window win) { _SOKOL_UNUSED(win); return 1; }
-bool sapp_window_occluded(sapp_window win) {
+bool sapp_tc_window_occluded(sapp_window win) {
     EmscriptenVisibilityChangeEvent visibility;
     return win.id == 0 && emscripten_get_visibility_status(&visibility) == EMSCRIPTEN_RESULT_SUCCESS && visibility.hidden;
 }
-void sapp_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
-double sapp_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
-const void* sapp_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-const void* sapp_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
-uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+void sapp_tc_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
+double sapp_tc_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_tc_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 
 /* ---- other-backend getters (zero stubs, same set as the native sections) - */
 const void* sapp_metal_get_device(void) { return 0; }
@@ -18258,29 +18327,29 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
 #if defined(__cplusplus)
 extern "C" {
 #endif
-sapp_window sapp_create_window(const sapp_window_desc* desc) { (void)desc; sapp_window w = {0}; return w; }
+sapp_window sapp_tc_create_window(const sapp_window_desc* desc) { (void)desc; sapp_window w = {0}; return w; }
 void sapp_destroy_window(sapp_window win) { (void)win; }
 void sapp_window_request_close(sapp_window win) { (void)win; }
-bool sapp_window_valid(sapp_window win) { (void)win; return false; }
+bool sapp_tc_window_valid(sapp_window win) { (void)win; return false; }
 int sapp_window_width(sapp_window win) { (void)win; return 0; }
 int sapp_window_height(sapp_window win) { (void)win; return 0; }
-int sapp_window_framebuffer_width(sapp_window win) { (void)win; return 0; }
-int sapp_window_framebuffer_height(sapp_window win) { (void)win; return 0; }
-float sapp_window_dpi_scale(sapp_window win) { (void)win; return 1.0f; }
+int sapp_tc_window_framebuffer_width(sapp_window win) { (void)win; return 0; }
+int sapp_tc_window_framebuffer_height(sapp_window win) { (void)win; return 0; }
+float sapp_tc_window_dpi_scale(sapp_window win) { (void)win; return 1.0f; }
 int sapp_window_sample_count(sapp_window win) { (void)win; return 1; }
-bool sapp_window_occluded(sapp_window win) { (void)win; return false; }
-void sapp_window_set_title(sapp_window win, const char* title) { (void)win; (void)title; }
-double sapp_window_frame_duration(sapp_window win) { (void)win; return 1.0 / 60.0; }
-const void* sapp_window_metal_current_drawable(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_metal_msaa_color_texture(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_render_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_resolve_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_macos_get_window(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_win32_get_hwnd(sapp_window win) { (void)win; return 0; }
-const void* sapp_window_x11_get_window(sapp_window win) { (void)win; return 0; }
-uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
+bool sapp_tc_window_occluded(sapp_window win) { (void)win; return false; }
+void sapp_tc_window_set_title(sapp_window win, const char* title) { (void)win; (void)title; }
+double sapp_tc_window_frame_duration(sapp_window win) { (void)win; return 1.0 / 60.0; }
+const void* sapp_tc_window_metal_current_drawable(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_depth_stencil_texture(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_metal_msaa_color_texture(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_render_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_resolve_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_d3d11_depth_stencil_view(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_macos_get_window(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_win32_get_hwnd(sapp_window win) { (void)win; return 0; }
+const void* sapp_tc_window_x11_get_window(sapp_window win) { (void)win; return 0; }
+uint32_t sapp_tc_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
@@ -18435,7 +18504,7 @@ extern "C" bool sapp_tc_window_read_metadata(sapp_window win, sapp_tc_window_met
     out->width = _sapp_tc.window_width; out->height = _sapp_tc.window_height;
     out->dpi_scale = _sapp_tc.dpi_scale; out->sample_count = sapp_sample_count();
     out->color_format = sapp_color_format(); out->depth_format = sapp_depth_format();
-    out->trust_hidden_signals = true; out->occluded = sapp_window_occluded(win);
+    out->trust_hidden_signals = true; out->occluded = sapp_tc_window_occluded(win);
     out->drawable_available = out->fb_width > 0 && out->fb_height > 0;
     out->source_interval = sapp_frame_duration();
 #if defined(__EMSCRIPTEN__)

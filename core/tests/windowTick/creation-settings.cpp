@@ -346,7 +346,7 @@ int main() {
 #endif
     }
     sapp_window_desc legacy{};
-    auto legacyHandle=sapp_create_window(&legacy);
+    auto legacyHandle=sapp_tc_create_window(&legacy);
     auto* legacyWindow=_sapp_tc_lookup(legacyHandle);
     check("zero descriptor creates windowed",legacyWindow&&!legacyWindow->fullscreen);
 #if defined(TEST_MAC) || defined(TEST_WIN)
@@ -355,7 +355,7 @@ int main() {
     check("X11 zero descriptor keeps default interval",legacyWindow&&legacyWindow->requested_swap_interval==1);
     if(legacyWindow) dispose(legacyWindow);
     legacy.swap_interval=-2;
-    legacyWindow=_sapp_tc_lookup(sapp_create_window(&legacy));
+    legacyWindow=_sapp_tc_lookup(sapp_tc_create_window(&legacy));
     check("X11 negative interval normalizes to one",legacyWindow&&legacyWindow->requested_swap_interval==1);
 #endif
 #if defined(TEST_WIN)

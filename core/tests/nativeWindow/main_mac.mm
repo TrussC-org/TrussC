@@ -51,7 +51,7 @@ void present(id<CAMetalDrawable> drawable) {
 // Probe client: count ticks and draw only when the native tick admits it.
 void probeTick(sapp_window win, void*) {
     ++callbacks;
-    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sapp_window_metal_current_drawable(win);
+    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sapp_tc_window_metal_current_drawable(win);
     if (drawable) { ++acquired; lastAcquired = win.id; present(drawable); }
 }
 
@@ -137,10 +137,10 @@ void synchronousChecks() {
             const bool shouldDraw = !trust || allow;
             check("hidden drawing and trust are independent for either window", callbacks == 1 &&
                 acquired == int(shouldDraw) && (!acquired || lastAcquired == target->win_id));
-            check("all visibility readers use effective state", sapp_window_occluded({target->win_id}) == trust &&
+            check("all visibility readers use effective state", sapp_tc_window_occluded({target->win_id}) == trust &&
                 _sapp_tc_native_iconified(target) == (trust && iconified) &&
                 _sapp_tc_native_occluded(target) == (trust && !iconified) &&
-                (target != first || sapp_window_occluded({0}) == trust));
+                (target != first || sapp_tc_window_occluded({0}) == trust));
             auto* peer = target == first ? other : first;
             check("hidden signal switch is per window", peer->trust_hidden_signals);
         }
@@ -149,10 +149,10 @@ void synchronousChecks() {
         sapp_tc_window_draw_while_hidden({target->win_id}, savedAllow);
         _sapp_tc_mac_observe(target);
     }
-    check("drawable is not acquirable outside its tick", sapp_window_metal_current_drawable(second) == nullptr &&
-        sapp_window_metal_depth_stencil_texture(second) == nullptr);
+    check("drawable is not acquirable outside its tick", sapp_tc_window_metal_current_drawable(second) == nullptr &&
+        sapp_tc_window_metal_depth_stencil_texture(second) == nullptr);
     // One-shot skip requests belong to the addressed window.
-    sapp_skip_present();
+    sapp_tc_skip_present();
     check("first skip is isolated", first->skip_present && !other->skip_present);
     _sapp_tc_mac_tick(other, nil);
     check("other window's tick keeps first skip", first->skip_present);
@@ -173,23 +173,23 @@ void synchronousChecks() {
     const int before = liveNativeWindows();
     @autoreleasepool {
         forceTinyScale = true;
-        const sapp_window rejected = sapp_create_window(&desc);
+        const sapp_window rejected = sapp_tc_create_window(&desc);
         forceTinyScale = false;
         check("unrepresentable logical size rejected", rejected.id == 0);
         if (rejected.id) sapp_destroy_window(rejected);
         desc._tc_pixel_width = desc._tc_pixel_height = 0;
         failLayer = true;
-        check("failed drawable layer rejects creation", sapp_create_window(&desc).id == 0);
+        check("failed drawable layer rejects creation", sapp_tc_create_window(&desc).id == 0);
         failLayer = false;
     }
-    check("failure unwinds native window", liveNativeWindows() == before && sapp_window_valid(second));
+    check("failure unwinds native window", liveNativeWindows() == before && sapp_tc_window_valid(second));
     const uint32_t savedNextId = _sapp_tc.next_id;
     _sapp_tc.next_id = UINT32_MAX - 1;
     @autoreleasepool {
-        const sapp_window last = sapp_create_window(&desc);
+        const sapp_window last = sapp_tc_create_window(&desc);
         check("last identity is valid", last.id == UINT32_MAX);
         if (last.id) sapp_destroy_window(last);
-        check("identity exhaustion rejects cleanly", sapp_create_window(&desc).id == 0 &&
+        check("identity exhaustion rejects cleanly", sapp_tc_create_window(&desc).id == 0 &&
             _sapp_tc.next_id == UINT32_MAX);
     }
     int records = 0;
@@ -204,14 +204,14 @@ void synchronousChecks() {
 sapp_event_type destroyOn;
 bool destroyedInCallback;
 void victimEvent(const sapp_event* event, sapp_window win, void*) {
-    if (event->type == destroyOn && sapp_window_valid(win)) { destroyedInCallback = true; sapp_destroy_window(win); }
+    if (event->type == destroyOn && sapp_tc_window_valid(win)) { destroyedInCallback = true; sapp_destroy_window(win); }
 }
 sapp_window makeVictim() {
     sapp_window_desc d = {};
     d.x = d.y = -1; d.width = 120; d.height = 90; d.title = "victim"; d.no_high_dpi = noHighDpi;
     d.mtl_device = (__bridge const void*)_sapp_tc.app.device;
     d.event_cb = victimEvent;
-    return sapp_create_window(&d);
+    return sapp_tc_create_window(&d);
 }
 void destroyInCallbackChecks() {
     enum Path { LinkTick, FallbackTick, Occlusion, Miniaturize, Deminiaturize, TickResize, KeyDown };
@@ -266,8 +266,8 @@ void destroyInCallbackChecks() {
             }
             forceHidden = nil; forceVisible = nil;
             check((std::string("destroying the window from ") + c.name + " is safe").c_str(),
-                destroyedInCallback && !sapp_window_valid(victim));
-            if (sapp_window_valid(victim)) sapp_destroy_window(victim);
+                destroyedInCallback && !sapp_tc_window_valid(victim));
+            if (sapp_tc_window_valid(victim)) sapp_destroy_window(victim);
         }
     }
     // The constructor's own startup steps notify: showing a window makes it key.
@@ -283,7 +283,7 @@ void destroyInCallbackChecks() {
         check("destroy from first FOCUSED waits for construction return",
             destroyedInCallback && victim.id && _sapp_tc_lookup(victim) &&
             !_sapp_tc_lookup(victim)->constructing && _sapp_tc_lookup(victim)->close_requested && after == before + 1);
-        if (victim.id && sapp_window_valid(victim)) sapp_destroy_window(victim);
+        if (victim.id && sapp_tc_window_valid(victim)) sapp_destroy_window(victim);
     }
 }
 
@@ -340,7 +340,7 @@ sapp_window makeProbe(void (*tick)(sapp_window, void*), void (*event)(const sapp
     d.x = d.y = -1; d.width = 120; d.height = 90; d.title = title; d.no_high_dpi = noHighDpi;
     d.mtl_device = (__bridge const void*)_sapp_tc.app.device;
     d.tick_cb = tick; d.event_cb = event; d.close_cb = close;
-    return sapp_create_window(&d);
+    return sapp_tc_create_window(&d);
 }
 _sapp_tc_window_t* fsCreated;
 
@@ -427,7 +427,7 @@ void countClose(id self, SEL cmd) {
 void dcTick(sapp_window win, void*) {
     if (!dcClosed) return;
     ++dcTicksAfterClose;
-    if (sapp_window_metal_current_drawable(win)) ++dcAcquiresAfterClose;
+    if (sapp_tc_window_metal_current_drawable(win)) ++dcAcquiresAfterClose;
 }
 void dcEvent(const sapp_event* event, sapp_window win, void*) {
     if (!dcArmed || event->type != dcOn) return;
@@ -572,7 +572,7 @@ void step() {
         if (!other->iconified && !waited(5)) break;
         if (sampleStart == 0) { sampleStart = now(); ticksAt = callbacks; acquiredAt = acquired; break; }
         if (now() - sampleStart < 0.5) break;
-        check("trusted minimize is reported for the secondary", other->iconified && sapp_window_occluded(second) &&
+        check("trusted minimize is reported for the secondary", other->iconified && sapp_tc_window_occluded(second) &&
             iconifiedEvents == 1);
         check("minimized secondary ticks from its own fallback source", other->fallback_active &&
             callbacks - ticksAt >= 5);
@@ -598,7 +598,7 @@ void step() {
         std::printf("nativeWindow: untrusted minimized secondary: %d ticks, %d drawables in %.1fs\n",
             callbacks - ticksAt, acquired - acquiredAt, now() - sampleStart);
         check("untrusted minimize reports visible and sends no hidden events", other->window.miniaturized &&
-            !sapp_window_occluded(second) && !other->iconified && iconifiedEvents == 0 && suspendedEvents == 0);
+            !sapp_tc_window_occluded(second) && !other->iconified && iconifiedEvents == 0 && suspendedEvents == 0);
         check("untrusted minimized secondary keeps ticking and drawing", other->fallback_active &&
             callbacks > ticksAt && acquired > acquiredAt);
         sampleStart = 0;
@@ -622,7 +622,7 @@ void step() {
         std::printf("nativeWindow: minimized first window: %d frames, %d drawables in %.1fs\n",
             mainFrames - mainFramesAt, mainDrawables - mainDrawablesAt, now() - sampleStart);
         check("minimized first window keeps its frame callback on its fallback source",
-            first->iconified && sapp_window_occluded({0}) && first->fallback_active && mainFrames - mainFramesAt >= 5);
+            first->iconified && sapp_tc_window_occluded({0}) && first->fallback_active && mainFrames - mainFramesAt >= 5);
         check("minimized first window keeps drawing (launch draw_while_hidden)", mainDrawables > mainDrawablesAt);
         sampleStart = 0;
         [first->window deminiaturize:nil];
@@ -681,7 +681,7 @@ void step() {
             d.x = d.y = -1; d.width = 120; d.height = 90; d.title = "closed"; d.no_high_dpi = noHighDpi;
             d.mtl_device = (__bridge const void*)_sapp_tc.app.device;
             d.tick_cb = closedTick; d.close_cb = keepOnClose; d.user_data = (void*)(intptr_t)i;
-            closedWindows[i] = sapp_create_window(&d);
+            closedWindows[i] = sapp_tc_create_window(&d);
             _sapp_tc_window_t* w = _sapp_tc_lookup(closedWindows[i]);
             if (!w) { check("closed-window probe created", false); continue; }
             w->trust_hidden_signals = i == 0;
@@ -715,9 +715,9 @@ void step() {
         }
         for (int i = 0; i < 2; ++i) {
             check(i == 0 ? "natively closed secondary stops ticking (trusted)" : "natively closed secondary stops ticking (untrusted)",
-                sapp_window_valid(closedWindows[i]) && closedTicks[i] == closedTicksAt[i]);
+                sapp_tc_window_valid(closedWindows[i]) && closedTicks[i] == closedTicksAt[i]);
             sapp_destroy_window(closedWindows[i]);
-            check("a natively closed secondary is destroyed once", !sapp_window_valid(closedWindows[i]));
+            check("a natively closed secondary is destroyed once", !sapp_tc_window_valid(closedWindows[i]));
         }
         sampleStart = 0;
         nestKind = 0;
@@ -757,8 +757,8 @@ void step() {
               nestKind == 1 ? "no nested frame inside an in-tick SUSPENDED callback" :
                               "no nested frame inside an out-of-tick KEY_DOWN callback", nestNested == 0);
         check("close requested inside the callback is deferred until it returns, then processed",
-            !nestCloseDuringCallback && nestClosed && !sapp_window_valid(nestWindow));
-        if (sapp_window_valid(nestWindow)) sapp_destroy_window(nestWindow);
+            !nestCloseDuringCallback && nestClosed && !sapp_tc_window_valid(nestWindow));
+        if (sapp_tc_window_valid(nestWindow)) sapp_destroy_window(nestWindow);
         if (++nestKind < 3) { enter(NestSetup); break; }
         enter(FsCreate);
         break;
@@ -813,7 +813,7 @@ void step() {
         }
         if (!throwClosed && !waited(4)) break;
         check("a close request is still processed after tick_cb threw (close_cb throw contained too)",
-            throwClosed && !sapp_window_valid(throwWindow));
+            throwClosed && !sapp_tc_window_valid(throwWindow));
         enter(ThrowEventStart);
         break;
     }
@@ -853,7 +853,7 @@ void step() {
         }
         if (!throwClosed && !waited(5)) break;
         sampleStart = 0;
-        check("a close request is still processed after event_cb threw", throwClosed && !sapp_window_valid(throwWindow));
+        check("a close request is still processed after event_cb threw", throwClosed && !sapp_tc_window_valid(throwWindow));
         enter(ThrowLegacy);
         break;
     }
@@ -909,8 +909,8 @@ void step() {
         std::printf("nativeWindow: close requested before the modal: closed=%d, inside handler=%d\n",
             modalClosed, modalClosedInHandler);
         check("a close requested before the modal is processed after the handler returns",
-            modalHandlerDone && modalClosed && !modalClosedInHandler && !sapp_window_valid(modalOwner));
-        if (sapp_window_valid(modalOwner)) sapp_destroy_window(modalOwner);
+            modalHandlerDone && modalClosed && !modalClosedInHandler && !sapp_tc_window_valid(modalOwner));
+        if (sapp_tc_window_valid(modalOwner)) sapp_destroy_window(modalOwner);
         ccKind = 0;
         enter(CcSetup);
         break;
@@ -946,10 +946,10 @@ void step() {
                 "native close inside a tick callback runs close_cb once, after it returns",
                 "direct NSWindow close inside an event callback runs close_cb once, after it returns, no tick between",
                 "direct NSWindow close inside a tick callback runs close_cb once, after it returns, no tick between"};
-            check(names[ccKind], ccSpinDone && ccCloses == 1 && !ccClosedInCallback && !sapp_window_valid(ccWindow) &&
+            check(names[ccKind], ccSpinDone && ccCloses == 1 && !ccClosedInCallback && !sapp_tc_window_valid(ccWindow) &&
                 (ccKind < 2 || ccTicksAfterNativeClose == 0));
         }
-        if (sapp_window_valid(ccWindow)) sapp_destroy_window(ccWindow);
+        if (sapp_tc_window_valid(ccWindow)) sapp_destroy_window(ccWindow);
         if (++ccKind < 4) { enter(CcSetup); break; }
         xKind = 4;
         enter(XSetup);
@@ -987,10 +987,10 @@ void step() {
             std::printf("nativeWindow: [NSWindow close] of Y inside X's callback: close_cb ran %d time(s), inside=%d, Y ticks between close and teardown=%d\n",
                 yCloses, yClosedInside, yTicksAfterClose);
             check("direct close of another window inside a callback: close_cb once, after it returns, no tick between",
-                xSpinDone && yCloses == 1 && !yClosedInside && yTicksAfterClose == 0 && !sapp_window_valid(yWindow));
-            if (sapp_window_valid(yWindow)) sapp_destroy_window(yWindow);
+                xSpinDone && yCloses == 1 && !yClosedInside && yTicksAfterClose == 0 && !sapp_tc_window_valid(yWindow));
+            if (sapp_tc_window_valid(yWindow)) sapp_destroy_window(yWindow);
         }
-        if (sapp_window_valid(xWindow)) sapp_destroy_window(xWindow);
+        if (sapp_tc_window_valid(xWindow)) sapp_destroy_window(xWindow);
         if (++xKind <= 5) { enter(XSetup); break; }
         dcKind = 0;
         enter(DcSetup);
@@ -1043,7 +1043,7 @@ void step() {
                 dcClosed && dcNativeCloses == 1 && dcCloses == 1);
         }
         dcNSWindow = nil;
-        if (sapp_window_valid(dcWindow)) sapp_destroy_window(dcWindow);
+        if (sapp_tc_window_valid(dcWindow)) sapp_destroy_window(dcWindow);
         if (++dcKind <= 2) { enter(DcSetup); break; }
         enter(TerminateChild);
         break;
@@ -1091,7 +1091,7 @@ void step() {
     case CloseSecondary:
         if (!secondClosed && !waited(3)) break;
         check("deferred secondary close reaches its close callback and disposes it",
-            secondClosed && !sapp_window_valid(second));
+            secondClosed && !sapp_tc_window_valid(second));
         sapp_window_request_close({first->win_id});
         enter(VetoQuit);
         break;
@@ -1156,8 +1156,8 @@ void mainFrame() {
     if (coveredFirst) {
         const void* drawable = sapp_metal_get_current_drawable();
         std::printf("nativeWindow: covered first frame: occluded=%d source=%s drawable=%d\n",
-            sapp_window_occluded({0}), _sapp_tc.app.main->fallback_active ? "fallback" : "display link", drawable != nullptr);
-        check("covered first frame follows init on the fallback source", didInitialize && sapp_window_occluded({0}) &&
+            sapp_tc_window_occluded({0}), _sapp_tc.app.main->fallback_active ? "fallback" : "display link", drawable != nullptr);
+        check("covered first frame follows init on the fallback source", didInitialize && sapp_tc_window_occluded({0}) &&
             _sapp_tc.app.main->fallback_active && sapp_frame_count() == 0);
         check("covered first frame draws according to launch data", (drawable != nullptr) == (launchHidden >= 0));
         present((__bridge id<CAMetalDrawable>)drawable);
@@ -1206,15 +1206,15 @@ void initialized() {
     desc.width = 101; desc.height = 77; desc.no_high_dpi = noHighDpi; desc.title = "nativeWindow secondary";
     desc.mtl_device = (__bridge const void*)_sapp_tc.app.device;
     desc.event_cb = secondaryEvent; desc.close_cb = secondaryClosed;
-    second = sapp_create_window(&desc);
+    second = sapp_tc_create_window(&desc);
     _sapp_tc_window_t* other = _sapp_tc_lookup(second);
     check("secondary created", other != nullptr);
     if (!other) { sapp_quit(); return; }
     std::printf("nativeWindow: secondary=%.2f/%dx%d (%dx%d pt)\n", other->dpi_scale, other->fb_width,
         other->fb_height, other->win_width, other->win_height);
     check("secondary dimensions are published by its constructor", other->ready &&
-        sapp_window_framebuffer_width(second) == other->fb_width && other->fb_width > 0 &&
-        sapp_window_dpi_scale(second) == expectedScale(other->window));
+        sapp_tc_window_framebuffer_width(second) == other->fb_width && other->fb_width > 0 &&
+        sapp_tc_window_dpi_scale(second) == expectedScale(other->window));
     check("initial scales and dimensions agree", first->dpi_scale == other->dpi_scale &&
         first->fb_width == other->fb_width && first->fb_height == other->fb_height &&
         first->win_width == other->win_width && first->win_height == other->win_height);

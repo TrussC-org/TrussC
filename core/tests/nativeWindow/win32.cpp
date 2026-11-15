@@ -311,13 +311,13 @@ void titles() {
     sapp_set_window_title(longTitle);
     check("legacy title retains stable borrowed 255-byte storage", borrowed == first->title &&
         sapp_query_desc().window_title == borrowed && std::strlen(borrowed) == 255);
-    sapp_window_set_title({first->win_id},"Handle first");
-    sapp_window_set_title(second,"Handle secondary");
+    sapp_tc_window_set_title({first->win_id},"Handle first");
+    sapp_tc_window_set_title(second,"Handle secondary");
     WCHAR text[512]; GetWindowTextW(first->hwnd,text,512);
     check("positive first handle title targets first without replacing storage", !std::wcscmp(text,L"Handle first") && sapp_query_desc().window_title == borrowed);
-    sapp_window_set_title({0},"Zero is not a title handle");
-    sapp_window_set_title({UINT32_MAX},"Unknown is not first");
-    sapp_window_set_title({first->win_id},longTitle);
+    sapp_tc_window_set_title({0},"Zero is not a title handle");
+    sapp_tc_window_set_title({UINT32_MAX},"Unknown is not first");
+    sapp_tc_window_set_title({first->win_id},longTitle);
     GetWindowTextW(first->hwnd,text,512);
     check("invalid handles and overflowing native title conversion do not change first", !std::wcscmp(text,L"Handle first"));
     char utf8[361];
@@ -356,7 +356,7 @@ void visibilityTransitions(_sapp_tc_window_t* w, SwapProbe& spy) {
         expect("DXGI clearing occlusion while minimized never emits RESUMED",
             {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED});
         check("cleared DXGI observation retains effective minimized visibility",
-            !w->occluded && sapp_window_occluded({w->win_id}) == trust);
+            !w->occluded && sapp_tc_window_occluded({w->win_id}) == trust);
         SendMessageW(w->hwnd, WM_SIZE, SIZE_RESTORED, 0);
         expect("restore emits RESTORED then one RESUMED only when trusted",
             {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESUMED});
@@ -457,7 +457,7 @@ void callbackReentry() {
         const int aggregates = events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED];
         SendMessageW(w->hwnd, WM_SIZE, restore ? SIZE_RESTORED : SIZE_MINIMIZED, 0);
         check("detailed WM_SIZE callback may destroy its window before aggregate delivery",
-            !sapp_window_valid(win) && events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED] == aggregates);
+            !sapp_tc_window_valid(win) && events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED] == aggregates);
     }
 }
 
@@ -477,7 +477,7 @@ void policies(_sapp_tc_window_t* w) {
         spy.presents = spy.probes = 0;
         const int before = ticks;
         _sapp_tc_win32_tick(w);
-        check("hidden observation query honors trust independently of draw", sapp_window_occluded({w->win_id}) == trust);
+        check("hidden observation query honors trust independently of draw", sapp_tc_window_occluded({w->win_id}) == trust);
         check("hidden drawing admission is per-window policy", spy.presents == int(draw || !trust));
         check("untrusted observations do not probe DXGI", spy.probes == int(trust && !minimized));
         check("hidden update-policy callback still runs once", ticks == before + 1);
@@ -500,7 +500,7 @@ void policies(_sapp_tc_window_t* w) {
     _sapp_tc_win32_tick(w);
     const HRESULT countAfter=spy.real->GetLastPresentCount(&presentsAfter);
     check("untrusted stale observations allow addressed real DXGI presentation", spy.presents == 1 && spy.probes == 0 &&
-        !w->credit_held && !sapp_window_occluded({w->win_id}) && SUCCEEDED(countBefore) && SUCCEEDED(countAfter) && presentsAfter == presentsBefore+1);
+        !w->credit_held && !sapp_tc_window_occluded({w->win_id}) && SUCCEEDED(countBefore) && SUCCEEDED(countAfter) && presentsAfter == presentsBefore+1);
     spy.inject = true;
     w->trust_hidden_signals = true; w->draw_while_hidden = false;
     w->iconified = false; w->occluded = true;
@@ -636,7 +636,7 @@ bool initialDimensionsMatchClient(const _sapp_tc_window_t* w, bool* clamped = nu
 void initialized() {
     first = _sapp_tc.app.main;
     lastLaunchId = first->win_id;
-    if (initQuit) { sapp_skip_present(); sapp_quit(); return; }
+    if (initQuit) { sapp_tc_skip_present(); sapp_quit(); return; }
     if (sessionEnd) {
         trussc::internal::appExitCode() = 37;
         SendMessageW(first->hwnd, WM_ENDSESSION, TRUE, 0);
@@ -655,10 +655,10 @@ void initialized() {
     d.width = 1001; d.height = 667;
     if (pixelSizes) { d._tc_pixel_width = 1001; d._tc_pixel_height = 667; }
     d.max_frame_latency = 1;
-    second = sapp_create_window(&d); d.x = 700; d.max_frame_latency = 16; third = sapp_create_window(&d);
+    second = sapp_tc_create_window(&d); d.x = 700; d.max_frame_latency = 16; third = sapp_tc_create_window(&d);
     auto* other = _sapp_tc_lookup(second);
-    check("one main and two secondaries constructed", other && sapp_window_valid(third) && liveHwnds == 3);
-    if (!other || !sapp_window_valid(third)) { sapp_quit(); return; }
+    check("one main and two secondaries constructed", other && sapp_tc_window_valid(third) && liveHwnds == 3);
+    if (!other || !sapp_tc_window_valid(third)) { sapp_quit(); return; }
     for (auto item : {std::pair{first,2u}, std::pair{other,1u}, std::pair{_sapp_tc_lookup(third),16u}}) {
         IDXGISwapChain2* chain = nullptr;
         UINT latency = 0;
@@ -764,7 +764,7 @@ void nativeChecks() {
     const auto savedClose=other->desc.close_cb;
     other->desc.close_cb=[](sapp_window,void*) { throw std::runtime_error("native close callback fault"); };
     SendMessageW(other->hwnd,WM_CLOSE,0,0);
-    check("throwing close client cannot bypass native disposal ownership", IsWindow(other->hwnd) && sapp_window_valid(second));
+    check("throwing close client cannot bypass native disposal ownership", IsWindow(other->hwnd) && sapp_tc_window_valid(second));
     other->desc.close_cb=savedClose;
     throwQuit=true;
     _sapp_tc_win32_request_exit(first);
@@ -843,7 +843,7 @@ int main(int argc, char** argv) {
         if (launchCovered && launchPolicy == 0) {
             const uint32_t previousId = lastLaunchId;
             sapp_run(&d);
-            check("repeat sapp_run preserves monotonic creation identities", lastLaunchId > previousId && !sapp_window_valid({previousId}));
+            check("repeat sapp_run preserves monotonic creation identities", lastLaunchId > previousId && !sapp_tc_window_valid({previousId}));
             check("repeat sapp_run initializes and cleans up independently", cleanupCalls == 2 && liveHwnds == 0);
             delete launchProbe; launchProbe = nullptr;
         }
@@ -878,18 +878,18 @@ int main(int argc, char** argv) {
             check("three real waitable surfaces keep ticking", loopTicks[1]>2 && loopTicks[2]>2);
             ShowWindow(other->hwnd,SW_MINIMIZE); loopStage=1;
         } else if (loopStage == 1 && elapsed > .9) {
-            check("real minimize reports hidden", sapp_window_occluded(second));
+            check("real minimize reports hidden", sapp_tc_window_occluded(second));
             ShowWindow(other->hwnd,SW_RESTORE); loopStage=2;
         } else if (loopStage == 2 && elapsed > 1.5) {
-            check("real restore resumes addressed presentation", !sapp_window_occluded(second) && other->last_present>started+.9);
+            check("real restore resumes addressed presentation", !sapp_tc_window_occluded(second) && other->last_present>started+.9);
             ShowWindow(first->hwnd,SW_MINIMIZE); loopStage=3;
         } else if (loopStage == 3 && elapsed > 1.9) {
-            check("real first-window minimize reports hidden", sapp_window_occluded({0}));
+            check("real first-window minimize reports hidden", sapp_tc_window_occluded({0}));
             ShowWindow(first->hwnd,SW_RESTORE); loopStage=4;
         } else if (loopStage == 4 && elapsed > 2.5) {
-            check("real first-window restore resumes presentation", !sapp_window_occluded({0}) && first->last_present>started+1.9);
+            check("real first-window restore resumes presentation", !sapp_tc_window_occluded({0}) && first->last_present>started+1.9);
             sapp_window_request_close(second); sapp_window_request_close(third); loopStage=5;
-        } else if (loopStage == 5 && !sapp_window_valid(second) && !sapp_window_valid(third)) {
+        } else if (loopStage == 5 && !sapp_tc_window_valid(second) && !sapp_tc_window_valid(third)) {
             check("two scripted secondary closes use common close", closed==2);
             quitRequests=0; vetoQuit=true; sapp_window_request_close({first->win_id}); loopStage=6;
         } else if (loopStage == 6 && quitRequests==1) {

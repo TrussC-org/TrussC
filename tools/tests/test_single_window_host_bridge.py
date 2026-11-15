@@ -19,10 +19,10 @@ common = '\n'.join(body(RUNTIME, signature) for signature in (
     'void refreshSelectedWindowMetadata(', 'bool enterWindowTick(', 'void windowTick(', 'void singleWindowFrame('))
 parts = []
 # Use each real platform's implementation of the legacy skip endpoint.
-skips = list(re.finditer(r'SOKOL_API_IMPL void sapp_skip_present\(void\) \{', NATIVE))
+skips = list(re.finditer(r'SOKOL_API_IMPL void sapp_tc_skip_present\(void\) \{', NATIVE))
 assert len(skips) == 3
 for platform, match in zip(('ios','android','web'), skips):
-    skip = body(NATIVE[match.start():], 'SOKOL_API_IMPL void sapp_skip_present(') if platform == 'web' else body(NATIVE[match.start():NATIVE.index('}',match.start())+1], 'SOKOL_API_IMPL void sapp_skip_present(')
+    skip = body(NATIVE[match.start():], 'SOKOL_API_IMPL void sapp_tc_skip_present(') if platform == 'web' else body(NATIVE[match.start():NATIVE.index('}',match.start())+1], 'SOKOL_API_IMPL void sapp_tc_skip_present(')
     parts.append(f'namespace {platform} {{\n' + r'''
 struct sapp_window { unsigned id=0; };
 struct sapp_event {};
@@ -41,11 +41,11 @@ bool sapp_isvalid() { return true; }
 int sapp_width() { return 100; } int sapp_height() { return 50; }
 float sapp_dpi_scale() { return 2; } int sapp_sample_count() { return 1; }
 int sapp_color_format() { return 1; } int sapp_depth_format() { return 2; }
-bool sapp_window_occluded(sapp_window) { return false; }
+bool sapp_tc_window_occluded(sapp_window) { return false; }
 double nativeDuration=1.0/120.0;
 double sapp_frame_duration() { return nativeDuration; }
 int stubReads=0, desktopSkips=0;
-double sapp_window_frame_duration(sapp_window) { ++stubReads; return 1.0/60.0; }
+double sapp_tc_window_frame_duration(sapp_window) { ++stubReads; return 1.0/60.0; }
 void sapp_tc_window_skip_present(sapp_window) { ++desktopSkips; }
 void publishWindowMetadata(Window& w,const sapp_tc_window_metadata& m) { w.binding.metadata=m; }
 bool refreshWindowMetadata(Window&) { return true; }
@@ -118,8 +118,8 @@ if os.environ.get('TC_SINGLE_WINDOW_MUTATIONS'):
     for name, old, new in (
         ('ignore_ending_admission','    if (runtimeEnding()) return;',''),
         ('source_metadata_zero','metadata.source_interval = sapp_frame_duration();','metadata.source_interval = 0;'),
-        ('source_uses_secondary_stub','supportsSecondaryWindows() ? sapp_window_frame_duration(handle) : sapp_frame_duration()','sapp_window_frame_duration(handle)'),
-        ('skip_uses_desktop_endpoint','else sapp_skip_present();','else sapp_tc_window_skip_present(handle);'),
+        ('source_uses_secondary_stub','supportsSecondaryWindows() ? sapp_tc_window_frame_duration(handle) : sapp_frame_duration()','sapp_tc_window_frame_duration(handle)'),
+        ('skip_uses_desktop_endpoint','else sapp_tc_skip_present();','else sapp_tc_window_skip_present(handle);'),
         ('skip_inert','_sapp_tc.skip_present = true;','/* mutation: inert native skip */'),
         ('android_swap_ignores_skip','if (_sapp_tc.skip_present) { _sapp_tc.skip_present = false; return; }','_sapp_tc.skip_present = false;'),
     ):

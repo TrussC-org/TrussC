@@ -169,7 +169,7 @@ int main(){native::run();presentation::run();printf("event-gates: %d checks, %d 
 '''
 code=code.replace('sapp_tc_window_close_recorded(', 'closeRecorded(')
 # The removed stamp assertions now exercise the production metadata query.
-metadata_query=body(source,'extern "C" bool sapp_tc_window_read_metadata(').replace('extern "C" ','').replace('sapp_tc_window_read_metadata(', 'readMetadata(').replace('sapp_tc_window_visible(', 'visible(').replace('sapp_window_occluded(', 'occluded(')
+metadata_query=body(source,'extern "C" bool sapp_tc_window_read_metadata(').replace('extern "C" ','').replace('sapp_tc_window_read_metadata(', 'readMetadata(').replace('sapp_tc_window_visible(', 'visible(').replace('sapp_tc_window_occluded(', 'occluded(')
 metadata_parts=[]
 for platform,defines in [
     ('mac','#define __APPLE__ 1\n#define TARGET_OS_OSX 1'),

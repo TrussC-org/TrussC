@@ -5,12 +5,15 @@
 #include "sokol_window_fullscreen.h"
 #include "sokol_window_creation.h"
 
+// [TrussC] Shared native fork record.
+
 struct _sapp_tc_timing_t {
     double last, ema, smooth_dt, dt;
 };
 
 // The platform constructor owns these fields until publication; afterwards the
 // native window owns them until its unwinder runs. Native handles stay per OS.
+// [TrussC] Shared native fork record.
 struct _sapp_tc_native_window_t {
     uint32_t win_id;
     sapp_window_desc desc;
@@ -56,6 +59,8 @@ static inline bool _sapp_tc_native_occluded(const _sapp_tc_native_window_t* w) {
 static inline bool _sapp_tc_native_hidden(const _sapp_tc_native_window_t* w) {
     return w->desc.hidden || _sapp_tc_native_iconified(w) || _sapp_tc_native_occluded(w);
 }
+
+// [TrussC] Shared native fork record.
 
 struct _sapp_tc_native_desc {
     sapp_window_desc window;

@@ -517,7 +517,7 @@ Window* _sapp_tc_lookup(sapp_window win) {
     for (auto* entry : _sapp_tc.windows) if (entry && entry->win_id==win.id) return entry;
     return nullptr;
 }
-bool sapp_window_valid(sapp_window win) { return _sapp_tc_lookup(win); }
+bool sapp_tc_window_valid(sapp_window win) { return _sapp_tc_lookup(win); }
 bool _sapp_tc_win32_request_exit(Window*) { ++quitRequests; return !vetoQuit; }
 void sapp_destroy_window(sapp_window win) {
     for (auto*& entry : _sapp_tc.windows) if (entry && entry->win_id==win.id) entry=nullptr;
@@ -540,11 +540,11 @@ int main() {
             if (d._tc_close_cb) d._tc_close_cb({id},nullptr);
     };
     close({2},nullptr);
-    check("sibling close disposes without process quit", !sapp_window_valid({2}) && !_sapp_tc.app.quit_ordered && quitRequests==0);
+    check("sibling close disposes without process quit", !sapp_tc_window_valid({2}) && !_sapp_tc.app.quit_ordered && quitRequests==0);
     vetoQuit=true; request(1);
-    check("last close veto retains launch window", sapp_window_valid({1}) && !_sapp_tc.app.quit_ordered && quitRequests==1);
+    check("last close veto retains launch window", sapp_tc_window_valid({1}) && !_sapp_tc.app.quit_ordered && quitRequests==1);
     vetoQuit=false; request(1);
-    check("accepted last close disposes and quits", !sapp_window_valid({1}) && _sapp_tc.app.quit_ordered && quitRequests==2);
+    check("accepted last close disposes and quits", !sapp_tc_window_valid({1}) && _sapp_tc.app.quit_ordered && quitRequests==2);
     sessionEnd=true;
     const int result=launch();
     check("session mode returns before peer-dependent suite", result==0 && launches==1 && cleanupCalls==1);

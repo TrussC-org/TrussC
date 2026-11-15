@@ -719,7 +719,7 @@ void show_window(NSWindow*) {
 sapp_event_type destroyOn;
 bool destroyedInCallback=false;
 void _sapp_tc_mac_unwind(Native* w) { _sapp_tc_mac_forget_key(w->win_id); dispose(w); }
-''' + extract('void sapp_destroy_window(sapp_window win) {') + extract('bool sapp_window_valid(sapp_window win) {') + body(read(root/'core/tests/nativeWindow/main_mac.mm'), 'void victimEvent(', 'main_mac.mm') + r'''
+''' + extract('void sapp_destroy_window(sapp_window win) {') + extract('bool sapp_tc_window_valid(sapp_window win) {') + body(read(root/'core/tests/nativeWindow/main_mac.mm'), 'void victimEvent(', 'main_mac.mm') + r'''
 int native_allocations=0;
 ''' + mac_creation_admission + r'''
     ++native_allocations;
@@ -727,7 +727,7 @@ int native_allocations=0;
     // allocation. A guard-removal mutant must not enter AppKit setup seams.
     Native* w=target; // Fixture has completed allocation, initialization and publication.
     creation_record=w;
-''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
+''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {') + r'''
 void run() {
     int before=failures, count=checks;
     Native w; NSWindow window; View view; CADisplayLink link;
@@ -777,7 +777,7 @@ void run() {
     // Replay the production public constructor's show-time key notification:
     // AppKit has not yet changed the not-visible property to visible.
     reset(w,window,view,false); creation_key_probe=true;
-    auto created=sapp_create_window(&w.desc);
+    auto created=sapp_tc_create_window(&w.desc);
     check("macOS creation with transient hidden key property emits only FOCUSED",
           created.id==w.win_id && events==std::vector<int>{SAPP_EVENTTYPE_FOCUSED} &&
           !w.occluded && !w.iconified && !w.link_suspended && !w.fallback_active && !w.suspended_sent);
@@ -815,7 +815,7 @@ void run() {
     // notification/resize and additional source RESUMED destruction stay covered.
     for (int path=0; path<7; ++path) {
         reset(w,window,view,false); creation_key_probe=true;
-        auto victim=sapp_create_window(&w.desc);
+        auto victim=sapp_tc_create_window(&w.desc);
         w.desc.event_cb=victimEvent;
         destroyOn=path==4?SAPP_EVENTTYPE_RESIZED:path>=5?SAPP_EVENTTYPE_RESUMED:SAPP_EVENTTYPE_SUSPENDED;
         destroyedInCallback=false; events.clear();
@@ -831,7 +831,7 @@ void run() {
             if (path==5) link_tick(&view,&link); else fallback_tick(&view,&timer);
         }
         check("macOS device victim destroys safely from source SUSPENDED/RESUMED notification or RESIZED",
-              destroyedInCallback && !sapp_window_valid(victim) && _sapp_tc.callbacks_active==0);
+              destroyedInCallback && !sapp_tc_window_valid(victim) && _sapp_tc.callbacks_active==0);
         check("macOS destroyed victim performs no later client tick or drawable", consulted==0 && acquired==0);
     }
     // Exercise the same visibility and source shims for both roles. AppKit's
@@ -1141,7 +1141,7 @@ void run() {
     }
     reset(w,window,view,false); peer_setup(peer,peer_window,peer_view);
     constructor_probe=true; destroy_at=2;
-    sapp_window handle=sapp_create_window(&w.desc);
+    sapp_window handle=sapp_tc_create_window(&w.desc);
     check("macOS public constructor returns invalid handle if destroyed", handle.id==0 && !_sapp_tc_lookup({w.win_id}) && _sapp_tc.constructing==0);
     summary("macOS round 2 callbacks / deferred close / construction / exceptions", before, count);
     before=failures; count=checks;
@@ -1960,7 +1960,7 @@ if '--mutations' in sys.argv[3:]:
         'mac-stale-after-show': change(ctor,
             '[window makeKeyAndOrderFront:nil];\n    if (!(w = _sapp_tc_mac_live(win_id))) {',
             '[window makeKeyAndOrderFront:nil];\n    if (false) {'),
-        'mac-invalid-public-handle': change('sapp_window sapp_create_window(const sapp_window_desc* desc) {',
+        'mac-invalid-public-handle': change('sapp_window sapp_tc_create_window(const sapp_window_desc* desc) {',
             'return { w ? w->win_id : 0 };', 'return { w ? w->win_id : 99 };'),
         'mac-retain-tick-state': change('struct _sapp_tc_mac_tick_scope {', 'w->in_tick = false;', ''),
         'mac-retain-callback-state': change('struct _sapp_tc_mac_callback_scope {', '--w->callback_depth;', '(void)w;'),

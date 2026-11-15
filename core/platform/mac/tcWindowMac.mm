@@ -56,18 +56,18 @@ namespace internal {
 namespace {
 sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
 }
-void nativeWindowSetTitle(Window& w, const char* title) { sapp_window_set_title(handle(w), title); }
+void nativeWindowSetTitle(Window& w, const char* title) { sapp_tc_window_set_title(handle(w), title); }
 void nativeWindowSetFullscreen(Window& w, bool full) { sapp_tc_window_set_fullscreen(handle(w), full); }
 uint32_t nativeWindowFullscreenPhase(const Window& w) { return sapp_tc_window_fullscreen_phase(handle(w)); }
 void nativeWindowToggleFullscreen(Window& w) { sapp_tc_window_toggle_fullscreen(handle(w)); }
 void nativeWindowSetSize(Window& w, double width, double height, bool) {
-    NSWindow* native = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(handle(w));
+    NSWindow* native = (__bridge NSWindow*)(void*)sapp_tc_window_macos_get_window(handle(w));
     if (native) [native setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
 }
-void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_window_macos_get_window(handle(w)), x, y); }
-IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_window_macos_get_window(handle(w))); }
+void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_tc_window_macos_get_window(handle(w)), x, y); }
+IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_tc_window_macos_get_window(handle(w))); }
 void nativeWindowBringToFront(Window& w) {
-    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(handle(w));
+    NSWindow* window = (__bridge NSWindow*)sapp_tc_window_macos_get_window(handle(w));
     if (window) {
         [NSApp activateIgnoringOtherApps:YES];
         if ([window isMiniaturized]) [window deminiaturize:nil];
@@ -101,7 +101,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);
-        st->win = sapp_create_window(&d);
+        st->win = sapp_tc_create_window(&d);
     }
     if (st->win.id == 0) {
         win->native_ = nullptr;

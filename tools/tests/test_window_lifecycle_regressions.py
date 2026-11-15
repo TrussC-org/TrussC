@@ -28,8 +28,8 @@ def main():
     rejection = constructor[constructor.index('_sapp_tc_creation_transaction creation('):
                             constructor.index('w->ready = true;')]
     android = native[native.index('/* ---- multi-window API: explicit platform gap on Android') :]
-    android = android[:android.index('void sapp_window_set_title(')]
-    query = body(android, 'bool sapp_window_occluded(')
+    android = android[:android.index('void sapp_tc_window_set_title(')]
+    query = body(android, 'bool sapp_tc_window_occluded(')
     message_handler = body(native, '_SOKOL_PRIVATE int _sapp_tc_android_main_cb(')
     messages = message_handler[message_handler.index('case _SOKOL_ANDROID_MSG_RESUME:'):
                                message_handler.index('case _SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW:')]

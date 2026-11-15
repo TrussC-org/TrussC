@@ -175,7 +175,7 @@ int main(int argc,char** argv) {
     auto* first=create(2);auto* second=create();auto* third=create();
     intervalCalls.clear();
     check("steady role",_sapp_tc_x11_update_pacer()==first && intervalCalls.empty());
-    first->iconified=true;second->wake_on_input=false; // As sapp_create_window creates secondaries.
+    first->iconified=true;second->wake_on_input=false; // As sapp_tc_create_window creates secondaries.
     check("minimized handoff",_sapp_tc_x11_update_pacer()==second);
     check("new pacer wakes on input",second->wake_on_input);
     check("hidden demotion deferred; promote once",intervalCalls==std::vector<std::string>{"2:1"} && first->swap_interval_pending);

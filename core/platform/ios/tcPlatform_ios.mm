@@ -447,10 +447,10 @@ Location getLocation() {
 // ---------------------------------------------------------------------------
 // iOS immersive mode: hide status bar
 } // namespace trussc (temporarily close for extern)
-extern bool _sapp_ios_immersive_mode;
+extern bool _sapp_tc_ios_immersive_mode;
 namespace trussc {
 void setImmersiveMode(bool enabled) {
-    _sapp_ios_immersive_mode = enabled;
+    _sapp_tc_ios_immersive_mode = enabled;
     // Tell UIKit to re-query prefersStatusBarHidden
     UIWindow* window = nil;
     for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
@@ -465,7 +465,7 @@ void setImmersiveMode(bool enabled) {
         [window.rootViewController setNeedsUpdateOfHomeIndicatorAutoHidden];
     }
 }
-bool getImmersiveMode() { return _sapp_ios_immersive_mode; }
+bool getImmersiveMode() { return _sapp_tc_ios_immersive_mode; }
 
 // ---------------------------------------------------------------------------
 // Keep screen on
@@ -485,7 +485,7 @@ bool getKeepScreenOn() { return keepScreenOn_; }
 // Orientation
 // ---------------------------------------------------------------------------
 void setOrientation(Orientation mask) {
-    sapp_ios_set_supported_orientations(static_cast<uint32_t>(mask));
+    sapp_tc_ios_set_supported_orientations(static_cast<uint32_t>(mask));
 }
 
 void bringWindowToFront() {

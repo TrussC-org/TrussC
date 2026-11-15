@@ -57,17 +57,17 @@ namespace internal {
 namespace {
 sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
 }
-void nativeWindowSetTitle(Window& w, const char* title) { sapp_window_set_title(handle(w), title); }
+void nativeWindowSetTitle(Window& w, const char* title) { sapp_tc_window_set_title(handle(w), title); }
 void nativeWindowSetFullscreen(Window& w, bool full) { sapp_tc_window_set_fullscreen(handle(w), full); }
 uint32_t nativeWindowFullscreenPhase(const Window& w) { return sapp_tc_window_fullscreen_phase(handle(w)); }
 void nativeWindowToggleFullscreen(Window& w) { sapp_tc_window_toggle_fullscreen(handle(w)); }
 void nativeWindowSetSize(Window& w, double width, double height, bool) {
-    setWindowSizeWin32(sapp_window_win32_get_hwnd(handle(w)), width, height);
+    setWindowSizeWin32(sapp_tc_window_win32_get_hwnd(handle(w)), width, height);
 }
-void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_window_win32_get_hwnd(handle(w)), x, y); }
-IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_window_win32_get_hwnd(handle(w))); }
+void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_tc_window_win32_get_hwnd(handle(w)), x, y); }
+IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_tc_window_win32_get_hwnd(handle(w))); }
 void nativeWindowBringToFront(Window& w) {
-    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(handle(w));
+    HWND hwnd = (HWND)sapp_tc_window_win32_get_hwnd(handle(w));
     if (!hwnd) return;
     if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);   // SetForegroundWindow keeps it minimised
     SetForegroundWindow(hwnd);
@@ -98,7 +98,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);
-        st->win = sapp_create_window(&d);
+        st->win = sapp_tc_create_window(&d);
     }
     if (st->win.id == 0) {
         win->native_ = nullptr;

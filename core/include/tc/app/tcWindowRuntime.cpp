@@ -1040,17 +1040,17 @@ sg_swapchain acquireSwapchain(sapp_window handle, void*) {
     sapp_tc_window_metadata metadata{};
     sg_swapchain sc{};
 #if defined(SOKOL_METAL)
-    sc.metal.current_drawable = sapp_window_metal_current_drawable(handle);
+    sc.metal.current_drawable = sapp_tc_window_metal_current_drawable(handle);
     if (!sc.metal.current_drawable) return {};
-    sc.metal.depth_stencil_texture = sapp_window_metal_depth_stencil_texture(handle);
-    sc.metal.msaa_color_texture = sapp_window_metal_msaa_color_texture(handle);
+    sc.metal.depth_stencil_texture = sapp_tc_window_metal_depth_stencil_texture(handle);
+    sc.metal.msaa_color_texture = sapp_tc_window_metal_msaa_color_texture(handle);
 #elif defined(SOKOL_D3D11)
-    sc.d3d11.render_view = sapp_window_d3d11_render_view(handle);
+    sc.d3d11.render_view = sapp_tc_window_d3d11_render_view(handle);
     if (!sc.d3d11.render_view) return {};
-    sc.d3d11.resolve_view = sapp_window_d3d11_resolve_view(handle);
-    sc.d3d11.depth_stencil_view = sapp_window_d3d11_depth_stencil_view(handle);
+    sc.d3d11.resolve_view = sapp_tc_window_d3d11_resolve_view(handle);
+    sc.d3d11.depth_stencil_view = sapp_tc_window_d3d11_depth_stencil_view(handle);
 #else
-    sc.gl.framebuffer = sapp_window_gl_framebuffer(handle);
+    sc.gl.framebuffer = sapp_tc_window_gl_framebuffer(handle);
 #endif
     // Acquiring a drawable can absorb an external resize (notably Retina).
     // Read its metadata afterwards, so the pass has one native size snapshot.
@@ -1228,7 +1228,7 @@ void refreshSelectedWindowMetadata() {
         metadata.fb_width = sapp_width(); metadata.fb_height = sapp_height();
         metadata.dpi_scale = sapp_dpi_scale(); metadata.sample_count = sapp_sample_count();
         metadata.color_format = sapp_color_format(); metadata.depth_format = sapp_depth_format();
-        metadata.trust_hidden_signals = true; metadata.occluded = sapp_window_occluded({0});
+        metadata.trust_hidden_signals = true; metadata.occluded = sapp_tc_window_occluded({0});
         metadata.drawable_available = metadata.fb_width > 0 && metadata.fb_height > 0;
         metadata.source_interval = sapp_frame_duration();
         publishWindowMetadata(*window, metadata);
@@ -2139,13 +2139,13 @@ void windowTick(sapp_window handle, void* user) noexcept {
     bool drawn = false;
     steps.run("native window tick", [&] {
         if (auto* window = static_cast<Window*>(user)) {
-            const double duration = supportsSecondaryWindows() ? sapp_window_frame_duration(handle) : sapp_frame_duration();
+            const double duration = supportsSecondaryWindows() ? sapp_tc_window_frame_duration(handle) : sapp_frame_duration();
             drawn = enterWindowTick(*window, handle, windowClockNow(), duration);
         }
     });
     if (!drawn) {
         if constexpr (supportsSecondaryWindows()) sapp_tc_window_skip_present(handle);
-        else sapp_skip_present();
+        else sapp_tc_skip_present();
     }
 }
 void bootstrapWindow(Window& target, void (*bootstrap)()) {

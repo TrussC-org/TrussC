@@ -62,7 +62,7 @@ struct Main : tc::App {
         secondary->setApp<Secondary>();
         const auto handle = tc::internal::WindowRequestAccess::binding(*secondary).handle;
         auto* display = (Display*)sapp_x11_get_display();
-        const auto native = (::Window)(uintptr_t)sapp_window_x11_get_window(handle);
+        const auto native = (::Window)(uintptr_t)sapp_tc_window_x11_get_window(handle);
         // Emulate a WM clamp between creation and the first native tick. Also
         // inject its ConfigureNotify; the real drawable and notification agree.
         XResizeWindow(display, native, 100, 60);

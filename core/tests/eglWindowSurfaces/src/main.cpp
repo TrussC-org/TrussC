@@ -132,8 +132,8 @@ bool captureWindowsReady() noexcept {
     auto* display = (Display*)sapp_x11_get_display();
     const ::Window windows[] = {
         (::Window)(uintptr_t)sapp_x11_get_window(),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(greenWindow)
+        (::Window)(uintptr_t)sapp_tc_window_x11_get_window(redWindow),
+        (::Window)(uintptr_t)sapp_tc_window_x11_get_window(greenWindow)
     };
     int x[3]{}, y[3]{};
     XWindowAttributes attributes[3]{};
@@ -245,7 +245,7 @@ void sendKey(Display* display, sapp_window window, KeySym symbol) noexcept {
     XEvent key{};
     key.xkey.type = KeyPress;
     key.xkey.display = display;
-    key.xkey.window = (::Window)(uintptr_t)sapp_window_x11_get_window(window);
+    key.xkey.window = (::Window)(uintptr_t)sapp_tc_window_x11_get_window(window);
     key.xkey.root = DefaultRootWindow(display);
     key.xkey.keycode = XKeysymToKeycode(display, symbol);
     key.xkey.same_screen = True;
@@ -266,19 +266,19 @@ void init() noexcept {
     desc.event_cb = event;
     desc.close_cb = closeRequested;
     desc.title = "EGL red";
-    redWindow = sapp_create_window(&desc);
+    redWindow = sapp_tc_create_window(&desc);
     desc.title = "EGL green";
     desc.no_high_dpi = false;
-    greenWindow = sapp_create_window(&desc);
+    greenWindow = sapp_tc_create_window(&desc);
     check("two secondaries created", redWindow.id && greenWindow.id && redWindow.id != greenWindow.id);
     if (!redWindow.id || !greenWindow.id) { sapp_quit(); return; }
     auto* display = (Display*)sapp_x11_get_display();
     XMoveWindow(display, (::Window)(uintptr_t)sapp_x11_get_window(), 0, 0);
-    XMoveWindow(display, (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow), 160, 0);
-    XMoveWindow(display, (::Window)(uintptr_t)sapp_window_x11_get_window(greenWindow), 320, 0);
+    XMoveWindow(display, (::Window)(uintptr_t)sapp_tc_window_x11_get_window(redWindow), 160, 0);
+    XMoveWindow(display, (::Window)(uintptr_t)sapp_tc_window_x11_get_window(greenWindow), 320, 0);
     XSync(display, False);
-    check("per-window DPI follows each creation request", sapp_window_dpi_scale(redWindow) == 1.0f &&
-        sapp_window_dpi_scale(greenWindow) == sapp_dpi_scale());
+    check("per-window DPI follows each creation request", sapp_tc_window_dpi_scale(redWindow) == 1.0f &&
+        sapp_tc_window_dpi_scale(greenWindow) == sapp_dpi_scale());
     check("creation restores caller surface", eglGetCurrentSurface(EGL_DRAW) == mainSurface);
 }
 
@@ -298,8 +298,8 @@ void frame() noexcept {
         const int redBefore = redDraws;
         trussc::internal::tickX11WindowForTests(greenWindow);
         check("green presents independently", redDraws == redBefore && greenDraws > 0);
-        captureFront(sapp_window_x11_get_window(redWindow), capturePaths[1].c_str(), 0);
-        captureFront(sapp_window_x11_get_window(greenWindow), capturePaths[2].c_str(), 1);
+        captureFront(sapp_tc_window_x11_get_window(redWindow), capturePaths[1].c_str(), 0);
+        captureFront(sapp_tc_window_x11_get_window(greenWindow), capturePaths[2].c_str(), 1);
         sapp_tc_gl_make_current(greenWindow);
         const EGLSurface greenSurface = eglGetCurrentSurface(EGL_DRAW);
         const EGLDisplay display = eglGetCurrentDisplay();
@@ -313,7 +313,7 @@ void frame() noexcept {
             eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE && eglGetCurrentSurface(EGL_READ) == EGL_NO_SURFACE);
         eglMakeCurrent(display, mainSurface, mainSurface, sharedContext);
         auto* xdisplay = (Display*)sapp_x11_get_display();
-        XResizeWindow(xdisplay, (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow), 183, 71);
+        XResizeWindow(xdisplay, (::Window)(uintptr_t)sapp_tc_window_x11_get_window(redWindow), 183, 71);
         XSync(xdisplay, False);
         const bool resized = waitForGeometry([] {
             trussc::internal::tickX11WindowForTests(redWindow);
@@ -326,7 +326,7 @@ void frame() noexcept {
         sendKey(xdisplay, greenWindow, XK_b);
         XEvent close{};
         close.xclient.type = ClientMessage;
-        close.xclient.window = (::Window)(uintptr_t)sapp_window_x11_get_window(greenWindow);
+        close.xclient.window = (::Window)(uintptr_t)sapp_tc_window_x11_get_window(greenWindow);
         close.xclient.message_type = XInternAtom(xdisplay, "WM_PROTOCOLS", False);
         close.xclient.format = 32;
         close.xclient.data.l[0] = (long)XInternAtom(xdisplay, "WM_DELETE_WINDOW", False);
@@ -340,13 +340,13 @@ void frame() noexcept {
         trussc::internal::tickX11WindowForTests(greenWindow);
         check("X11 resize routes to its window", redResizes == 1 && greenResizes == 0 &&
             lastRedWidth == 183 && lastRedHeight == 71 &&
-            sapp_window_framebuffer_width(redWindow) == 183 && sapp_window_framebuffer_height(redWindow) == 71);
+            sapp_tc_window_framebuffer_width(redWindow) == 183 && sapp_tc_window_framebuffer_height(redWindow) == 71);
         check("X11 close routes to its window", greenCloses == 1);
         sapp_window_desc spareDesc{};
         spareDesc.width = spareDesc.height = 32;
         spareDesc.title = "non-current destroy";
-        const sapp_window spare = sapp_create_window(&spareDesc);
-        check("non-current destroy fixture created", sapp_window_valid(spare));
+        const sapp_window spare = sapp_tc_create_window(&spareDesc);
+        check("non-current destroy fixture created", sapp_tc_window_valid(spare));
         const EGLDisplay display = eglGetCurrentDisplay();
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         const unsigned beforeDestroy = makeCurrentCalls;
@@ -360,16 +360,16 @@ void frame() noexcept {
         const int redBeforeClose = redDraws;
         trussc::internal::tickX11WindowForTests(redWindow);
         check("closing caller during another tick preserves the executing window",
-            !sapp_window_valid(greenWindow) && sapp_window_valid(redWindow) && redDraws == redBeforeClose + 1);
-        captureFront(sapp_window_x11_get_window(redWindow), capturePaths[1].c_str(), 1);
+            !sapp_tc_window_valid(greenWindow) && sapp_tc_window_valid(redWindow) && redDraws == redBeforeClose + 1);
+        captureFront(sapp_tc_window_x11_get_window(redWindow), capturePaths[1].c_str(), 1);
         // A closed caller has no surface to restore. A surviving window
         // selects its own surface on its next tick.
         trussc::internal::tickX11WindowForTests(redWindow);
         check("remaining secondary renders on its next tick", redDraws == redBeforeClose + 2);
-        captureFront(sapp_window_x11_get_window(redWindow), capturePaths[1].c_str(), 0);
+        captureFront(sapp_tc_window_x11_get_window(redWindow), capturePaths[1].c_str(), 0);
         sapp_tc_gl_make_current(redWindow);
         sapp_destroy_window(redWindow);
-        check("closing current secondary removes its native window", !sapp_window_valid(redWindow));
+        check("closing current secondary removes its native window", !sapp_tc_window_valid(redWindow));
         // Return to the native loop: verify the survivor in its next ordinary
         // frame callback, after the backend has selected its surface again.
     } else {
@@ -411,7 +411,7 @@ void mainProbeInit() noexcept {
         "Drag files here; type text; click/wheel while locked; verify anchor and raw deltas in log.");
 }
 void mainProbeFrame() noexcept {
-    if (mainIdle && !mainDirty) { sapp_skip_present(); return; }
+    if (mainIdle && !mainDirty) { sapp_tc_skip_present(); return; }
     mainDirty = false;
     clearColor(0, .25f, .5f);
     if (inputTime != 0) {

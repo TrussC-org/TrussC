@@ -70,7 +70,7 @@ def generate(backend, variant):
     descriptor = body(HEADER, 'inline sapp_window_desc buildNativeWindowDescriptor(')
     # Pick the correct same-named public entry, with no last-occurrence shortcut.
     entry_region = NATIVE[NATIVE.index('static _sapp_tc_window_t* _sapp_tc_' + port + '_create_window'):]
-    entry = body(entry_region, 'sapp_window sapp_create_window(')
+    entry = body(entry_region, 'sapp_window sapp_tc_create_window(')
     constructor_name = '_sapp_tc_' + port + ('_create_window_ex' if backend == 'mac' else '_create_window')
     constructor = body(NATIVE, 'static _sapp_tc_window_t* ' + constructor_name + '(')
     rate_helper = body(NATIVE, 'static void _sapp_tc_mac_update_frame_rate(') if backend == 'mac' else ''

@@ -271,14 +271,14 @@ static void event(const sapp_event* ev) {
     }
 }
 static void frame() {
-    if (flood) { ++frames; sapp_skip_present(); return; }
+    if (flood) { ++frames; sapp_tc_skip_present(); return; }
     if (++frames == 1) {
         firstFrame = now; now += work;
         if (cancelQuit) sapp_request_quit();
         if (buffered) pending = 1;
-        if (skip) sapp_skip_present();
+        if (skip) sapp_tc_skip_present();
     } else {
-        nextFrame = now; sapp_skip_present(); sapp_quit();
+        nextFrame = now; sapp_tc_skip_present(); sapp_quit();
     }
 }
 static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display* display) {
@@ -415,15 +415,15 @@ int main() {
                 _sapp_tc_x11_tick(target);
                 check("native hidden admission and trust follow data for either role",
                     frames == 1 && swaps == int(!trust));
-                check("untrusted hidden flags report visible", sapp_window_occluded({target->win_id}) == trust &&
-                    (target != &main || sapp_window_occluded({0}) == trust));
+                check("untrusted hidden flags report visible", sapp_tc_window_occluded({target->win_id}) == trust &&
+                    (target != &main || sapp_tc_window_occluded({0}) == trust));
             }
         }
         target->occluded = target->iconified = false;
         target->trust_hidden_signals = true;
     }
     swaps = 0;
-    sapp_skip_present();
+    sapp_tc_skip_present();
     _sapp_tc_x11_tick(&secondary);
     _sapp_tc_x11_tick(&main);
     check("main skip does not suppress secondary present", swaps == 1 && presentedSurface == secondary.drawable);

@@ -45,7 +45,7 @@ void check(const char* label, bool okay) {
 }
 #ifdef VISIBILITY_X11
 unsigned long xwindow(Window& window) {
-    return (unsigned long)(uintptr_t)sapp_window_x11_get_window(internal::WindowRequestAccess::binding(window).handle);
+    return (unsigned long)(uintptr_t)sapp_tc_window_x11_get_window(internal::WindowRequestAccess::binding(window).handle);
 }
 void checkUnmapped(Window& window) {
     check("X11 hidden window is unmapped", visibilityWaitMapped(sapp_x11_get_display(), xwindow(window), false));

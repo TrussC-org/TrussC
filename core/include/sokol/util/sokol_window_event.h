@@ -22,6 +22,7 @@ static inline bool _sapp_tc_event_wakes(sapp_event_type type) {
     }
     return false;
 }
+// [TrussC] Shared native fork record.
 struct _sapp_tc_event_result {
     bool delivered = false;
     bool client_threw = false;
@@ -71,6 +72,7 @@ static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event
 // The local record is only a view of that state; it owns no native resources.
 template<class State>
 static bool _sapp_tc_deliver_single_event(State& state, const sapp_event* input) noexcept {
+    // [TrussC] Shared native fork record.
     struct Client {
         uint32_t win_id = 0;
         sapp_window_desc desc{};

@@ -72,7 +72,7 @@ double seenWidth = 0, seenHeight = 0;
 int calls = 0;
 const void* seenHandle = nullptr;
 const void* sapp_win32_get_hwnd() { return reinterpret_cast<void*>(1); }
-const void* sapp_window_win32_get_hwnd(int win) { return reinterpret_cast<void*>(win); }
+const void* sapp_tc_window_win32_get_hwnd(int win) { return reinterpret_cast<void*>(win); }
 float sapp_dpi_scale() { return dpi; }
 bool sapp_isvalid() { return true; }
 bool sapp_is_fullscreen() { return false; }
@@ -190,7 +190,7 @@ def creation_source(backend, *, native_path=None):
         # (including the target-DPI correction condition and SetWindowPos call).
         common = body(native, 'static _sapp_tc_window_t* _sapp_tc_win32_create_window(')
         secondary_entry = body(before(after(native, main), '\nvoid sapp_destroy_window('),
-                               'sapp_window sapp_create_window(')
+                               'sapp_window sapp_tc_create_window(')
         for entry in (main, secondary_entry):
             after(entry, '_sapp_tc_win32_create_window(&native)')
         after(common, '_sapp_tc_win32_create_native_window(')
@@ -204,7 +204,7 @@ def creation_source(backend, *, native_path=None):
         common = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(')
         wrapper = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(')
         secondary_entry = body(before(after(native, main), '\nvoid sapp_destroy_window('),
-                               'sapp_window sapp_create_window(')
+                               'sapp_window sapp_tc_create_window(')
         # Replay every statement from descriptor initialization to the actual
         # constructor call, including any overwrite after normalization. Only
         # native API types/services are stubbed, and the ObjC bridge is erased.
@@ -290,7 +290,7 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('main', 'static bool _sapp_tc_mac_create_main_window(',
              'native.window = _sapp_tc_normalize_main_window(d);',
              '\n    native.window._tc_pixel_width = native.window._tc_pixel_height = 0;', ('main',)),
-            ('secondary', 'sapp_window sapp_create_window(',
+            ('secondary', 'sapp_window sapp_tc_create_window(',
              'native.window = _sapp_tc_normalize_window(desc);',
              '\n    native.window._tc_pixel_width = native.window._tc_pixel_height = 0;', ('secondary',)),
             ('common', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(',
@@ -358,7 +358,7 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('win', '    sapp_window_desc d = internal::buildNativeWindowDescriptor('),
             ('win', 'static bool _sapp_tc_win32_create_main_window('),
             ('win', 'static _sapp_tc_window_t* _sapp_tc_win32_create_window('),
-            ('win', 'sapp_window sapp_create_window('),
+            ('win', 'sapp_window sapp_tc_create_window('),
             ('win', '    native.window = '),
             ('win', '_sapp_tc_win32_create_window(&native)'),
             ('win', '    w->desc = '),
@@ -369,7 +369,7 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('mac', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex('),
             ('mac', 'static bool _sapp_tc_mac_create_main_window('),
             ('mac', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window('),
-            ('mac', 'sapp_window sapp_create_window('),
+            ('mac', 'sapp_window sapp_tc_create_window('),
             ('mac', '    _sapp_tc_native_desc native = {};'),
             ('mac', 'native.window = _sapp_tc_normalize_main_window(d);'),
             ('mac', 'native.window = _sapp_tc_normalize_window(desc);'),
