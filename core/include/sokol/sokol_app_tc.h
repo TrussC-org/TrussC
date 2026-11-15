@@ -919,7 +919,7 @@
     'Graceful exit' means that the application-provided cleanup callback will
     be called before the application quits.
 
-    On native desktop platforms sokol_app.h provides more control over the
+    On native desktop platforms and Android sokol_app.h provides more control over the
     application-quit-process. It's possible to initiate a 'programmatic quit'
     from the application code, and a quit initiated by the application user can
     be intercepted (for instance to show a custom dialog box).
@@ -1518,6 +1518,7 @@ typedef enum sapp_event_type {
     SAPP_EVENTTYPE_QUIT_REQUESTED,
     SAPP_EVENTTYPE_CLIPBOARD_PASTED,
     SAPP_EVENTTYPE_FILES_DROPPED,
+    SAPP_EVENTTYPE_ANDROID_BACK,
     SAPP_EVENTTYPE_TC_DEVICE_LOST,      // TrussC: shared D3D11 device lost (once per run)
     SAPP_EVENTTYPE_TC_REDRAW_REQUESTED, // TrussC: native content invalidation
     SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED, // TrussC: native resize needs a follow-up present
@@ -3365,7 +3366,7 @@ typedef struct {
     bool init_called;
     bool constructing; // [TrussC] client publication uses the shared creation transaction
     bool cleanup_called;
-    bool quit_requested;        /* inert: lifecycle is activity-driven */
+    bool quit_requested;        /* cancellable Android programmatic quit */
     bool quit_ordered;
     bool event_consumed;
     bool html5_ask_leave_site;  /* inert */
@@ -14346,11 +14347,13 @@ _SOKOL_PRIVATE void _sapp_tc_android_cleanup_egl_surface(void) {
     }
 }
 
-_SOKOL_PRIVATE void _sapp_tc_android_app_event(sapp_event_type type) {
+_SOKOL_PRIVATE bool _sapp_tc_android_app_event(sapp_event_type type) {
+    bool event_consumed = false;
     if (_sapp_tc_events_enabled()) {
         _sapp_tc_init_event(type);
-        _sapp_tc_call_event(&_sapp_tc.event);
+        event_consumed = _sapp_tc_call_event(&_sapp_tc.event);
     }
+    return event_consumed;
 }
 
 _SOKOL_PRIVATE void _sapp_tc_android_update_dimensions(ANativeWindow* window, bool force_update) {
@@ -14516,15 +14519,13 @@ _SOKOL_PRIVATE bool _sapp_tc_android_key_event(const AInputEvent* e) {
         return false;
     }
     if (AKeyEvent_getKeyCode(e) == AKEYCODE_BACK) {
-        /* [TrussC tettou771] Patched: BACK key no longer triggers shutdown.
-           Upstream calls _sapp_tc_android_shutdown() here, which destroys the
-           EGL surface and invokes cleanup_cb. Under screen pinning, the OS
-           blocks ANativeActivity_finish(), so the process keeps running but
-           the EGL context is gone — the app appears frozen. Consume the
-           event without shutdown. Long-term fix: implement
-           SAPP_EVENTTYPE_QUIT_REQUESTED for Android (already supported on
-           macOS/Windows/Linux). */
-        return true;
+        // [TrussC tettou771] Former unconditional consumption replaced by
+        // upstream b633722: let Android handle Back unless the event is consumed.
+        const bool key_up = AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_UP;
+        const bool cancelled = 0 != (AKeyEvent_getFlags(e) & AKEY_EVENT_FLAG_CANCELED);
+        if (key_up && !cancelled) {
+            return _sapp_tc_android_app_event(SAPP_EVENTTYPE_ANDROID_BACK);
+        }
     }
     return false;
 }
@@ -14645,7 +14646,7 @@ _SOKOL_PRIVATE int _sapp_tc_android_main_cb(int fd, int events, void* data) {
 _SOKOL_PRIVATE bool _sapp_tc_android_should_update(void) {
     bool is_in_front = _sapp_tc.android.has_resumed && _sapp_tc.android.has_focus;
     bool has_surface = _sapp_tc.android.surface != EGL_NO_SURFACE;
-    return is_in_front && has_surface;
+    return !_sapp_tc.quit_ordered && is_in_front && has_surface;
 }
 
 #if __ANDROID_API__ >= 29
@@ -14704,8 +14705,19 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
     pthread_cond_broadcast(&_sapp_tc.android.pt.cond);
     pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
 
-    /* main loop */
+    /* upstream b633722: order quit once, then wait for Activity destruction. */
+    bool quit_handled = false;
     while (!_sapp_tc.android.is_thread_stopping) {
+        if (_sapp_tc.quit_requested && !_sapp_tc.quit_ordered) {
+            _sapp_tc_android_app_event(SAPP_EVENTTYPE_QUIT_REQUESTED);
+            if (_sapp_tc.quit_requested) {
+                _sapp_tc.quit_ordered = true;
+            }
+        }
+        if (_sapp_tc.quit_ordered && !quit_handled) {
+            _sapp_tc_android_shutdown();
+            quit_handled = true;
+        }
         #if __ANDROID_API__ >= 29
             if (_sapp_tc.android.choreographer != NULL) {
                 // Posts _sapp_tc_android_frame_callback with the choreographer to start our frame
@@ -14717,7 +14729,9 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
                 }
                 // Blocks until the next event. We don't need a while loop here because we're
                 // already being driven by the outer while loop.
-                ALooper_pollOnce(-1, NULL, NULL, NULL);
+                // [TrussC] A callback may have requested quit before this poll.
+                const bool quit_pending = !quit_handled && (_sapp_tc.quit_requested || _sapp_tc.quit_ordered);
+                ALooper_pollOnce(quit_pending ? 0 : -1, NULL, NULL, NULL);
                 continue;
             }
         #endif
@@ -14729,7 +14743,8 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
         /* process all events (or stop early if app is requested to quit) */
         bool process_events = true;
         while (process_events && !_sapp_tc.android.is_thread_stopping) {
-            bool block_until_event = !_sapp_tc.android.is_thread_stopping && !_sapp_tc_android_should_update();
+            const bool quit_pending = !quit_handled && (_sapp_tc.quit_requested || _sapp_tc.quit_ordered);
+            const bool block_until_event = !_sapp_tc.android.is_thread_stopping && !quit_pending && !_sapp_tc_android_should_update();
             process_events = ALooper_pollOnce(block_until_event ? -1 : 0, NULL, NULL, NULL) == ALOOPER_POLL_CALLBACK;
         }
     }

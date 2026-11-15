@@ -28,6 +28,9 @@ public:
     // Exit request (can be canceled)
     Event<ExitRequestEventArgs> exitRequested;  // Set args.cancel = true to cancel
 
+    // Android Back only; cancel skips the platform's default Back behavior.
+    Event<BackPressedEventArgs> backPressed;
+
     // Shared D3D11 device lost (once); cancel suppresses the default failure exit.
     Event<DeviceLostEventArgs> deviceLost;
 
