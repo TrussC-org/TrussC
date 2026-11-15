@@ -172,7 +172,7 @@ setFps(EVENT_DRIVEN);  // Redraw only on demand
 setIndependentFps(60, EVENT_DRIVEN);   // call redraw() on every visible change
 ```
 
-On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
 
 ## Drawing
 
@@ -4999,6 +4999,8 @@ unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // 
 unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
 unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
 float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
+float VideoPlayer::getRotation() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in radians.
+int VideoPlayer::getRotationDeg() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in degrees.
 int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.

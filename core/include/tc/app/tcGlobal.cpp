@@ -994,6 +994,7 @@ void RenderTarget::flushLayers() {
     for (auto& page : fontAtlasUploads) FontAtlasManager::publishAtlas(*page);
     prepareDeferredShaderDraws(deferredShaderDraws);
     bool appliedScissor = false;
+    size_t pbrIndex = 0;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
         for (auto& draw : deferredShaderDraws) {
@@ -1005,8 +1006,11 @@ void RenderTarget::flushLayers() {
             }
             executeDeferredShaderDraw(draw);
         }
-        for (auto& draw : deferredPbrDraws)
-            if (draw.layerId == layer) getPbrPipeline().executePbrDraw(draw.cmd);
+        // PBR draws are appended in layer order; consume each recording once.
+        while (pbrIndex < deferredPbrDraws.size() && deferredPbrDraws[pbrIndex].layerId == layer) {
+            getPbrPipeline().executePbrDraw(deferredPbrDraws[pbrIndex].cmd);
+            ++pbrIndex;
+        }
         for (auto& draw : deferredPointDraws)
             if (draw.layerId == layer) executePointDraw(draw.cmd);
     }

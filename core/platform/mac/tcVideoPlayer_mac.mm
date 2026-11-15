@@ -10,6 +10,7 @@
 #import <CoreVideo/CoreVideo.h>
 
 #include "TrussC.h"
+#include "tc/video/internal/tcVideoRotation.h"
 #include "../metal/tcVideoAsyncLoad.h"
 
 // Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
@@ -60,6 +61,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
 @property (nonatomic, strong) AVPlayerItemVideoOutput* videoOutput;
 @property (nonatomic, strong) AVAsset* asset;
 
+@property (nonatomic, assign) int rotationDeg;
 @property (nonatomic, assign) NSInteger videoWidth;
 @property (nonatomic, assign) NSInteger videoHeight;
 @property (nonatomic, assign) float frameRate;
@@ -216,20 +218,23 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
         status_->warn(); self.asset = nil; return NO;
     }
 
-    // Handle transform (rotation)
     CGAffineTransform transform = videoTrack.preferredTransform;
-    if (transform.b == 1.0 && transform.c == -1.0) {
-        // 90 degrees rotation
-        _videoWidth = (NSInteger)naturalSize.height;
-        _videoHeight = (NSInteger)naturalSize.width;
-    } else if (transform.b == -1.0 && transform.c == 1.0) {
-        // -90 degrees rotation
-        _videoWidth = (NSInteger)naturalSize.height;
-        _videoHeight = (NSInteger)naturalSize.width;
-    } else {
-        _videoWidth = (NSInteger)naturalSize.width;
-        _videoHeight = (NSInteger)naturalSize.height;
+    const auto rotation = trussc::internal::VideoRotation::fromMatrix(
+        transform.a, transform.b, transform.c, transform.d);
+    _rotationDeg = rotation.degrees;
+    int outputWidth = int(naturalSize.width), outputHeight = int(naturalSize.height);
+    rotation.size(outputWidth, outputHeight);
+    const CGSize outputSize = CGSizeMake(outputWidth, outputHeight);
+    // Bound (external input): quarter turns/reflection preserve the encoded area; size both CPU buffers from the admitted output layout.
+    size_t outputBytes = 0;
+    if (!std::isfinite(outputSize.width) || !std::isfinite(outputSize.height) ||
+        outputSize.width <= 0 || outputSize.height <= 0 ||
+        outputSize.width > INT_MAX / 4 || outputSize.height > INT_MAX ||
+        !trussc::internal::VideoDecodeLimits::rgba(int64_t(outputSize.width), int64_t(outputSize.height), outputBytes)) {
+        status_->reject(outputBytes, 0); self.asset = nil; return NO;
     }
+    _videoWidth = (NSInteger)outputSize.width;
+    _videoHeight = (NSInteger)outputSize.height;
 
     _frameRate = videoTrack.nominalFrameRate;
     _duration = (float)CMTimeGetSeconds(self.asset.duration);
@@ -267,6 +272,10 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
 
     // Create player item
     self.playerItem = [AVPlayerItem playerItemWithAsset:self.asset];
+    if (rotation.active()) {
+        // Apply the same quarter turn/reflection as Linux before copying frames.
+        self.playerItem.videoComposition = trussc::internal::videoDisplayComposition(self.asset, videoTrack);
+    }
     if (!self.playerItem) {
         trussc::logError("VideoPlayer") << "Failed to create player item";
         self.asset = nil;
@@ -313,7 +322,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
                                                object:self.playerItem];
 
     // Allocate pixel buffer (RGBA)
-    _pixelBufferSize = metadataBytes;
+    _pixelBufferSize = outputBytes;
     _pixelBuffer = new (std::nothrow) unsigned char[_pixelBufferSize];
     if (!_pixelBuffer) { [self close]; return NO; }
     memset(_pixelBuffer, 0, _pixelBufferSize);
@@ -747,6 +756,7 @@ bool VideoPlayer::loadPreparedPlatform(const fs::path& path, void* asset) {
     // Get video dimensions
     width_ = (int)impl.videoWidth;
     height_ = (int)impl.videoHeight;
+    rotationDeg_ = impl.rotationDeg;
 
     // Allocate pixel buffer
     size_t bufferSize = impl.pixelBufferSize;
@@ -1006,7 +1016,8 @@ static bool tcv_extract_frame_mac(const std::string& path, Pixels& outPixels,
         }
 
         AVAssetImageGenerator* generator = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
-        generator.appliesPreferredTrackTransform = YES;
+        generator.appliesPreferredTrackTransform = NO;
+        generator.videoComposition = internal::videoDisplayComposition(asset, track);
         if (exact) {
             // Frame-accurate: no tolerance either way.
             generator.requestedTimeToleranceBefore = kCMTimeZero;

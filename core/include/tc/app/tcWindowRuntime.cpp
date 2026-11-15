@@ -1392,11 +1392,11 @@ void deliverPendingWindowVisibilityAtReadyEntry(Window& window) {
     if (b.lastDeliveredHidden == window.isOccluded()) return;
     sapp_event event{};
     event.type = window.isOccluded() ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
-    event.window_id = b.handle.id; event.dpi_scale = b.metadata.dpi_scale;
     event.frame_count = sapp_frame_count();
     event.window_width = b.metadata.width; event.window_height = b.metadata.height;
     event.framebuffer_width = b.metadata.fb_width; event.framebuffer_height = b.metadata.fb_height;
-    convertWindowEvent(&event, window);
+    const float dpi = b.metadata.dpi_scale > 0 ? b.metadata.dpi_scale : WindowRequestAccess::context(window).dpiScale;
+    convertWindowEvent(&event, window, {dpi, b.metadata.pointer_locked, b.metadata.reliable_button_bits});
 }
 WindowEntryScope::WindowEntryScope(Window& window, bool tick, bool bootstrap, bool pendingVisibility)
     : window_(window), keepAlive_(window.hostOwner_.lock()), previous_(currentWindowCtx()),
@@ -1489,8 +1489,8 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
         }
     }
 
-    bool mouseMoveHasReliableButtonBits(const sapp_event* ev) {
-        return ev->reliable_button_bits && !ev->pointer_locked;
+    bool mouseMoveHasReliableButtonBits(const WindowEventContext& delivery) {
+        return delivery.reliableButtonBits && !delivery.pointerLocked;
     }
 
     // Call only for moves whose reliability was captured before raw listeners.
@@ -1526,7 +1526,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
     binding.explicitHideSuspended = hidden && (binding.metadata.hidden || binding.explicitHideSuspended);
     return VisibilityDelivery::RawThenTyped;
 }
-    void convertWindowEvent(const sapp_event* ev, Window& window) {
+    void convertWindowEvent(const sapp_event* ev, Window& window, const WindowEventContext& delivery) {
         auto& ctx = WindowRequestAccess::context(window);
         // Native mapping or resizing invalidates previously presented content.
         if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {
@@ -1550,13 +1550,14 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
 
         // A raw listener can change pointer lock; keep this move's original
         // button-bit reliability for the entire dispatch.
-        const bool recoverButtonsOnMove = ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && !ev->pointer_locked &&
-            (ev->button_snapshot || mouseMoveHasReliableButtonBits(ev));
+        const bool recoverButtonsOnMove = ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && !delivery.pointerLocked &&
+            (ev->button_snapshot || mouseMoveHasReliableButtonBits(delivery));
 
         // Keep this event's coordinate basis through raw-listener reentry.
-        const float dpi = ev->dpi_scale > 0 ? ev->dpi_scale : ctx.dpiScale;
+        const float dpi = std::isfinite(delivery.dpiScale) && delivery.dpiScale > 0
+            ? delivery.dpiScale : ctx.dpiScale;
         const double scale = pixelPerfectMode() ? 1.0 : 1.0 / double(dpi);
-        const bool locked = ev->pointer_locked;
+        const bool locked = delivery.pointerLocked;
         const float basis = pixelPerfectMode() ? dpi : 1.0f;
         auto finitePointer = [&](double x, double y) {
             const double px = ctx.pointerValid ? (ctx.pointerBasis == basis ? ctx.lastPointerX : ctx.pointerLogicalX * basis) : x;
@@ -1957,17 +1958,17 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
     }
 void dispatchWindowEventForTests(const sapp_event* input, Window& window) {
     if (!input) return;
-    sapp_event event = *input;
     const auto& b = WindowRequestAccess::binding(window);
-    if (!(event.dpi_scale > 0)) event.dpi_scale = WindowRequestAccess::context(window).dpiScale;
-    event.window_id = b.handle.id;
+    if ((b.operations && b.operations->readMetadata) ||
+        (!supportsSecondaryWindows() && !b.handle.id && sapp_isvalid())) {
+        enterWindowEvent(input, b.handle, &window); return;
+    }
+    // Explicit synthetic context for GPU-free test bindings, which have no native producer.
+    WindowEventContext delivery{WindowRequestAccess::context(window).dpiScale, b.metadata.pointer_locked, false};
 #if defined(_WIN32) || defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
-    event.reliable_button_bits = true;
+    delivery.reliableButtonBits = true;
 #endif
-#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(SOKOL_GLCORE) && !defined(__ANDROID__))
-    event.pointer_locked = event.pointer_locked || sapp_mouse_locked();
-#endif
-    enterWindowEvent(&event, b.handle, &window);
+    enterWindowEvent(input, b.handle, &window, &delivery);
 }
 void dispatchWindowDisplayEventForTests(const sapp_event* event, Window& window) {
     sapp_window_inject_event(WindowRequestAccess::binding(window).handle, event);
@@ -1994,13 +1995,28 @@ void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexce
     }
     enterWindowEvent(event, handle, user);
 }
-void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
+void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, const WindowEventContext* testContext) noexcept {
     // Admission belongs to the native init predicate. Desktop init callbacks
     // may synchronously deliver events, as they did through the legacy client.
     TeardownSteps steps;
     steps.run("native window event", [&] {
         auto* window = static_cast<Window*>(user);
         if (!event || !window || WindowRequestAccess::binding(*window).handle.id != handle.id) return;
+        WindowEventContext delivery{};
+        if (testContext) delivery = *testContext;
+        else {
+            // Metadata queries cannot call user code. Snapshot before WindowEntryScope,
+            // whose pending App/size/visibility callbacks may reenter or change the target.
+            const auto& b = WindowRequestAccess::binding(*window);
+            sapp_tc_window_metadata metadata{};
+            const bool read = b.operations && b.operations->readMetadata
+                ? b.operations->readMetadata(handle, b.user, metadata)
+                : sapp_tc_window_read_metadata(handle, &metadata);
+            // A failed read keeps delivering with the window's own DPI, as before
+            // step 1; desktop admission below still requires live metadata.
+            delivery = read ? WindowEventContext{metadata.dpi_scale, metadata.pointer_locked, metadata.reliable_button_bits}
+                            : WindowEventContext{WindowRequestAccess::context(*window).dpiScale, false, false};
+        }
         WindowEntryScope entry(*window, false, false, false);
         if (!entry) return;
         observeWindowVisibility(WindowRequestAccess::context(*window), event->type);
@@ -2008,7 +2024,7 @@ void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user) n
         if (!coordinator().bootstrapping && event->type != SAPP_EVENTTYPE_SUSPENDED && event->type != SAPP_EVENTTYPE_RESUMED &&
             event->type != SAPP_EVENTTYPE_ICONIFIED && event->type != SAPP_EVENTTYPE_RESTORED)
             deliverPendingWindowVisibilityAtReadyEntry(*window);
-        convertWindowEvent(event, *window);
+        convertWindowEvent(event, *window, delivery);
         if constexpr (!supportsSecondaryWindows()) {
             if (!coordinator().bootstrapping) deliverPendingWindowVisibilityAtReadyEntry(*window);
         }

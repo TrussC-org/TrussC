@@ -83,13 +83,13 @@ enum sapp_event_type { SAPP_EVENTTYPE_UNFOCUSED, SAPP_EVENTTYPE_SUSPENDED,
 struct sapp_window { unsigned id; };
 struct sapp_tc_window_metadata {
     int fb_width=0, fb_height=0, width=0, height=0, sample_count=0, color_format=0, depth_format=0;
-    float dpi_scale=1;
+    float dpi_scale=1; bool pointer_locked=false, reliable_button_bits=false;
     double source_interval=0;
     bool hidden=false, trust_hidden_signals=false, iconified=false, occluded=false, drawable_available=false;
 };
 struct Window;
 struct WindowContext {
-    Window* hostWindow=nullptr;
+    Window* hostWindow=nullptr; float dpiScale=1;
     bool isMain=true, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
@@ -131,13 +131,14 @@ void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
 ''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()').replace('trussc::internal::WindowRequestAccess::', 'WindowRequestAccess::') + r'''
 enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
 struct sapp_event {
-    sapp_event_type type{}; unsigned window_id=0; uint64_t frame_count=0;
-    float dpi_scale=1; int window_width=0,window_height=0,framebuffer_width=0,framebuffer_height=0;
+    sapp_event_type type{}; uint64_t frame_count=0;
+    int window_width=0,window_height=0,framebuffer_width=0,framebuffer_height=0;
 };
 uint64_t sapp_frame_count() { return 0; }
 std::vector<int> visibilityTrace;
 ''' + body(runtime, 'VisibilityDelivery prepareWindowVisibilityDelivery(') + r'''
-void convertWindowEvent(const sapp_event* event, Window& window) {
+struct WindowEventContext { float dpiScale; bool pointerLocked, reliableButtonBits; };
+void convertWindowEvent(const sapp_event* event, Window& window, const WindowEventContext& = {}) {
     const auto delivery=prepareWindowVisibilityDelivery(window,event->type);
     if(delivery==VisibilityDelivery::Drop)return;
     check("mobile raw listener sees authoritative getter and ctx",window.ctx.suspended==window.isOccluded());

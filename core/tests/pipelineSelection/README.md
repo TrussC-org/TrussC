@@ -27,7 +27,9 @@ readPixelsFloat(): GLES3 cannot read a float attachment as unsigned bytes.
 The dummy suite also forces buffer growth after a dimension rebuild and verifies that
 releaseSglBuffers clears all three CPU capacities and the GPU vertex buffer.
 NV12 uses generated planes through the actual VideoPlayer draw routing; no
-codec, video clock, camera or NVDEC device is needed.
+codec, video clock, camera or NVDEC device is needed. Non-square planes cover
+0/90/180/270 degrees with and without source reflection, comparing marker
+positions against CPU-oriented RGBA in an offset, scaled display rectangle.
 
 `--record` writes a separate pipeline manifest of PNGs. Its `blend-after-end.after`
 image has lazy and active rows, each with RGB (192,64,64) in both rectangles.

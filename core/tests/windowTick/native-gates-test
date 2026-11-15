@@ -216,8 +216,7 @@ code = r'''
 #include <signal.h>
 struct sapp_window { unsigned id; };
 struct sapp_event {
-    unsigned frame_count=0, window_id=0;
-    float dpi_scale=1; bool pointer_locked=false, reliable_button_bits=false;
+    unsigned frame_count=0;
     int type=0, window_width=0, window_height=0, framebuffer_width=0, framebuffer_height=0;
 };
 using sapp_event_type = int;

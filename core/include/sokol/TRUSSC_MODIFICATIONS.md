@@ -207,6 +207,7 @@ credits and lazy drawable acquisition belong to this single admission feature.
 | X11 skipped ticks #998/#1212 | Feed `_sapp_tc.refresh_period` only when `last_tick_presented` is true: `skip_present` gaps under nonblocking compositors otherwise teach a false 30 Hz display and slow interval-zero followers. |
 | X11 input #1012 | Clear delivery flags and reset the affected `earliest_next` after GLX/EGL event delivery, admitting input in the same skipped-present wait turn. Shared due-check/EGL behavior stays. |
 | Movable X11 pacer #997, Q31 D | Earliest-created ready/drawable/effectively visible window owns native vsync at N and runs first. Demote the surviving old drawable to 0, promote once, reset presentation history/deadline. Creation records the role without reapplying interval; surface renewal reapplies it. GLX EXT is per-drawable; MESA makes the intended drawable current and retains the multiwindow interval-0 timer fallback. |
+| Covered X11 pacer, known issue #1367 | Comment only at `_sapp_tc_x11_update_pacer`: on compositors that throttle covered windows (labwc/Xwayland), a covered pacer drops every window to ~1 Hz; the block is in eglMakeCurrent re-binding the pacer surface (DRI3 buffer starvation), and an interval change on that surface blocks ~3 s, so no hand-off is attempted. Behavior unchanged. |
 | X11 hidden work | Never swap hidden windows. Draw-while-hidden ON retains draw/GPU submission, OFF retains updates; both use the periodic base-refresh timer. `is_main` only selects client init. Win32/macOS and covered-window detection are unchanged. |
 | Host bridges #239 C4 (`b8e542af`, `6bb9ee00`, `df87610f`) | Desktop host turns and singleton init/event bridges keep Runtime progressing without drawing. Event 2 relocates injection/MCP with existing scheduling/dev-tool wake limits; no immediate injected-input deadline-cancel wake protocol. |
 | Skip present, historical D3D11 flicker fix | Suppress event-driven presentation without dropping owner completion. Explicit checks: D3D11, X11 GLX/EGL, Android EGL. macOS consumes the one-shot at tick boundary; gfx owns Metal presentation. iOS flag is inert; Web stores it for parity but rAF auto-presents (non-Web WebGPU present branch excluded). No WGL/Vulkan app backend. |
@@ -325,21 +326,42 @@ attach only when shown. The owner chose independent top-level windows: remove
 descriptor, native hints and corresponding teardown/visibility handling together,
 while preserving ordinary multiwindow lifetimes and hidden startup.
 
-### Native event context and retained TC notifications (#239, #258, #1262)
+### Native event context and retained TC notifications (#239, #258, #1262, #1398)
 
-**Classification:** MOVE to TrussC (planned) for six fields; KEEP essential for device loss and redraw kinds.
+**Classification:** MOVE to TrussC (event step 1 complete for target context;
+source/snapshot still planned); KEEP essential for device loss and redraw kinds.
 
-**Code locations:** `sapp_event` (`window_id`, `dpi_scale`, `pointer_locked`, `reliable_button_bits`, `source`, `button_snapshot`, `device_lost_reason`); `util/sokol_window_event.h`; `SAPP_EVENTTYPE_TC_DEVICE_LOST`, `SAPP_EVENTTYPE_TC_REDRAW_REQUESTED`, `SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED`.
+**Code locations:** `sapp_event` (`source`, `button_snapshot`, `device_lost_reason`);
+`sapp_tc_window_metadata`, `sapp_tc_window_read_metadata`;
+`util/sokol_window_event.h`; Runtime `WindowEventContext` and `enterWindowEvent`;
+`SAPP_EVENTTYPE_TC_DEVICE_LOST`, `SAPP_EVENTTYPE_TC_REDRAW_REQUESTED`,
+`SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED`.
 
-**Planned slice:** event 1 moves target ID/DPI/lock/reliability outside raw sapp_event; event 2 moves source/snapshot; event 3a marks surviving members.
+**Completed slice:** event 1 removes `window_id`, `dpi_scale`, `pointer_locked`
+and `reliable_button_bits` from raw `sapp_event` and their native stampers.
+Routing uses the callback's `sapp_window` and existing Window binding, without
+another identity field. Runtime snapshots target DPI, pointer-lock ownership
+and button-bit reliability through the private metadata boundary before any
+App/resize/visibility/raw callback, and passes that local context to conversion.
+Nested delivery cannot replace an outer event's coordinate/lock basis.
 
-The six extra fields currently duplicate binding context or TrussC injection
-state. Move all six to TrussC, snapshotting target context before raw conversion;
-keep `device_lost_reason` and the three TC kinds. Do not pursue byte-identical
-upstream events by removing required loss/resize/map notifications. The source
-and snapshot relocation is described by the injection feature below, not a
-second native event implementation. Later #1404 A/B restores the approved
-Window-owned injection surface and typed text/drop/ImGui coverage.
+Desktop metadata reads the addressed native record; EGL lock ownership checks
+both the lock flag and `lock_owner == w`. Button-bit reliability is the same
+platform capability formerly stamped on events (Win32/X11/Web true,
+AppKit/iOS/Android false); the frozen lock flag suppresses lost-release recovery
+on EGL/Web. The single-window query now accepts only handle zero and reports
+native DPI/dimensions and Web's actual lock state, with no DPI-1/unlocked Web
+fallback. Native injection still passes through the same send gate and Runtime
+snapshot, preserving source, private drag snapshot, order and input wakes.
+
+The original six extra fields duplicated binding context or TrussC injection
+state. Event 2 will relocate the remaining `source`/`button_snapshot` and native
+injection hook; event 3a will mark surviving members. Keep `device_lost_reason`
+and all three TC kinds: do not pursue byte-identical upstream events by removing
+required loss/resize/map notifications. The source and snapshot relocation is
+described by the injection feature below, not a second native event
+implementation. Later #1404 A/B restores the approved Window-owned injection
+surface and typed text/drop/ImGui coverage.
 
 ### Injected input provenance and private MCP drag snapshot
 

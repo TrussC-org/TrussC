@@ -55,7 +55,7 @@ void callback(const sapp_event* e,sapp_window h,void*){
     ++calls;last=*e;
     check("native busy state precedes callback",record.in_tick);
     check("wake flag precedes callback",!_sapp_tc_event_wakes(e->type)||record.input_delivered);
-    check("stamped metadata targets receiver and preserves first-window frame count",h.id==91&&e->window_id==91&&e->frame_count==77&&e->dpi_scale==2&&e->framebuffer_width==160);
+    check("stamped metadata targets receiver and preserves first-window frame count",h.id==91&&e->frame_count==77&&e->framebuffer_width==160);
     if(removeRecord)live=nullptr;
     if(throwCallback)throw 1015;
 }
@@ -83,9 +83,9 @@ void run(){
     record.close_recorded=false;record.native_closed=false;record.ready=true;record.is_main=false;
     sapp_event e{};e.type=SAPP_EVENTTYPE_MOUSE_MOVE;e.mouse_x=40;e.mouse_y=20;
     _sapp_tc_send(&record,&e);check("real source is zero",last.source==SAPP_EVENTSOURCE_REAL&&!record.in_tick);
-    e.window_id=999;e.frame_count=999;e.dpi_scale=999;
+    e.frame_count=999;
     check("injection accepted",sapp_window_inject_event({91},&e));
-    check("injection copies const input and marks source",last.source==SAPP_EVENTSOURCE_INJECTED&&e.window_id==999&&e.dpi_scale==999);
+    check("injection copies const input and marks source",last.source==SAPP_EVENTSOURCE_INJECTED&&e.frame_count==999);
     e.source=SAPP_EVENTSOURCE_REPLAYED;sapp_window_inject_event({91},&e);check("replay source preserved",last.source==SAPP_EVENTSOURCE_REPLAYED);
     int before=calls;
     check("stale and null targets rejected",!sapp_window_inject_event({92},&e)&&!sapp_window_inject_event({0},&e)&&!sapp_window_inject_event({91},nullptr)&&calls==before);
@@ -149,13 +149,84 @@ void run(){window.coreEvents=&hub;present();check("production present cancels dr
 int main(){native::run();presentation::run();printf("event-gates: %d checks, %d failures\n",checks,failures);return failures?1:0;}
 '''
 code=code.replace('sapp_window_inject_event(', 'inject(').replace('sapp_tc_window_close_recorded(', 'closeRecorded(')
+# The removed stamp assertions now exercise the production metadata query.
+metadata_query=body(source,'extern "C" bool sapp_tc_window_read_metadata(').replace('extern "C" ','').replace('sapp_tc_window_read_metadata(', 'readMetadata(').replace('sapp_tc_window_visible(', 'visible(').replace('sapp_window_occluded(', 'occluded(')
+metadata_parts=[]
+for platform,defines in [
+    ('mac','#define __APPLE__ 1\n#define TARGET_OS_OSX 1'),
+    ('win','#define _WIN32 1'),
+    ('glx','#define __linux__ 1'),
+    ('egl','#define __linux__ 1\n#define SOKOL_GLES3 1'),
+    ('ios','#define __APPLE__ 1\n#define TARGET_OS_IPHONE 1'),
+    ('android','#define __ANDROID__ 1'),
+    ('web','#define __EMSCRIPTEN__ 1')]:
+    desktop=platform in ('mac','win','glx','egl')
+    metadata_parts.append('''
+#undef __APPLE__
+#undef TARGET_OS_OSX
+#undef TARGET_OS_IPHONE
+#undef __linux__
+#undef _WIN32
+#undef __EMSCRIPTEN__
+#undef __ANDROID__
+#undef SOKOL_GLES3
+'''+defines+'\nnamespace metadata_'+platform+r''' {
+struct Record {
+    int fb_width=302,fb_height=152,win_width=201,win_height=101;
+    float dpi_scale=1.5f;
+    sapp_window_desc desc{};
+    sapp_pixel_format color_format=SAPP_PIXELFORMAT_RGBA8,depth_format=SAPP_PIXELFORMAT_DEPTH;
+    bool trust_hidden_signals=true,iconified=false,occluded=false;
+    double frame_duration=.01,refresh_period=.02;
+} record,other;
+struct {
+    bool valid=true,cleanup_called=false,mouse_locked=true;
+    Record* lock_owner=&record;
+    int framebuffer_width=302,framebuffer_height=152,window_width=201,window_height=101;
+    float dpi_scale=1.5f;
+    struct {bool locked=true;} mouse;
+} _sapp_tc;
+Record* _sapp_tc_lookup(sapp_window h){return h.id==41?&record:nullptr;}
+bool visible(sapp_window){return true;}
+bool _sapp_tc_native_hidden(const Record*){return false;}
+int sapp_sample_count(){return 4;}
+sapp_pixel_format sapp_color_format(){return SAPP_PIXELFORMAT_RGBA8;}
+sapp_pixel_format sapp_depth_format(){return SAPP_PIXELFORMAT_DEPTH;}
+bool occluded(sapp_window){return false;}
+double sapp_frame_duration(){return .01;}
+'''+metadata_query+r'''
+void run(){
+    sapp_tc_window_metadata metadata{};
+    record.desc.sample_count=4;
+'''+f'    const sapp_window handle{{{41 if desktop else 0}}};\n'+r'''
+    check("metadata query rejects null output",!readMetadata(handle,nullptr));
+    check("metadata query accepts target handle",readMetadata(handle,&metadata));
+    check("target metadata retains fractional DPI and dimensions",metadata.dpi_scale==1.5f&&metadata.fb_width==302&&metadata.fb_height==152&&metadata.width==201&&metadata.height==101);
+    check("target metadata retains formats and source interval",metadata.sample_count==4&&metadata.color_format==SAPP_PIXELFORMAT_RGBA8&&metadata.depth_format==SAPP_PIXELFORMAT_DEPTH&&metadata.source_interval==.01);
+'''+f'    check("platform lock and button reliability",metadata.pointer_locked=={str(platform in ("egl","web")).lower()}&&metadata.reliable_button_bits=={str(platform in ("win","glx","egl","web")).lower()});\n'+(r'''
+    _sapp_tc.lock_owner=&other;
+    check("another window's lock is not the target's lock",readMetadata(handle,&metadata)&&!metadata.pointer_locked&&metadata.reliable_button_bits);
+''' if platform=='egl' else '')+(r'''
+    _sapp_tc.mouse.locked=false;
+    check("Web unlock updates real metadata",readMetadata(handle,&metadata)&&!metadata.pointer_locked&&metadata.reliable_button_bits);
+''' if platform=='web' else '')+r'''
+    check("metadata rejects stale target handles",!readMetadata({999},&metadata));
+'''+(r'''
+    _sapp_tc.valid=false;check("single-window metadata rejects absent native state",!readMetadata(handle,&metadata));
+    _sapp_tc.valid=true;_sapp_tc.cleanup_called=true;check("single-window metadata rejects retired state",!readMetadata(handle,&metadata));
+''' if not desktop else '')+'}\n}\n')
+code=code.replace('int main(){native::run();',''.join(metadata_parts)+'\nint main(){'+''.join('metadata_'+p+'::run();' for p in ('mac','win','glx','egl','ios','android','web'))+'native::run();')
+
 variants=[('baseline',code)]
 if os.environ.get('TC_EVENT_GATE_MUTATIONS'):
     edits=[
-        ('target_identity','event->window_id = id;','event->window_id = 0;'),
+        ('target_identity','w->desc.event_cb(event, {id}, w->desc.user_data);','w->desc.event_cb(event, {0}, w->desc.user_data);'),
         ('target_frame_as_process_frame','_sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0','w->frame_count'),
         ('legacy_frame_count','event->frame_count = frame;','event->frame_count = 0;'),
-        ('dpi_metadata','event->dpi_scale = w->dpi_scale;','event->dpi_scale = 1;'),
+        ('dpi_metadata','out->dpi_scale = w->dpi_scale;','out->dpi_scale = 1;'),
+        ('target_lock_ownership','_sapp_tc.mouse_locked && _sapp_tc.lock_owner == w;','_sapp_tc.mouse_locked;'),
+        ('web_lock_metadata','out->pointer_locked = _sapp_tc.mouse.locked;','out->pointer_locked = false;'),
+        ('single_window_dpi','out->dpi_scale = _sapp_tc.dpi_scale;','out->dpi_scale = 1;'),
         ('wake_before_callback','if (_sapp_tc_event_wakes(event->type)) w->input_delivered = w->wake_on_input;','/* omit input wake */'),
         ('sentinel_wake','case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return false;','case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return true;'),
         ('injected_source','event.source = input->source == SAPP_EVENTSOURCE_REPLAYED ? SAPP_EVENTSOURCE_REPLAYED : SAPP_EVENTSOURCE_INJECTED;','event.source = SAPP_EVENTSOURCE_REAL;'),
