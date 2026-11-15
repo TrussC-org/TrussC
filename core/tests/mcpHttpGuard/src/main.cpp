@@ -285,7 +285,7 @@ static void testCompleteRefusals(int port) {
     testConcurrentCompleteRefusals(port, "zero body", headers +
         "Content-Type: text/plain\r\nContent-Length: 0\r\n\r\n", 415);
     testConcurrentCompleteRefusals(port, "no body", "GET / HTTP/1.1\r\nHost: other.example\r\n\r\n", 403);
-    testConcurrentCompleteRefusals(port, "header refusal", "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: invalid\r\n\r\n", 416);
+    testConcurrentCompleteRefusals(port, "header refusal", "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=invalid\r\n\r\n", 416);
     testConcurrentCompleteRefusals(port, "read-ahead body", headers +
         "Content-Type: text/plain\r\nContent-Length: " + to_string(kListTools.size()) + "\r\n\r\n" + kListTools, 415);
     testConcurrentCompleteRefusals(port, "body read", headers +
@@ -999,8 +999,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 
         // GET / (server info) takes the Host / Origin checks too
         check("GET / -> 200", status(cli.Get("/")) == 200);
-        expectStatus("GET / rebinding Host -> 403", cli.Get("/", {{"Host", "evil.example"}}), 403);
-        expectStatus("GET / foreign Origin -> 403", cli.Get("/", {{"Origin", "http://evil.example"}}), 403);
+        expectStatus("GET / rebinding Host -> 403", cli.Get("/", httplib::Headers{{"Host", "evil.example"}}), 403);
+        expectStatus("GET / foreign Origin -> 403", cli.Get("/", httplib::Headers{{"Origin", "http://evil.example"}}), 403);
 
         {
             httplib::Client persistent("127.0.0.1", port);
