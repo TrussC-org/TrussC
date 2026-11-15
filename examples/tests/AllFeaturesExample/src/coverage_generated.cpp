@@ -1093,6 +1093,13 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
     }
 };
 
+struct Cover_BackPressedEventArgs : af::Scope<BackPressedEventArgs> {
+    ~Cover_BackPressedEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<BackPressedEventArgs>().cancel;
+    }
+};
+
 struct Cover_BlendDesc : af::Scope<BlendDesc> {
     ~Cover_BlendDesc(); // Never instantiated.
     static void run() {
@@ -1352,6 +1359,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
     ~Cover_CoreEvents(); // Never instantiated.
     static void run() {
         (void)af::val<CoreEvents>().afterFrame;
+        (void)af::val<CoreEvents>().backPressed;
         (void)af::val<CoreEvents>().clipboardPasted;
         (void)af::val<CoreEvents>().closeRequested;
         (void)af::val<CoreEvents>().deviceLost;
@@ -5320,6 +5328,7 @@ void af::coverGenerated() {
     af_generated::Cover_AudioRecorder::run();
     af_generated::Cover_AudioSettings::run();
     af_generated::Cover_AudioStats::run();
+    af_generated::Cover_BackPressedEventArgs::run();
     af_generated::Cover_BlendDesc::run();
     af_generated::Cover_BlendDesc__Component::run();
     af_generated::Cover_BuildInfo::run();

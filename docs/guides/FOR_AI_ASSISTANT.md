@@ -3009,6 +3009,11 @@ SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio fil
 ```cpp
 ```
 
+### BackPressedEventArgs — Arguments for the Android backPressed event.
+
+```cpp
+```
+
 ### BlendDesc — Defines blend equations that standard modes cannot express, such as adding light while keeping destination alpha.
 
 ```cpp
