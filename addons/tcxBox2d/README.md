@@ -1,3 +1,5 @@
+Frozen at Box2D v2.4; for new projects use tcxBox2d3 (experimental).
+
 # tcxBox2d
 
 Add `tcxBox2d` to your project's `addons.make`, then run `trusscli update`

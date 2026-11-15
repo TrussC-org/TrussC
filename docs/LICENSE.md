@@ -93,6 +93,7 @@ These libraries are only included if you use the corresponding addon.
 | **libcurl** | 8.23.0 (Windows; macOS/Linux use system libcurl; see [PROVENANCE.md](../addons/tcxCurl/PROVENANCE.md)) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
 | **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |
 | **Box2D** | 2.4.2 | `addons/tcxBox2d/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d |
+| **Box2D v3** | 3.2.0 | `addons/tcxBox2d3/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d3 |
 | **cgltf** | 1.15 (two small parsing allocation-failure insertions, see [PROVENANCE.md](../addons/tcxGltf/PROVENANCE.md)) | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
 | **tinyobjloader** | commit `45636bd` (branch `release`, + 2 TrussC patches; reader limit configured by the addon build, upstream tag handling, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
 | **Snappy** | 1.3.1 | `addons/tcxHap/CMakeLists.txt` | https://github.com/google/snappy | BSD 3-Clause | Google Inc. | tcxHap |

@@ -101,6 +101,7 @@ addons/**/*.vcxproj
 
 addons/*
 !addons/tcxBox2d
+!addons/tcxBox2d3
 !addons/tcxMidi
 !addons/tcxCurl
 !addons/tcxImGui
