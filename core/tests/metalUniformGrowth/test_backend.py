@@ -37,8 +37,10 @@ def main():
     source = (Path(sys.argv[1]) if len(sys.argv) > 1 else HEADER).read_text(encoding="utf-8")
     names = ["_sg_mtl_bind_uniform_buffers", "_sg_roundup", "_sg_roundup_pow2", "_sg_mtl_resize_uniform_buffer",
              "_sg_mtl_grow_uniform_buffer", "_sg_mtl_apply_uniforms"]
+    skipdraw = ["_sg_skipdraw_clr_ub", "_sg_skipdraw_set_ub", "_sg_skipdraw_ub", "_sg_skipdraw_any"]
+    names[0:0] = skipdraw
     functions = "\n".join(extract(source, name) for name in names)
-    if extract(source, names[0]):
+    if extract(source, "_sg_mtl_bind_uniform_buffers"):
         functions += "\n#define HAS_PASS_BIND 1\n"
     fixture = (HERE / "backend_mock.mm").read_text(encoding="utf-8")
     scratch_root = Path(os.environ.get("TMPDIR", str(HERE / "build-mock")))

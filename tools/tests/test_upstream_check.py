@@ -50,7 +50,7 @@ FIXTURE_LIST = """# License
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |
 |---------|---------|----------------------|----------|---------|---------------------|---------|
-| **sokol-shdc (sokol-tools-bin)** | commit `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | linux: `ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df` |
+| **sokol-shdc (sokol-tools-bin)** | commit `2428a421bb4c2d765c43cb77167b6e1d6e0d498f` (2026-11-10T18:18:51Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | linux: `f1a5b91e55696d4e4f615b5d1cf524ac2636fc9a052dac6d568d448e2af86b39` |
 
 ### Addons
 
@@ -93,7 +93,7 @@ class UpstreamTests(unittest.TestCase):
         self.assertEqual(by_name["branchlib"]["branch"], "x")
         self.assertFalse(by_name["branchlib"]["not_recorded"])
         self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["hashes"],
-                         {"linux": "ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df"})
+                         {"linux": "f1a5b91e55696d4e4f615b5d1cf524ac2636fc9a052dac6d568d448e2af86b39"})
         self.assertEqual(by_name["mbedTLS"]["version"], "3.6.7")
         self.assertEqual(by_name["mbedTLS"]["slug"], "mbed-tls/mbedtls")
         self.assertEqual(by_name["libcurl"]["version"], "8.12.1")
@@ -101,7 +101,7 @@ class UpstreamTests(unittest.TestCase):
         self.assertIsNone(by_name["tinyobjloader"]["version"])
         self.assertEqual(by_name["HAP"]["commit"], "d847f6bbd3be88575dd4ef33a877243780e3be76")
         self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["commit"],
-                         "11d0cf678105d614d675e6d9bd2aaf3eeff12f8c")
+                         "2428a421bb4c2d765c43cb77167b6e1d6e0d498f")
         self.assertEqual(by_name["HAP"]["paths"], ["addons/tcxHap/CMakeLists.txt"])
 
     def test_new_pins_use_commit_checks_in_weekly_report(self):

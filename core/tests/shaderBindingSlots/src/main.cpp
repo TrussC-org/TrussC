@@ -25,7 +25,7 @@ struct InspectShader : Base {
     using Base::pendingViews;
 };
 
-// Also detect writes outside sg_bindings, not just into its end canary.
+// Detect writes outside sg_bindings (upstream removed its internal canaries).
 struct GuardedBindings {
     std::array<uint32_t, 64> before;
     sg_bindings bindings;
@@ -52,7 +52,7 @@ void checkBindingCopies() {
                 expected.bindings.samplers[slot].id = 202;
             }
             shader.fillTextureBindings(actual.bindings);
-            check("only the intended view/sampler bytes change (including canaries)",
+            check("only the intended view/sampler bytes change (including surrounding guards)",
                 std::memcmp(&actual, &expected, sizeof(actual)) == 0);
         }
     }

@@ -272,8 +272,8 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
 - `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
   rejected view/image slots leave pending bindings and the image cache unchanged;
   every valid view slot binds, but only supported sampler slots are written.
-  Checks the entire bindings object and surrounding guards, including the end
-  canary, with zero and nonzero sentinels. Uniform slots retain their bytes or
+  Checks the entire bindings object and surrounding guards
+  with zero and nonzero sentinels. Uniform slots retain their bytes or
   are rejected before copying; repeated invalid calls warn only once.
 - `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
   replay (#271): in-frame vertex/index buffer growth,
@@ -283,7 +283,9 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
   `allCoreTests shaderStreamDraws --gpu-check` (OpenGL Core display required)
   also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
   passes, checks the growth notice, and exercises Shader moves/clear with
-  a pending swapchain draw. On Linux, run it with Xvfb.
+  a pending swapchain draw. It also checks that an invalid binding skips the
+  draw and a corrected binding recovers without reapplying the pipeline (#1644).
+  On Linux, run it with Xvfb.
 - `stringPatterns/` — empty substring patterns count as zero or leave the
   input unchanged (#405); replacements are left-to-right and nonoverlapping,
   including the internal timestamp helper. Covers deletion, growth, and many

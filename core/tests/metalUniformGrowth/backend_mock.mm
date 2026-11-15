@@ -89,7 +89,7 @@ struct {
     } mtl;
     struct { bool valid = true, is_compute = false; } cur_pass;
     unsigned frame_index = 1;
-    bool next_draw_valid = true;
+    int skipdraw_flags = 0;
     _sg_pipeline_t* cur_pip;
 } _sg;
 static std::vector<id<MTLBuffer>> retired;
@@ -112,6 +112,7 @@ constexpr int SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN = 0;
 #define _sg_stats_inc(x) ((void)0)
 #define _SG_ERROR(x) (++errors)
 #define _SG_OBJC_RELEASE(obj) ((obj) = nil)
+constexpr int _SG_SKIPDRAW_UB = 1 << 2;
 #include "functions.inc"
 
 static int failures = 0;
@@ -181,7 +182,14 @@ int main() {
         sg_range range = {data, sizeof(data)};
         _sg_mtl_apply_uniforms(4, &range);
         check("failed upload rejects draw without cursor or binding changes",
-              !_sg.next_draw_valid && _sg.mtl.cur_ub_offset == size && value(compute[7]) == 15);
+              _sg_skipdraw_ub(4) && _sg.mtl.cur_ub_offset == size && value(compute[7]) == 15);
+        // The size rejection path must set a different slot too. Clearing one
+        // slot (the public apply_uniforms preamble) cannot recover the other.
+        sg_range oversized = {data, SIZE_MAX};
+        _sg_mtl_apply_uniforms(3, &oversized);
+        check("oversized upload rejects its own slot", _sg_skipdraw_ub(3) && _sg_skipdraw_ub(4));
+        _sg_skipdraw_clr_ub(3);
+        check("correcting another slot preserves failed upload", _sg_skipdraw_any() && _sg_skipdraw_ub(4));
         check("allocation failures are reported", errors >= 3);
         failAllocation = false;
         _sg.mtl.idpool.free_queue_top = 0;
@@ -195,10 +203,10 @@ int main() {
         // The next upload must grow rather than subtracting with underflow.
         _sg.mtl.ub_size = 300;
         _sg.mtl.cur_ub_offset = 512;
-        _sg.next_draw_valid = true;
+        _sg_skipdraw_clr_ub(4);
         _sg_mtl_apply_uniforms(4, &range);
         check("unaligned reserve grows safely after cursor rounding",
-              _sg.next_draw_valid && _sg.mtl.uniform_buffers[0] != before
+              !_sg_skipdraw_any() && _sg.mtl.uniform_buffers[0] != before
               && _sg.mtl.cur_ub_offset == 256 && _sg.mtl.ub_size == 600);
     }
     for (auto* buffer : allocated) { std::free(buffer->data); object_dispose(buffer); }

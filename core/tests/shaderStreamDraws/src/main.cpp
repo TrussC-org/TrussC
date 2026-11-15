@@ -52,6 +52,7 @@ public:
 
     void draw() override {
         if (!shader_.isLoaded()) { exitApp(); return; }
+        if (frame_ == 0) checkBindingRecovery();
         clear(0.0f);
         // Park a swapchain recording while separate FBO passes grow its stream.
         ShaderVertex triangle[] = {vertex(-1, -1, 1, 0), vertex(1, -1, 1, 0), vertex(0, 1, 1, 0)};
@@ -103,6 +104,59 @@ public:
     }
 
 private:
+    // Upstream #1644: an ALLOC buffer is legal to bind but skips drawing.
+    // A corrected binding must recover within the same pass/pipeline.
+    void checkBindingRecovery() {
+        const sg_shader rawShader = sg_make_shader(stream_color_shader_desc(sg_query_backend()));
+        auto desc = shader_.description();
+        desc.shader = rawShader;
+        desc.index_type = SG_INDEXTYPE_NONE;
+        desc.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
+        desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
+        desc.sample_count = 1;
+        const sg_pipeline pipeline = sg_make_pipeline(&desc);
+        check("recovery pipeline valid", sg_query_pipeline_state(pipeline) == SG_RESOURCESTATE_VALID);
+        ShaderVertex triangle[] = {vertex(-1, -1, 0, 1), vertex(1, -1, 0, 1), vertex(0, 1, 0, 1)};
+        sg_buffer_desc bufferDesc = {};
+        bufferDesc.data = SG_RANGE(triangle);
+        const sg_buffer validBuffer = sg_make_buffer(&bufferDesc);
+        const sg_buffer pendingBuffer = sg_alloc_buffer();
+        Texture color;
+        color.allocate(32, 32, TextureFormat::RGBA8, TextureUsage::RenderTarget);
+        sg_pass pass = {};
+        pass.attachments.colors[0] = color.getAttachmentView();
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = {0, 0, 0, 1};
+        for (bool recover : {false, true}) {
+            {
+                internal::TargetPassScope scope(pass, 32, 32, SG_PIXELFORMAT_RGBA8, 1, false);
+                check("recovery pass active", scope.active());
+                sg_apply_pipeline(pipeline);
+                sg_bindings bindings = {};
+                bindings.vertex_buffers[0] = pendingBuffer;
+                sg_apply_bindings(&bindings);
+                sg_draw(0, 3, 1);
+                if (recover) {
+                    bindings.vertex_buffers[0] = validBuffer;
+                    sg_apply_bindings(&bindings);
+                    // Deliberately no sg_apply_pipeline here.
+                    sg_draw(0, 3, 1);
+                }
+            }
+            fbo_.begin(0, 0, 0, 1);
+            setupScreenOrtho();
+            setColor(1);
+            color.draw(0, 0);
+            fbo_.end();
+            checkPixel(recover ? "corrected binding draws without reapplying pipeline"
+                               : "invalid binding skips draw", 0, recover ? 255 : 0);
+        }
+        sg_dealloc_buffer(pendingBuffer);
+        sg_destroy_buffer(validBuffer);
+        sg_destroy_pipeline(pipeline);
+        sg_destroy_shader(rawShader);
+    }
+
     void checkAllocationFailure() {
         InspectShader failing, another;
         check("failure-test shaders load", failing.load(stream_color_shader_desc) && another.load(stream_color_shader_desc));
