@@ -3,6 +3,7 @@
 #define SOKOL_WINDOW_CREATION_INCLUDED
 #include <utility>
 template<class Window, class Rollback>
+// [TrussC] Shared native fork record.
 class _sapp_tc_creation_transaction {
 public:
     _sapp_tc_creation_transaction(Window* window, Rollback rollback)

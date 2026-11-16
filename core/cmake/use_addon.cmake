@@ -37,6 +37,15 @@ set(_TC_LOADED_ADDONS "" CACHE INTERNAL "List of loaded TrussC addons")
 # both `use_addon` (which then links to the requested target) and the hot
 # reload path (which links the addon's static lib directly to the guest).
 macro(_tc_load_addon _ADDON_NAME)
+    # Reserve the selection before add_subdirectory: a transitive load can
+    # happen before the first addon has created its target or entered the list.
+    if("${_ADDON_NAME}" STREQUAL "tcxBox2d" OR "${_ADDON_NAME}" STREQUAL "tcxBox2d3")
+        get_property(_TC_BOX2D_SELECTED GLOBAL PROPERTY _TC_BOX2D_SELECTED)
+        if(_TC_BOX2D_SELECTED AND NOT _TC_BOX2D_SELECTED STREQUAL "${_ADDON_NAME}")
+            message(FATAL_ERROR "tcxBox2d and tcxBox2d3 cannot be used together; choose one in addons.make.")
+        endif()
+        set_property(GLOBAL PROPERTY _TC_BOX2D_SELECTED "${_ADDON_NAME}")
+    endif()
     list(FIND _TC_LOADED_ADDONS ${_ADDON_NAME} _ADDON_INDEX)
     if(_ADDON_INDEX EQUAL -1)
         get_filename_component(_ADDON_PATH "${TRUSSC_DIR}/../addons/${_ADDON_NAME}" ABSOLUTE)

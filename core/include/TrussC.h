@@ -2596,8 +2596,8 @@ namespace internal {
 namespace internal {
 // Descriptor data shared by startup, desktop secondaries and sole-surface
 // hosts. Backend defaults/attributes remain their existing policy (D3).
-inline sapp_window_desc buildNativeWindowDescriptor(const WindowSettings& settings, bool pixels) {
-    sapp_window_desc d = {};
+inline sapp_tc_window_desc buildNativeWindowDescriptor(const WindowSettings& settings, bool pixels) {
+    sapp_tc_window_desc d = {};
     d.x = d.y = -1;
     d.width = settings.width; d.height = settings.height;
     if (pixels) {

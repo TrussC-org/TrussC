@@ -202,14 +202,14 @@ int main() {
     rejected("file index past count is rejected", 4, sizeof(buffer), SAPP_HTML5_FETCH_ERROR_OTHER);
     request.dropped_file_index = 0;
     setFile(4294967300.0);
-    check("64-bit getter retains full size", sapp_html5_get_dropped_file_size64(0) == UINT64_C(4294967300));
+    check("64-bit getter retains full size", sapp_tc_html5_get_dropped_file_size64(0) == UINT64_C(4294967300));
     check("legacy getter saturates at UINT32_MAX", sapp_html5_get_dropped_file_size(0) == UINT32_MAX);
     setFile(9007199254740991.0);
-    check("64-bit getter retains largest safe integer", sapp_html5_get_dropped_file_size64(0) == UINT64_C(9007199254740991));
-    check("unavailable file size is zero", sapp_html5_get_dropped_file_size64(-1) == 0 &&
-        sapp_html5_get_dropped_file_size64(1) == 0);
+    check("64-bit getter retains largest safe integer", sapp_tc_html5_get_dropped_file_size64(0) == UINT64_C(9007199254740991));
+    check("unavailable file size is zero", sapp_tc_html5_get_dropped_file_size64(-1) == 0 &&
+        sapp_tc_html5_get_dropped_file_size64(1) == 0);
     _sapp_tc.drop.enabled = false;
-    check("disabled drops have zero file size", sapp_html5_get_dropped_file_size64(0) == 0);
+    check("disabled drops have zero file size", sapp_tc_html5_get_dropped_file_size64(0) == 0);
     _sapp_tc.drop.enabled = true;
     setFile(4);
     request.buffer.size = sizeof(buffer);

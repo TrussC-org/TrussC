@@ -8,7 +8,7 @@ int titles = 0, sizes = 0, fullscreenCalls = 0;
 bool fullscreen = false;
 double width = 0, height = 0;
 std::string title;
-bool read(sapp_window, void*, sapp_tc_window_metadata& metadata) {
+bool read(sapp_tc_window, void*, sapp_tc_window_metadata& metadata) {
     metadata.fb_width = 640; metadata.fb_height = 480; metadata.dpi_scale = 1;
     metadata.sample_count = 1; metadata.color_format = SAPP_PIXELFORMAT_RGBA8;
     return true;

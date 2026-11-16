@@ -32,7 +32,7 @@ static void visibilityCheck(const char* label, bool ok) {
     std::printf("effective-visibility: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++visibilityFailures;
 }
-static void visibilityEvent(const sapp_event* ev, sapp_window window, void*) {
+static void visibilityEvent(const sapp_event* ev, sapp_tc_window window, void*) {
     // Bound (test trace): retain at most 16 events; count overflow so exact-sequence checks fail.
     if (visibilityEventCount < 16) visibilityEvents[visibilityEventCount] = ev->type;
     ++visibilityEventCount;
@@ -271,14 +271,14 @@ static void event(const sapp_event* ev) {
     }
 }
 static void frame() {
-    if (flood) { ++frames; sapp_skip_present(); return; }
+    if (flood) { ++frames; sapp_tc_skip_present(); return; }
     if (++frames == 1) {
         firstFrame = now; now += work;
         if (cancelQuit) sapp_request_quit();
         if (buffered) pending = 1;
-        if (skip) sapp_skip_present();
+        if (skip) sapp_tc_skip_present();
     } else {
-        nextFrame = now; sapp_skip_present(); sapp_quit();
+        nextFrame = now; sapp_tc_skip_present(); sapp_quit();
     }
 }
 static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display* display) {
@@ -352,7 +352,7 @@ int main() {
         reset(main, paired ? pair : windows, display); _sapp_tc.window_slots = paired ? 2 : 1;
         secondary.iconified = secondary.occluded = false;
         secondary.swap_interval = 0; secondary.swap_interval_pending = false;
-        main.draw_while_hidden = draw; main.desc.tick_cb = [](sapp_window, void*) { ++frames; };
+        main.draw_while_hidden = draw; main.desc.tick_cb = [](sapp_tc_window, void*) { ++frames; };
         _sapp_tc.WM_STATE = 101; visibilityProbe = true; observedState = IconicState;
         XEvent ev{}; ev.type = PropertyNotify; ev.xproperty.window = main.xwin;
         ev.xproperty.atom = _sapp_tc.WM_STATE; ev.xproperty.state = PropertyNewValue;
@@ -382,7 +382,7 @@ int main() {
     newest.requested_swap_interval = 1;
     _sapp_tc.idle.drawable = (EGLSurface)9;
     sapp_tc_gl_activate_idle(); nativeSequence.clear();
-    main.desc.event_cb = [](const sapp_event* ev, sapp_window handle, void*) {
+    main.desc.event_cb = [](const sapp_event* ev, sapp_tc_window handle, void*) {
         ++callbacks;
         check("WM_STATE hands pacer to earliest visible window before dispatch", _sapp_tc.pacer.id == 4);
         check("WM_STATE dispatches iconified then suspended", ev->type ==
@@ -405,7 +405,7 @@ int main() {
     observedState = NormalState;
     secondary.swap_interval = 0; secondary.swap_interval_pending = false;
     reset(main, pair, display); _sapp_tc.window_slots = 2;
-    main.desc.tick_cb = secondary.desc.tick_cb = [](sapp_window, void*) { ++frames; };
+    main.desc.tick_cb = secondary.desc.tick_cb = [](sapp_tc_window, void*) { ++frames; };
     for (auto* target : {&main, &secondary}) {
         for (bool trust : {false, true}) for (bool iconified : {false, true}) {
             target->trust_hidden_signals = trust;
@@ -415,15 +415,15 @@ int main() {
                 _sapp_tc_x11_tick(target);
                 check("native hidden admission and trust follow data for either role",
                     frames == 1 && swaps == int(!trust));
-                check("untrusted hidden flags report visible", sapp_window_occluded({target->win_id}) == trust &&
-                    (target != &main || sapp_window_occluded({0}) == trust));
+                check("untrusted hidden flags report visible", sapp_tc_window_occluded({target->win_id}) == trust &&
+                    (target != &main || sapp_tc_window_occluded({0}) == trust));
             }
         }
         target->occluded = target->iconified = false;
         target->trust_hidden_signals = true;
     }
     swaps = 0;
-    sapp_skip_present();
+    sapp_tc_skip_present();
     _sapp_tc_x11_tick(&secondary);
     _sapp_tc_x11_tick(&main);
     check("main skip does not suppress secondary present", swaps == 1 && presentedSurface == secondary.drawable);
@@ -465,7 +465,7 @@ int main() {
         for (int type : { FocusIn, FocusOut }) {
             for (int mode : { NotifyNormal, NotifyWhileGrabbed }) {
                 reset(main, pair, display); _sapp_tc.window_slots = 2;
-                secondary.desc.event_cb = [](const sapp_event* ev, sapp_window, void*) { event(ev); };
+                secondary.desc.event_cb = [](const sapp_event* ev, sapp_tc_window, void*) { event(ev); };
                 const sapp_event_type expected = type == FocusIn ? SAPP_EVENTTYPE_FOCUSED : SAPP_EVENTTYPE_UNFOCUSED;
                 XEvent ev{}; ev.type = type; ev.xfocus.window = window; ev.xfocus.mode = mode;
                 ev.xfocus.detail = NotifyNonlinear;

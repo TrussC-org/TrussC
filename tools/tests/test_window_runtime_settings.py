@@ -262,7 +262,7 @@ int main(){
         execute('#include <string>\n#include <memory>\n#include <cassert>\n#include <type_traits>\n'
                 '#include <sokol/sokol_app_tc.h>\n#define TC_LUA_SKIP\nclass Window;\n'
                 'int warnings=0; struct Log { void operator<<(const char*) {} };\n'
-                'Log logWarning(const char*) { ++warnings; return {}; }\n' + settings + runtime + body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(') + r'''
+                'Log logWarning(const char*) { ++warnings; return {}; }\n' + settings + runtime + body(header, 'inline sapp_tc_window_desc buildNativeWindowDescriptor(') + r'''
 namespace internal { int gpuUniformBufferReserve=0; }
 void configure(const RuntimeSettings& runtime) { ''' + assignment + r''' }
 template<class T> int runApp(const WindowSettings&, const RuntimeSettings& r) { configure(r); return 23; }

@@ -66,6 +66,8 @@ UPSTREAM = {
     "mbedTLS": {"series": "3.6"},
     # addons/tcxLua/README.md: sol2 does not support Lua 5.5 yet.
     "Lua": {"series": "5.4"},
+    # tcxBox2d is frozen on v2; tcxBox2d3 tracks v3 separately.
+    "Box2D": {"series": "2.4"},
     "libcurl": {"tag_prefix": "curl-"},
     "bcdec": {"file": "bcdec.h", "macros": ["BCDEC_VERSION_MAJOR", "BCDEC_VERSION_MINOR"]},
 }
@@ -88,6 +90,7 @@ OSV = {
     "mbedTLS": {"tag": "v{version}"},
     "libcurl": {"tag": "curl-{version_underscored}"},
     "libremidi": {"tag": "v{version}"}, "Box2D": {"tag": "v{version}"},
+    "Box2D v3": {"tag": "v{version}"},
     "cgltf": {"tag": "v{version}"}, "tinyobjloader": {},
     "Snappy": {"tag": "{version}"}, "HAP": {},
     "Lua": {"tag": "v{version}"}, "sol2": {"tag": "v{version}"},

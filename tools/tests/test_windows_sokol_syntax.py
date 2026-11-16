@@ -25,7 +25,7 @@ class WindowsSyntaxCheckTests(unittest.TestCase):
         preparation, worker = presenter.split('std::thread([native]', 1)
         self.assertIn('inputs.requestingWindow.lock()', preparation)
         self.assertIn('window->isOpen()', preparation)
-        self.assertIn('sapp_window_win32_get_hwnd(', preparation)
+        self.assertIn('sapp_tc_window_win32_get_hwnd(', preparation)
         for field in ('title', 'message', 'defaultPath', 'defaultName', 'folderSelection'):
             self.assertRegex(preparation, rf'native->{field} = [^;]*inputs\.{field}')
         self.assertNotRegex(worker, r'\b(?:inputs|window|GetActiveWindow|currentAppOwner|currentWindowCtx)\b')

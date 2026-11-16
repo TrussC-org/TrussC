@@ -22,7 +22,7 @@ def window_control_enum():
 def recording_operations():
     """`struct RecordingOperations` with the Window-taking members of WindowNativeOperations.
 
-    Members that take sapp_window handles (metadata, swapchain, events) are left
+    Members that take sapp_tc_window handles (metadata, swapchain, events) are left
     out: the probes stub the Window binding, not the native windowing layer.
     """
     text = (ROOT / 'core/include/tc/app/internal/tcWindowRuntime.h').read_text(encoding='utf-8')

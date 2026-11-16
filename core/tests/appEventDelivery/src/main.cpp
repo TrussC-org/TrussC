@@ -45,7 +45,7 @@ void stages(bool before) {
     STAGE(windowResized); STAGE(filesDropped);
 #undef STAGE
 }
-bool readResizeMetadata(sapp_window, void* user, sapp_tc_window_metadata& out) {
+bool readResizeMetadata(sapp_tc_window, void* user, sapp_tc_window_metadata& out) {
     out = *static_cast<sapp_tc_window_metadata*>(user); return true;
 }
 void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifiers = 0) {

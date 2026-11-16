@@ -21,16 +21,16 @@ struct _sapp_tc_window_t {
     int win_width=80,win_height=40,fb_width=160,fb_height=80;
     bool ready=true,in_tick=false,wake_on_input=true,input_delivered=false,native_closed=false; int callback_depth=0;
     bool (*events_enabled)()=nullptr;
-    struct { void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
+    struct { void (*event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr; void* user_data=nullptr; } desc;
 };
 struct { int callbacks_active=0; bool deferred_blocked=false; bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; struct { _sapp_tc_window_t* main=nullptr; } app; } _sapp_tc;
 _sapp_tc_window_t* live=nullptr;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return live && live->win_id==h.id ? live : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return live && live->win_id==h.id ? live : nullptr; }
 ''' + ('''
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 ''' + extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n' if index==0 else '')+implementation+r'''
-void callback(const sapp_event* e,sapp_window h,void* p) {
+void callback(const sapp_event* e,sapp_tc_window h,void* p) {
     auto& w=*static_cast<_sapp_tc_window_t*>(p);
     check("native event callback excludes its own native tick", w.in_tick);
     check("event metadata and receiver survive common binding", h.id==23 && e->framebuffer_width==160 && e->frame_count==7);
@@ -66,7 +66,7 @@ struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sa
     struct { _sapp_tc_window_t* main=nullptr; unsigned host_loop_depth=1; bool host_turn_open=false;
     struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; } desc; } app; } _sapp_tc;
 void _sapp_tc_mac_init_client() {}
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window) { return nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window) { return nullptr; }
 void _sapp_tc_mac_schedule_deferred() {}
 int before=0,after=0;
 void begin() { ++before; check("AppKit process callbacks share native busy scope",_sapp_tc.callbacks_active>0); } void end() { ++after; check("AppKit end callbacks share native busy scope",_sapp_tc.callbacks_active>0); }
@@ -101,15 +101,15 @@ void run() {
 '''
 x11=r'''
 namespace x11 {
-struct sapp_window { unsigned id; };
+struct sapp_tc_window { unsigned id; };
 struct _sapp_tc_window_t { int visibility_op=1; uint32_t win_id=27; bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1,swap_interval=1; double earliest_next=100,last_present=0; struct {double last=0;}timing; };
 struct Descriptor { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr; void* user_data=nullptr;
     void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr;
-    void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; };
+    void (*_tc_event_cb)(const sapp_event*,sapp_tc_window,void*)=nullptr; };
 _sapp_tc_window_t window;
-struct { int display=0; double refresh_period=1.0/60.0; sapp_window pacer{27}; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
+struct { int display=0; double refresh_period=1.0/60.0; sapp_tc_window pacer{27}; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
     struct { bool init_called=false,quit_ordered=false,quit_requested=false; Descriptor desc; _sapp_tc_window_t* main=&window; } app; } _sapp_tc;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==window.win_id ? &window : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return h.id==window.win_id ? &window : nullptr; }
 int before=0,after=0,init=0,ticks=0,clockCalls=0,visibilitySync=0;
 constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0;
 void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t* w) { ++visibilitySync; w->visibility_op=_SAPP_TC_X11_VISIBILITY_NONE; }
@@ -167,7 +167,7 @@ struct _sapp_tc_window_t { unsigned win_id=3; bool in_tick=false; int callback_d
 struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false,terminate_pending=false;
     _sapp_tc_window_t* windows[1]={&window};
     struct { bool quit_requested=false,quit_ordered=false; struct { bool (*_tc_callbacks_active)()=nullptr; } desc; } app; } _sapp_tc;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return _sapp_tc.windows[0] && h.id==window.win_id?&window:nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return _sapp_tc.windows[0] && h.id==window.win_id?&window:nullptr; }
 void _sapp_tc_mac_schedule_deferred() {}
 AEEventID _sapp_tc_mac_quit_reason() { return 0; }
 bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
@@ -203,10 +203,10 @@ void run() {
 '''
 modal=r'''
 namespace modal {
-struct sapp_window { unsigned id; };
+struct sapp_tc_window { unsigned id; };
 struct _sapp_tc_window_t { unsigned win_id=39; bool in_tick=false,from_modal=false; } window;
 _sapp_tc_window_t* live=&window;
-_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return live && live->win_id==h.id ? live : nullptr; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window h) { return live && live->win_id==h.id ? live : nullptr; }
 int before=0,after=0,ticks=0;
 bool release=false;
 void begin() { ++before; if (release) live=nullptr; }
