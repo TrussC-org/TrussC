@@ -642,6 +642,15 @@ static void printVersion() {
     }
 }
 
+static void printVersionHelp() {
+    cout << "Usage: trusscli version\n"
+         << "\n"
+         << "Show version (trusscli + current TrussC).\n"
+         << "\n"
+         << "Options:\n"
+         << "  -h, --help                 Show this help\n";
+}
+
 // Print a one-line nudge to stderr when the running trusscli was built from a
 // different TrussC revision than the source tree it now points at (e.g. after a
 // manual `git pull`). Non-fatal — it only reminds the user to `trusscli upgrade`
@@ -5371,6 +5380,12 @@ int main(int argc, char* argv[]) try {
         return 0;
     }
     if (first == "-v" || first == "--version" || first == "version") {
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "-h" || args[i] == "--help") {
+                printVersionHelp();
+                return 0;
+            }
+        }
         printVersion();
         return 0;
     }

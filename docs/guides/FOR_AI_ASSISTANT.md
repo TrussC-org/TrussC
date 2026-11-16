@@ -2135,6 +2135,34 @@ Use `tc_get_stencil` with `{fbo: debugNameOrIndex}` (from `tc_list_fbos`) to ins
 
 TrussC **welcomes community participation.** For questions, sharing work, and chat, **Discord** is fastest (invite: https://discord.gg/7MRRny56VQ ). For bug reports, feature requests, and fixes, **open an Issue / PR on GitHub at `TrussC-org/TrussC`** without hesitation — the author, tettou771, makes an effort to respond actively. "It doesn't work like this" and "I'd like this API" are welcome too.
 
+## Repository layout: where things live
+
+Look in `core/include/tc` for exact API signatures and overloads, `examples/<group>/` for working usage, and `docs/` for explanations.
+
+```text
+TrussC/
+├── core/
+│   ├── include/tc/     # TrussC API headers and implementation
+│   ├── include/sokol/  # vendored sokol, TrussC fork (see TRUSSC_MODIFICATIONS.md)
+│   ├── include/impl/   # internal helpers and library glue
+│   ├── include/{earcut,lz4,nlohmann,pugixml,stb}/  # vendored libraries; not TrussC code
+│   ├── shaders/        # built-in GLSL, compiled by sokol-shdc
+│   ├── platform/       # per-OS and per-backend code
+│   └── tests/          # core test harnesses
+├── addons/             # optional tcx addons
+├── examples/           # 18 topic groups: graphics, 3d, sound, video, node, shader, ...
+│   └── templates/emptyExample/  # the file layout every new app copies
+├── tools/              # trusscli source (src/), tool tests, build/check scripts
+│   └── bin/            # trusscli binary (created by the setup/build script)
+└── docs/
+    ├── guides/         # how-to guides
+    ├── architecture/   # design and lifecycle notes
+    ├── reference/      # API reference source (api-reference.toml)
+    └── dev/            # developer notes on specific internals
+```
+
+There is no `core/src`; core code sits next to the headers. For build commands, see [FOR_AI_ASSISTANT.md — Building & the toolchain](#building--the-toolchain).
+
 ## API Index
 
 Complete C++ API index, generated from the C++ AST + `docs/reference/`. Use this
@@ -3005,6 +3033,11 @@ SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio fil
 ```
 
 ### AudioStats — Reports audio engine counters, output levels, and processing load.
+
+```cpp
+```
+
+### BackPressedEventArgs — Arguments for the Android backPressed event.
 
 ```cpp
 ```
@@ -5729,7 +5762,14 @@ Sound sfx = bundle.build();
 14. **Prefer `Event<T>` + `EventListener` over raw `function<>` callbacks.** `EventListener` is RAII: it auto-disconnects on destruction, so no dangling-callback crashes.
 15. **`LayoutMod` never auto-relayouts.** Call `updateLayout()` after adding/removing/resizing children (property setters like `setSpacing()` do trigger it).
 16. **`getGlobalPos()` returns `Vec3`** — the node's origin in global space, shorthand for `localToGlobal(Vec3(0,0,0))`.
-17. **Unqualified `random()` may resolve to POSIX `::random()`** and compile to the wrong thing silently. Write `tc::random(min, max)` explicitly; there is no `randomf`.
+17. **Unqualified `random()` without arguments is an ambiguous-call compile error on Linux and macOS** with `using namespace std; using namespace tc;`, because POSIX `::random()` is also declared. Use `tc::random()` or pass an argument; `random(max)` and `random(min, max)` are unaffected.
+
+    ```cpp
+    void tcApp::setup() {
+        float a = tc::random();   // 0.0 to 1.0
+        float b = random(1.0f);   // same range, no ambiguity
+    }
+    ```
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
 19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth testing (LESS_EQUAL) for all subsequent draws. `Add`, `Screen`, `Multiply` and `Subtract` test without writing depth; `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing it. Translucent `Alpha` also writes depth, so draw opaque objects first and translucent ones back to front; TrussC does not sort draws. The setting persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
@@ -6042,16 +6082,3 @@ void tcApp::setup() {
 - If user seems experienced, give more technical explanations
 - Always keep answers simple and concise
 - When asked to write code, use canvas/artifacts for proper pair programming
-
-### Folder Structure
-```
-TrussC/
-├── core/                # Core library
-├── addons/              # Optional addons (tcxBox2d, tcxOsc, etc.)
-├── examples/            # Sample projects
-├── docs/                # Documentation
-└── tools/               # Build scripts and CLI source (run these first!)
-    ├── build_mac.command
-    ├── build_win.bat
-    └── build_linux.sh
-```

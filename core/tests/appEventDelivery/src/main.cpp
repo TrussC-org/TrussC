@@ -149,6 +149,18 @@ struct DeliveryApp : App {
     MouseMoveEventArgs lastMove;
 };
 void inputChecks() {
+#ifndef __ANDROID__
+    int backCalls = 0;
+    auto backListener = events().backPressed.listen([&](BackPressedEventArgs& e) {
+        ++backCalls;
+        e.cancel = true;
+    });
+    sapp_event back{};
+    back.type = SAPP_EVENTTYPE_ANDROID_BACK;
+    auto* target = internal::resolveWindow();
+    internal::windowEvent(&back, internal::WindowRequestAccess::binding(*target).handle, target);
+    check("backPressed never fires on other platforms", backCalls == 0);
+#endif
     order.clear();
     auto keyDown = events().keyPressed.listen([](auto& e) { check("listener observes held key", isKeyPressed(e.key)); });
     auto keyUp = events().keyReleased.listen([](auto& e) { check("listener observes released key", !isKeyPressed(e.key)); });

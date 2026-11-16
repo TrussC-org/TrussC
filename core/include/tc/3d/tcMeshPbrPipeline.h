@@ -245,7 +245,7 @@ public:
             bind.samplers[SMP_tc_pbr_shadowMapSmp] = shadowGeneration->sampler;
         } else {
             bind.views[VIEW_tc_pbr_shadowMap]      = fallbackShadowArrayView_;
-            bind.samplers[SMP_tc_pbr_shadowMapSmp] = fallbackSampler_;
+            bind.samplers[SMP_tc_pbr_shadowMapSmp] = fallbackShadowSampler_;
         }
 
         // (bindings applied later, in executePbrDraw)
@@ -475,6 +475,12 @@ private:
         smp_desc.wrap_w = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.label = "tc_pbr_fallback_smp";
         fallbackSampler_ = sg_make_sampler(&smp_desc);
+
+        // The shadow shader's unfilterable-float view requires a nonfiltering
+        // sampler even when the fallback image itself is filterable.
+        smp_desc.min_filter = smp_desc.mag_filter = smp_desc.mipmap_filter = SG_FILTER_NEAREST;
+        smp_desc.label = "tc_pbr_fallback_shadow_smp";
+        fallbackShadowSampler_ = sg_make_sampler(&smp_desc);
 
         // 1x1 flat normal map: (0.5, 0.5, 1.0, 1.0) = tangent-space "no bump"
         sg_image_desc nm_desc = {};
@@ -831,6 +837,7 @@ private:
     sg_view fallbackIesView_{};
     sg_image fallbackShadowArray_{};
     sg_view fallbackShadowArrayView_{};
+    sg_sampler fallbackShadowSampler_{};
     sg_sampler fallbackSampler_{};
     bool fallbackInitialized_{false};
 };

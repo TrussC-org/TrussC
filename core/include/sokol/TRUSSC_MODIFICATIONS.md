@@ -696,21 +696,37 @@ This is the current patch, not the intended future iOS policy. Remove it in
 R7; TrussC `exitApp` on iOS must log “iOS apps cannot quit themselves” on every
 call and do nothing else. Normal native termination cleanup remains.
 
-### Android BACK consumption
+### Android BACK consumption (removed; R7 hook completed early)
 
-**Classification:** KEEP decided by owner (consumption); MOVE to TrussC (planned) for policy notification.
+**Classification:** REMOVED by owner decision B (2026-11-15); upstream b633722
+Back and programmatic quit ported into the standalone fork.
 
-**Code locations:** `_sapp_tc_android_key_event` (`[TrussC tettou771]` BACK marker).
+**Code locations:** `_sapp_tc_android_key_event`, `_sapp_tc_android_app_event`,
+`_sapp_tc_android_loop`, `_sapp_tc_android_should_update`; Runtime's window event
+translation, `CoreEvents::backPressed`, `BackPressedEventArgs`.
 
-**Planned slice:** R7 Android BACK hook and Android-only Runtime event, public usage to owner first.
+**Planned slice:** none; R7 Back hook completed early with the approved API.
 
-Consume `AKEYCODE_BACK` (`return true`) instead of `_sapp_tc_android_shutdown()`:
-upstream destroys EGL and calls `cleanup_cb` immediately, but screen pinning
-(lock-task) blocks `ANativeActivity_finish()`, leaving a live frozen process.
-R7 adds a consuming TrussC hook and Android-only Runtime event (e.g. `backPressed`);
-no listener keeps current behavior, listeners may call `exitApp()`. New API
-needs en/ja/ko reference cards and owner usage review first. The old raw
-QUIT_REQUESTED proposal is superseded.
+The former `[TrussC tettou771]` patch consumed every Back key to avoid destroying
+EGL when screen pinning blocks Activity finish. It is removed: non-canceled Back
+key-up now sends `SAPP_EVENTTYPE_ANDROID_BACK`. Unconsumed Back posts through a
+reverse pipe to the UI looper, which calls `Activity.moveTaskToBack(true)` via JNI.
+The native key is handled in either case so NativeActivity cannot finish the
+Activity as its fallback. All supported Android versions background the task.
+The main-thread TrussC listener consumes only when `BackPressedEventArgs::cancel`
+is true. Home/Recents require Android kiosk configuration, not this hook.
+
+Android quit flags are now active: `sapp_request_quit` delivers cancellable
+QUIT_REQUESTED; `sapp_quit` orders shutdown without another query. Runtime's
+`exitApp` already sets the request and resolves `exitRequested` at its safe point,
+then orders native quit. Both Choreographer and fallback loops process the flags,
+stop frame delivery after ordering, and call shutdown once while waiting for
+Activity destruction. DESTROY uses the existing app-thread message/condition
+handshake and orders cleanup without a cancellable quit query. After window loss,
+a 1×1 pbuffer binds the existing EGL context for cleanup before UI-thread exit;
+the EGL config supports both window and pbuffer surfaces. Cleanup-called gating
+prevents duplicate cleanup on destruction. The API 36 predictive-Back manifest requirement and the current
+API 35 template are documented in the en/ja/ko reference source.
 
 ### Android display density
 
@@ -1337,3 +1353,13 @@ After updating:
 ## Author
 
 All modifications by tettou771
+
+## Pipeline pool usage diagnostics (#1512 part 0)
+
+Owner-approved fork change: `sgl_tc_query_pipeline_pool()` returns occupied and
+capacity counts from the existing free-slot queue (zeros outside sgl lifetime).
+Upstream sgl exposes no pool usage query. TrussC samples this accessor and
+upstream `sg_query_stats()` at its pipeline creation/destruction sites to report
+the fuller pool. No trace hooks, descriptor callbacks, per-platform implementation
+changes, allocation, reclamation or frame polling are added. Pipeline creation
+semantics are unchanged.

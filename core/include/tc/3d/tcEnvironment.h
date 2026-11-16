@@ -33,12 +33,14 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
 
 #include "tc/gpu/shaders/iblBake.glsl.h"
+#include "tc/3d/tcIblUpload.h"
 
 namespace trussc {
 
@@ -98,12 +100,32 @@ public:
             logError("Environment") << "loadFromHDR expects F32 pixels";
             return false;
         }
+        if (!sg_isvalid()) return false;
 
         // Upload equirect HDR as a 2D texture with REPEAT wrap on U axis
         // for seamless horizontal wrapping at the phi = ±pi boundary.
         Texture equirect;
         equirect.setWrapU(TextureWrap::Repeat);
-        equirect.allocate(src, TextureUsage::Immutable);
+        const auto format = internal::iblEquirectFormat(
+            sg_query_pixelformat(SG_PIXELFORMAT_RGBA32F).filter);
+        if (format == TextureFormat::RGBA32F) {
+            equirect.allocate(src, TextureUsage::Immutable);
+        } else {
+            std::vector<uint16_t> halfPixels(size_t(src.getWidth()) * src.getHeight() * 4);
+            for (int y = 0; y < src.getHeight(); ++y) {
+                for (int x = 0; x < src.getWidth(); ++x) {
+                    const Color pixel = src.getColor(x, y);
+                    const size_t offset = (size_t(y) * src.getWidth() + x) * 4;
+                    halfPixels[offset]     = internal::iblFloatToHalf(pixel.r);
+                    halfPixels[offset + 1] = internal::iblFloatToHalf(pixel.g);
+                    halfPixels[offset + 2] = internal::iblFloatToHalf(pixel.b);
+                    halfPixels[offset + 3] = internal::iblFloatToHalf(pixel.a);
+                }
+            }
+            // Typed raw uploads use Dynamic; this source only lives for the bake.
+            equirect.allocate(src.getWidth(), src.getHeight(), format, TextureUsage::Dynamic);
+            equirect.loadData(halfPixels.data(), src.getWidth(), src.getHeight(), 4);
+        }
         if (!equirect.isAllocated()) return false;
 
         return bakeFromEquirectTexture(equirect);
