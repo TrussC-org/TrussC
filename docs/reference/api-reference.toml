@@ -52792,16 +52792,43 @@ details.en = '''
 - `random()` returns a `float` in `[0, 1)`; with increasing bounds, `random(max)` uses `[0, max)` and `random(min, max)` uses `[min, max)`.
 - Bounds are passed directly to the distribution without validation or reordering.
 - Each thread has its own Mersenne Twister engine, initially seeded from `random_device`; `random` and `randomInt` share that engine within the thread, and `randomSeed` reseeds only the calling thread's engine.
+
+`random()` without arguments, called without a namespace qualifier, is an ambiguous-call compile error on Linux and macOS with `using namespace std; using namespace tc;`, because POSIX `::random()` is also declared. Use `tc::random()` or pass an argument; `random(max)` and `random(min, max)` are unaffected.
+
+```cpp
+void tcApp::setup() {
+    float a = tc::random();   // 0.0 to 1.0
+    float b = random(1.0f);   // same range, no ambiguity
+}
+```
 '''
 details.ja = '''
 - `random()` は `[0, 1)` の `float` を返します。上下限が昇順の場合、`random(max)` の範囲は `[0, max)`、`random(min, max)` の範囲は `[min, max)` です。
 - 上下限は検証や並べ替えをせず、そのまま分布に渡します。
 - 各スレッドは `random_device` で初期シードを設定する独立したメルセンヌ・ツイスタ生成器を持ちます。`random` と `randomInt` は同じスレッド内で生成器を共有し、`randomSeed` は呼び出したスレッドの生成器だけを再シードします。
+
+`random()` を引数なし・名前空間の指定なしで呼ぶと、Linux と macOS では `using namespace std; using namespace tc;` のもとで呼び出しが曖昧になり、コンパイルエラーになります。POSIX の `::random()` も宣言されているためです。`tc::random()` と書くか、引数を渡してください。`random(max)` と `random(min, max)` は影響を受けません。
+
+```cpp
+void tcApp::setup() {
+    float a = tc::random();   // 0.0 to 1.0
+    float b = random(1.0f);   // same range, no ambiguity
+}
+```
 '''
 details.ko = '''
 - `random()`은 `[0, 1)` 범위의 `float`를 반환합니다. 경계값이 오름차순이면 `random(max)`의 범위는 `[0, max)`이고 `random(min, max)`의 범위는 `[min, max)`입니다.
 - 경계값을 검사하거나 순서를 바꾸지 않고 그대로 분포에 전달합니다.
 - 각 스레드는 `random_device`로 초기 시드를 설정하는 독립적인 메르센 트위스터 생성기를 가집니다. `random`과 `randomInt`는 같은 스레드 안에서 생성기를 공유하며 `randomSeed`는 호출한 스레드의 생성기만 다시 시드 설정합니다.
+
+`random()`을 인수와 네임스페이스 지정 없이 호출하면 Linux와 macOS에서 `using namespace std; using namespace tc;`를 사용할 때 호출이 모호해져 컴파일 오류가 발생합니다. POSIX의 `::random()`도 선언되어 있기 때문입니다. `tc::random()`을 사용하거나 인수를 전달합니다. `random(max)`와 `random(min, max)`는 영향을 받지 않습니다.
+
+```cpp
+void tcApp::setup() {
+    float a = tc::random();   // 0.0 to 1.0
+    float b = random(1.0f);   // same range, no ambiguity
+}
+```
 '''
 related = ["randomInt", "randomSeed", "noise"]
 snippet = '''
@@ -66719,7 +66746,12 @@ details.en = '''
 - `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
 - `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
 - Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
-- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+- The fuller sg or sokol_gl pipeline pool logs Notice once per run at 50%, Warning on each upward crossing of 80%, and Error on full-pool creation failure (at most once per second, with suppressed failures counted); increase the pool before `runApp()`:
+  ```cpp
+  WindowSettings settings;
+  settings.setPipelinePoolSize(4096);
+  runApp<tcApp>(settings);
+  ```
 '''
 details.ja = '''
 - 既定値はパイプライン 1024 枠です。sokol_gfx のパイプラインは 1 枠あたり約 1.2 KB の CPU メモリを使います。4096 枠なら約 4.9 MB です。
@@ -66727,7 +66759,12 @@ details.ja = '''
 - `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
 - `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
 - `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
-- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+- sg と sokol_gl のうち使用率が高いプールについて、50% に達すると実行中に一度だけ Notice、80% に達するたびに Warning、満杯による作成失敗では Error を記録します（最大毎秒一度で、抑制した失敗数も示します）。`runApp()` の前に枠数を増やしてください。
+  ```cpp
+  WindowSettings settings;
+  settings.setPipelinePoolSize(4096);
+  runApp<tcApp>(settings);
+  ```
 '''
 details.ko = '''
 - 기본값은 파이프라인 슬롯 1024개입니다. sokol_gfx 파이프라인 슬롯은 각각 약 1.2 KB의 CPU 메모리를 사용합니다. 4096개는 약 4.9 MB를 사용합니다.
@@ -66735,7 +66772,12 @@ details.ko = '''
 - `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
 - `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
 - `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
-- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+- sg와 sokol_gl 중 사용률이 높은 풀에 대해 50%에 도달하면 실행 중 한 번만 Notice, 80%를 상향 통과할 때마다 Warning, 풀이 가득 차 생성에 실패하면 Error를 기록합니다(초당 최대 한 번이며 억제된 실패 수도 표시합니다). `runApp()` 전에 슬롯 수를 늘려야 합니다.
+  ```cpp
+  WindowSettings settings;
+  settings.setPipelinePoolSize(4096);
+  runApp<tcApp>(settings);
+  ```
 '''
 related = ["WindowSettings", "RuntimeSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize"]
 snippet = '''

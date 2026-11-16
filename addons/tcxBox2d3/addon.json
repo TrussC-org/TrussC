@@ -1,0 +1,7 @@
+{
+  "description": "Experimental 2D physics with Box2D v3.2; exclusive with tcxBox2d",
+  "author": "tettou771",
+  "license": "MIT",
+  "category": "physics",
+  "keywords": ["physics", "2d", "collision", "simulation"]
+}

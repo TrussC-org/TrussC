@@ -509,6 +509,7 @@ bool frameworkShutdown() { return false; }
 bool sg_isvalid() { return valid; }
 struct Handle { int id=0; };
 void sgl_destroy_pipeline(Handle) { ++operations; }
+void samplePipelinePools() {}
 void sgl_destroy_context(Handle) { ++operations; }
 Handle sgl_default_context() { ++operations;return {1}; }
 struct RenderTargetResources {

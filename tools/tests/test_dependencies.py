@@ -54,7 +54,7 @@ class DependencyTests(unittest.TestCase):
         return rows
 
     def test_real_tree_and_selftest(self):
-        self.assertEqual(len(self.rows), 35)
+        self.assertEqual(len(self.rows), 36)
         self.assertEqual(deps.check(str(ROOT), self.rows), [])
         self.assertEqual(deps.selftest(str(ROOT), self.rows), [])
 
@@ -70,6 +70,7 @@ class DependencyTests(unittest.TestCase):
             ("mbedTLS", "addons/tcxTls/CMakeLists.txt", "v3.6.7", "v3.6.8"),
             ("libcurl", "addons/tcxCurl/CMakeLists.txt", "8_23_0", "8_24_0"),
             ("libremidi", "addons/tcxMidi/CMakeLists.txt", "v5.4.3", "v5.4.4"),
+            ("Box2D v3", "addons/tcxBox2d3/CMakeLists.txt", "v3.2.0", "v3.2.1"),
         ]
         for name, path, old, new in cases:
             with self.subTest(library=name):
@@ -283,7 +284,7 @@ fetchcontent_declare(real
 
             good = run()
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
-            self.assertIn("35 third-party entries", good.stdout)
+            self.assertIn("36 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
             inventory = license_path.read_text(encoding="utf-8")
             version_prefix = "| **miniaudio** | 0.11.26"

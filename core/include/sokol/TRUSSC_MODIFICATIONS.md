@@ -1346,3 +1346,13 @@ After updating:
 ## Author
 
 All modifications by tettou771
+
+## Pipeline pool usage diagnostics (#1512 part 0)
+
+Owner-approved fork change: `sgl_tc_query_pipeline_pool()` returns occupied and
+capacity counts from the existing free-slot queue (zeros outside sgl lifetime).
+Upstream sgl exposes no pool usage query. TrussC samples this accessor and
+upstream `sg_query_stats()` at its pipeline creation/destruction sites to report
+the fuller pool. No trace hooks, descriptor callbacks, per-platform implementation
+changes, allocation, reclamation or frame polling are added. Pipeline creation
+semantics are unchanged.

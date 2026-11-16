@@ -32,6 +32,8 @@ std::ostream& logWarning(const char*) { return warnings; }
 namespace internal {
 int suspensions = 0;
 template<class T> void deferGpuDestroy(T) {}
+void samplePipelinePools() {}
+uint64_t pipelinePoolExhaustionEvents() noexcept { return 0; }
 bool suspendForImageUpload() { ++suspensions; return false; }
 }
 }

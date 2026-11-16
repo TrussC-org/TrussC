@@ -1263,6 +1263,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_reference_workflow.py -v
 
+      - name: Box2D addon exclusivity configure checks
+        if: always()
+        run: python3 tools/tests/test_box2d_exclusive.py -v
+
       - name: FetchContent CMake regression checks
         if: always()
         run: python3 tools/tests/test_fetchcontent_cache.py -v
