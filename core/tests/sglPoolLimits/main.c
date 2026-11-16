@@ -3,9 +3,8 @@
 // (sokol_gl_tc.h, #317), on SOKOL_DUMMY_BACKEND (no GPU, no window).
 //
 // Checks:
-//   (a) sgl_context_make_pipeline() is all or nothing: when the sg pipeline
-//       pool cannot hold all of an sgl pipeline's sg pipelines, it returns id
-//       0 and the sg pipelines it had made are destroyed again.
+//   (a) primitive pipelines are lazy; a failed child skips only its draw,
+//       leaves other children usable, and retries on its next use.
 //   (b) _sgl_draw() skips a draw command whose sg pipeline is id 0 (recorded
 //       while a destroyed sgl pipeline was loaded) and draws the others.
 //   (c) the sgl context pool grows when full: more contexts than
@@ -26,7 +25,7 @@
 #include "sokol_gfx.h"
 
 // The dummy backend normally always succeeds. Inject a backend creation
-// failure with a nonzero FAILED handle to exercise the other rollback path.
+// failure with a nonzero FAILED handle to exercise the nonzero-handle failure path.
 static int g_fail_pipeline_countdown = 0;
 static sg_pipeline test_make_pipeline(const sg_pipeline_desc* desc) {
     if (g_fail_pipeline_countdown > 0 && --g_fail_pipeline_countdown == 0) {
@@ -75,83 +74,115 @@ static void push_tri(void) {
     sgl_end();
 }
 
-// sg pipelines made per sgl pipeline: one per primitive type, quads share
-// the triangle pipeline.
-#define SG_PIPS_PER_SGL_PIP (SGL_NUM_PRIMITIVE_TYPES - 1)
-
-// (a) Pool of 23 sg pipelines: the default context's pipeline takes 5, three
-// more sgl pipelines take 15, and the fifth sgl pipeline finds 3 free slots.
-static void test_pipeline_rollback(void) {
-    const int pool = 23;
-    sg_setup(&(sg_desc){ .pipeline_pool_size = pool, .logger.func = slog_func });
-    sgl_setup(&(sgl_desc_t){ .logger.func = slog_func });
-    check("(c) default context pool starts at 8", _sgl.context_pool.pool.size == 9);
-
-    // Room for 3 more sgl pipelines; the 4th one does not fit.
-    sgl_pipeline made[4] = {{0}};
-    int n_made = 0;
-    bool got_failure = false;
-    for (int i = 0; i < 4; i++) {
-        sgl_pipeline p = sgl_context_make_pipeline(sgl_default_context(),
-                                                   &(sg_pipeline_desc){0});
-        if (p.id == SG_INVALID_ID) { got_failure = true; break; }
-        made[n_made++] = p;
-    }
-    const uint32_t alive = sg_pipelines_alive();
-    const uint32_t expect_alive = (uint32_t)(4 * SG_PIPS_PER_SGL_PIP);
-    printf("  [rollback] sgl pipelines made=%d (want 3)  sg pipelines alive=%u (want %u of %d)\n",
-           n_made, alive, expect_alive, pool);
-    check("(a) sgl pipeline that does not fit returns id 0",
-          got_failure && n_made == 3);
-    check("(a) its partly made sg pipelines are destroyed again",
-          alive == expect_alive);
-
-    // The free slots really are free: plain sg pipelines fit into them.
-    int extra = 0;
-    for (int i = 0; i < pool; i++) {
-        sg_pipeline_desc d = {0};
-        d.shader = _sgl.shd;
-        d.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
-        d.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
-        d.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
-        d.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT;
-        sg_pipeline p = sg_make_pipeline(&d);
-        if (p.id == SG_INVALID_ID) break;
-        ++extra;
-    }
-    printf("  [rollback] plain sg pipelines made afterwards=%d (want %d)\n",
-           extra, pool - (int)expect_alive);
-    check("(a) the freed sg pipeline slots can be used again",
-          extra == pool - (int)expect_alive);
-
-    // Destroying an sgl pipeline returns its sg pipelines.
-    const uint32_t before = sg_pipelines_alive();
-    sgl_destroy_pipeline(made[0]);
-    check("(a) sgl_destroy_pipeline() frees its sg pipelines",
-          sg_pipelines_alive() == before - SG_PIPS_PER_SGL_PIP);
-
-    sgl_shutdown();
-    sg_shutdown();
+static int pipeline_errors;
+static void pipeline_logger(const char* tag, uint32_t level, uint32_t item,
+                            const char* message, uint32_t line, const char* file, void* user) {
+    if (strcmp(tag, "sgl") == 0 && item == SGL_LOGITEM_MAKE_PIPELINE_FAILED && level == 1)
+        ++pipeline_errors;
+    slog_func(tag, level, item, message, line, file, user);
 }
 
-static void test_failed_pipeline_rollback(void) {
-    for (int fail = 1; fail <= SG_PIPS_PER_SGL_PIP; ++fail) {
-        sg_setup(&(sg_desc){ .logger.func = slog_func });
-        // Only the default pipeline and one more sgl slot fit. A successful
-        // creation after rollback proves that the failed sgl slot was freed.
-        sgl_setup(&(sgl_desc_t){ .pipeline_pool_size = 2, .logger.func = slog_func });
-        const uint32_t before = sg_pipelines_alive();
-        g_fail_pipeline_countdown = fail;
-        sgl_pipeline failed = sgl_make_pipeline(&(sg_pipeline_desc){0});
-        printf("  [backend failure] failing sg pipeline %d of %d\n", fail, SG_PIPS_PER_SGL_PIP);
-        check("(a) nonzero FAILED sg pipeline rolls back and returns id 0",
-              failed.id == SG_INVALID_ID && sg_pipelines_alive() == before);
-        sgl_pipeline next = sgl_make_pipeline(&(sg_pipeline_desc){0});
-        check("(a) failed sgl slot can be reused after backend failure",
-              next.id != SG_INVALID_ID && sg_pipelines_alive() == before + SG_PIPS_PER_SGL_PIP);
-        sgl_shutdown();
-        sg_shutdown();
+static void push_points(void) {
+    sgl_begin_points(); sgl_v2f(0, 0); sgl_end();
+}
+static void push_lines(void) {
+    sgl_begin_lines(); sgl_v2f(0, 0); sgl_v2f(1, 1); sgl_end();
+}
+static void begin_pass(void) {
+    sg_begin_pass(&(sg_pass){ .swapchain = { .width = 16, .height = 16,
+        .color_format = SG_PIXELFORMAT_RGBA8,
+        .depth_format = SG_PIXELFORMAT_DEPTH_STENCIL, .sample_count = 1 } });
+}
+
+static void test_lazy_primitives(void) {
+    sg_setup(&(sg_desc){ .logger.func = slog_func });
+    sgl_setup(&(sgl_desc_t){ .logger.func = slog_func });
+    sg_enable_stats();
+    check("(a) default context creates no sg pipelines", sg_pipelines_alive() == 0);
+    sgl_pipeline unused = sgl_context_make_pipeline(sgl_default_context(), &(sg_pipeline_desc){0});
+    sgl_destroy_pipeline(unused);
+    check("(a) unused pipeline destroys safely", sg_pipelines_alive() == 0);
+    // The descriptor and label may be temporary caller storage.
+    char label[] = "temporary-label";
+    sg_pipeline_desc desc = { .label = label };
+    sgl_pipeline p = sgl_make_pipeline(&desc);
+    label[0] = 'X'; desc.colors[0].write_mask = SG_COLORMASK_NONE;
+    sgl_load_pipeline(p);
+    push_tri(); push_tri();
+    check("(a) triangle-only pipeline creates exactly one child", sg_pipelines_alive() == 1);
+    sg_pipeline triangles = _sgl_get_pipeline(p, SGL_PRIMITIVETYPE_TRIANGLES);
+    check("(a) descriptor snapshot preserves caller render state", sg_query_pipeline_desc(triangles).colors[0].write_mask == SG_COLORMASK_RGB);
+    check("(a) descriptor snapshot owns its label", strcmp(_sgl_lookup_pipeline(p.id)->desc.label, "temporary-label") == 0);
+    sgl_begin_quads();
+    for (int i = 0; i < 4; ++i) sgl_v2f(0, 0);
+    sgl_end();
+    check("(a) quads share the triangle child", sg_pipelines_alive() == 1 &&
+        _sgl_get_pipeline(p, SGL_PRIMITIVETYPE_QUADS).id == triangles.id);
+    push_points();
+    check("(a) points create one child on first use", sg_pipelines_alive() == 2);
+    push_lines(); push_lines();
+    check("(a) lines create once on first use", sg_pipelines_alive() == 3);
+    sgl_begin_line_strip(); sgl_v2f(0, 0); sgl_v2f(1, 1); sgl_end();
+    sgl_begin_triangle_strip();
+    sgl_v2f(0, 0); sgl_v2f(1, 0); sgl_v2f(0, 1); sgl_end();
+    check("(a) strips create distinct children", sg_pipelines_alive() == 5);
+    begin_pass(); sgl_draw();
+    check("(a) every primitive draws, repeated compatible draws merge", sg_query_stats().cur_frame.num_draw == 5);
+    sg_end_pass(); sg_commit();
+    sgl_destroy_pipeline(p);
+    check("(a) destroy frees each child exactly once", sg_pipelines_alive() == 0);
+    p = sgl_make_pipeline(&(sg_pipeline_desc){0});
+    sgl_load_pipeline(p);
+    sgl_begin_quads();
+    for (int i = 0; i < 4; ++i) sgl_v2f(0, 0);
+    sgl_end();
+    check("(a) quads-first creates exactly the triangle child", sg_pipelines_alive() == 1 &&
+        _sgl_get_pipeline(p, SGL_PRIMITIVETYPE_QUADS).id == _sgl_get_pipeline(p, SGL_PRIMITIVETYPE_TRIANGLES).id);
+    sg_commit();
+    sgl_destroy_pipeline(p);
+    sgl_shutdown(); sg_shutdown();
+}
+
+static void test_child_failure(bool backend_failure) {
+    pipeline_errors = 0;
+    sg_setup(&(sg_desc){ .pipeline_pool_size = backend_failure ? 8 : 1, .logger.func = slog_func });
+    sgl_setup(&(sgl_desc_t){ .logger.func = pipeline_logger });
+    sg_enable_stats();
+    sgl_pipeline p = sgl_make_pipeline(&(sg_pipeline_desc){0});
+    sgl_load_pipeline(p); push_tri();
+    if (backend_failure) {
+        g_fail_pipeline_countdown = 1;
+        sgl_translate(2, 3, 0);
     }
+    push_points();
+    if (backend_failure) check("(a) failed child preserves dirty matrices", _sgl.cur_ctx->matrix_dirty);
+    check("(a) failed child reports the existing error", pipeline_errors == 1);
+    check("(a) failed child leaves parent and siblings valid", sg_pipelines_alive() == 1 &&
+        _sgl_lookup_pipeline(p.id)->slot.state == SG_RESOURCESTATE_VALID && !sgl_error().any);
+    // A failed point draw between two triangles must neither record nor merge
+    // its vertices into the previous triangle command.
+    push_tri();
+    check("(a) skipped vertices cannot enter a merged triangle draw", sgl_num_vertices() == 6);
+    begin_pass(); sgl_draw();
+    check("(a) failure skips only its draw; triangles still draw", sg_query_stats().cur_frame.num_draw == (backend_failure ? 2u : 1u) &&
+        _sgl.cur_ctx->commands.ptr[0].args.draw.num_vertices == (backend_failure ? 3 : 6));
+    sg_end_pass(); sg_commit();
+    if (!backend_failure) {
+        // Release the triangle child by destroying its owner, making room for
+        // the failed point child of another parent below.
+        sgl_pipeline other = sgl_make_pipeline(&(sg_pipeline_desc){0});
+        sgl_load_pipeline(other); push_points();
+        check("(a) full pool still skips points", pipeline_errors == 2);
+        sgl_destroy_pipeline(p); p = other;
+    }
+    push_points();
+    check("(a) later use retries the failed child without leaking", sg_pipelines_alive() == (backend_failure ? 2u : 1u));
+    begin_pass(); sgl_draw();
+    check("(a) retried child draws", sg_query_stats().cur_frame.num_draw == 1);
+    sg_end_pass(); sg_commit();
+    sgl_destroy_pipeline(p);
+    check("(a) partial children destroy without leaks", sg_pipelines_alive() == 0);
+    sgl_shutdown(); sg_shutdown();
 }
 
 // (c) context_pool_size = 2 (the default context plus one).
@@ -331,8 +362,9 @@ static void test_full_buffer_pool_growth(void) {
 }
 
 int main(void) {
-    test_pipeline_rollback();
-    test_failed_pipeline_rollback();
+    test_lazy_primitives();
+    test_child_failure(false);
+    test_child_failure(true);
     test_context_pool_grow();
     test_context_pool_grow_failure();
     test_full_buffer_pool_growth();

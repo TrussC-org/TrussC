@@ -349,15 +349,28 @@ bool pipelineGenerationProbe() {
     auto failedRequest=internal::PipelineKey::raw(internal::PipelineRole::Shader,desc);
     const auto failed=target.pipeline(failedRequest);
     const auto failedImmediate=internal::active3D();
+    sgl_set_context(target.resources().context);
     internal::loadPipeline(failedImmediate);
-    ok &= !failedImmediate.id && target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D,BlendMode::Alpha,true};
+    ok &= failedImmediate.id && target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D,BlendMode::Alpha,true};
+    // The SGL recipe survives exhaustion; only its first primitive draw fails.
+    auto* recording = _sgl_lookup_context(target.resources().context.id);
+    const int commandsBefore = recording->commands.next;
+    const int verticesBefore = recording->vertices.next;
+    auto triangle = [] {
+        sgl_begin_triangles(); sgl_v2f(0,0); sgl_v2f(1,0); sgl_v2f(0,1); sgl_end();
+    };
+    triangle();
+    ok &= recording->commands.next == commandsBefore && recording->vertices.next == verticesBefore;
     const auto entries=target.resources().rawCache->cache.size();
     for(auto pipeline:held) sg_destroy_pipeline(pipeline);
-    ok &= !failed.raw.id && !target.pipeline(failedRequest).raw.id && target.resources().rawCache->cache.size()==entries && !internal::active3D().id;
+    ok &= !failed.raw.id && !target.pipeline(failedRequest).raw.id && target.resources().rawCache->cache.size()==entries && internal::active3D().id==failedImmediate.id;
+    triangle();
+    ok &= recording->commands.next == commandsBefore + 1 && recording->vertices.next == verticesBefore + 3 &&
+        sg_query_pipeline_state(recording->commands.ptr[commandsBefore].args.draw.pip) == SG_RESOURCESTATE_VALID;
     internal::retirePipelineProgram(shader); internal::deferGpuDestroy(shader);
     internal::endGpuFrame();
     internal::currentWindowCtx()=previous;
-    std::printf("PIPELINE failure cached=%d expected=1\n",ok);
+    std::printf("PIPELINE raw failure cached / immediate child retries=%d expected=1\n",ok);
     return ok;
 }
 

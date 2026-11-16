@@ -1157,7 +1157,7 @@ Color setters (`sgl_c*f/c*b/c1i`) store floats directly; `_sgl_pack_rgbab()` /
 `_sgl_pack_rgbaf()` were removed. Vertices grow 28→40 bytes (~1.4×), preserving
 values above 1.0 for float Fbos. Packed-color rollback is canceled.
 
-### Context pool growth and all-or-nothing pipelines (#317)
+### Context pool growth and pipeline failure safety (#317, #1512)
 
 **Classification:** KEEP decided by owner (R2 growth); KEEP essential (pipeline/invalid-ID safety).
 
@@ -1166,9 +1166,9 @@ values above 1.0 for float Fbos. Packed-color rollback is canceled.
 **Planned slice:** none; retain the current behavior.
 
 Pool/allocation failure returns id 0 for existing caller handling; R2 doubles
-contexts as it does buffers. `_sgl_init_pipeline()` stops at the first invalid
-`sg_make_pipeline()` ID or non-`SG_RESOURCESTATE_VALID` pipeline; `_sgl_make_pipeline()` destroys prior pipelines, frees
-the sgl slot and returns `SG_INVALID_ID`. `_sgl_draw()` skips id-0 commands
+contexts as it does buffers. The original all-or-nothing child creation was
+replaced by the owner-approved lazy primitive creation below (#1512).
+`_sgl_draw()` still skips id-0 commands
 (recorded with invalid/destroyed pipeline) before `sg_apply_pipeline()`.
 
 `_sgl_grow_context_pool()` doubles array/bookkeeping up to `_SGL_MAX_POOL_SIZE - 1`,
@@ -1360,6 +1360,31 @@ Owner-approved fork change: `sgl_tc_query_pipeline_pool()` returns occupied and
 capacity counts from the existing free-slot queue (zeros outside sgl lifetime).
 Upstream sgl exposes no pool usage query. TrussC samples this accessor and
 upstream `sg_query_stats()` at its pipeline creation/destruction sites to report
-the fuller pool. No trace hooks, descriptor callbacks, per-platform implementation
-changes, allocation, reclamation or frame polling are added. Pipeline creation
-semantics are unchanged.
+the fuller pool. Part 0 adds no trace hooks, descriptor callbacks, per-platform
+implementation changes, allocation, reclamation or frame polling. Part 1 below
+adds the lazy child creation callback; the pool query semantics are unchanged.
+
+### Lazy sokol_gl primitive pipelines (#1512, part 1)
+
+**Classification:** KEEP decided by owner (2026-11-16).
+
+**Code locations:** `_sgl_pipeline_t.desc`, `_sgl_init_pipeline`,
+`_sgl_get_pipeline`, `sgl_end`, `_sgl_destroy_pipeline` (`[TrussC]` markers),
+`sgl_desc_t.pipeline_created` (`[TrussC fork]`); TrussC installs the callback
+in `sglSetupDescriptor()`.
+
+Store the patched descriptor (including an owned copy of its debug label) in
+an sgl pipeline. Resolve each SG primitive child on first recording use; quads
+resolve to the triangle child. A triangle-only pipeline uses one SG slot instead
+of five. Unused children have invalid IDs and are never destroyed. A failed child
+logs the existing `MAKE_PIPELINE_FAILED` error, frees any FAILED SG handle, and
+skips only that draw; other children remain valid and the next use retries.
+Recording, merging, replay and dependency visits retain concrete SG handles.
+The optional `sgl_desc_t.pipeline_created` callback (`[TrussC fork]`) runs
+once after each lazy child creation attempt, after failure logging and cleanup.
+TrussC installs `samplePipelinePools` to observe successful allocations at the
+50%/80% thresholds; cached children do not call it. Keeping the callback after
+the SGL failure log preserves the single exhaustion Error.
+The framework retains equal sg/sgl pool capacities and the public default 1024;
+there is no eviction or upstream issue. Tests: `sglPoolLimits`, `sglVertexLayout`,
+and the unchanged display suite / renderRegression pixel comparison.

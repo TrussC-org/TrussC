@@ -16,7 +16,7 @@ static void check_layout(const char* label, sgl_pipeline handle, sg_shader shade
     };
     const int offsets[] = { first_offset, 12, 20, 36 };
     for (int primitive = 0; valid && primitive < SGL_NUM_PRIMITIVE_TYPES; ++primitive) {
-        const sg_pipeline gpu_pipeline = pipeline->pip[primitive];
+        const sg_pipeline gpu_pipeline = _sgl_get_pipeline(handle, (_sgl_primitive_type_t)primitive);
         const sg_pipeline_desc desc = sg_query_pipeline_desc(gpu_pipeline);
         valid = sg_query_pipeline_state(gpu_pipeline) == SG_RESOURCESTATE_VALID &&
                 desc.shader.id == shader.id && desc.layout.buffers[0].stride == 40;
