@@ -59,6 +59,7 @@ const sg_shader_desc* samplerlessDesc(sg_backend backend) {
 class SamplerApp : public App {
 public:
     void setup() override {
+        sg_enable_stats();
         errors_ = getLogger().onLog.listen([](LogEventArgs& e) {
             if (e.level >= LogLevel::Error) check("sampler GPU error", false);
         });
@@ -89,6 +90,7 @@ public:
         sg_image_desc target = {};
         target.width = targetWidth;
         target.height = 4;
+        target.sample_count = 1;
         target.pixel_format = SG_PIXELFORMAT_RGBA8;
         target.usage.color_attachment = true;
         target.usage.copy_src = true;
@@ -107,13 +109,28 @@ public:
             ShaderVertex quad[] = {
                 {-1, -1, 0, 0, 0, 0, 0, 0, 0}, {1, -1, 0, 0, 0, 0, 0, 0, 0},
                 {1, 1, 0, 0, 0, 0, 0, 0, 0}, {-1, 1, 0, 0, 0, 0, 0, 0, 0}};
+            const auto drawsBefore = sg_query_stats().cur_frame.num_draw;
 #if defined(SOKOL_WGPU)
             sg_pass pass = {};
             pass.attachments.colors[0] = attachment_;
             pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
             pass.action.colors[0].clear_value = {0, 0, 0, 1};
+            // Shader submissions need a recording context. The raw-pass scope
+            // alone is for direct sg_* draws and does not replay Shader queues.
+            internal::RenderTarget target;
+            target.passKind = internal::TargetPassKind::Fixed;
+            target.isFbo = true;
+            target.binding = pass;
+            target.clearAction = pass.action;
+            target.width = targetWidth;
+            target.height = 4;
+            target.colorFormat = SG_PIXELFORMAT_RGBA8;
+            target.sampleCount = 1;
+            target.hasDepth = false;
+            target.depthFormat = SG_PIXELFORMAT_NONE;
+            target.pooledResources = internal::leaseTargetResources(target.colorFormat, 1, target.depthFormat);
             {
-                internal::TargetPassScope scope(pass, targetWidth, 4, SG_PIXELFORMAT_RGBA8);
+                internal::TargetPassScope scope(target);
                 shader_.submitVertices(quad, 4, PrimitiveType::Quads);
             }
 #else
@@ -121,6 +138,9 @@ public:
             shader_.submitVertices(quad, 4, PrimitiveType::Quads);
             fbo_.end();
 #endif
+            check(samplerless ? "samplerless quad submitted (FAIL means skipped draw)"
+                              : "14-slot sampler quad submitted (FAIL means skipped draw)",
+                  sg_query_stats().cur_frame.num_draw == drawsBefore + 1);
             rendered_ = true;
 #if defined(SOKOL_WGPU)
             // Public Fbo readPixels is synchronous and unsupported on WebGPU.
@@ -177,7 +197,11 @@ private:
             const auto expected = slotColor(i);
             char label[80];
             std::snprintf(label, sizeof(label), "%s slot %d RGBA", samplerless ? "samplerless" : "sampler", i);
-            check(label, std::memcmp(pixels + stride * 2 + (i * 4 + 2) * 4, expected.data(), 4) == 0);
+            const auto* actual = pixels + stride * 2 + (i * 4 + 2) * 4;
+            std::printf("%s: actual=%u,%u,%u,%u expected=%u,%u,%u,%u\n", label,
+                actual[0], actual[1], actual[2], actual[3],
+                expected[0], expected[1], expected[2], expected[3]);
+            check(label, std::memcmp(actual, expected.data(), 4) == 0);
         }
         samplerCompleted = true;
         exitApp();
