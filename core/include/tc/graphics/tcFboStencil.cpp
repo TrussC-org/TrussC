@@ -67,6 +67,7 @@ bool ensureStencilResources() {
     sampler.min_filter = sampler.mag_filter = SG_FILTER_NEAREST;
     s.sampler = sg_make_sampler(&sampler);
     s.ready = sg_query_sampler_state(s.sampler) == SG_RESOURCESTATE_VALID;
+    const auto exhaustionBefore = pipelinePoolExhaustionEvents();
     for (int b = 0; b < 8; ++b) {
         sg_pipeline_desc p = {};
         p.shader = s.writeShader;
@@ -84,6 +85,7 @@ bool ensureStencilResources() {
         p.stencil.write_mask = uint8_t(1 << b);
         p.stencil.ref = uint8_t(1 << b);
         s.writes[b] = sg_make_pipeline(&p);
+        samplePipelinePools();
 
         p.shader = s.readShader;
         p.color_count = 1;
@@ -99,10 +101,12 @@ bool ensureStencilResources() {
         p.stencil.write_mask = 0;
         p.stencil.ref = 0;
         s.reads[b] = sg_make_pipeline(&p);
+        samplePipelinePools();
         s.ready &= sg_query_pipeline_state(s.writes[b]) == SG_RESOURCESTATE_VALID &&
                    sg_query_pipeline_state(s.reads[b]) == SG_RESOURCESTATE_VALID;
     }
-    if (!s.ready) logWarning("Fbo") << "stencil round trip resource creation failed";
+    if (!s.ready && exhaustionBefore == pipelinePoolExhaustionEvents())
+        logWarning("Fbo") << "stencil round trip resource creation failed";
     return s.ready;
 }
 
@@ -175,8 +179,14 @@ bool FboStencilAccess::readR8(const Fbo& source, Fbo& destination) {
 
 void FboStencilAccess::shutdown() {
     auto& s = stencilResources();
-    for (auto p : s.writes) if (p.id) sg_destroy_pipeline(p);
-    for (auto p : s.reads) if (p.id) sg_destroy_pipeline(p);
+    for (auto p : s.writes) if (p.id) {
+        sg_destroy_pipeline(p);
+        samplePipelinePools();
+    }
+    for (auto p : s.reads) if (p.id) {
+        sg_destroy_pipeline(p);
+        samplePipelinePools();
+    }
     if (s.sampler.id) sg_destroy_sampler(s.sampler);
     if (s.writeShader.id) sg_destroy_shader(s.writeShader);
     if (s.readShader.id) sg_destroy_shader(s.readShader);

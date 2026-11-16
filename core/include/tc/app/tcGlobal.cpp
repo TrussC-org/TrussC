@@ -26,6 +26,7 @@
 #include "impl/tcImageDecode.h"
 #include "internal/tcBuildOutputCapture.h"
 #include "internal/tcHotReloadScan.h"
+#include "internal/tcPipelinePoolLog.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -367,8 +368,9 @@ struct GraphicsPoolSizes {
 };
 GraphicsPoolSizes requestedGraphicsPools;
 GraphicsPoolSizes activeGraphicsPools;
-// Process lifetime: graphics restarts and hot reload must not repeat errors.
-std::atomic<bool> poolExhaustionReported[7]{};
+// Non-pipeline pools keep their process-lifetime exhaustion gates.
+std::atomic<bool> poolExhaustionReported[5]{};
+internal::PipelinePoolLog pipelinePoolLog;
 
 // Bound (representation): 16-bit sokol pool indices would alias handles above 65535; log Error and use 65535.
 constexpr int maxGraphicsPoolSize = 65535;
@@ -386,6 +388,23 @@ int graphicsPoolSize(int count, int defaultCount, const char* setter) {
 }
 
 namespace internal {
+// Internal test seam: initialize the same monitor for production and dummy backends.
+PipelinePoolLog& installPipelinePoolLogging() {
+    pipelinePoolLog.emit = [](internal::PipelinePoolLog::Level level, const std::string& message) {
+        using Level = internal::PipelinePoolLog::Level;
+        getLogger().log(level == Level::Notice ? LogLevel::Notice :
+                        level == Level::Warning ? LogLevel::Warning : LogLevel::Error, message);
+    };
+    pipelinePoolLog.install();
+    return pipelinePoolLog;
+}
+void samplePipelinePools() noexcept {
+    pipelinePoolLog.sgAllocationExhausted = false;
+    pipelinePoolLog.sampleSg();
+}
+uint64_t pipelinePoolExhaustionEvents() noexcept {
+    return pipelinePoolLog.exhaustionEvents;
+}
 void configureGraphicsPools(const WindowSettings& settings) {
     requestedGraphicsPools = {settings.resourcePoolSize, settings.shaderPoolSize, settings.pipelinePoolSize};
 }
@@ -447,6 +466,7 @@ void setup() {
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
+    internal::installPipelinePoolLogging();
     internal::initializeFboOrientation();
     internal::initializeVertexStorageBufferLimit();
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
@@ -454,6 +474,7 @@ void setup() {
     // Initialize sokol_gl with the same descriptor used for later rebuilds.
     auto sgldesc = internal::sglSetupDescriptor();
     sgl_setup(&sgldesc);
+    internal::samplePipelinePools();
 
     // RenderTarget: the swapchain target uses the default sgl context (carries the
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
@@ -2378,8 +2399,12 @@ bool logPoolExhaustion(const char* tag, uint32_t logItem) {
         pool = 6;
     }
     if (pool < 0) return false;
+    if (pool >= 5) {
+        pipelinePoolLog.exhausted(pool == 5);
+        return true;
+    }
     if (!poolExhaustionReported[pool].exchange(true)) {
-        const char* names[] = {"buffer", "image", "view", "sampler", "shader", "pipeline", "pipeline"};
+        const char* names[] = {"buffer", "image", "view", "sampler", "shader"};
         const int count = pool < 4 ? activeGraphicsPools.resources :
                           pool == 4 ? activeGraphicsPools.shaders : activeGraphicsPools.pipelines;
         const char* setter = pool < 4 ? "setResourcePoolSize" :
@@ -2419,9 +2444,15 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                  logItem == SG_LOGITEM_GL_SHADER_COMPILATION_FAILED ||
                  logItem == SG_LOGITEM_GL_SHADER_LINKING_FAILED)) {
                 getLogger().log(LogLevel::Warning, sokolLogMessage(tag, logItem, message, lineNr));
+            } else if (tag && std::strcmp(tag, "sgl") == 0 &&
+                       logItem == SGL_LOGITEM_MAKE_PIPELINE_FAILED && pipelinePoolLog.sgAllocationExhausted) {
+                pipelinePoolLog.sgAllocationExhausted = false;
             } else if (logPoolExhaustion(tag, logItem)) {
-                // Keep sokol's own line at debug verbosity, including repeats.
-                getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));
+                // Non-pipeline pools retain their original debug line. Pipeline
+                // failures have exactly one actionable (rate-limited) message.
+                if (!((tag && std::strcmp(tag, "sg") == 0 && logItem == SG_LOGITEM_PIPELINE_POOL_EXHAUSTED) ||
+                      (tag && std::strcmp(tag, "sgl") == 0 && logItem == SGL_LOGITEM_PIPELINE_POOL_EXHAUSTED)))
+                    getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));
             } else if (logLevel == 0) {
                 // A panic: the process ends right after, so the sinks do not
                 // wait for the lock (a thread holding it may never let go).
@@ -2864,7 +2895,10 @@ void drainPendingGpuDestroys() {
     retire(q.views, refs.views, sg_destroy_view);
     retire(q.images, refs.images, sg_destroy_image);
     retire(q.samplers, refs.samplers, sg_destroy_sampler);
-    retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
+    retire(q.pipelines, refs.pipelines, [](sg_pipeline pipeline) {
+        sg_destroy_pipeline(pipeline);
+        samplePipelinePools();
+    });
     retire(q.shaders, refs.shaders, sg_destroy_shader);
     auto** textureLink = &retiredTextures;
     while (auto* storage = *textureLink) {
@@ -3188,6 +3222,7 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     if (context.id) return true;
     if (contextFailed) return false;
     context = sgl_make_context(&desc);
+    samplePipelinePools();
     if (context.id) sgl_tc_context_target_owned(context);
     contextFailed = !context.id;
     generation = nextPipelineGeneration();
@@ -3205,7 +3240,10 @@ void RenderTargetResources::rememberSelection(PipelineSelectionId id, PipelineHa
 void RenderTargetResources::release() {
     if (frameworkShutdown() || !sg_isvalid()) return;
     for (const auto& entry : cache) {
-        if (entry.second.id) sgl_destroy_pipeline(entry.second);
+        if (entry.second.id) {
+            sgl_destroy_pipeline(entry.second);
+            samplePipelinePools();
+        }
 #ifndef NDEBUG
         pipelineOwnerCtx().erase(entry.second.id);
 #endif
@@ -3214,6 +3252,7 @@ void RenderTargetResources::release() {
     // sokol_gl owns its mandatory default context until shutdown. A resized
     // Window may switch to a dedicated context without destroying that default.
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
+    samplePipelinePools();
     context = {}; contextFailed = false;
 }
 void RenderTarget::setStencilDescKey(uint32_t key) {
@@ -3295,10 +3334,13 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
         auto& cache = bundle.rawCache->cache;
         auto found = cache.find(key);
         if (found != cache.end()) { result.raw = found->second; return result; }
+        const auto exhaustionBefore = pipelinePoolLog.exhaustionEvents;
         auto pipeline = programReady ? sg_make_pipeline(&normalized) : sg_pipeline{};
+        samplePipelinePools();
         if (sg_query_pipeline_state(pipeline) != SG_RESOURCESTATE_VALID) {
             deferGpuDestroy(pipeline); pipeline = {};
-            logWarning("RenderTarget") << "could not create raster pipeline; affected draws skipped until rebuild";
+            if (exhaustionBefore == pipelinePoolLog.exhaustionEvents)
+                logWarning("RenderTarget") << "could not create raster pipeline; affected draws skipped until rebuild";
         }
         cache.emplace(key, pipeline); result.raw = pipeline;
     } else if (bundle.context.id) {
@@ -3311,14 +3353,16 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
         }
         // sgl supplies the default shader/layout when unset and preserves an
         // explicit custom-shader layout; pass the request before raw-sg defaults.
+        const auto exhaustionBefore = pipelinePoolLog.exhaustionEvents;
         auto pipeline = programReady ? sgl_context_make_pipeline(bundle.context, &desc) : sgl_pipeline{};
+        samplePipelinePools();
         bundle.cache.emplace(key, pipeline);
         bundle.selections[pipeline.id] = request.selection;
         if (pipeline.id) {
 #ifndef NDEBUG
             pipelineOwnerCtx()[pipeline.id] = bundle.context.id;
 #endif
-        } else logWarning("RenderTarget") << "could not create immediate pipeline; affected draws skipped until rebuild";
+        } else if (exhaustionBefore == pipelinePoolLog.exhaustionEvents) logWarning("RenderTarget") << "could not create immediate pipeline; affected draws skipped until rebuild";
         result.immediate = pipeline;
     }
     return result;
