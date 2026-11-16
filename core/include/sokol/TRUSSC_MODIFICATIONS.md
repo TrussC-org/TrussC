@@ -1363,3 +1363,22 @@ upstream `sg_query_stats()` at its pipeline creation/destruction sites to report
 the fuller pool. No trace hooks, descriptor callbacks, per-platform implementation
 changes, allocation, reclamation or frame polling are added. Pipeline creation
 semantics are unchanged.
+
+## Dynamic stencil reference (#1512, part 2a)
+
+Owner-approved `[TrussC fork]` extension `sg_apply_stencil_ref(uint8_t)` in
+`sokol_gfx.h`. Inside a render pass, after applying a valid pipeline, it overrides
+that pipeline's stencil reference until the next `sg_apply_pipeline` or end of
+pass. Stencil-disabled pipelines ignore it. Invalid calls report validation
+errors in debug and do nothing in release. No TrussC public API or caller changes.
+
+GL/GLES sets both faces using the bound pipeline's comparisons/read mask and
+updates the actual cached reference; GL and Metal invalidate their pipeline
+identity caches so reapplying the same pipeline restores its own reference.
+Metal uses the current render encoder, D3D11 reuses the bound depth-stencil
+state, WebGPU sets the render-pass reference, and dummy does nothing. Vulkan
+adds dynamic stencil reference to every graphics pipeline and sets both faces
+on override and pipeline application. Backend helpers and Vulkan integration
+carry `[TrussC fork]` markers; remove this extension if upstream supplies an
+equivalent. Coverage: `stencilRef` display readback and `stencilRefValidation`
+debug/release dummy tests.

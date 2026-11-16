@@ -5612,6 +5612,9 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(VALIDATE_APIP_DEPTHSTENCILATTACHMENT_IMAGE_VALID, "sg_apply_pipeline: the pass depth-stencil attachment view's image object is not in valid state (SG_RESOURCESTATE_VALID)") \
     _SG_LOGITEM_XMACRO(VALIDATE_APIP_DEPTHSTENCILATTACHMENT_FORMAT, "sg_apply_pipeline: pipeline .depth.pixel_format doesn't match sg_pass.attachments.depth_stencil image pixel format") \
     _SG_LOGITEM_XMACRO(VALIDATE_APIP_ATTACHMENT_SAMPLE_COUNT, "sg_apply_pipeline: pipeline MSAA sample count doesn't match pass attachment sample count") \
+    /* [TrussC fork] Dynamic stencil reference validation. */ \
+    _SG_LOGITEM_XMACRO(VALIDATE_ASTREF_RENDERPASS_EXPECTED, "sg_apply_stencil_ref: must be called in a render pass") \
+    _SG_LOGITEM_XMACRO(VALIDATE_ASTREF_NO_PIPELINE, "sg_apply_stencil_ref: must be called after sg_apply_pipeline with a valid pipeline") \
     _SG_LOGITEM_XMACRO(VALIDATE_ABND_PASS_EXPECTED, "sg_apply_bindings: must be called in a pass") \
     _SG_LOGITEM_XMACRO(VALIDATE_ABND_EMPTY_BINDINGS, "sg_apply_bindings: the provided sg_bindings struct is empty") \
     _SG_LOGITEM_XMACRO(VALIDATE_ABND_NO_PIPELINE, "sg_apply_bindings: must be called after sg_apply_pipeline") \
@@ -6087,6 +6090,10 @@ SOKOL_GFX_API_DECL void sg_apply_viewportf(float x, float y, float width, float 
 SOKOL_GFX_API_DECL void sg_apply_scissor_rect(int x, int y, int width, int height, bool origin_top_left);
 SOKOL_GFX_API_DECL void sg_apply_scissor_rectf(float x, float y, float width, float height, bool origin_top_left);
 SOKOL_GFX_API_DECL void sg_apply_pipeline(sg_pipeline pip);
+// [TrussC fork] Override the applied render pipeline's stencil ref until the
+// next sg_apply_pipeline or end of pass. Disabled stencil is a no-op.
+// Requires a render pass and an applied pipeline.
+SOKOL_GFX_API_DECL void sg_apply_stencil_ref(uint8_t ref);
 SOKOL_GFX_API_DECL void sg_apply_bindings(const sg_bindings* bindings);
 SOKOL_GFX_API_DECL void sg_apply_uniforms(int ub_slot, const sg_range* data);
 SOKOL_GFX_API_DECL void sg_draw(int base_element, int num_elements, int num_instances);
@@ -10184,6 +10191,12 @@ _SOKOL_PRIVATE void _sg_dummy_apply_scissor_rect(int x, int y, int w, int h, boo
     _SOKOL_UNUSED(origin_top_left);
 }
 
+// [TrussC fork] Dynamic stencil reference (#1512).
+_SOKOL_PRIVATE void _sg_dummy_apply_stencil_ref(_sg_pipeline_t* pip, uint8_t ref) {
+    _SOKOL_UNUSED(pip);
+    _SOKOL_UNUSED(ref);
+}
+
 _SOKOL_PRIVATE void _sg_dummy_apply_pipeline(_sg_pipeline_t* pip) {
     SOKOL_ASSERT(pip);
     _SOKOL_UNUSED(pip);
@@ -13327,6 +13340,19 @@ _SOKOL_PRIVATE void _sg_gl_apply_render_pipeline_state(_sg_pipeline_t* pip) {
     #endif
 }
 
+// [TrussC fork] Dynamic stencil reference (#1512).
+_SOKOL_PRIVATE void _sg_gl_apply_stencil_ref(_sg_pipeline_t* pip, uint8_t ref) {
+    _SG_GL_CHECK_ERROR();
+    glStencilFuncSeparate(GL_FRONT, _sg_gl_compare_func(pip->gl.stencil.front.compare), ref, pip->gl.stencil.read_mask);
+    glStencilFuncSeparate(GL_BACK, _sg_gl_compare_func(pip->gl.stencil.back.compare), ref, pip->gl.stencil.read_mask);
+    _sg_stats_add(gl.num_render_state, 2);
+    // Cache the actual value, including across bindings/cache restores. Force
+    // even a reapply of this same pipeline to restore its immutable own ref.
+    _sg.gl.cache.stencil.ref = ref;
+    _sg.gl.cache.cur_pip = _sg_sref(0);
+    _SG_GL_CHECK_ERROR();
+}
+
 _SOKOL_PRIVATE void _sg_gl_apply_pipeline(_sg_pipeline_t* pip) {
     SOKOL_ASSERT(pip);
     _SG_GL_CHECK_ERROR();
@@ -15916,6 +15942,12 @@ _SOKOL_PRIVATE void _sg_d3d11_apply_scissor_rect(int x, int y, int w, int h, boo
     _sg_d3d11_RSSetScissorRects(_sg.d3d11.ctx, 1, &rect);
 }
 
+// [TrussC fork] Dynamic stencil reference (#1512).
+_SOKOL_PRIVATE void _sg_d3d11_apply_stencil_ref(_sg_pipeline_t* pip, uint8_t ref) {
+    _sg_d3d11_OMSetDepthStencilState(_sg.d3d11.ctx, pip->d3d11.dss, ref);
+    _sg_stats_inc(d3d11.pipeline.num_om_set_depth_stencil_state);
+}
+
 _SOKOL_PRIVATE void _sg_d3d11_apply_pipeline(_sg_pipeline_t* pip) {
     SOKOL_ASSERT(pip);
     SOKOL_ASSERT(_sg.d3d11.ctx);
@@ -18426,6 +18458,15 @@ _SOKOL_PRIVATE void _sg_mtl_apply_scissor_rect(int x, int y, int w, int h, bool 
     r.width = (NSUInteger)clip.w;
     r.height = (NSUInteger)clip.h;
     [_sg.mtl.render_cmd_encoder setScissorRect:r];
+}
+
+// [TrussC fork] Dynamic stencil reference (#1512).
+_SOKOL_PRIVATE void _sg_mtl_apply_stencil_ref(_sg_pipeline_t* pip, uint8_t ref) {
+    _SOKOL_UNUSED(pip);
+    [_sg.mtl.render_cmd_encoder setStencilReferenceValue:ref];
+    _sg_stats_inc(metal.pipeline.num_set_stencil_reference_value);
+    // A reapply of the same pipeline must restore its own reference value.
+    _sg.mtl.cache.cur_pip = _sg_sref(0);
 }
 
 _SOKOL_PRIVATE void _sg_mtl_apply_pipeline(_sg_pipeline_t* pip) {
@@ -21290,6 +21331,12 @@ _SOKOL_PRIVATE void _sg_wgpu_apply_scissor_rect(int x, int y, int w, int h, bool
     uint32_t sw = (uint32_t) clip.w;
     uint32_t sh = (uint32_t) clip.h;
     wgpuRenderPassEncoderSetScissorRect(_sg.wgpu.rpass_enc, sx, sy, sw, sh);
+}
+
+// [TrussC fork] Dynamic stencil reference (#1512).
+_SOKOL_PRIVATE void _sg_wgpu_apply_stencil_ref(_sg_pipeline_t* pip, uint8_t ref) {
+    _SOKOL_UNUSED(pip);
+    wgpuRenderPassEncoderSetStencilReference(_sg.wgpu.rpass_enc, ref);
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_apply_pipeline(_sg_pipeline_t* pip) {
@@ -24394,13 +24441,15 @@ _SOKOL_PRIVATE sg_resource_state _sg_vk_create_pipeline(_sg_pipeline_t* pip, con
         } else {
             rnd_state.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
         }
-        VkDynamicState dyn_states[2] = {
+        // [TrussC fork] Stencil reference is supplied dynamically (#1512).
+        VkDynamicState dyn_states[3] = {
             VK_DYNAMIC_STATE_VIEWPORT,
             VK_DYNAMIC_STATE_SCISSOR,
+            VK_DYNAMIC_STATE_STENCIL_REFERENCE, // [TrussC fork]
         };
         _SG_STRUCT(VkPipelineDynamicStateCreateInfo, dyn_state);
         dyn_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-        dyn_state.dynamicStateCount = 2;
+        dyn_state.dynamicStateCount = 3; // [TrussC fork]
         dyn_state.pDynamicStates = dyn_states;
 
         _SG_STRUCT(VkGraphicsPipelineCreateInfo, pip_create_info);
@@ -24726,6 +24775,12 @@ _SOKOL_PRIVATE void _sg_vk_commit(void) {
     _sg.vk.render_finished_sem = 0;
 }
 
+// [TrussC fork] Dynamic stencil reference (#1512).
+_SOKOL_PRIVATE void _sg_vk_apply_stencil_ref(_sg_pipeline_t* pip, uint8_t ref) {
+    _SOKOL_UNUSED(pip);
+    vkCmdSetStencilReference(_sg.vk.frame.cmd_buf, VK_STENCIL_FACE_FRONT_AND_BACK, ref);
+}
+
 _SOKOL_PRIVATE void _sg_vk_apply_pipeline(_sg_pipeline_t* pip) {
     SOKOL_ASSERT(pip);
     SOKOL_ASSERT(pip->vk.pip);
@@ -24735,6 +24790,10 @@ _SOKOL_PRIVATE void _sg_vk_apply_pipeline(_sg_pipeline_t* pip) {
         ? VK_PIPELINE_BIND_POINT_COMPUTE
         : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(_sg.vk.frame.cmd_buf, bindpoint, pip->vk.pip);
+    // [TrussC fork] Applying a pipeline resets the dynamic reference (#1512).
+    if (!pip->cmn.is_compute) {
+        _sg_vk_apply_stencil_ref(pip, pip->cmn.stencil.ref);
+    }
 }
 
 _SOKOL_PRIVATE bool _sg_vk_apply_bindings(_sg_bindings_ptrs_t* bnd) {
@@ -26774,6 +26833,23 @@ _SOKOL_PRIVATE bool _sg_validate_apply_scissor_rect(int x, int y, int width, int
         }
         _sg_validate_begin();
         _SG_VALIDATE(_sg.cur_pass.in_pass && !_sg.cur_pass.is_compute, VALIDATE_ASR_RENDERPASS_EXPECTED);
+        return _sg_validate_end();
+    #endif
+}
+
+// [TrussC fork] Dynamic stencil reference follows apply_* validation style.
+_SOKOL_PRIVATE bool _sg_validate_apply_stencil_ref(void) {
+    #if !defined(SOKOL_DEBUG)
+        return true;
+    #else
+        if (_sg.desc.disable_validation) {
+            return true;
+        }
+        _sg_validate_begin();
+        _SG_VALIDATE(_sg.cur_pass.in_pass && !_sg.cur_pass.is_compute, VALIDATE_ASTREF_RENDERPASS_EXPECTED);
+        const _sg_pipeline_t* pip = _sg_pipeline_ref_ptr_or_null(&_sg.cur_pip);
+        _SG_VALIDATE(pip && _sg_pipeline_ref_alive(&_sg.cur_pip) &&
+            (pip->slot.state == SG_RESOURCESTATE_VALID) && !_sg_skipdraw_pip(), VALIDATE_ASTREF_NO_PIPELINE);
         return _sg_validate_end();
     #endif
 }
@@ -29272,6 +29348,36 @@ SOKOL_API_IMPL void sg_apply_pipeline(sg_pipeline pip_id) {
     _sg.use_indexed_draw = pip->cmn.index_type != SG_INDEXTYPE_NONE;
     _sg.use_instanced_draw = pip->cmn.use_instanced_draw;
     _sg_apply_pipeline(pip);
+}
+
+// [TrussC fork] Dynamic stencil reference (#1512). Keep release calls without
+// a valid applied pipeline harmless, as with the other apply_* entry points.
+SOKOL_API_IMPL void sg_apply_stencil_ref(uint8_t ref) {
+    SOKOL_ASSERT(_sg.valid);
+    if (!_sg_validate_apply_stencil_ref()) {
+        return;
+    }
+    if (!_sg.cur_pass.valid || _sg.cur_pass.is_compute ||
+        !_sg_pipeline_ref_alive(&_sg.cur_pip) || _sg_skipdraw_pip()) {
+        return;
+    }
+    _sg_pipeline_t* pip = _sg_pipeline_ref_ptr(&_sg.cur_pip);
+    if ((pip->slot.state != SG_RESOURCESTATE_VALID) || !pip->cmn.stencil.enabled) {
+        return;
+    }
+    #if defined(_SOKOL_ANY_GL)
+        _sg_gl_apply_stencil_ref(pip, ref);
+    #elif defined(SOKOL_METAL)
+        _sg_mtl_apply_stencil_ref(pip, ref);
+    #elif defined(SOKOL_D3D11)
+        _sg_d3d11_apply_stencil_ref(pip, ref);
+    #elif defined(SOKOL_WGPU)
+        _sg_wgpu_apply_stencil_ref(pip, ref);
+    #elif defined(SOKOL_VULKAN)
+        _sg_vk_apply_stencil_ref(pip, ref);
+    #elif defined(SOKOL_DUMMY_BACKEND)
+        _sg_dummy_apply_stencil_ref(pip, ref);
+    #endif
 }
 
 SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
