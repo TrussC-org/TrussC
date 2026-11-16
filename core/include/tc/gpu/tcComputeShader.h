@@ -40,9 +40,12 @@ public:
         sg_pipeline_desc pipeline = {};
         pipeline.compute = true;
         pipeline.shader = shader_;
+        const auto exhaustionBefore = internal::pipelinePoolExhaustionEvents();
         pipeline_ = sg_make_pipeline(&pipeline);
+        internal::samplePipelinePools();
         if (!isLoaded()) {
-            logWarning("ComputeShader") << "Failed to create compute pipeline";
+            if (exhaustionBefore == internal::pipelinePoolExhaustionEvents())
+                logWarning("ComputeShader") << "Failed to create compute pipeline";
             clear();
             return false;
         }
