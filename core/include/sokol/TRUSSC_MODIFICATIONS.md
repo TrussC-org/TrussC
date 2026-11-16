@@ -1380,7 +1380,26 @@ Regression coverage: `sglLayerUpload` checks capped allocation sizes, growth,
 reuse and distinct slots; `sglFlushBuffers --gpu-check` checks pixels across
 many growing flushes and subsequent device frames.
 
-### Lazy sokol_gl primitive pipelines (#1512, part 1)
+## Dynamic stencil reference (#1512, part 2a)
+
+Owner-approved `[TrussC fork]` extension `sg_apply_stencil_ref(uint8_t)` in
+`sokol_gfx.h`. Inside a render pass, after applying a valid pipeline, it overrides
+that pipeline's stencil reference until the next `sg_apply_pipeline` or end of
+pass. Stencil-disabled pipelines ignore it. Invalid calls report validation
+errors in debug and do nothing in release. No TrussC public API or caller changes.
+
+GL/GLES sets both faces using the bound pipeline's comparisons/read mask and
+updates the actual cached reference; GL and Metal invalidate their pipeline
+identity caches so reapplying the same pipeline restores its own reference.
+Metal uses the current render encoder, D3D11 reuses the bound depth-stencil
+state, WebGPU sets the render-pass reference, and dummy does nothing. Vulkan
+adds dynamic stencil reference to every graphics pipeline and sets both faces
+on override and pipeline application. Backend helpers and Vulkan integration
+carry `[TrussC fork]` markers; remove this extension if upstream supplies an
+equivalent. Coverage: `stencilRef` display readback and `stencilRefValidation`
+debug/release dummy tests.
+
+## Lazy sokol_gl primitive pipelines (#1512, part 1)
 
 **Classification:** KEEP decided by owner (2026-11-16).
 
