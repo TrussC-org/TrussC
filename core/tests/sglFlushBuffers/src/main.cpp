@@ -22,14 +22,15 @@ public:
     void draw() override {
         clear(0.0f);
         target_.begin(0, 0, 0, 1);
-        // Cumulative uploads increase within each frame. The second frame is
-        // much larger, forcing reuse and growth of the same pool slots.
+        // Rebuild from offset zero so later uploads replace earlier positions
+        // and colors. Uploads grow within each frame; small/large/small frames
+        // exercise growth and reuse of the same pool slots.
         for (int batch = 0; batch < 16; ++batch) {
+            sgl_tc_context_reset(sgl_get_context());
             setColor((batch & 1) ? 0.0f : 1.0f, (batch & 1) ? 1.0f : 0.0f, 0.0f, 1.0f);
             const int repeats = (frame_ == 1 ? 128 : 1) * (batch + 1);
             for (int i = 0; i < repeats; ++i) drawRect(batch * 8, 0, 8, 32);
             sgl_draw();
-            sgl_tc_draw_rewind();
             check("flush has no sokol_gl error", !sgl_error().any);
         }
         target_.end();
@@ -39,9 +40,13 @@ public:
         if (read) {
             bool correct = true;
             for (int batch = 0; batch < 16; ++batch) {
-                const auto* p = &pixels[(16 * 128 + batch * 8 + 4) * 4];
-                correct &= p[0] == ((batch & 1) ? 0 : 255)
-                    && p[1] == ((batch & 1) ? 255 : 0) && p[2] == 0 && p[3] == 255;
+                for (int y = 0; y < 32; ++y) {
+                    for (int x = batch * 8; x < (batch + 1) * 8; ++x) {
+                        const auto* p = &pixels[(y * 128 + x) * 4];
+                        correct &= p[0] == ((batch & 1) ? 0 : 255)
+                            && p[1] == ((batch & 1) ? 255 : 0) && p[2] == 0 && p[3] == 255;
+                    }
+                }
             }
             check("all earlier and later flush pixels survive", correct);
         }
