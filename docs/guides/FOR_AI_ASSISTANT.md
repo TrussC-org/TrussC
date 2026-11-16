@@ -5729,7 +5729,14 @@ Sound sfx = bundle.build();
 14. **Prefer `Event<T>` + `EventListener` over raw `function<>` callbacks.** `EventListener` is RAII: it auto-disconnects on destruction, so no dangling-callback crashes.
 15. **`LayoutMod` never auto-relayouts.** Call `updateLayout()` after adding/removing/resizing children (property setters like `setSpacing()` do trigger it).
 16. **`getGlobalPos()` returns `Vec3`** — the node's origin in global space, shorthand for `localToGlobal(Vec3(0,0,0))`.
-17. **Unqualified `random()` may resolve to POSIX `::random()`** and compile to the wrong thing silently. Write `tc::random(min, max)` explicitly; there is no `randomf`.
+17. **Unqualified `random()` without arguments is an ambiguous-call compile error on Linux and macOS** with `using namespace std; using namespace tc;`, because POSIX `::random()` is also declared. Use `tc::random()` or pass an argument; `random(max)` and `random(min, max)` are unaffected.
+
+    ```cpp
+    void tcApp::setup() {
+        float a = tc::random();   // 0.0 to 1.0
+        float b = random(1.0f);   // same range, no ambiguity
+    }
+    ```
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
 19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth testing (LESS_EQUAL) for all subsequent draws. `Add`, `Screen`, `Multiply` and `Subtract` test without writing depth; `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing it. Translucent `Alpha` also writes depth, so draw opaque objects first and translucent ones back to front; TrussC does not sort draws. The setting persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
