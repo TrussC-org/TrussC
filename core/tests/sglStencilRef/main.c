@@ -1,5 +1,7 @@
 // Standalone dummy-backend unit test; assertion interception proves omissions
 // are visible without deliberately crashing the test process.
+// Keep sokol's debug validation in Release builds too.
+#undef NDEBUG
 #include <stdio.h>
 static int assertions;
 #define SOKOL_ASSERT(condition) ((condition) ? (void)0 : (void)++assertions)
