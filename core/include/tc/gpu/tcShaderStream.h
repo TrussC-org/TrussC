@@ -13,6 +13,7 @@
 #include "../../sokol/sokol_gfx.h"
 #endif
 #include "tcGpuDestroyQueue.h"
+#include "tcStencilRef.h"
 #include "../app/tcExit.h"
 
 namespace trussc {

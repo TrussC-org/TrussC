@@ -7,6 +7,7 @@
 // Included from TrussC.h after BlendMode, CameraContext and the sokol headers.
 // =============================================================================
 #include "impl/tcImportError.h"
+#include "tc/gpu/tcStencilRef.h"
 #include <unordered_map>
 #include <array>
 #include <cstdint>
@@ -248,9 +249,6 @@ enum class PipelineRole { Fill, Premult, Coverage, Clear, Geometry3D,
 // Reference belongs to draw state; retain a bit for enabled value-only state.
 constexpr uint32_t pipelineStencilKey(uint32_t key) {
     return key ? (key & ~0xFFu) | (1u << 21) : 0;
-}
-inline void applyDrawStencilRef(uint32_t key) {
-    if (key) sg_apply_stencil_ref(uint8_t(key));
 }
 struct ImmediateSelection {
     PipelineRole role = PipelineRole::Fill;

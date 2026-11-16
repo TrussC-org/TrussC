@@ -253,6 +253,105 @@ void manyValues() {
     }
     resetStyle();
 }
+// A user pipeline's baked reference survives framework draws in the same pass.
+void mixedUserPipelines() {
+    sg_pipeline_desc desc = {};
+    desc.stencil.enabled = true;
+    desc.stencil.ref = 61;
+    desc.stencil.read_mask = 255;
+    desc.stencil.front.compare = SG_COMPAREFUNC_EQUAL;
+    desc.stencil.back = desc.stencil.front;
+    desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+    desc.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.sample_count = 1;
+    const sgl_pipeline userSgl = sgl_make_pipeline(&desc);
+    const sg_shader shader = sg_make_shader(stencil_desc_mesh_shader_desc(sg_query_backend()));
+    desc.shader = shader;
+    desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+    desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
+    const sg_pipeline userRaw = sg_make_pipeline(&desc);
+    const ShaderVertex vertices[] = {
+        {-1, -1, 0, 0, 0, 0, 1, 0, 1}, {3, -1, 0, 0, 0, 0, 1, 0, 1},
+        {-1, 3, 0, 0, 0, 0, 1, 0, 1}};
+    sg_buffer_desc bufferDesc = {};
+    bufferDesc.data = SG_RANGE(vertices);
+    const sg_buffer buffer = sg_make_buffer(&bufferDesc);
+    sg_bindings bindings = {};
+    bindings.vertex_buffers[0] = buffer;
+    check("mixed user pipelines keep baked 61 without dynamic opt-in",
+        sg_query_pipeline_desc(userRaw).stencil.ref == 61 &&
+        !sg_query_pipeline_desc(userRaw).stencil._tc_dynamic_ref);
+    for (bool sglPath : {false, true}) for (bool frameworkFirst : {true, false}) {
+        Fbo fbo;
+        fbo.allocate(8, 4, 1);
+        fbo.begin(0, 0, 0);
+        setupScreenOrtho();
+        resetStyle();
+        disableDepthTest();
+        setBlendMode(BlendMode::Disabled);
+        clearStencil();
+        setStencilDesc(StencilDesc::shape(17));
+        drawRect(0, 0, 4, 4);
+        setStencilDesc(StencilDesc::shape(61));
+        drawRect(4, 0, 4, 4);
+        internal::currentTarget().flushLayers();
+        setStencilDesc(StencilDesc::inside(17));
+        const auto passesBefore = sg_query_stats().cur_frame.num_passes;
+        auto frameworkDraw = [&] {
+            setStencilDesc(StencilDesc::inside(17));
+            setColor(1, 0, 0);
+            drawRect(0, 0, 8, 4);
+            internal::currentTarget().flushLayers();
+        };
+        auto userDraw = [&] {
+            // No dynamic setter: each user pipeline must use its baked 61.
+            if (sglPath) {
+                sgl_push_pipeline();
+                sgl_load_pipeline(userSgl);
+                sgl_begin_quads();
+                sgl_c4f(0, 1, 0, 1);
+                sgl_v2f(0, 0);
+                sgl_v2f(8, 0);
+                sgl_v2f(8, 4);
+                sgl_v2f(0, 4);
+                sgl_end();
+                sgl_pop_pipeline();
+                internal::currentTarget().flushLayers();
+            } else {
+                sg_apply_pipeline(userRaw);
+                sg_apply_bindings(&bindings);
+                sg_draw(0, 3, 1);
+            }
+        };
+        if (frameworkFirst) {
+            frameworkDraw();
+            userDraw();
+        } else {
+            userDraw();
+            frameworkDraw();
+        }
+        check("mixed draws stay in one GPU pass",
+            sg_query_stats().cur_frame.num_passes == passesBefore);
+        resetStencilDesc();
+        fbo.end();
+        const auto pixels = readColor(fbo);
+        bool exact = true;
+        for (int y = 0; y < 4; ++y) for (int x = 0; x < 8; ++x) {
+            const auto* pixel = pixels.getData() + (y * 8 + x) * 4;
+            exact &= pixel[0] == (x < 4 ? 255 : 0) &&
+                pixel[1] == (x < 4 ? 0 : 255) && pixel[2] == 0 && pixel[3] == 255;
+        }
+        std::printf("MIXED %s %s\n", sglPath ? "sgl" : "raw sg",
+            frameworkFirst ? "framework/user" : "user/framework");
+        check("one-pass readback preserves framework 17 and user baked 61", exact);
+    }
+    sg_destroy_buffer(buffer);
+    sg_destroy_pipeline(userRaw);
+    sg_destroy_shader(shader);
+    sgl_destroy_pipeline(userSgl);
+    resetStyle();
+}
 void nestedValues() {
     Fbo targets[3];
     const uint8_t values[] = {17, 83, 219};
@@ -615,6 +714,7 @@ class StencilApp : public App {
             depthPreservation();
             cycling();
             manyValues();
+            mixedUserPipelines();
             nestedValues();
             shapeAndStyle();
             drawPaths();
