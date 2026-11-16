@@ -16,6 +16,13 @@
 # Link-time mocks must be own-binary unless reviewed to forward while inactive;
 # tools/tests/test_core_test_build_steps.py guards the reviewed exceptions.
 
+if(EMSCRIPTEN)
+    target_link_options(${PROJECT_NAME} PRIVATE -sEXIT_RUNTIME=0
+        "--pre-js=${CMAKE_CURRENT_LIST_DIR}/../common/web-args.js")
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY
+        LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../common/web-args.js")
+endif()
+
 # TC_CORE_TEST_SELECT: a ;-list of the combined tests to compile. Set by
 # examples/build_all.py (--shard, CI splits the core tests over several jobs)
 # on every configure; empty compiles all of them.

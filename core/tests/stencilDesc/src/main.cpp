@@ -264,7 +264,7 @@ void mixedUserPipelines() {
     desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
     desc.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
     desc.sample_count = 1;
-    const sgl_pipeline userSgl = sgl_make_pipeline(&desc);
+    const sg_pipeline_desc sglDesc = desc;
     const sg_shader shader = sg_make_shader(stencil_desc_mesh_shader_desc(sg_query_backend()));
     desc.shader = shader;
     desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
@@ -286,6 +286,9 @@ void mixedUserPipelines() {
         Fbo fbo;
         fbo.allocate(8, 4, 1);
         fbo.begin(0, 0, 0);
+        // sgl takes attachment formats from the current context, not desc.
+        // Create in this RGBA8 Fbo's context (the D3D11 swapchain is BGRA8).
+        const sgl_pipeline userSgl = sglPath ? sgl_make_pipeline(&sglDesc) : sgl_pipeline{};
         setupScreenOrtho();
         resetStyle();
         disableDepthTest();
@@ -345,11 +348,11 @@ void mixedUserPipelines() {
         std::printf("MIXED %s %s\n", sglPath ? "sgl" : "raw sg",
             frameworkFirst ? "framework/user" : "user/framework");
         check("one-pass readback preserves framework 17 and user baked 61", exact);
+        if (sglPath) sgl_destroy_pipeline(userSgl);
     }
     sg_destroy_buffer(buffer);
     sg_destroy_pipeline(userRaw);
     sg_destroy_shader(shader);
-    sgl_destroy_pipeline(userSgl);
     resetStyle();
 }
 void nestedValues() {
@@ -605,7 +608,7 @@ void drawPaths() {
     Shader shader;
     check("custom shader loads", shader.load(stencil_desc_mesh_shader_desc));
     Font font;
-    check("test font loads", font.load(fs::path(__FILE__).parent_path() / "../../renderTargetState/src/fixture.ttf", 16).ok());
+    check("test font loads", font.load("stencilDesc-fixture.ttf", 16).ok());
     GlyphBatch glyphs;
     glyphs.setFont(font);
     glyphs.add("AA", Color(0, 1, 0));

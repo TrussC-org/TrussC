@@ -16,6 +16,14 @@ from check_build_warnings import run_build
 # per entry: linking/compiling an interceptor affects every entry in that binary.
 # Keep exact operations here, not a blanket exemption for a test directory.
 REVIEWED_TARGET_OPTIONS = {
+    # Test runner only: keep rAF display apps alive after main returns and
+    # pass URL argv/report aborts. Does not replace any native/TrussC symbol.
+    ('allCoreTests', 'target_link_options',
+     ('allCoreTests', 'PRIVATE', '-sEXIT_RUNTIME=0',
+      f'--pre-js={ROOT}/core/tests/allCoreTests/../common/web-args.js')),
+    ('allCoreTests', 'set_property',
+     ('TARGET', 'allCoreTests', 'APPEND', 'PROPERTY', 'LINK_DEPENDS',
+      f'{ROOT}/core/tests/allCoreTests/../common/web-args.js')),
     # Packages a font at a test-specific path; no symbol or runtime interception.
     ('customBlend', 'target_link_options',
      ('allCoreTests', 'PRIVATE',
