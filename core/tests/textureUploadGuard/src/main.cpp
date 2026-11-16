@@ -1,5 +1,6 @@
 // #686: run with --gpu-check under Xvfb on Linux.
 #include <TrussC.h>
+#include <tc/gpu/detail/tcTextureUploadStaging.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
@@ -48,11 +49,12 @@ public:
             others_[0].loadData(a_);
             others_[1].loadData(b_);
             const auto after = sg_query_stats().total.buffers;
-            if (!steadyFrame_) {
+            constexpr size_t sets = internal::TextureUploadStaging::frameSets;
+            if (uploadFrames_ == sets) {
                 check("mixed-size upload grows exactly one slot", after.allocated == before.allocated + 1 &&
                     after.deallocated == before.deallocated + 1);
             }
-            if (steadyFrame_) {
+            if (uploadFrames_ >= 2 * sets) {
                 check("warm uploads make zero staging buffers", before.allocated == after.allocated);
                 check("warm uploads destroy zero staging buffers", before.deallocated == after.deallocated);
             }
@@ -69,7 +71,7 @@ public:
             vector<unsigned char> bytes(8 * 8 * 4);
             check("larger upload readback succeeds", largeFbo.readPixels(bytes.data()));
             check("grown slot reaches the right texture", memcmp(bytes.data(), largePixels_.getData(), bytes.size()) == 0);
-            if (!steadyFrame_) { steadyFrame_ = true; return; }
+            if (uploadFrames_++ < 2 * sets) return;
             completed = true;
             exitApp();
             return;
@@ -149,8 +151,8 @@ public:
         check("all uploads occurred in one device frame", internal::deviceFrameCount() == firstFrame_);
         paused_.allocate(4, 4, 4, TextureUsage::Stream);
         paused_.loadData(b_);
-        // These consume small early ordinals on subsequent frames. The large
-        // upload then grows its ordinal, before the third-frame steady check.
+        // Fill all rotating sets, then revisit the first set to grow its
+        // second ordinal. Check steady allocations after every set is warm.
         for (auto& texture : others_) texture.allocate(4, 4, 4, TextureUsage::Stream);
         large_.allocate(8, 8, 4, TextureUsage::Stream);
         largePixels_.allocate(8, 8, 4);
@@ -176,7 +178,7 @@ private:
     Texture paused_, large_, others_[2];
     uint64_t firstFrame_ = 0;
     bool secondFrame_ = false;
-    bool steadyFrame_ = false;
+    size_t uploadFrames_ = 1;
 };
 } // namespace
 
@@ -189,6 +191,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     settings.setSize(32, 32);
     settings.setHighDpi(false);
     return tcCoreTest::runDisplayTest<UploadGuardApp>(settings, failures, [] {
-        check("all three frames completed", completed);
+        check("all rotation and steady frames completed", completed);
     });
 }

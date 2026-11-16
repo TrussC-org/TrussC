@@ -107,9 +107,6 @@ namespace {
 // Refreshed after each sg_setup; other backends have no extra stage bound here.
 int cachedVertexStorageBufferLimit = std::numeric_limits<int>::max();
 
-// Constructed with the graphics device and emptied before sg_shutdown.
-std::unique_ptr<TextureUploadStaging> textureUploadStaging;
-
 void initializeVertexStorageBufferLimit() {
     cachedVertexStorageBufferLimit = std::numeric_limits<int>::max();
 #if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
@@ -124,6 +121,9 @@ int vertexStorageBufferLimit() { return cachedVertexStorageBufferLimit; }
 
 namespace {
 thread_local bool shaderStreamBufferAllocation = false;
+
+// Constructed with the graphics device and emptied before sg_shutdown.
+std::unique_ptr<TextureUploadStaging> textureUploadStaging;
 }
 
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
@@ -3905,13 +3905,10 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
         upload = {padded.data(), padded.size()};
     }
     const bool resume = suspendForImageUpload();
-    sg_buffer staging = {};
-    try {
-        staging = pool.acquire(upload.size, gpuStaging, deviceFrameCount());
-    } catch (...) {
-        if (resume) ensureCurrentPass();
-        throw;
-    }
+    // Commit-listener uploads are unsupported: published device stats advance
+    // before sokol finishes the commit, so its write validation frame can differ.
+    const auto stagingUpload = pool.acquire(upload.size, gpuStaging, deviceFrameCount());
+    const sg_buffer staging = stagingUpload.buffer;
     if (sg_query_buffer_state(staging) == SG_RESOURCESTATE_VALID) {
         sg_write_buffer_desc write = {};
         write.src.data = upload;
@@ -3925,8 +3922,7 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
         copy.dst.mip_level = mipLevel;
         sg_copy_buffer_to_image(&copy);
     }
-    // Keep this ordinal for the next device frame; sokol rotates its native
-    // transient backings. Every upload in this frame consumes a distinct slot.
+    TextureUploadStaging::release(stagingUpload);
     if (resume) ensureCurrentPass();
 }
 
