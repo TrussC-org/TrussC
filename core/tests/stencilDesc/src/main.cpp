@@ -1,4 +1,9 @@
 #include <TrussC.h>
+#include <tcxImGui.h>
+#include "../../../../addons/tcxLut/src/tcLut.h"
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#include "../../../platform/linux/tcVideoNV12Shader.h"
+#endif
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include "pipeline.glsl.h"
@@ -188,6 +193,112 @@ void cycling() {
     }
     check("draw-once cycles 1..255 twice with one color contribution per stroke", exact);
     check("clear every 255 strokes resets all bytes", bytesEqual(fbo, 0));
+}
+// #1512: values must share pipelines while remaining distinct draw snapshots.
+void manyValues() {
+    sg_enable_stats();
+    Shader shader;
+    check("255-mask shader loads", shader.load(stencil_desc_mesh_shader_desc));
+    for (bool shaderPath : {false, true}) {
+        Fbo fbo;
+        fbo.allocate(255, 4);
+        auto render = [&](int count) {
+            fbo.begin(0, 0, 0);
+            setupScreenOrtho(); resetStyle(); disableDepthTest();
+            setBlendMode(BlendMode::Disabled);
+            clearStencil();
+            auto quad = [&](float left, float right, float red) {
+                if (!shaderPath) {
+                    setColor(red, 1, 0);
+                    drawRect(left, 0, right - left, 4);
+                    return;
+                }
+                const float x0 = 2 * left / 255 - 1, x1 = 2 * right / 255 - 1;
+                const ShaderVertex vertices[] = {
+                    {x0, -1, 0, 0, 0, red, 1, 0, 1}, {x1, -1, 0, 0, 0, red, 1, 0, 1},
+                    {x1, 1, 0, 0, 0, red, 1, 0, 1}, {x0, 1, 0, 0, 0, red, 1, 0, 1}};
+                shader.submitVertices(vertices, 4, PrimitiveType::Quads);
+            };
+            if (shaderPath) shader.begin();
+            for (int value = 1; value <= count; ++value) {
+                setStencilDesc(StencilDesc::shape(uint8_t(value)));
+                quad(float(value - 1), float(value), 0);
+            }
+            for (int value = 1; value <= count; ++value) {
+                setStencilDesc(StencilDesc::inside(uint8_t(value)));
+                quad(0, 255, float(value) / 255);
+            }
+            if (shaderPath) shader.end();
+            // A different global value at flush must not affect any recording.
+            resetStencilDesc();
+            fbo.end();
+        };
+        render(1); // Warm precisely the same shape/inside recipes and child types.
+        const auto before = sg_query_stats();
+        render(255);
+        const auto after = sg_query_stats();
+        std::printf("255 MASKS %s: pipelines %u -> %u, dynamic ref changes %u\n",
+            shaderPath ? "Shader" : "sgl", before.total.pipelines.alive, after.total.pipelines.alive,
+            after.cur_frame.num_set_stencil_ref - before.cur_frame.num_set_stencil_ref);
+        check("255 values allocate no pipelines after one-value warmup",
+            before.total.pipelines.alive == after.total.pipelines.alive &&
+            before.total.pipelines.allocated == after.total.pipelines.allocated);
+        const auto pixels = readColor(fbo);
+        bool exact = true;
+        for (int y = 0; y < 4; ++y) for (int x = 0; x < 255; ++x) {
+            const auto* pixel = pixels.getData() + (y * 255 + x) * 4;
+            exact &= std::abs(int(pixel[0]) - (x + 1)) <= 1 && pixel[1] == 255 && pixel[2] == 0;
+        }
+        check("all 255 masks retain their individual values and draw colors", exact);
+    }
+    resetStyle();
+}
+void nestedValues() {
+    Fbo targets[3];
+    const uint8_t values[] = {17, 83, 219};
+    for (auto& target : targets) target.allocate(8, 4);
+    auto drawLevel = [&](auto&& self, int level) -> void {
+        targets[level].begin(0, 0, 0);
+        setupScreenOrtho(); resetStyle(); disableDepthTest();
+        setBlendMode(BlendMode::Disabled);
+        clearStencil();
+        setStencilDesc(StencilDesc::shape(values[level]));
+        drawRect(0, 0, 4, 4);
+        setStencilDesc(StencilDesc::inside(values[level]));
+        setColor(1, 0, 0); drawRect(0, 0, 8, 4);
+        internal::currentTarget().flushLayers();
+        if (level < 2) {
+            self(self, level + 1);
+            check("nested end returns child's logical reference", getStencilDesc() == StencilDesc::inside(219));
+            // Returned child value must not match the parent's attachment.
+            setColor(0, 0, 1); drawRect(0, 0, 8, 4);
+        }
+        setStencilDesc(StencilDesc::inside(values[level]));
+        setColor(0, 1, 0); drawRect(0, 0, 8, 4);
+        // Retain the leaf value across both parent pass resumptions.
+        setStencilDesc(StencilDesc::inside(219));
+        targets[level].end();
+    };
+    drawLevel(drawLevel, 0);
+    for (auto& target : targets) {
+        const auto pixels = readColor(target);
+        bool exact = true;
+        for (int y = 0; y < 4; ++y) for (int x = 0; x < 8; ++x) {
+            const auto* pixel = pixels.getData() + (y * 8 + x) * 4;
+            exact &= pixel[0] == 0 && pixel[1] == (x < 4 ? 255 : 0) && pixel[2] == 0;
+        }
+        check("nested passes preserve separate non-zero masks and replay values", exact);
+    }
+    targets[0].begin(); setupScreenOrtho();
+    setStencilDesc(StencilDesc::inside(17));
+    setColor(0, 0, 1); drawRect(0, 0, 8, 4);
+    internal::currentTarget().flushLayers();
+    setStencilDesc(StencilDesc::inside(219));
+    setColor(1, 0, 0); drawRect(0, 0, 8, 4);
+    targets[0].end();
+    const auto pixels = readColor(targets[0]);
+    check("reentered pass and explicit flush restore correct ref", pixels.getData()[2] == 255 && pixels.getData()[0] == 0);
+    resetStyle();
 }
 void shapeAndStyle() {
     Fbo actual, reference;
@@ -379,6 +490,19 @@ void depthPreservation() {
     check("stencil clear and descriptor reset preserve earlier depth", exact);
 }
 void drawPaths() {
+    tcx::imgui::ImGuiManager ui[2];
+    for (auto& manager : ui) manager.setupOffscreen();
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    internal::NV12VideoShader nv12;
+    nv12.loadShader();
+    Texture luma, chroma;
+    const unsigned char lumaBytes[] = {192, 192, 192, 192};
+    const unsigned char chromaBytes[] = {128, 128};
+    luma.allocate(2, 2, TextureFormat::R8, TextureUsage::Dynamic);
+    chroma.allocate(1, 1, TextureFormat::RG8, TextureUsage::Dynamic);
+    luma.loadData(lumaBytes, 2, 2, 1);
+    chroma.loadData(chromaBytes, 1, 1, 2);
+#endif
     Shader shader;
     check("custom shader loads", shader.load(stencil_desc_mesh_shader_desc));
     Font font;
@@ -395,12 +519,22 @@ void drawPaths() {
     const unsigned char texel[] = {0, 255, 0, 255};
     texture.allocate(1, 1, TextureFormat::RGBA8, TextureUsage::Dynamic);
     texture.loadData(texel, 1, 1, 4);
+    auto lut = tcx::lut::createIdentity(2);
+    check("identity LUT allocates", lut.isAllocated());
+    tcx::lut::LutShader lutShader;
+    check("LUT shader loads", lutShader.load());
+    lutShader.setLut(lut);
+    lutShader.setTexture(texture);
     const ShaderVertex vertices[] = {
         {-1, -1, 0, 0, 0, 0, 1, 0, 1},
         {1, -1, 0, 0, 0, 0, 1, 0, 1},
         {-1, 1, 0, 0, 0, 0, 1, 0, 1},
         {1, 1, 0, 0, 0, 0, 1, 0, 1}};
-    const char* names[] = {"shape", "texture", "Mesh", "custom Shader", "PBR", "square points", "round points", "pixel points", "Font", "GlyphBatch", "bitmap text"};
+    const char* names[] = {"shape", "texture", "Mesh", "custom Shader", "PBR", "square points", "round points", "pixel points", "Font", "GlyphBatch", "bitmap text", "ImGui", "LUT"
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        , "NV12 video"
+#endif
+    };
     for (int path = 0; path < int(std::size(names)); ++path) {
         Fbo reference, masked;
         reference.allocate(32, 32);
@@ -412,9 +546,9 @@ void drawPaths() {
             disableDepthTest();
             clearStencil();
             if (fbo == &masked) {
-                setStencilDesc(StencilDesc::shape());
+                setStencilDesc(StencilDesc::shape(uint8_t(73 + path)));
                 drawRect(0, 0, 16, 32);
-                setStencilDesc(StencilDesc::inside());
+                setStencilDesc(StencilDesc::inside(uint8_t(73 + path)));
             }
             setColor(0, 1, 0);
             switch (path) {
@@ -439,6 +573,17 @@ void drawPaths() {
                 case 8: font.drawString("AA", 4, 4); break;
                 case 9: glyphs.draw(Mat4::translate(4, 4, 0)); break;
                 case 10: drawBitmapString("AA", 4, 4); break;
+                case 11: {
+                    auto scope = ui[fbo == &masked ? 1 : 0].scoped();
+                    check("stencil ImGui scope accepted", bool(scope));
+                    if (scope) ImGui::GetForegroundDrawList()->AddRectFilled(
+                        {0, 0}, {32, 32}, IM_COL32(0, 255, 0, 255));
+                    break;
+                }
+                case 12: lutShader.draw(0, 0, 32, 32); break;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+                case 13: nv12.draw(0, 0, 32, 32, luma, chroma); break;
+#endif
             }
             resetStencilDesc();
             fbo->end();
@@ -469,6 +614,8 @@ class StencilApp : public App {
             ordering();
             depthPreservation();
             cycling();
+            manyValues();
+            nestedValues();
             shapeAndStyle();
             drawPaths();
             auto parent = std::make_shared<Parent>();
@@ -500,7 +647,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return 0;
     }
     WindowSettings settings;
-    settings.setSize(128, 96).setHighDpi(false).setSampleCount(1).setSwapInterval(0).setPipelinePoolSize(8192);
+    settings.setSize(128, 96).setHighDpi(false).setSampleCount(1).setSwapInterval(0);
     return tcCoreTest::runDisplayTest<StencilApp>(settings, failures, [] {
         check("test completed", completed);
     });

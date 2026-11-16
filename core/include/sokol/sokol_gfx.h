@@ -4641,6 +4641,8 @@ typedef struct sg_stencil_state {
     uint8_t read_mask;
     uint8_t write_mask;
     uint8_t ref;
+    // [TrussC fork] Internal opt-in: debug draws require an explicit reference.
+    bool _tc_dynamic_ref;
 } sg_stencil_state;
 
 typedef struct sg_depth_state {
@@ -5112,6 +5114,7 @@ typedef struct sg_frame_stats {
     uint32_t num_apply_viewport;
     uint32_t num_apply_scissor_rect;
     uint32_t num_apply_pipeline;
+    uint32_t num_set_stencil_ref; // [TrussC fork] Actual dynamic reference changes.
     uint32_t num_apply_bindings;
     uint32_t num_apply_uniforms;
     uint32_t num_draw;
@@ -8413,6 +8416,11 @@ typedef struct {
     #endif
     #if defined(SOKOL_TRACE_HOOKS)
     sg_trace_hooks hooks;
+    #endif
+    // [TrussC fork] Reference state is reset by every pipeline application.
+    uint8_t stencil_ref;
+    #if defined(SOKOL_DEBUG)
+    bool stencil_ref_applied;
     #endif
     _sg_commit_listeners_t commit_listeners;
 } _sg_state_t;
@@ -25512,6 +25520,15 @@ static inline void _sg_apply_uniforms(int ub_slot, const sg_range* data) {
 }
 
 static inline void _sg_draw(int base_element, int num_elements, int num_instances, int base_vertex, int base_index) {
+    // [TrussC fork] Catch forgotten reference application at any submission site.
+    #if defined(SOKOL_DEBUG)
+    if (_sg_pipeline_ref_alive(&_sg.cur_pip)) {
+        const _sg_pipeline_t* pip = _sg_pipeline_ref_ptr(&_sg.cur_pip);
+        if (pip->cmn.stencil.enabled && pip->cmn.stencil._tc_dynamic_ref) {
+            SOKOL_ASSERT(_sg.stencil_ref_applied);
+        }
+    }
+    #endif
     #if defined(_SOKOL_ANY_GL)
     _sg_gl_draw(base_element, num_elements, num_instances, base_vertex, base_index);
     #elif defined(SOKOL_METAL)
@@ -29347,6 +29364,13 @@ SOKOL_API_IMPL void sg_apply_pipeline(sg_pipeline pip_id) {
     }
     _sg.use_indexed_draw = pip->cmn.index_type != SG_INDEXTYPE_NONE;
     _sg.use_instanced_draw = pip->cmn.use_instanced_draw;
+    // [TrussC fork] Applying even the same pipeline restores its own reference.
+    if (pip->cmn.stencil.enabled) {
+        _sg.stencil_ref = pip->cmn.stencil.ref;
+        #if defined(SOKOL_DEBUG)
+        _sg.stencil_ref_applied = false;
+        #endif
+    }
     _sg_apply_pipeline(pip);
 }
 
@@ -29365,6 +29389,13 @@ SOKOL_API_IMPL void sg_apply_stencil_ref(uint8_t ref) {
     if ((pip->slot.state != SG_RESOURCESTATE_VALID) || !pip->cmn.stencil.enabled) {
         return;
     }
+    // [TrussC fork] Acknowledge explicit zero without redundant backend work.
+    #if defined(SOKOL_DEBUG)
+    _sg.stencil_ref_applied = true;
+    #endif
+    if (_sg.stencil_ref == ref) return;
+    _sg.stencil_ref = ref;
+    _sg_stats_inc(num_set_stencil_ref);
     #if defined(_SOKOL_ANY_GL)
         _sg_gl_apply_stencil_ref(pip, ref);
     #elif defined(SOKOL_METAL)

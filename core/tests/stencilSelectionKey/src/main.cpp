@@ -1,4 +1,4 @@
-// #1386: packed stencil values participate in selection cache identity.
+// #1386: raster stencil fields participate in pipeline identity; reference values do not.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -21,23 +21,33 @@ TC_CORE_TEST_MAIN() {
     PipelineSelectionCache cache;
     cache.emplace(defaultId, PipelineHandles{{1}});
     bool distinct = true, copied = true;
-    for (unsigned bit = 0; bit < 21; ++bit) {
+    for (unsigned bit = 8; bit < 21; ++bit) {
         auto selection = standard;
         selection.stencilDescKey = uint32_t(1) << bit;
         auto id = PipelineSelectionId::immediate(selection);
-        copied = copied && id.stencilDescKey == selection.stencilDescKey;
+        copied = copied && id.stencilDescKey == pipelineStencilKey(selection.stencilDescKey);
         distinct = distinct && !(selection == standard) && !(id == defaultId);
         cache.emplace(id, PipelineHandles{{uint32_t(bit + 2)}});
     }
-    check("all five stencil fields distinguish immediate selections", distinct);
+    check("raster stencil fields distinguish immediate selections", distinct);
     check("packed stencil key reaches shared selection identity", copied);
-    bool retained = cache.size() == 22 && cache.at(defaultId).immediate.id == 1;
-    for (unsigned bit = 0; bit < 21; ++bit) {
+    bool retained = cache.size() == 14 && cache.at(defaultId).immediate.id == 1;
+    for (unsigned bit = 8; bit < 21; ++bit) {
         auto selection = standard;
         selection.stencilDescKey = uint32_t(1) << bit;
         retained = retained && cache.at(PipelineSelectionId::immediate(selection)).immediate.id == bit + 2;
     }
     check("alternating keys retain independent cached handles", retained);
+    bool shared = true;
+    auto shape = standard;
+    shape.stencilDescKey = stencilDescKey(StencilDesc::shape(0));
+    for (int value = 0; value <= 255; ++value) {
+        auto selection = shape;
+        selection.stencilDescKey = stencilDescKey(StencilDesc::shape(uint8_t(value)));
+        shared &= selection == shape && PipelineSelectionId::immediate(selection) == PipelineSelectionId::immediate(shape);
+    }
+    check("all 256 references share pipeline selection identity", shared);
+    check("value-only enabled state remains distinct from disabled", pipelineStencilKey(7) != pipelineStencilKey(0));
     size_t previousHash = 2166136261u;
     for (auto value : {defaultId.recipe, defaultId.variant, defaultId.attachments}) {
         previousHash = (previousHash ^ uint32_t(value)) * 16777619u;
@@ -53,7 +63,7 @@ TC_CORE_TEST_MAIN() {
                 StencilDesc desc{173, StencilTest(compare), write, uint8_t(mask), color};
                 sg_pipeline_desc pipeline = {};
                 applyStencilDesc(pipeline, stencilDescKey(desc));
-                raster &= pipeline.stencil.enabled && pipeline.stencil.ref == 173 &&
+                raster &= pipeline.stencil.enabled && pipeline.stencil.ref == 0 && pipeline.stencil._tc_dynamic_ref &&
                     pipeline.stencil.front.compare == sg_compare_func(compare ? compare : SG_COMPAREFUNC_ALWAYS) &&
                     pipeline.stencil.back.compare == sg_compare_func(compare ? compare : SG_COMPAREFUNC_ALWAYS) &&
                     pipeline.stencil.front.fail_op == SG_STENCILOP_KEEP &&

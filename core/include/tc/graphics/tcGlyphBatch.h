@@ -130,6 +130,7 @@ public:
             command.scissor = {clip.active ? clip.x : 0, clip.active ? clip.y : 0,
                                clip.active ? clip.w : float(target->width),
                                clip.active ? clip.h : float(target->height)};
+            command.stencilDescKey = target->stencilDescKey;
             command.pipeline = pipeline.raw;
             command.pipelineGeneration = target->resources().rawCache;
             command.vertexCount = static_cast<int>(page.vertices.size() / 4 * 6); // indexed sg_draw count

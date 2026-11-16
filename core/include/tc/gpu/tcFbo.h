@@ -790,6 +790,7 @@ private:
         const auto selected = recipe.select(internal::currentTarget());
         if (!selected.raw.id) return false;
         sg_apply_pipeline(selected.raw);
+        internal::applyDrawStencilRef(internal::currentTarget().stencilDescKey);
         return true;
     }
 
