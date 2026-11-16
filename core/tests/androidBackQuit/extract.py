@@ -16,7 +16,9 @@ def body(name):
     return header[start:end] + '\n'
 
 names = ('bool _sapp_tc_android_app_event(', 'void _sapp_tc_android_cleanup(',
-         'void _sapp_tc_android_shutdown(', 'bool _sapp_tc_android_key_event(',
+         'void _sapp_tc_android_shutdown(', 'void _sapp_tc_android_background(',
+         'bool _sapp_tc_android_key_event(', 'int _sapp_tc_android_main_cb(',
+         'int _sapp_tc_android_ui_cb(',
          'bool _sapp_tc_android_should_update(')
 code = ''.join(body(name) for name in names)
 code += '#if __ANDROID_API__ >= 29\n' + body('void _sapp_tc_android_frame_callback(') + '#endif\n'

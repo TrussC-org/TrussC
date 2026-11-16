@@ -707,8 +707,10 @@ translation, `CoreEvents::backPressed`, `BackPressedEventArgs`.
 
 The former `[TrussC tettou771]` patch consumed every Back key to avoid destroying
 EGL when screen pinning blocks Activity finish. It is removed: non-canceled Back
-key-up now sends `SAPP_EVENTTYPE_ANDROID_BACK` and returns its consumed state.
-No listener defaults to Android handling (12+ backgrounds, older versions finish).
+key-up now sends `SAPP_EVENTTYPE_ANDROID_BACK`. Unconsumed Back posts through a
+reverse pipe to the UI looper, which calls `Activity.moveTaskToBack(true)` via JNI.
+The native key is handled in either case so NativeActivity cannot finish the
+Activity as its fallback. All supported Android versions background the task.
 The main-thread TrussC listener consumes only when `BackPressedEventArgs::cancel`
 is true. Home/Recents require Android kiosk configuration, not this hook.
 
@@ -717,8 +719,11 @@ QUIT_REQUESTED; `sapp_quit` orders shutdown without another query. Runtime's
 `exitApp` already sets the request and resolves `exitRequested` at its safe point,
 then orders native quit. Both Choreographer and fallback loops process the flags,
 stop frame delivery after ordering, and call shutdown once while waiting for
-Activity destruction. Existing cleanup-called gating prevents duplicate cleanup
-on destruction. The API 36 predictive-Back manifest requirement and the current
+Activity destruction. DESTROY uses the existing app-thread message/condition
+handshake and orders cleanup without a cancellable quit query. After window loss,
+a 1×1 pbuffer binds the existing EGL context for cleanup before UI-thread exit;
+the EGL config supports both window and pbuffer surfaces. Cleanup-called gating
+prevents duplicate cleanup on destruction. The API 36 predictive-Back manifest requirement and the current
 API 35 template are documented in the en/ja/ko reference source.
 
 ### Android display density
