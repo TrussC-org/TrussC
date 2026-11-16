@@ -1,5 +1,6 @@
 // #686: run with --gpu-check under Xvfb on Linux.
 #include <TrussC.h>
+#include <tc/gpu/detail/tcTextureUploadStaging.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
@@ -21,6 +22,7 @@ class UploadGuardApp : public App {
 public:
     void setup() override {
         setFps(VSYNC);
+        sg_enable_stats();
         fbo_.allocate(4, 4);
         a_.allocate(4, 4, 4);
         b_.allocate(4, 4, 4);
@@ -40,15 +42,41 @@ public:
                 e.message == "[Texture] loadData() called twice in same frame, skipped") ++warnings;
         });
         if (secondFrame_) {
-            check("device frame advanced", sapp_frame_count() != firstFrame_);
+            check("device frame advanced", internal::deviceFrameCount() != firstFrame_);
+            const auto before = sg_query_stats().total.buffers;
             texture_.loadData(a_);
+            large_.loadData(largePixels_);
+            others_[0].loadData(a_);
+            others_[1].loadData(b_);
+            const auto after = sg_query_stats().total.buffers;
+            constexpr size_t sets = internal::TextureUploadStaging::frameSets;
+            if (uploadFrames_ == sets) {
+                check("mixed-size upload grows exactly one slot", after.allocated == before.allocated + 1 &&
+                    after.deallocated == before.deallocated + 1);
+            }
+            if (uploadFrames_ >= 2 * sets) {
+                check("warm uploads make zero staging buffers", before.allocated == after.allocated);
+                check("warm uploads destroy zero staging buffers", before.deallocated == after.deallocated);
+            }
             check("same image accepts upload on next frame", warnings == 0);
             expectPixels("next frame reads A", texture_, a_);
+            expectPixels("first distinct texture reads A", others_[0], a_);
+            expectPixels("second distinct texture reads B", others_[1], b_);
+            expectPixels("paused source keeps original pixels", paused_, b_);
+            Fbo largeFbo;
+            largeFbo.allocate(8, 8);
+            largeFbo.begin(0, 0, 0, 0);
+            setColor(1.0f); large_.draw(0, 0);
+            largeFbo.end();
+            vector<unsigned char> bytes(8 * 8 * 4);
+            check("larger upload readback succeeds", largeFbo.readPixels(bytes.data()));
+            check("grown slot reaches the right texture", memcmp(bytes.data(), largePixels_.getData(), bytes.size()) == 0);
+            if (uploadFrames_++ < 2 * sets) return;
             completed = true;
             exitApp();
             return;
         }
-        firstFrame_ = sapp_frame_count();
+        firstFrame_ = internal::deviceFrameCount();
 
         // Cover each 2D allocation overload, without advancing the device frame.
         for (int allocation = 0; allocation < 3; ++allocation) {
@@ -120,7 +148,16 @@ public:
                 && result[at+2] == (x == 0 ? 255 : 0) && result[at+3] == 255;
         }
         check("earlier pixels preserved; immediate draw sees each upload", colors);
-        check("all uploads occurred in one device frame", sapp_frame_count() == firstFrame_);
+        check("all uploads occurred in one device frame", internal::deviceFrameCount() == firstFrame_);
+        paused_.allocate(4, 4, 4, TextureUsage::Stream);
+        paused_.loadData(b_);
+        // Fill all rotating sets, then revisit the first set to grow its
+        // second ordinal. Check steady allocations after every set is warm.
+        for (auto& texture : others_) texture.allocate(4, 4, 4, TextureUsage::Stream);
+        large_.allocate(8, 8, 4, TextureUsage::Stream);
+        largePixels_.allocate(8, 8, 4);
+        for (int y = 0; y < 8; ++y) for (int x = 0; x < 8; ++x)
+            largePixels_.setColor(x, y, Color(0, 0, 1, 1));
         secondFrame_ = true;
     }
 
@@ -137,9 +174,11 @@ private:
 
     Fbo fbo_;
     Texture texture_;
-    Pixels a_, b_;
+    Pixels a_, b_, largePixels_;
+    Texture paused_, large_, others_[2];
     uint64_t firstFrame_ = 0;
     bool secondFrame_ = false;
+    size_t uploadFrames_ = 1;
 };
 } // namespace
 
@@ -152,6 +191,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     settings.setSize(32, 32);
     settings.setHighDpi(false);
     return tcCoreTest::runDisplayTest<UploadGuardApp>(settings, failures, [] {
-        check("both frames completed", completed);
+        check("all rotation and steady frames completed", completed);
     });
 }

@@ -24,6 +24,7 @@
 
 #include <TrussC.h>
 #include "impl/tcImageDecode.h"
+#include "tc/gpu/detail/tcTextureUploadStaging.h"
 #include "internal/tcBuildOutputCapture.h"
 #include "internal/tcHotReloadScan.h"
 #include "internal/tcPipelinePoolLog.h"
@@ -121,6 +122,9 @@ int vertexStorageBufferLimit() { return cachedVertexStorageBufferLimit; }
 
 namespace {
 thread_local bool shaderStreamBufferAllocation = false;
+
+// Constructed with the graphics device and emptied before sg_shutdown.
+std::unique_ptr<TextureUploadStaging> textureUploadStaging;
 }
 
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
@@ -466,6 +470,7 @@ void setup() {
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
+    internal::textureUploadStaging = std::make_unique<internal::TextureUploadStaging>();
     internal::installPipelinePoolLogging();
     internal::initializeFboOrientation();
     internal::initializeVertexStorageBufferLimit();
@@ -560,6 +565,7 @@ void cleanup() {
     internal::endFrameworkLifetime();
     sgl_shutdown();
     internal::recordImageDecodeLimit(0);
+    internal::textureUploadStaging.reset();
     sg_shutdown();
     // Whatever the drain above left (handles a recording still referenced) is
     // dead with the device. With sokol invalid this drops the queue without
@@ -3917,7 +3923,11 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
     // unsubmitted draws. A GPU upload buffer keeps the copy in command order.
     const bool gpuStaging = features.copy_buffer_to_image_relaxed_buffer_type
         && !features.copy_buffer_to_image_relaxed_bytes_per_row;
-    std::vector<uint8_t> padded;
+    // Raw sokol test/embedding devices without tc::setup keep the old
+    // per-call lifetime, rather than retaining handles past their shutdown.
+    TextureUploadStaging standalone;
+    auto& pool = textureUploadStaging ? *textureUploadStaging : standalone;
+    auto& padded = pool.padded;
     sg_range upload = data;
     int rowPitch = 0, slicePitch = 0;
     if (gpuStaging) {
@@ -3932,20 +3942,17 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
             return;
         }
         slicePitch = rowPitch * height;
-        padded.resize(rows * static_cast<size_t>(rowPitch));
+        padded.assign(rows * static_cast<size_t>(rowPitch), 0);
         for (size_t row = 0; row < rows; ++row)
             std::memcpy(padded.data() + row * rowPitch,
                 static_cast<const uint8_t*>(data.ptr) + row * rowBytes, rowBytes);
         upload = {padded.data(), padded.size()};
     }
     const bool resume = suspendForImageUpload();
-    sg_buffer_desc desc = {};
-    desc.size = (upload.size + 3) & ~size_t(3);
-    desc.usage.staging_buffer = !gpuStaging;
-    desc.usage.copy_src = true;
-    desc.usage.write_transient = true;
-    desc.label = "tc-texture-upload";
-    const sg_buffer staging = sg_make_buffer(&desc);
+    // Commit-listener uploads are unsupported: published device stats advance
+    // before sokol finishes the commit, so its write validation frame can differ.
+    const auto stagingUpload = pool.acquire(upload.size, gpuStaging, deviceFrameCount());
+    const sg_buffer staging = stagingUpload.buffer;
     if (sg_query_buffer_state(staging) == SG_RESOURCESTATE_VALID) {
         sg_write_buffer_desc write = {};
         write.src.data = upload;
@@ -3959,8 +3966,7 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
         copy.dst.mip_level = mipLevel;
         sg_copy_buffer_to_image(&copy);
     }
-    // Sokol/native command encoders retain storage through GPU submission.
-    sg_destroy_buffer(staging);
+    TextureUploadStaging::release(stagingUpload);
     if (resume) ensureCurrentPass();
 }
 
