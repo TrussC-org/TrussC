@@ -6331,6 +6331,7 @@ backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
 });
 ```
 - An edge-swipe Back normally delivers touch-down before Android takes over the gesture; canceling Back does not undo that touch-down, so kiosk controls should act on uncanceled release. TrussC has no system gesture-inset API; keep controls away from the edges.
+- The bottom-edge Home and Recents swipe also delivers its first press to the app before the launcher takes over, so exhibit and kiosk apps should not act on a press near the screen edges; act on release, as below.
 ```cpp
 void tcApp::touchReleased(const TouchEventArgs& e) {
     if (!e.cancelled) logNotice("Touch") << "Activate";
@@ -6354,6 +6355,7 @@ backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
 });
 ```
 - 画面端のスワイプによる Back では、Android がジェスチャーを引き継ぐ前にタッチ開始が届くのが通常の動作です。Back を取り消してもタッチ開始は戻せないため、キオスクの操作は取り消されていないタッチ終了で確定します。TrussC にシステムジェスチャーのインセット API はありませんので、操作部は画面端から離します。
+- 画面下端からのホームや最近使ったアプリのスワイプでも、ランチャーが引き継ぐ前に最初のタッチがアプリに届きます。展示やキオスクのアプリでは、画面端付近のタッチ開始で動作せず、次のようにタッチ終了で確定します。
 ```cpp
 void tcApp::touchReleased(const TouchEventArgs& e) {
     if (!e.cancelled) logNotice("Touch") << "Activate";
@@ -6377,6 +6379,7 @@ backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
 });
 ```
 - 화면 가장자리 스와이프 Back은 Android가 제스처를 넘겨받기 전에 터치 시작을 전달하는 것이 정상입니다. Back을 취소해도 터치 시작은 되돌릴 수 없으므로 키오스크 조작은 취소되지 않은 터치 종료에서 확정합니다. TrussC에는 시스템 제스처 인셋 API가 없으므로 조작부를 화면 가장자리에서 떨어뜨립니다.
+- 화면 아래 가장자리에서 홈이나 최근 앱으로 가는 스와이프도 런처가 넘겨받기 전에 첫 터치를 앱에 전달합니다. 전시나 키오스크 앱은 화면 가장자리 근처의 터치 시작에서 동작하지 말고, 다음과 같이 터치 종료에서 확정합니다.
 ```cpp
 void tcApp::touchReleased(const TouchEventArgs& e) {
     if (!e.cancelled) logNotice("Touch") << "Activate";

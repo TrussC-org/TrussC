@@ -14658,6 +14658,8 @@ _SOKOL_PRIVATE int _sapp_tc_android_main_cb(int fd, int events, void* data) {
             break;
         case _SOKOL_ANDROID_MSG_DESTROY:
             _SAPP_INFO(ANDROID_MSG_DESTROY);
+            // [TrussC] Name the system destroy in the exit log, like exitApp().
+            trussc::internal::setExitReasonIfEmpty("activity-destroy");
             _sapp_tc.quit_ordered = true;
             _sapp_tc_android_cleanup();
             _sapp_tc.valid = false;

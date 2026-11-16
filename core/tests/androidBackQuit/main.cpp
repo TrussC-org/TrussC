@@ -7,6 +7,11 @@
 #include <cstring>
 #include <initializer_list>
 
+namespace trussc::internal {
+const char* exitReason = nullptr;
+void setExitReasonIfEmpty(const char* reason) { if (!exitReason) exitReason = reason; }
+}
+
 namespace {
 #define _SOKOL_PRIVATE static
 #define _SOKOL_UNUSED(x) (void)(x)
