@@ -105,6 +105,9 @@ layout(binding=9) uniform texture2D occlusionTex;
 layout(binding=9) uniform sampler occlusionTexSmp;
 
 // Shadow map array (R32F depth from each shadow light's POV, one layer per slot)
+// Depth comparisons and interpolation are done manually, using nearest taps.
+@image_sample_type shadowMap unfilterable_float
+@sampler_type shadowMapSmp nonfiltering
 layout(binding=10) uniform texture2DArray shadowMap;
 layout(binding=10) uniform sampler shadowMapSmp;
 
