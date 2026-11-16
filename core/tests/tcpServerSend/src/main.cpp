@@ -473,7 +473,9 @@ TC_CORE_TEST_MAIN() {
         // Drain at most 256 KB per iteration, pausing between reads. Socket
         // buffering and scheduling determine when the writer can progress.
         vector<char> sink(256u * 1024u);
-        const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
+        // A fixture guard only: stopping reads early would make the test
+        // itself the non-reading peer, so leave ample room for 48 MB.
+        const auto deadline = chrono::steady_clock::now() + chrono::seconds(120);
         while (!sendDone.load() && chrono::steady_clock::now() < deadline) {
             (void)::recv(slow, sink.data(), static_cast<int>(sink.size()), 0);
             this_thread::sleep_for(chrono::milliseconds(40));

@@ -1188,6 +1188,9 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
             retriedWritable = true;
             continue;
         }
+        // Only back-to-back writable reports that accept nothing skip the
+        // retry; a quiet wait re-arms it for the next writable report.
+        if (ready == 0) retriedWritable = false;
         if (timeout <= 0.0f) continue;
 
         const std::chrono::duration<float> idle = std::chrono::steady_clock::now() - lastProgress;
