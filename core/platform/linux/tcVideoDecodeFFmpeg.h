@@ -64,13 +64,13 @@ inline bool openVideoInput(AVFormatContext** context, const char* path, VideoDec
 
 // Some FFmpeg library versions initialize contexts with one thread. Zero
 // requests FFmpeg's automatic choice instead of fixing the worker count.
-inline void configureVideoCodec(AVCodecContext* context) {
-    context->thread_count = 0;
+inline void configureVideoCodec(AVCodecContext* context, int threads) {
+    context->thread_count = threads;
 }
 
 // Discard all hardware state before opening a fresh software decoder.
 inline bool reopenVideoCodecSoftware(AVCodecContext*& context, AVBufferRef*& device,
-                                     AVHWDeviceType& type, const AVCodecParameters* parameters) {
+                                     AVHWDeviceType& type, const AVCodecParameters* parameters, int threads) {
     avcodec_free_context(&context);
     av_buffer_unref(&device);
     type = AV_HWDEVICE_TYPE_NONE;
@@ -78,7 +78,7 @@ inline bool reopenVideoCodecSoftware(AVCodecContext*& context, AVBufferRef*& dev
     if (!codec) return false;
     context = avcodec_alloc_context3(codec);
     if (!context || avcodec_parameters_to_context(context, parameters) < 0) return false;
-    configureVideoCodec(context);
+    configureVideoCodec(context, threads);
     return avcodec_open2(context, codec, nullptr) >= 0;
 }
 

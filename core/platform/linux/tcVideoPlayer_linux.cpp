@@ -108,6 +108,8 @@ public:
         return n ? n : "unknown";
     }
 
+    int decodeThreads() const { return codecCtx_ ? codecCtx_->thread_count : 0; }
+
     Sound audioSound_;
     std::shared_ptr<SoundBuffer> audioBuffer_;
 
@@ -148,6 +150,7 @@ private:
     // FFmpeg context
     AVFormatContext* formatCtx_ = nullptr;
     AVCodecContext* codecCtx_ = nullptr;
+    int decodeThreads_ = 0; // Snapshot at load; also used when reopening in software.
     SwsContext* swsCtx_ = nullptr;
     AVFrame* frame_ = nullptr;
     AVPacket* packet_ = nullptr;
@@ -235,6 +238,7 @@ public:
 
 bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     filePath_ = path;
+    decodeThreads_ = player ? player->getDecodeThreads() : 0;
 
     // Open file
     if (!internal::openVideoInput(&formatCtx_, path.c_str(), *status_)) {
@@ -328,7 +332,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     }
 
 
-    internal::configureVideoCodec(codecCtx_);
+    internal::configureVideoCodec(codecCtx_, decodeThreads_);
 
     // Open codec (fallback to SW on HW open failure)
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
@@ -336,7 +340,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
             logWarning("VideoPlayer") << "HW codec open failed, falling back to SW";
         }
         if (hwType_ == AV_HWDEVICE_TYPE_NONE ||
-            !internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_, codecPar)) {
+            !internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_, codecPar, decodeThreads_)) {
             logError("VideoPlayer") << "Failed to open codec";
             avcodec_free_context(&codecCtx_);
             avformat_close_input(&formatCtx_);
@@ -786,7 +790,7 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
     } else if (transferFailed) {
         logNotice("VideoPlayer") << "HW frame transfer failed; falling back to software decoding";
         if (!internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_,
-                formatCtx_->streams[videoStreamIndex_]->codecpar)) {
+                formatCtx_->streams[videoStreamIndex_]->codecpar, decodeThreads_)) {
             logError("VideoPlayer") << "Failed to open software codec after HW format probe";
             return false;
         }
@@ -1297,6 +1301,11 @@ void TCVideoPlayerImpl::previousFrame() {
 
 namespace trussc {
 
+int internal::VideoPlayerPlatformAccess::decodeThreadsForTests(const VideoPlayer& player) {
+    return player.platformHandle_ ?
+        static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->decodeThreads() : 0;
+}
+
 void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player) {
     if (player.platformHandle_)
         static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->audioSound_.stop();
@@ -1576,7 +1585,7 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
     if (!codecCtx || avcodec_parameters_to_context(codecCtx, par) < 0) {
         avcodec_free_context(&codecCtx); avformat_close_input(&fmtCtx); return false;
     }
-    internal::configureVideoCodec(codecCtx);
+    internal::configureVideoCodec(codecCtx, 0);
     if (avcodec_open2(codecCtx, codec, nullptr) < 0 || status->rejected() != previousRejections) {
         avcodec_free_context(&codecCtx);
         avformat_close_input(&fmtCtx);
