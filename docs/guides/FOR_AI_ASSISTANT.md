@@ -2137,31 +2137,31 @@ TrussC **welcomes community participation.** For questions, sharing work, and ch
 
 ## Repository layout: where things live
 
-Look in `core/include/tc` for the most reliable source of exact API signatures and overloads, `examples/<group>/` for working usage, and `docs/` for explanations.
+Look in `core/include/tc` for exact API signatures and overloads, `examples/<group>/` for working usage, and `docs/` for explanations.
 
 ```text
 TrussC/
 ├── core/
-│   ├── include/tc/    # API headers and shared implementations; check declarations and behavior
-│   ├── include/impl/  # Internal helpers and library implementations; trace supporting code
-│   └── platform/      # OS/backend implementations; trace platform-specific behavior
-├── addons/            # Optional tcx extensions; find features outside the core
-├── examples/          # Projects grouped by topic; find runnable usage
-│   ├── graphics/      # Drawing examples; start with rendering basics
-│   ├── 3d/            # Cameras, meshes and lighting; explore 3D rendering
-│   └── tests/         # Feature checks; inspect expected behavior
-├── tools/             # Build/install scripts, dependency/warning checks and test/render runners
-│   ├── src/           # trusscli GUI/CLI source; trace project generation, builds and distribution
-│   ├── bin/           # trusscli executable; run project commands
-│   ├── icon/          # trusscli artwork; find tool icons
-│   └── tests/         # Tool and regression tests; verify tooling changes
+│   ├── include/tc/     # TrussC API headers and implementation
+│   ├── include/sokol/  # vendored sokol, TrussC fork (see TRUSSC_MODIFICATIONS.md)
+│   ├── include/impl/   # internal helpers and library glue
+│   ├── include/{earcut,lz4,nlohmann,pugixml,stb}/  # vendored libraries; not TrussC code
+│   ├── shaders/        # built-in GLSL, compiled by sokol-shdc
+│   ├── platform/       # per-OS and per-backend code
+│   └── tests/          # core test harnesses
+├── addons/             # optional tcx addons
+├── examples/           # 18 topic groups: graphics, 3d, sound, video, node, shader, ...
+│   └── templates/emptyExample/  # the file layout every new app copies
+├── tools/              # trusscli source (src/), tool tests, build/check scripts
+│   └── bin/            # trusscli binary (created by the setup/build script)
 └── docs/
-    ├── guides/        # Task-oriented instructions; learn workflows
-    ├── architecture/  # Design and lifecycle notes; understand internals
-    └── reference/     # API prose and metadata; maintain reference documentation
+    ├── guides/         # how-to guides
+    ├── architecture/   # design and lifecycle notes
+    ├── reference/      # API reference source (api-reference.toml)
+    └── dev/            # developer notes on specific internals
 ```
 
-Core source is alongside headers and in the implementation folders listed here; there is no `core/src` directory. For build commands, use [FOR_AI_ASSISTANT.md — Building & the toolchain](#building--the-toolchain).
+There is no `core/src`; core code sits next to the headers. For build commands, see [FOR_AI_ASSISTANT.md — Building & the toolchain](#building--the-toolchain).
 
 ## API Index
 
