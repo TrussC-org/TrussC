@@ -105,10 +105,10 @@ bool metalGrowthFailureChecks(sg_view attachment) {
     unsigned char bytes[16] = {};
     sg_range range = {bytes, sizeof(bytes)};
     _sg.mtl.cur_ub_offset = size;
-    _sg.next_draw_valid = true;
+    _sg_skipdraw_reset();
     _sg.mtl.device = (id<MTLDevice>)[[MetalGrowthFailDevice alloc] init];
     _sg_mtl_apply_uniforms(0, &range);
-    ok &= !_sg.next_draw_valid && _sg.mtl.cur_ub_offset == size
+    ok &= _sg_skipdraw_ub(0) && _sg.mtl.cur_ub_offset == size
         && _sg.mtl.uniform_buffers[slot] == buffer;
     _sg.mtl.device = device;
     _sg.mtl.cur_ub_offset = offset;

@@ -45,7 +45,7 @@ This is the one list of third-party code in TrussC and the version the build use
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization |
 |---------|---------|----------------------|----------|---------|---------------------|
-| **sokol** | commit `e7a48ed6` (+ TrussC patches, see [TRUSSC_MODIFICATIONS.md](../core/include/sokol/TRUSSC_MODIFICATIONS.md)) | `core/include/sokol/` | https://github.com/floooh/sokol | zlib License | Andre Weissflog |
+| **sokol** | commit `93aa187b` (+ TrussC patches, see [TRUSSC_MODIFICATIONS.md](../core/include/sokol/TRUSSC_MODIFICATIONS.md)) | `core/include/sokol/` | https://github.com/floooh/sokol | zlib License | Andre Weissflog |
 | **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 4 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
 | **stb_image_write** | 1.16, commit `1ee679c` (unmodified) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
@@ -77,7 +77,7 @@ libjpeg-turbo binaries should retain the applicable upstream notices.
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |
 |---------|---------|----------------------|----------|---------|---------------------|---------|
-| **sokol-shdc (sokol-tools-bin)** | commit `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | osx: `8b4a6ac1172ec0d90dd41d611067d5e87a51e78dc28acb216cfc341d880b1d78`<br>osx_arm64: `92db37975ad7ff3c3c9bc27cba1503287377cb287ebabf60d1c6b597abfa3244`<br>linux: `ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df`<br>linux_arm64: `446b4bcea0c81d3ae529bc0d93533ea661b017f5b9ec2b2293a4c85f5fdcb639`<br>win32: `bd616287f9ea689d53c6d260e443ee733e61ae1b73a9b37adc482ead0364d561` |
+| **sokol-shdc (sokol-tools-bin)** | commit `2428a421bb4c2d765c43cb77167b6e1d6e0d498f` (2026-11-10T18:18:51Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | osx: `b27a6cf91b95774829e72896bd824307efd1ad7c7ea92fd1a347f30c0f176d2e`<br>osx_arm64: `fb4491a0386db41944544075061e35f5dfdd960155f10ebd0a84059803ddb770`<br>linux: `f1a5b91e55696d4e4f615b5d1cf524ac2636fc9a052dac6d568d448e2af86b39`<br>linux_arm64: `df5241ba3140afc30e816e0bff1309eaa25b6e3e022166d3297d056770f6f686`<br>win32: `5faecfe8dd5efcc6e8453d2ae631aeb389e37fb0c4dcb70e5dc9178b8e20f5d9` |
 
 Updates must change the shader compiler commit and all five host binary hashes together, preserving the `metal_sim` and `wgsl` outputs used by TrussC.
 
@@ -88,7 +88,7 @@ These libraries are only included if you use the corresponding addon.
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
 |---------|---------|----------------------|----------|---------|---------------------|-------|
 | **Dear ImGui** | 1.92.9b (owned test engine configuration + TrussC widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
-| **sokol_imgui.h** | commit `e7a48ed6` (+ TrussC multi-context and GPU buffer growth patches) | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
+| **sokol_imgui.h** | commit `93aa187b` (+ TrussC multi-context and GPU buffer growth patches) | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
 | **libcurl** | 8.23.0 (Windows; macOS/Linux use system libcurl; see [PROVENANCE.md](../addons/tcxCurl/PROVENANCE.md)) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
 | **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |

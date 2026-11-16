@@ -10,10 +10,12 @@ until its implementation slice lands.
 
 ## Provenance and classification
 
-**Upstream base:** https://github.com/floooh/sokol commit `e7a48ed6` (2026-11-03).
+**Upstream base:** https://github.com/floooh/sokol commit `93aa187b` (2026-11-10).
 
 This machine-readable base record applies to the patched copies `sokol_gfx.h`,
 `sokol_glue.h` and `util/sokol_gl_tc.h` (upstream `util/sokol_gl.h`).
+The latter two, `sokol_log.h` and `sokol_imgui.h` are unchanged upstream
+between e7a48ed6 and 93aa187b; their local patches remain unchanged.
 `sokol_app_tc.h` has original `sokol_app.h` lineage, graduated into the standalone
 TrussC fork in P0–P6 (`6d73d9a2`, `6686f275`, `30da93d1`, `7a1347e2`,
 `2bfaf1a5`, `f3ac1c8f`, `0295b8e3`); `e7a48ed6` is its **compatibility sync**
@@ -22,8 +24,8 @@ revision, not a whole-implementation rebase. Preserve the zlib license and
 it disagrees with the current code/feature contracts below; the fork does not
 implement every newer upstream enum, diagnostic, swapchain option or backend.
 
-Shader compiler: `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z), the
-owner-selected master HEAD used by CI. The host hashes are recorded in
+Shader compiler: `2428a421bb4c2d765c43cb77167b6e1d6e0d498f` (2026-11-10T18:18:51Z), the
+owner-selected update including sokol-tools #225 (14 sampler slots). The host hashes are recorded in
 `core/cmake/trussc_shaders.cmake`; update the commit and all five hashes together
 and check the generated shaders against these vendored headers. This compiler
 preserves the `metal_sim` and `wgsl` outputs required by TrussC.
@@ -76,7 +78,7 @@ Each implementation slice must fit 1–2 days; stop if it needs a new engine.
 | `sokol_glue.h` | One local RGB10A2 translation patch. |
 | `sokol_log.h` | Unmodified upstream. |
 | `util/sokol_gl_tc.h` | Renamed fork of `util/sokol_gl.h`; no other sokol header depends on it; local public API uses `sgl_tc_`. |
-| `addons/tcxImGui/src/sokol_imgui.h` | e7a48ed6/#713 Q3/Q4 with `[TrussC]` `simgui_tc_*` multi-context patches; update alongside core, following its [ledger](../../../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md). |
+| `addons/tcxImGui/src/sokol_imgui.h` | 93aa187b/#713 Q3/Q4 with `[TrussC]` `simgui_tc_*` multi-context patches; update alongside core, following its [ledger](../../../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md). |
 
 Core/util layout matches upstream. Audio uses miniaudio instead of
 `sokol_audio.h` (rationale: `tc/sound/tcAudio_impl.cpp`). App's supported `sapp_*` API
@@ -810,7 +812,7 @@ remove each retired declaration and every reachable definition together.
 
 ## sokol_gfx.h
 
-Patched upstream e7a48ed6 copy; use the three-way process below. Its example
+Patched upstream 93aa187b copy; use the three-way process below. Its example
 include spells `sokol_app_tc.h` (graduation P6 `7a1347e2`), covered by the fork
 identity entry; this integration comment introduces no rendering behavior.
 
@@ -918,6 +920,11 @@ overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 
   draw/catch-up pass with buffer-creation Error. Checked doubling/aligned int
   arithmetic (`<limits.h>`) rejects unrepresentable uploads before writes;
   successful growth is Info (TrussC Notice, #1473); upload statistics remain.
+- 93aa187b scopes skip-draw state by pipeline, bindings and uniform slot (#1644).
+  Both local size/allocation failure paths now call `_sg_skipdraw_set_ub(ub_slot)`: a
+  draw stays suppressed until that slot uploads successfully or the pipeline is
+  reapplied. Correcting a different slot cannot clear the failed slot. Successful
+  growth still uploads/binds the requested block and does not suppress the draw.
 
 Anchors: `metalUniformGrowth` (PBR raster replay, compute/rollback wrapper),
 `test_backend.py` (production Objective-C mocks, not native pixels/lifetime).
@@ -1301,7 +1308,7 @@ from the current TrussC copy, THEIRS from the intended local upstream checkout:
 ```bash
 # Run from TrussC; set the local upstream checkout and this file's base.
 sokol_clone=/path/to/local/sokol
-base_sha=e7a48ed6
+base_sha=93aa187b
 merge_dir=$(mktemp -d)
 git -C "$sokol_clone" show "${base_sha}:sokol_glue.h" > "$merge_dir/BASE.h"
 cp "$sokol_clone/sokol_glue.h" "$merge_dir/THEIRS.h"

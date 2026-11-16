@@ -1078,8 +1078,8 @@
             - SG_SAMPLERTYPE_NONFILTERING,
             - SG_SAMPLERTYPE_COMPARISON,
         - a backend-specific bind slot:
-            - D3D11/HLSL: the sampler register N (`register(sN)`) where N is 0..SG_MAX_SAMPLER_BINDINGS
-            - Metal/MSL: the sampler bind slot N (`[[sampler(N)]]`) where N is 0..SG_MAX_SAMPLER_BINDINGS
+            - D3D11/HLSL: the sampler register N (`register(sN)`) where N is 0..(SG_MAX_SAMPLER_BINDSLOTS-1)
+            - Metal/MSL: the sampler bind slot N (`[[sampler(N)]]`) where N is 0..(SG_MAX_SAMPLER_BINDSLOTS-1)
             - WebGPU/WGSL: the binding N in `@group(1) @binding(N)` where N is 0..127
 
     - An array of 'texture-sampler-pairs' used by the shader to sample textures,
@@ -1109,13 +1109,13 @@
               compute shaders: `register(u0..u31)`
             - read/write storage-buffer-bindings in fragment shaders: `register(uN..u31)`
               where N is >= the number of color attachments
-            - samplers: `register(s0..s11)`
+            - samplers: `register(s0..s13)`
         - Metal/MSL:
             - separate bindslot space per shader stage
             - uniform blocks: `[[buffer(0..7)]]`
             - storage buffers: `[[buffer(8..23)]]`
             - textures and storage image bindings: `[[texture(0..31)]]`
-            - samplers: `[[sampler(0..11)]]`
+            - samplers: `[[sampler(0..13)]]`
         - WebGPU/WGSL:
             - common bindslot space across shader stages
             - uniform blocks: `@group(0) @binding(0..15)`
@@ -2461,7 +2461,7 @@ enum {
     SG_MAX_VERTEXBUFFER_BINDSLOTS = 8,
     SG_MAX_UNIFORMBLOCK_BINDSLOTS = 8,
     SG_MAX_VIEW_BINDSLOTS = 32,
-    SG_MAX_SAMPLER_BINDSLOTS = 12,
+    SG_MAX_SAMPLER_BINDSLOTS = 14,
     SG_MAX_TEXTURE_SAMPLER_PAIRS = 32,  // same as SG_MAX_VIEW_BINDSLOTS
     SG_MAX_PORTABLE_COLOR_ATTACHMENTS = 4,
     SG_MAX_PORTABLE_TEXTURE_BINDINGS_PER_STAGE = 16,
@@ -3599,14 +3599,12 @@ typedef enum sg_pass_state {
     chunks of vertex- and/or index-data into the same buffer objects.
 */
 typedef struct sg_bindings {
-    uint32_t _start_canary;
     sg_buffer vertex_buffers[SG_MAX_VERTEXBUFFER_BINDSLOTS];
     int vertex_buffer_offsets[SG_MAX_VERTEXBUFFER_BINDSLOTS];
     sg_buffer index_buffer;
     int index_buffer_offset;
     sg_view views[SG_MAX_VIEW_BINDSLOTS];
     sg_sampler samplers[SG_MAX_SAMPLER_BINDSLOTS];
-    uint32_t _end_canary;
 } sg_bindings;
 
 /*
@@ -4362,8 +4360,8 @@ typedef struct sg_sampler_desc {
         - the shader stage the sampler appears in (SG_SHADERSTAGE_*)
         - the sampler type (SG_SAMPLERTYPE_*)
         - backend specific bindslots:
-            - HLSL: the sampler register `register(s0..11)`
-            - MSL: the sampler attribute `[[sampler(0..11)]]`
+            - HLSL: the sampler register `register(s0..13)`
+            - MSL: the sampler attribute `[[sampler(0..13)]]`
             - WGSL: the binding in `@group(1) @binding(0..127)`
 
     - reflection information for each texture-sampler pair used by
@@ -4372,6 +4370,9 @@ typedef struct sg_sampler_desc {
         - the texture's array index in the sg_shader_desc.views[] array
         - the sampler's array index in the sg_shader_desc.samplers[] array
         - GLSL only: the name of the combined image-sampler object
+
+      On non-GL backends, textures read without a sampler do not need a
+      texture-sampler pair. GL requires a pair for every texture binding.
 
     The number and order of items in the sg_shader_desc.attrs[]
     array corresponds to the items in sg_pipeline_desc.layout.attrs.
@@ -5197,7 +5198,7 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(D3D11_STORAGEBUFFER_HLSL_REGISTER_U_OUT_OF_RANGE, "sg_shader_desc.views[].storage_buffer.hlsl_register_u_n is out of range (must be 0..31)") \
     _SG_LOGITEM_XMACRO(D3D11_IMAGE_HLSL_REGISTER_T_OUT_OF_RANGE, "sg_shader_desc.views[].texture.hlsl_register_t_n is out of range (must be 0..31)") \
     _SG_LOGITEM_XMACRO(D3D11_STORAGEIMAGE_HLSL_REGISTER_U_OUT_OF_RANGE, "sg_shader_desc.views[].storage_image.hlsl_register_u_n is out of range (must be 0..31)") \
-    _SG_LOGITEM_XMACRO(D3D11_SAMPLER_HLSL_REGISTER_S_OUT_OF_RANGE, "sampler 'hlsl_register_s_n' is out of range (must be 0..11)") \
+    _SG_LOGITEM_XMACRO(D3D11_SAMPLER_HLSL_REGISTER_S_OUT_OF_RANGE, "sampler 'hlsl_register_s_n' is out of range (must be 0..13)") \
     _SG_LOGITEM_XMACRO(D3D11_LOAD_D3DCOMPILER_47_DLL_FAILED, "loading d3dcompiler_47.dll failed (d3d11)") \
     _SG_LOGITEM_XMACRO(D3D11_SHADER_COMPILATION_FAILED, "shader compilation failed (d3d11)") \
     _SG_LOGITEM_XMACRO(D3D11_SHADER_COMPILATION_OUTPUT, "") \
@@ -5223,7 +5224,7 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(METAL_STORAGEBUFFER_MSL_BUFFER_SLOT_OUT_OF_RANGE, "storage buffer 'msl_buffer_n' is out of range (must be 8..23)") \
     _SG_LOGITEM_XMACRO(METAL_STORAGEIMAGE_MSL_TEXTURE_SLOT_OUT_OF_RANGE, "storage image 'msl_texture_n' is out of range (must be 0..31)") \
     _SG_LOGITEM_XMACRO(METAL_IMAGE_MSL_TEXTURE_SLOT_OUT_OF_RANGE, "image 'msl_texture_n' is out of range (must be 0..31)") \
-    _SG_LOGITEM_XMACRO(METAL_SAMPLER_MSL_SAMPLER_SLOT_OUT_OF_RANGE, "sampler 'msl_sampler_n' is out of range (must be 0..11)") \
+    _SG_LOGITEM_XMACRO(METAL_SAMPLER_MSL_SAMPLER_SLOT_OUT_OF_RANGE, "sampler 'msl_sampler_n' is out of range (must be 0..13)") \
     _SG_LOGITEM_XMACRO(METAL_CREATE_CPS_FAILED, "failed to create compute pipeline state (metal)") \
     _SG_LOGITEM_XMACRO(METAL_CREATE_CPS_OUTPUT, "") \
     _SG_LOGITEM_XMACRO(METAL_CREATE_RPS_FAILED, "failed to create render pipeline state (metal)") \
@@ -8346,6 +8347,13 @@ typedef struct {
     bool write;
 } _sg_pixelformat_info_t;
 
+typedef enum {
+    _SG_SKIPDRAW_PIPELINE = (1<<0),
+    _SG_SKIPDRAW_BINDINGS = (1<<1),
+    _SG_SKIPDRAW_UB = (1<<2),
+    // following bits reserved for UB1..UBN
+} _sg_skipdraw_t;
+
 typedef struct {
     bool valid;
     sg_desc desc;       // original desc with default values patched in
@@ -8365,7 +8373,7 @@ typedef struct {
         } swapchain;
     } cur_pass;
     _sg_pipeline_ref_t cur_pip;
-    bool next_draw_valid;
+    int skipdraw_flags; // combination of _SG_SKIPDRAW_*
     bool use_indexed_draw;
     bool use_instanced_draw;
     struct {
@@ -9085,6 +9093,57 @@ _SG_IMPL_RES_PTR_OR_NULL(_sg_view_ref_ptr_or_null, _sg_view_ref_t, _sg_view_t)
 #define _sg_stats_add(key,val) {if(_sg.stats_enabled){ _sg.stats.cur_frame.key+=val;}}
 #define _sg_stats_inc(key) {if(_sg.stats_enabled){ _sg.stats.cur_frame.key++;}}
 #define _sg_resource_stats_inc(key) {if(_sg.stats_enabled){ _sg.stats.cur_frame.key++; _sg.stats.total.key++;}}
+
+_SOKOL_PRIVATE void _sg_skipdraw_reset(void) {
+    _sg.skipdraw_flags = 0;
+}
+
+_SOKOL_PRIVATE void _sg_skipdraw_set_pip(void) {
+    _sg.skipdraw_flags |= _SG_SKIPDRAW_PIPELINE;
+}
+
+_SOKOL_PRIVATE void _sg_skipdraw_clr_bnd(void) {
+    _sg.skipdraw_flags &= ~_SG_SKIPDRAW_BINDINGS;
+}
+
+_SOKOL_PRIVATE void _sg_skipdraw_set_bnd(void) {
+    _sg.skipdraw_flags |= _SG_SKIPDRAW_BINDINGS;
+}
+
+_SOKOL_PRIVATE void _sg_skipdraw_clr_ub(int ub_slot) {
+    SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
+    _sg.skipdraw_flags &= ~(_SG_SKIPDRAW_UB << ub_slot);
+}
+
+_SOKOL_PRIVATE void _sg_skipdraw_set_ub(int ub_slot) {
+    SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
+    _sg.skipdraw_flags |= (_SG_SKIPDRAW_UB << ub_slot);
+}
+
+_SOKOL_PRIVATE bool _sg_skipdraw_pip(void) {
+    return 0 != (_sg.skipdraw_flags & _SG_SKIPDRAW_PIPELINE);
+}
+
+_SOKOL_PRIVATE bool _sg_skipdraw_bnd(void) {
+    return 0 != (_sg.skipdraw_flags & _SG_SKIPDRAW_BINDINGS);
+}
+
+_SOKOL_PRIVATE bool _sg_skipdraw_ub(int ub_slot) {
+    SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
+    return 0 != (_sg.skipdraw_flags & (_SG_SKIPDRAW_UB << ub_slot));
+}
+
+_SOKOL_PRIVATE bool _sg_skipdraw_pip_bnd(void) {
+    return _sg_skipdraw_pip() || _sg_skipdraw_bnd();
+}
+
+_SOKOL_PRIVATE bool _sg_skipdraw_pip_ub(int ub_slot) {
+    return _sg_skipdraw_pip() || _sg_skipdraw_ub(ub_slot);
+}
+
+_SOKOL_PRIVATE bool _sg_skipdraw_any(void) {
+    return 0 != _sg.skipdraw_flags;
+}
 
 _SOKOL_PRIVATE void _sg_update_alive_free_resource_stats(sg_total_resource_stats* stats, const _sg_pool_t* pool) {
     SOKOL_ASSERT(stats && pool);
@@ -18696,14 +18755,17 @@ _SOKOL_PRIVATE void _sg_mtl_apply_uniforms(int ub_slot, const sg_range* data) {
     // Bound (abi): the uniform cursor is an int, so one aligned upload must stay below INT_MAX. Overflow invalidates this draw and is reported by METAL_CREATE_BUFFER_FAILED.
     if (data->size > (size_t)(INT_MAX - (_SG_MTL_UB_ALIGN - 1))) {
         _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
-        _sg.next_draw_valid = false;
+        // [TrussC] #859/#946: reject this uniform slot after allocation/size failure;
+        // a corrected upload clears its flag without clearing other failed slots.
+        _sg_skipdraw_set_ub(ub_slot);
         return;
     }
     const size_t required_size = (size_t)_sg.mtl.cur_ub_offset + data->size;
     if ((required_size > (size_t)_sg.mtl.ub_size) ||
         (required_size > (size_t)(INT_MAX & ~(_SG_MTL_UB_ALIGN - 1)))) {
         if (!_sg_mtl_grow_uniform_buffer(data->size)) {
-            _sg.next_draw_valid = false;
+            // [TrussC] #859/#946: growth failure invalidates this slot until a corrected upload.
+            _sg_skipdraw_set_ub(ub_slot);
             return;
         }
     }
@@ -24723,7 +24785,7 @@ _SOKOL_PRIVATE void _sg_vk_apply_uniforms(int ub_slot, const sg_range* data) {
     const VkDeviceSize ubuf_offset = _sg_vk_uniform_copy(data);
     if (_sg.vk.uniforms.dbuf.overflown) {
         _SG_ERROR(VULKAN_UNIFORM_BUFFER_OVERFLOW);
-        _sg.next_draw_valid = false;
+        _sg_skipdraw_set_ub(ub_slot);
         return;
     }
     _sg.vk.uniforms.addr_info[ub_slot].range = data->size;
@@ -26194,8 +26256,14 @@ _SOKOL_PRIVATE bool _sg_validate_shader_desc(const sg_shader_desc* desc) {
                 }
             }
         }
-        // each image and sampler must be referenced by an image sampler
+        // GL binds textures through combined texture-sampler pairs. Other
+        // backends can read textures without a sampler.
+        #if defined(_SOKOL_ANY_GL)
         _SG_VALIDATE(texview_slot_mask == ref_texview_slot_mask, VALIDATE_SHADERDESC_TEXVIEW_NOT_REFERENCED_BY_TEXTURE_SAMPLER_PAIRS);
+        #else
+        _SOKOL_UNUSED(texview_slot_mask);
+        _SOKOL_UNUSED(ref_texview_slot_mask);
+        #endif
         _SG_VALIDATE(smp_slot_mask == ref_smp_slot_mask, VALIDATE_SHADERDESC_SAMPLER_NOT_REFERENCED_BY_TEXTURE_SAMPLER_PAIRS);
 
         return _sg_validate_end();
@@ -29107,6 +29175,7 @@ SOKOL_API_IMPL void sg_begin_pass(const sg_pass* pass) {
     SOKOL_ASSERT(pass);
     SOKOL_ASSERT((pass->_start_canary == 0) && (pass->_end_canary == 0));
     _sg.cur_pass.in_pass = true;
+    _sg_skipdraw_set_pip();
     const sg_pass pass_def = _sg_pass_defaults(pass);
     _SG_TRACE_ARGS(begin_pass, &pass_def);
     if (!_sg_validate_pass_attachment_limits(&pass_def)) {
@@ -29185,24 +29254,23 @@ SOKOL_API_IMPL void sg_apply_pipeline(sg_pipeline pip_id) {
     SOKOL_ASSERT(_sg.valid);
     _sg_stats_inc(num_apply_pipeline);
     _SG_TRACE_ARGS(apply_pipeline, pip_id);
+    _sg_skipdraw_reset();
     if (!_sg.cur_pass.valid) {
         return;
     }
     if (!_sg_validate_apply_pipeline(pip_id)) {
-        _sg.next_draw_valid = false;
+        _sg_skipdraw_set_pip();
         return;
     }
     _sg_pipeline_t* pip = _sg_lookup_pipeline(pip_id.id);
     SOKOL_ASSERT(pip);
     _sg.cur_pip = _sg_pipeline_ref(pip);
-
-    _sg.next_draw_valid = (SG_RESOURCESTATE_VALID == pip->slot.state);
-    if (!_sg.next_draw_valid) {
+    if (SG_RESOURCESTATE_VALID != pip->slot.state) {
+        _sg_skipdraw_set_pip();
         return;
     }
     _sg.use_indexed_draw = pip->cmn.index_type != SG_INDEXTYPE_NONE;
     _sg.use_instanced_draw = pip->cmn.use_instanced_draw;
-
     _sg_apply_pipeline(pip);
 }
 
@@ -29214,14 +29282,14 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
     if (!_sg.cur_pass.valid) {
         return;
     }
+    _sg_skipdraw_clr_bnd();
     if (!_sg_validate_apply_bindings(bindings)) {
-        _sg.next_draw_valid = false;
+        _sg_skipdraw_set_bnd();
     }
-    SOKOL_ASSERT((bindings->_start_canary == 0) && (bindings->_end_canary==0));
     if (!_sg_pipeline_ref_alive(&_sg.cur_pip)) {
-        _sg.next_draw_valid = false;
+        _sg_skipdraw_set_pip();
     }
-    if (!_sg.next_draw_valid) {
+    if (_sg_skipdraw_pip_bnd()) {
         return;
     }
 
@@ -29237,7 +29305,7 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
                     bnd.vbs[i] = buf;
                     bnd.vb_offsets[i] = bindings->vertex_buffer_offsets[i];
                 } else {
-                    _sg.next_draw_valid = false;
+                    _sg_skipdraw_set_bnd();
                 }
             }
         }
@@ -29247,7 +29315,7 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
                 bnd.ib = buf;
                 bnd.ib_offset = bindings->index_buffer_offset;
             } else {
-                _sg.next_draw_valid = false;
+                _sg_skipdraw_set_bnd();
             }
         }
     }
@@ -29261,15 +29329,15 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
                 if (view->cmn.type == SG_VIEWTYPE_STORAGEBUFFER) {
                     // NOTE: _sg_buffer_ref_valid also checks for resource state VALID!
                     if (!_sg_buffer_ref_valid(&view->cmn.buf.ref)) {
-                        _sg.next_draw_valid = false;
+                        _sg_skipdraw_set_bnd();
                     }
                 } else {
                     if (!_sg_image_ref_valid(&view->cmn.img.ref)) {
-                        _sg.next_draw_valid = false;
+                        _sg_skipdraw_set_bnd();
                     }
                 }
             } else {
-                _sg.next_draw_valid = false;
+                _sg_skipdraw_set_bnd();
             }
         }
     }
@@ -29282,8 +29350,10 @@ SOKOL_API_IMPL void sg_apply_bindings(const sg_bindings* bindings) {
         }
     }
 
-    if (_sg.next_draw_valid) {
-        _sg.next_draw_valid &= _sg_apply_bindings(&bnd);
+    if (!_sg_skipdraw_bnd()) {
+        if (!_sg_apply_bindings(&bnd)) {
+            _sg_skipdraw_set_bnd();
+        }
     }
 }
 
@@ -29297,21 +29367,18 @@ SOKOL_API_IMPL void sg_apply_uniforms(int ub_slot, const sg_range* data) {
     if (!_sg.cur_pass.valid) {
         return;
     }
+    _sg_skipdraw_clr_ub(ub_slot);
     if (!_sg_validate_apply_uniforms(ub_slot, data)) {
-        _sg.next_draw_valid = false;
-        return;
+        _sg_skipdraw_set_ub(ub_slot);
     }
-    if (!_sg.next_draw_valid) {
+    if (_sg_skipdraw_pip_ub(ub_slot)) {
         return;
     }
     _sg_apply_uniforms(ub_slot, data);
 }
 
 _SOKOL_PRIVATE bool _sg_check_skip_draw(int num_elements, int num_instances) {
-    if (!_sg.cur_pass.valid) {
-        return true;
-    }
-    if (!_sg.next_draw_valid) {
+    if (!_sg.cur_pass.valid || _sg_skipdraw_any()) {
         return true;
     }
     // skip no-op draws
@@ -29355,10 +29422,7 @@ SOKOL_API_IMPL void sg_dispatch(int num_groups_x, int num_groups_y, int num_grou
     SOKOL_ASSERT(_sg.valid);
     _sg_stats_inc(num_dispatch);
     _SG_TRACE_ARGS(dispatch, num_groups_x, num_groups_y, num_groups_z);
-    if (!_sg.cur_pass.valid) {
-        return;
-    }
-    if (!_sg.next_draw_valid) {
+    if (!_sg.cur_pass.valid || _sg_skipdraw_any()) {
         return;
     }
     // skip no-op dispatches

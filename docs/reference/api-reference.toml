@@ -29173,28 +29173,65 @@ description.ko = "셰이더 슬롯의 텍스처 바인딩을 저장한다."
 details.en = '''
 - Accepts `(int slot, sg_view view, sg_sampler sampler)` or `(int slot, sg_image image, sg_sampler sampler)` and replaces the stored binding for that slot; binding to the GPU occurs when drawing.
 - View slots are 0–31. Slots outside this range are ignored with a warning emitted only once.
-- A sampler is bound at the same slot only for slots 0–11. For slots 12–31, a supplied nonzero sampler is ignored with a warning emitted only once; provide a sampler at binding 0–11 through another call or `setupBindings()`.
+- A sampler is bound at the same slot only for slots 0–13. For slots 14–31, a supplied nonzero sampler is ignored with a warning emitted only once; for sampled reads, provide a sampler at binding 0–13 through another call or `setupBindings()`.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 - The image overload creates and caches a texture view per slot, recreating it only when the image handle changes. Prefer the view overload when a view is already available.
 - Supplied images, views, and samplers remain externally owned; only views created by the image overload are owned by the shader. Draw submissions copy handles rather than texture contents, so referenced resources must remain valid until execution; see `Shader::clear` for deferred resource retirement.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 '''
 details.ja = '''
 - `(int slot, sg_view view, sg_sampler sampler)` または `(int slot, sg_image image, sg_sampler sampler)` を受け取り、そのスロットの保存済みバインディングを置き換えます。GPU へのバインドは描画時に行います。
 - ビュースロットは 0～31 です。範囲外のスロットは無視し、警告を一度だけログに出します。
-- 同じ番号のスロットにサンプラーを設定するのは 0～11 の場合だけです。12～31 に渡された非ゼロのサンプラーは無視し、警告を一度だけログに出します。別の呼び出しまたは `setupBindings()` で、バインディング 0～11 にサンプラーを設定してください。
+- 同じ番号のスロットにサンプラーを設定するのは 0～13 の場合だけです。14～31 に渡された非ゼロのサンプラーは無視し、警告を一度だけログに出します。サンプリングには、別の呼び出しまたは `setupBindings()` でバインディング 0～13 にサンプラーを設定してください。
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 - image 版はスロットごとにテクスチャビューを生成してキャッシュし、画像ハンドルが変わった場合だけ再生成します。既存のビューがある場合は view 版を使用してください。
 - 渡した画像・ビュー・サンプラーの所有権は移りません。シェーダーが所有するのは image 版で生成したビューだけです。描画の送信ではテクスチャの内容ではなくハンドルをコピーするため、参照先のリソースは実行まで有効に保つ必要があります。リソースの遅延解放は `Shader::clear` を参照してください。
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 '''
 details.ko = '''
 - `(int slot, sg_view view, sg_sampler sampler)` 또는 `(int slot, sg_image image, sg_sampler sampler)`를 받아 해당 슬롯의 저장된 바인딩을 교체합니다. GPU 바인딩은 그리기 시점에 수행합니다.
 - 뷰 슬롯은 0–31입니다. 범위를 벗어난 슬롯은 무시하고 경고를 한 번만 기록합니다.
-- 같은 번호의 슬롯에 샘플러를 설정하는 범위는 0–11입니다. 슬롯 12–31에 전달된 0이 아닌 샘플러는 무시하고 경고를 한 번만 기록합니다. 다른 호출이나 `setupBindings()`를 통해 바인딩 0–11에 샘플러를 제공해야 합니다.
+- 같은 번호의 슬롯에 샘플러를 설정하는 범위는 0–13입니다. 슬롯 14–31에 전달된 0이 아닌 샘플러는 무시하고 경고를 한 번만 기록합니다. 샘플링에는 다른 호출이나 `setupBindings()`를 통해 바인딩 0–13에 샘플러를 제공해야 합니다.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 - image 오버로드는 슬롯마다 텍스처 뷰를 생성하고 캐시하며 이미지 핸들이 바뀔 때만 다시 생성합니다. 이미 뷰가 있으면 view 오버로드를 사용하세요.
 - 전달한 이미지, 뷰 및 샘플러의 소유권은 이전되지 않습니다. 셰이더는 image 오버로드가 생성한 뷰만 소유합니다. 그리기 제출은 텍스처 내용이 아닌 핸들을 복사하므로 참조하는 리소스는 실행될 때까지 유효해야 합니다. 지연된 리소스 해제는 `Shader::clear`를 참조하세요.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 '''
 related = ["Texture", "Fbo", "Shader::setUniform"]
 snippet = '''
-void bindTexture(Shader& shader, const Texture& texture) {
-    shader.setTexture(0, texture.getView(), texture.getSampler());
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
 }
 '''
 
@@ -60694,15 +60731,33 @@ description.en = "Copies stored texture bindings into a sokol bindings structure
 description.ja = "保存済みテクスチャバインディングを sokol のバインディング構造体にコピーする。"
 description.ko = "저장된 텍스처 바인딩을 sokol 바인딩 구조체에 복사한다."
 details.en = '''
-- Protected `void fillTextureBindings(sg_bindings& bind) const` copies every `pendingViews` entry into `bind.views`; it writes the sampler at the same slot only below the sampler limit of 12.
+- Protected `void fillTextureBindings(sg_bindings& bind) const` copies every `pendingViews` entry into `bind.views`; it writes the sampler at the same slot only below the sampler limit of 14.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 - Leaves slots absent from `pendingViews` unchanged and does not apply bindings to the GPU. Slot validation and texture ownership are described in `Shader::setTexture`.
 '''
 details.ja = '''
-- protected の `void fillTextureBindings(sg_bindings& bind) const` は、`pendingViews` の各項目を `bind.views` にコピーします。同じスロットへのサンプラーの書き込みは、サンプラー上限の 12 未満の場合だけ行います。
+- protected の `void fillTextureBindings(sg_bindings& bind) const` は、`pendingViews` の各項目を `bind.views` にコピーします。同じスロットへのサンプラーの書き込みは、サンプラー上限の 14 未満の場合だけ行います。
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 - `pendingViews` にないスロットは変更せず、GPU へのバインディング適用も行いません。スロットの検査とテクスチャの所有権は `Shader::setTexture` を参照してください。
 '''
 details.ko = '''
-- protected 함수인 `void fillTextureBindings(sg_bindings& bind) const`는 `pendingViews`의 각 항목을 `bind.views`에 복사합니다. 같은 슬롯에 샘플러를 쓰는 작업은 샘플러 한도인 12 미만에서만 수행합니다.
+- protected 함수인 `void fillTextureBindings(sg_bindings& bind) const`는 `pendingViews`의 각 항목을 `bind.views`에 복사합니다. 같은 슬롯에 샘플러를 쓰는 작업은 샘플러 한도인 14 미만에서만 수행합니다.
+```cpp
+void tcApp::draw() {
+    shader.setTexture(13, texture.getView(), texture.getSampler());
+    shader.setTexture(14, texture.getView(), sg_sampler{});
+}
+```
 - `pendingViews`에 없는 슬롯은 변경하지 않으며 GPU에 바인딩을 적용하지 않습니다. 슬롯 검사와 텍스처 소유권은 `Shader::setTexture`를 참조하세요.
 '''
 

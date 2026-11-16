@@ -142,7 +142,7 @@
 -- [download 98% complete]
 -- [download 99% complete]
 -- [download 100% complete]
--- sokol-shdc downloaded and SHA-256 verified (11d0cf678105d614d675e6d9bd2aaf3eeff12f8c)
+-- sokol-shdc downloaded and SHA-256 verified (2428a421bb4c2d765c43cb77167b6e1d6e0d498f)
 -- [TrussC] Shader compilation enabled for /src/TrussC/core/shaders/fboMipDownsample.glsl;/src/TrussC/core/shaders/iblBake.glsl;/src/TrussC/core/shaders/meshPbr.glsl;/src/TrussC/core/shaders/pointCloud.glsl;/src/TrussC/core/shaders/sglCoverage.glsl;/src/TrussC/core/shaders/sglPremult.glsl;/src/TrussC/core/shaders/shadowDepth.glsl;/src/TrussC/core/shaders/videoNV12.glsl
 -- [loopModeExample] TrussC app configured
 -- Configuring done (2.2s)

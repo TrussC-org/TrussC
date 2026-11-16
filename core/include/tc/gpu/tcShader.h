@@ -324,9 +324,9 @@ public:
     // -------------------------------------------------------------------------
 
     // Both overloads accept view slots [0, SG_MAX_VIEW_BINDSLOTS). A sampler
-    // is bound at the same slot only below SG_MAX_SAMPLER_BINDSLOTS (12).
-    // Higher texture slots (12-31) ignore a supplied sampler with a warning;
-    // the shader must sample them with a sampler at binding 0-11, set by
+    // is bound at the same slot only below SG_MAX_SAMPLER_BINDSLOTS (14).
+    // Higher texture slots (14-31) ignore a supplied sampler with a warning;
+    // for sampled reads, use a sampler at binding 0-13, set by
     // another setTexture() call or an overridden setupBindings().
 
     // Convenience overload taking a raw sg_image. sokol's binding model needs

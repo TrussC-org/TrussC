@@ -41,15 +41,15 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     endif()
 
     # Select sokol-shdc binary based on host platform
-    # sokol-tools-bin master HEAD when pinned (2026-08-29T14:15:01Z), including the
+    # sokol-tools-bin master HEAD when pinned (2026-11-10T18:18:51Z), including the
     # metal_sim and wgsl outputs used below. Update the commit and all five
     # hashes together; record the version in docs/LICENSE.md.
-    set(_TC_SOKOL_SHDC_COMMIT "11d0cf678105d614d675e6d9bd2aaf3eeff12f8c")
-    set(_TC_SOKOL_SHDC_SHA256_osx "8b4a6ac1172ec0d90dd41d611067d5e87a51e78dc28acb216cfc341d880b1d78")
-    set(_TC_SOKOL_SHDC_SHA256_osx_arm64 "92db37975ad7ff3c3c9bc27cba1503287377cb287ebabf60d1c6b597abfa3244")
-    set(_TC_SOKOL_SHDC_SHA256_linux "ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df")
-    set(_TC_SOKOL_SHDC_SHA256_linux_arm64 "446b4bcea0c81d3ae529bc0d93533ea661b017f5b9ec2b2293a4c85f5fdcb639")
-    set(_TC_SOKOL_SHDC_SHA256_win32 "bd616287f9ea689d53c6d260e443ee733e61ae1b73a9b37adc482ead0364d561")
+    set(_TC_SOKOL_SHDC_COMMIT "2428a421bb4c2d765c43cb77167b6e1d6e0d498f")
+    set(_TC_SOKOL_SHDC_SHA256_osx "b27a6cf91b95774829e72896bd824307efd1ad7c7ea92fd1a347f30c0f176d2e")
+    set(_TC_SOKOL_SHDC_SHA256_osx_arm64 "fb4491a0386db41944544075061e35f5dfdd960155f10ebd0a84059803ddb770")
+    set(_TC_SOKOL_SHDC_SHA256_linux "f1a5b91e55696d4e4f615b5d1cf524ac2636fc9a052dac6d568d448e2af86b39")
+    set(_TC_SOKOL_SHDC_SHA256_linux_arm64 "df5241ba3140afc30e816e0bff1309eaa25b6e3e022166d3297d056770f6f686")
+    set(_TC_SOKOL_SHDC_SHA256_win32 "5faecfe8dd5efcc6e8453d2ae631aeb389e37fb0c4dcb70e5dc9178b8e20f5d9")
     set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/${_TC_SOKOL_SHDC_COMMIT}/bin")
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
