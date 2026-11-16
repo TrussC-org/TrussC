@@ -21,6 +21,7 @@ extern "C" {
 }
 
 #include "tcVideoDecodeFFmpeg.h"
+#include "tcVideoNV12Copy.h"
 #include "tc/sound/internal/tcFFmpegAudioLength.h"
 
 #include <thread>
@@ -930,19 +931,28 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         data.pixels.resize(nv12Mode_ ? size_t(encodedWidth_) * encodedHeight_ : outputBytes);
         if (nv12Mode_) data.pixelsUV.resize(size_t(encodedWidth_) * encodedHeight_ / 2);
         const AVPixelFormat destination = nv12Mode_ ? AV_PIX_FMT_NV12 : AV_PIX_FMT_RGBA;
-        swsCtx_ = sws_getCachedContext(swsCtx_, srcFrame->width, srcFrame->height,
-            AVPixelFormat(srcFrame->format), encodedWidth_, encodedHeight_, destination,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!swsCtx_) {
-            av_frame_unref(frame_);
-            decodeError("video scaler", AVERROR(ENOMEM));
-            return false;
-        }
         const bool rotateRGBA = !nv12Mode_ && rotation_.active();
         if (rotateRGBA) rotationBuffer_.resize(outputBytes);
         uint8_t* output[4] = {rotateRGBA ? rotationBuffer_.data() : data.pixels.data(), nv12Mode_ ? data.pixelsUV.data() : nullptr, nullptr, nullptr};
         int strides[4] = {encodedWidth_ * (nv12Mode_ ? 1 : 4), nv12Mode_ ? encodedWidth_ : 0, 0, 0};
-        int rows = sws_scale(swsCtx_, srcFrame->data, srcFrame->linesize, 0, srcFrame->height, output, strides);
+        int rows = encodedHeight_;
+        if (nv12Mode_ && srcFrame->format == AV_PIX_FMT_NV12 &&
+            srcFrame->width == encodedWidth_ && srcFrame->height == encodedHeight_) {
+            // Same-size NV12 needs no conversion. Some libswscale versions
+            // leave the destination UV plane empty for this identity operation.
+            internal::copyVideoNV12Planes(output, strides, srcFrame->data,
+                                           srcFrame->linesize, encodedWidth_, encodedHeight_);
+        } else {
+            swsCtx_ = sws_getCachedContext(swsCtx_, srcFrame->width, srcFrame->height,
+                AVPixelFormat(srcFrame->format), encodedWidth_, encodedHeight_, destination,
+                SWS_BILINEAR, nullptr, nullptr, nullptr);
+            if (!swsCtx_) {
+                av_frame_unref(frame_);
+                decodeError("video scaler", AVERROR(ENOMEM));
+                return false;
+            }
+            rows = sws_scale(swsCtx_, srcFrame->data, srcFrame->linesize, 0, srcFrame->height, output, strides);
+        }
         av_frame_unref(frame_);
         if (rows != encodedHeight_) { decodeError("video conversion", AVERROR(EINVAL)); return false; }
         if (rotateRGBA)
