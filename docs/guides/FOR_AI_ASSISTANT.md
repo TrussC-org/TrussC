@@ -2135,6 +2135,34 @@ Use `tc_get_stencil` with `{fbo: debugNameOrIndex}` (from `tc_list_fbos`) to ins
 
 TrussC **welcomes community participation.** For questions, sharing work, and chat, **Discord** is fastest (invite: https://discord.gg/7MRRny56VQ ). For bug reports, feature requests, and fixes, **open an Issue / PR on GitHub at `TrussC-org/TrussC`** without hesitation — the author, tettou771, makes an effort to respond actively. "It doesn't work like this" and "I'd like this API" are welcome too.
 
+## Repository layout: where things live
+
+Look in `core/include/tc` for exact API signatures and overloads, `examples/<group>/` for working usage, and `docs/` for explanations.
+
+```text
+TrussC/
+├── core/
+│   ├── include/tc/     # TrussC API headers and implementation
+│   ├── include/sokol/  # vendored sokol, TrussC fork (see TRUSSC_MODIFICATIONS.md)
+│   ├── include/impl/   # internal helpers and library glue
+│   ├── include/{earcut,lz4,nlohmann,pugixml,stb}/  # vendored libraries; not TrussC code
+│   ├── shaders/        # built-in GLSL, compiled by sokol-shdc
+│   ├── platform/       # per-OS and per-backend code
+│   └── tests/          # core test harnesses
+├── addons/             # optional tcx addons
+├── examples/           # 18 topic groups: graphics, 3d, sound, video, node, shader, ...
+│   └── templates/emptyExample/  # the file layout every new app copies
+├── tools/              # trusscli source (src/), tool tests, build/check scripts
+│   └── bin/            # trusscli binary (created by the setup/build script)
+└── docs/
+    ├── guides/         # how-to guides
+    ├── architecture/   # design and lifecycle notes
+    ├── reference/      # API reference source (api-reference.toml)
+    └── dev/            # developer notes on specific internals
+```
+
+There is no `core/src`; core code sits next to the headers. For build commands, see [FOR_AI_ASSISTANT.md — Building & the toolchain](#building--the-toolchain).
+
 ## API Index
 
 Complete C++ API index, generated from the C++ AST + `docs/reference/`. Use this
@@ -6049,16 +6077,3 @@ void tcApp::setup() {
 - If user seems experienced, give more technical explanations
 - Always keep answers simple and concise
 - When asked to write code, use canvas/artifacts for proper pair programming
-
-### Folder Structure
-```
-TrussC/
-├── core/                # Core library
-├── addons/              # Optional addons (tcxBox2d, tcxOsc, etc.)
-├── examples/            # Sample projects
-├── docs/                # Documentation
-└── tools/               # Build scripts and CLI source (run these first!)
-    ├── build_mac.command
-    ├── build_win.bat
-    └── build_linux.sh
-```
