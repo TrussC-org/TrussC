@@ -2135,6 +2135,34 @@ Use `tc_get_stencil` with `{fbo: debugNameOrIndex}` (from `tc_list_fbos`) to ins
 
 TrussC **welcomes community participation.** For questions, sharing work, and chat, **Discord** is fastest (invite: https://discord.gg/7MRRny56VQ ). For bug reports, feature requests, and fixes, **open an Issue / PR on GitHub at `TrussC-org/TrussC`** without hesitation — the author, tettou771, makes an effort to respond actively. "It doesn't work like this" and "I'd like this API" are welcome too.
 
+## Repository layout: where things live
+
+Look in `core/include/tc` for the most reliable source of exact API signatures and overloads, `examples/<group>/` for working usage, and `docs/` for explanations.
+
+```text
+TrussC/
+├── core/
+│   ├── include/tc/    # API headers and shared implementations; check declarations and behavior
+│   ├── include/impl/  # Internal helpers and library implementations; trace supporting code
+│   └── platform/      # OS/backend implementations; trace platform-specific behavior
+├── addons/            # Optional tcx extensions; find features outside the core
+├── examples/          # Projects grouped by topic; find runnable usage
+│   ├── graphics/      # Drawing examples; start with rendering basics
+│   ├── 3d/            # Cameras, meshes and lighting; explore 3D rendering
+│   └── tests/         # Feature checks; inspect expected behavior
+├── tools/             # Build/install scripts, dependency/warning checks and test/render runners
+│   ├── src/           # trusscli GUI/CLI source; trace project generation, builds and distribution
+│   ├── bin/           # trusscli executable; run project commands
+│   ├── icon/          # trusscli artwork; find tool icons
+│   └── tests/         # Tool and regression tests; verify tooling changes
+└── docs/
+    ├── guides/        # Task-oriented instructions; learn workflows
+    ├── architecture/  # Design and lifecycle notes; understand internals
+    └── reference/     # API prose and metadata; maintain reference documentation
+```
+
+Core source is alongside headers and in the implementation folders listed here; there is no `core/src` directory. For build commands, use [FOR_AI_ASSISTANT.md — Building & the toolchain](#building--the-toolchain).
+
 ## API Index
 
 Complete C++ API index, generated from the C++ AST + `docs/reference/`. Use this
@@ -6049,16 +6077,3 @@ void tcApp::setup() {
 - If user seems experienced, give more technical explanations
 - Always keep answers simple and concise
 - When asked to write code, use canvas/artifacts for proper pair programming
-
-### Folder Structure
-```
-TrussC/
-├── core/                # Core library
-├── addons/              # Optional addons (tcxBox2d, tcxOsc, etc.)
-├── examples/            # Sample projects
-├── docs/                # Documentation
-└── tools/               # Build scripts and CLI source (run these first!)
-    ├── build_mac.command
-    ├── build_win.bat
-    └── build_linux.sh
-```
