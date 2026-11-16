@@ -834,6 +834,10 @@ typedef struct sgl_desc_t {
 static const sgl_context SGL_DEFAULT_CONTEXT = { 0x00010001 };
 
 /* setup/shutdown/misc */
+/* [TrussC] Internal pool query for diagnostics (#1512); zero before setup/after shutdown. */
+typedef struct sgl_tc_pipeline_pool_info { int used; int capacity; } sgl_tc_pipeline_pool_info;
+SOKOL_GL_API_DECL sgl_tc_pipeline_pool_info sgl_tc_query_pipeline_pool(void);
+
 SOKOL_GL_API_DECL void sgl_setup(const sgl_desc_t* desc);
 SOKOL_GL_API_DECL void sgl_shutdown(void);
 SOKOL_GL_API_DECL float sgl_rad(float deg);
@@ -4001,6 +4005,16 @@ static sgl_context_desc_t _sgl_as_context_desc(const sgl_desc_t* desc) {
 // ██       ██████  ██████  ███████ ██  ██████
 //
 // >>public
+/* [TrussC] Read the existing free-slot queue without trace hooks or callbacks. */
+SOKOL_API_IMPL sgl_tc_pipeline_pool_info sgl_tc_query_pipeline_pool(void) {
+    sgl_tc_pipeline_pool_info info = {0, 0};
+    if (_sgl.init_cookie == _SGL_INIT_COOKIE) {
+        info.capacity = _sgl.pip_pool.pool.size - 1;
+        info.used = info.capacity - _sgl.pip_pool.pool.queue_top;
+    }
+    return info;
+}
+
 SOKOL_API_IMPL void sgl_setup(const sgl_desc_t* desc) {
     SOKOL_ASSERT(desc);
     _sgl_clear(&_sgl, sizeof(_sgl));
