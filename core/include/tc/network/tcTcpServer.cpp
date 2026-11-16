@@ -1139,6 +1139,7 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
     // time instead would drop a healthy client for the offense of being on a
     // slow link with a big payload.
     auto lastProgress = std::chrono::steady_clock::now();
+    bool retriedWritable = false;
 
     while (remaining > 0) {
         // Re-read every iteration: shutChannel() clears this to cut a parked
@@ -1155,6 +1156,7 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
             remaining -= static_cast<size_t>(sent);
             out.written += static_cast<size_t>(sent);
             lastProgress = std::chrono::steady_clock::now();
+            retriedWritable = false;
             continue;
         }
         if (sent == 0) {
@@ -1173,11 +1175,18 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
         }
 
         // The peer is not draining its window. Park for one slice so a
-        // disconnect can interrupt this, then re-check the deadline.
-        if (waitReady(ch.socket, true, kWaitSliceMs) < 0) {
+        // disconnect can interrupt this. Writability gets one send retry before
+        // the idle deadline is checked: accepted bytes restart the deadline,
+        // and a writable report that still accepts nothing can't defer it.
+        const int ready = waitReady(ch.socket, true, kWaitSliceMs);
+        if (ready < 0) {
             out.failure = "Send failed";
             out.code = socketError(ch.socket);
             break;
+        }
+        if (ready > 0 && !retriedWritable) {
+            retriedWritable = true;
+            continue;
         }
         if (timeout <= 0.0f) continue;
 

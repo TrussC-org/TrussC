@@ -348,7 +348,9 @@ TC_CORE_TEST_MAIN() {
 
         auto entered = make_shared<atomic<bool>>(false);
         auto handled = make_shared<atomic<bool>>(false);
-        EventListener sub = s2.onError.listen([&s2, entered, handled](TcpServerErrorEventArgs& e) {
+        auto timedOut = make_shared<atomic<bool>>(false);
+        EventListener sub = s2.onError.listen([&s2, entered, handled, timedOut](TcpServerErrorEventArgs& e) {
+            if (e.message.find("Send timed out") != string::npos) timedOut->store(true);
             entered->store(true);
             s2.disconnectClient(e.clientId);   // re-enters the send path's mutex
             handled->store(true);
@@ -404,6 +406,7 @@ TC_CORE_TEST_MAIN() {
                    finished ? "returned" : "had not returned",
                    chrono::duration<double, milli>(chrono::steady_clock::now() - t1).count());
             check("onError listener may disconnect its own client", finished);
+            check("a non-reading peer reports a send timeout", timedOut->load());
         } else if (senderDone->load()) {
             // The premise is not the invariant: a platform that swallowed every
             // payload never ran the listener, which says nothing either way.
@@ -439,7 +442,14 @@ TC_CORE_TEST_MAIN() {
         s3.setBindAddress("127.0.0.1");
         if (!s3.start(0, 8)) { printf("could not start third server\n"); bail(); }
         const int port3 = s3.getPort();
-        s3.setSendTimeout(1.0f);
+        s3.setSendTimeout(5.0f);
+        // send() can return before onError fires; keep the listener alive
+        // through stop(), which joins the writer and finishes its diagnostics.
+        EventListener errors = s3.onError.listen([](TcpServerErrorEventArgs& e) {
+            printf("  (slow draining peer onError: %s; code=%d; client=%d)\n",
+                   e.message.c_str(), e.errorCode, e.clientId);
+            fflush(stdout);
+        });
 
         rawsocket_t slow = connectSilentPeer(port3, /*shrinkRecvBuffer=*/false);
         if (slow == static_cast<rawsocket_t>(-1)) { printf("no slow peer\n"); bail(); }
@@ -450,18 +460,18 @@ TC_CORE_TEST_MAIN() {
         vector<int> ids3 = s3.getClientIds();
         if (ids3.empty()) { printf("no client id (3)\n"); bail(); }
 
-        // 16 MB is past what a sender-side socket buffer absorbs outright, so
-        // the send has to wait on the peer and the wait is what gets measured.
+        // 48 MB drained at up to 256 KB per 40 ms takes several seconds, past
+        // the 5 s timeout, while no gap between reads comes close to it.
         atomic<bool> sendOk{false}, sendDone{false};
-        vector<char> payload(16u * 1024u * 1024u, 'z');
+        vector<char> payload(48u * 1024u * 1024u, 'z');
         const auto sendStart = chrono::steady_clock::now();
         thread sender([&] {
             sendOk = s3.send(ids3[0], payload.data(), payload.size());
             sendDone = true;
         });
 
-        // 256 KB every 40 ms (~6 MB/s): about 2.5 s to take 16 MB, well past the
-        // 1 s timeout, but never 40 ms without progress.
+        // Drain at most 256 KB per iteration, pausing between reads. Socket
+        // buffering and scheduling determine when the writer can progress.
         vector<char> sink(256u * 1024u);
         const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
         while (!sendDone.load() && chrono::steady_clock::now() < deadline) {
@@ -486,8 +496,12 @@ TC_CORE_TEST_MAIN() {
         // Leaving it at SKIP is sound: what this case guards is that our own
         // deadline restarts on progress, which is arithmetic in send(), not
         // platform behavior. macOS and Linux both reach the state and check it.
-        printf("  (the send took %.2fs against a 1.00s idle timeout)\n", sendSecs);
-        if (sendSecs <= 1.0) {
+        printf("  (the send took %.2fs against a 5.00s idle timeout)\n", sendSecs);
+        if (!sendOk.load()) {
+            check("a slow but draining peer does not trip the idle timeout", false);
+            // Join the writer so its onError reason is logged before bailing.
+            s3.stop();
+        } else if (sendSecs <= 5.0) {
             printf("%-56s %s\n", "a slow but draining peer does not trip the idle timeout",
                    "SKIP (payload absorbed faster than the timeout)");
             fflush(stdout);
