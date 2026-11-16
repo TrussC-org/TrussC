@@ -138,8 +138,8 @@ public:
             shader_.submitVertices(quad, 4, PrimitiveType::Quads);
             fbo_.end();
 #endif
-            check(samplerless ? "samplerless quad submitted (FAIL means skipped draw)"
-                              : "14-slot sampler quad submitted (FAIL means skipped draw)",
+            check(samplerless ? "samplerless quad submitted (draw not skipped)"
+                              : "14-slot sampler quad submitted (draw not skipped)",
                   sg_query_stats().cur_frame.num_draw == drawsBefore + 1);
             rendered_ = true;
 #if defined(SOKOL_WGPU)
