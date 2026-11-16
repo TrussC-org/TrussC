@@ -415,8 +415,9 @@ void configureGraphicsPools(const WindowSettings& settings) {
 sgl_desc_t sglSetupDescriptor() {
     sgl_desc_t desc = {};
     desc.logger.func = sokolLog;
-    // Use the same count for sgl: its small CPU slots (32 B) should not impose
-    // a separate hidden limit. Each sgl pipeline still needs up to 5 sg slots.
+    desc.pipeline_created = samplePipelinePools;
+    // Use the same count for sgl so its CPU recipe slots do not impose a
+    // separate hidden limit. SG children are created only for primitive types used.
     // The sgl context pool keeps its existing automatic growth behavior.
     desc.pipeline_pool_size = activeGraphicsPools.pipelines;
     // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,

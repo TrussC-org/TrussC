@@ -71,32 +71,58 @@ void destroyImmediate(sgl_pipeline pipeline) {
     sgl_destroy_pipeline(pipeline);
     internal::samplePipelinePools();
 }
+void recordPrimitive(sgl_pipeline pipeline, int primitive) {
+    sgl_load_pipeline(pipeline);
+    switch (primitive) {
+        case 0: sgl_begin_points(); break;
+        case 1: sgl_begin_lines(); break;
+        case 2: sgl_begin_line_strip(); break;
+        case 3: sgl_begin_triangles(); break;
+        case 4: sgl_begin_triangle_strip(); break;
+    }
+    sgl_v2f(0, 0);
+    sgl_v2f(1, 0);
+    sgl_v2f(0, 1);
+    sgl_end();
+}
 }
 int main() {
     auto listener = getLogger().onLog.listen([](LogEventArgs& event) { messages.push_back(event); });
-    auto& monitor = start(20, 20); // default sgl pipeline occupies five sg slots
+    auto& monitor = start(20, 20); // unused default sgl pipeline occupies no sg slots
     check("no messages below 50%", messages.empty());
     std::vector<sg_pipeline> held;
-    for (int i = 0; i < 5; ++i) held.push_back(allocate());
+    sg_pipeline_desc lazyDesc = {};
+    std::vector<sgl_pipeline> lazy;
+    for (int i = 0; i < 5; ++i) lazy.push_back(makeImmediate(&lazyDesc));
+    check("CPU recipes do not reach either threshold", messages.empty());
+    auto recordChild = [&](int i) { recordPrimitive(lazy[i / 5], i % 5); };
+    for (int i = 0; i < 9; ++i) recordChild(i);
+    check("lazy SG children below 50% are quiet", messages.empty() && sg_query_stats().total.pipelines.alive == 9);
+    recordChild(9);
     const std::string remedy = "; raise it with WindowSettings::setPipelinePoolSize() before runApp()";
     check("50% Notice once and exact text", count(LogLevel::Notice, "sg pipeline pool 50% used (10/20)" + remedy) == 1);
-    for (int i = 0; i < 6; ++i) held.push_back(allocate());
+    for (int i = 10; i < 15; ++i) recordChild(i);
+    check("lazy SG children below 80% have no Warning or Error", count(LogLevel::Warning) == 0 && count(LogLevel::Error) == 0);
+    recordChild(15);
     check("80% Warning once and exact text", count(LogLevel::Warning, "sg pipeline pool 80% used (16/20)" + remedy) == 1);
-    for (int i = 0; i < 4; ++i) held.push_back(allocate());
-    for (int i = 0; i < 11; ++i) check("full allocation fails", !allocate().id);
+    check("both thresholds precede any failure", count(LogLevel::Error) == 0 && monitor.exhaustionEvents == 0);
+    for (int i = 16; i < 20; ++i) recordChild(i);
+    const auto messageCount = messages.size();
+    for (int i = 0; i < 20; ++i) recordChild(i);
+    check("cached children allocate nothing and emit no new messages", messages.size() == messageCount && sg_query_stats().total.pipelines.alive == 20);
+    for (int i = 0; i < 11; ++i) recordPrimitive(lazy[4], 0);
     check("full Error once and exact text", count(LogLevel::Error, "sg pipeline pool 100% used (20/20)" + remedy) == 1);
     now = 1;
     allocate();
     check("next second reports suppressed count", count(LogLevel::Error, "; 10 failures suppressed") == 1);
     check("one Error per second", count(LogLevel::Error) == 2);
-    for (auto pipeline : held) release(pipeline);
-    held.clear();
-    for (int i = 0; i < 11; ++i) held.push_back(allocate());
+    for (auto pipeline : lazy) destroyImmediate(pipeline);
+    for (int i = 0; i < 16; ++i) held.push_back(allocate());
     check("Notice stays once; Warning repeats on recross", count(LogLevel::Notice) == 1 && count(LogLevel::Warning) == 2);
     for (auto pipeline : held) destroy(pipeline);
     held.clear();
     // Dropping below 50% and crossing again must never repeat Notice.
-    for (int i = 0; i < 5; ++i) held.push_back(allocate());
+    for (int i = 0; i < 10; ++i) held.push_back(allocate());
     check("destroy and recross still keeps Notice once", count(LogLevel::Notice) == 1);
     for (auto pipeline : held) destroy(pipeline);
 
@@ -114,7 +140,10 @@ int main() {
     check("raw exhaustion has exactly one Error", !result.raw.id && count(LogLevel::Error) == 1 && count(LogLevel::Warning) == 0);
     messages.clear(); now = 3;
     auto immediate = target.pipeline(internal::PipelineKey::immediate({}));
-    check("immediate exhaustion has exactly one Error", !immediate.immediate.id && count(LogLevel::Error) == 1 && count(LogLevel::Warning) == 0);
+    check("immediate recipe does not allocate SG children", immediate.immediate.id && messages.empty());
+    sgl_load_pipeline(immediate.immediate);
+    sgl_begin_triangles(); sgl_v2f(0, 0); sgl_v2f(1, 0); sgl_v2f(0, 1); sgl_end();
+    check("immediate first-use exhaustion has exactly one Error", count(LogLevel::Error) == 1 && count(LogLevel::Warning) == 0);
     // Exercise the production compute wrapper with a valid dummy descriptor.
     _sg.features.compute = true;
     messages.clear(); now = 4;

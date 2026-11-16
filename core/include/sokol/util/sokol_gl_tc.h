@@ -539,7 +539,7 @@
                   one for uniform data, and one for commands
                 - a dynamic vertex buffer is created
                 - the default sgl_pipeline object is created, which involves
-                  creating 5 sg_pipeline objects
+                  creating up to 5 sg_pipeline objects on first primitive use
 
             One vertex is 24 bytes:
                 - float3 position
@@ -828,6 +828,9 @@ typedef struct sgl_desc_t {
     sg_face_winding face_winding;   // default: SG_FACEWINDING_CCW
     sgl_allocator_t allocator;      // optional memory allocation overrides (default: malloc/free)
     sgl_logger_t logger;            // optional log function override (default: NO LOGGING)
+    // [TrussC fork] Optional notification after each lazy SG child creation attempt,
+    // including failure logging/cleanup. Cached children do not notify.
+    void (*pipeline_created)(void);
 } sgl_desc_t;
 
 /* the default context handle */
@@ -2482,6 +2485,7 @@ typedef struct {
 typedef struct {
     _sgl_slot_t slot;
     sg_pipeline pip[SGL_NUM_PRIMITIVE_TYPES];
+    sg_pipeline_desc desc; // [TrussC] Patched recipe for lazy primitive children (#1512).
 } _sgl_pipeline_t;
 
 typedef struct {
@@ -2961,41 +2965,21 @@ static void _sgl_init_pipeline(sgl_pipeline pip_id, const sg_pipeline_desc* in_d
 
     _sgl_pipeline_t* pip = _sgl_lookup_pipeline(pip_id.id);
     SOKOL_ASSERT(pip && (pip->slot.state == SG_RESOURCESTATE_ALLOC));
-    pip->slot.state = SG_RESOURCESTATE_VALID;
-    for (int i = 0; i < SGL_NUM_PRIMITIVE_TYPES; i++) {
-        switch (i) {
-            case SGL_PRIMITIVETYPE_POINTS:
-                desc.primitive_type = SG_PRIMITIVETYPE_POINTS;
-                break;
-            case SGL_PRIMITIVETYPE_LINES:
-                desc.primitive_type = SG_PRIMITIVETYPE_LINES;
-                break;
-            case SGL_PRIMITIVETYPE_LINE_STRIP:
-                desc.primitive_type = SG_PRIMITIVETYPE_LINE_STRIP;
-                break;
-            case SGL_PRIMITIVETYPE_TRIANGLES:
-                desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-                break;
-            case SGL_PRIMITIVETYPE_TRIANGLE_STRIP:
-            case SGL_PRIMITIVETYPE_QUADS:
-                desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
-                break;
+    /* [TrussC] Retain a value snapshot: callers may discard the descriptor
+       and label before the first primitive is recorded. */
+    pip->desc = desc;
+    if (desc.label) {
+        const size_t size = strlen(desc.label) + 1;
+        char* label = (char*) _sgl_malloc(size);
+        if (!label) {
+            pip->desc.label = 0;
+            pip->slot.state = SG_RESOURCESTATE_FAILED;
+            return;
         }
-        if (SGL_PRIMITIVETYPE_QUADS == i) {
-            /* quads are emulated via triangles, use the same pipeline object */
-            pip->pip[i] = pip->pip[SGL_PRIMITIVETYPE_TRIANGLES];
-        } else {
-            pip->pip[i] = sg_make_pipeline(&desc);
-            /* [TrussC fork] a pipeline that exists but is not VALID counts as
-               failed too; stop at the first failure, _sgl_make_pipeline()
-               then destroys the ones already made. */
-            if ((pip->pip[i].id == SG_INVALID_ID) || (sg_query_pipeline_state(pip->pip[i]) != SG_RESOURCESTATE_VALID)) {
-                _SGL_ERROR(MAKE_PIPELINE_FAILED);
-                pip->slot.state = SG_RESOURCESTATE_FAILED;
-                break;
-            }
-        }
+        memcpy(label, desc.label, size);
+        pip->desc.label = label;
     }
+    pip->slot.state = SG_RESOURCESTATE_VALID;
 }
 
 static void _sgl_destroy_pipeline(sgl_pipeline pip_id);
@@ -3004,9 +2988,8 @@ static sgl_pipeline _sgl_make_pipeline(const sg_pipeline_desc* desc, const sgl_c
     sgl_pipeline pip_id = _sgl_alloc_pipeline();
     if (pip_id.id != SG_INVALID_ID) {
         _sgl_init_pipeline(pip_id, desc, ctx_desc);
-        /* [TrussC fork] all or nothing: if any sg pipeline could not be made,
-           destroy the ones that were, free the sgl slot and return the
-           invalid id (callers treat id 0 as "no pipeline"). */
+        /* [TrussC fork] Recipe allocation remains all or nothing. SG child
+           failure is local to that primitive and handled at first resolve. */
         const _sgl_pipeline_t* pip = _sgl_lookup_pipeline(pip_id.id);
         if (pip && (pip->slot.state != SG_RESOURCESTATE_VALID)) {
             _sgl_destroy_pipeline(pip_id);
@@ -3023,11 +3006,12 @@ static void _sgl_destroy_pipeline(sgl_pipeline pip_id) {
     if (pip) {
         sg_push_debug_group("sokol-gl");
         for (int i = 0; i < SGL_NUM_PRIMITIVE_TYPES; i++) {
-            if (i != SGL_PRIMITIVETYPE_QUADS) {
+            if ((i != SGL_PRIMITIVETYPE_QUADS) && (pip->pip[i].id != SG_INVALID_ID)) { // [TrussC] Unused children.
                 sg_destroy_pipeline(pip->pip[i]);
             }
         }
         sg_pop_debug_group();
+        if (pip->desc.label) _sgl_free((void*) pip->desc.label); // [TrussC] Owned recipe label.
         _sgl_reset_pipeline(pip);
         _sgl_pool_free_index(&_sgl.pip_pool.pool, _sgl_slot_index(pip_id.id));
     }
@@ -3035,12 +3019,36 @@ static void _sgl_destroy_pipeline(sgl_pipeline pip_id) {
 
 static sg_pipeline _sgl_get_pipeline(sgl_pipeline pip_id, _sgl_primitive_type_t prim_type) {
     _sgl_pipeline_t* pip = _sgl_lookup_pipeline(pip_id.id);
-    if (pip) {
+    /* [TrussC] Every recording resolve goes through here. Quads use exactly
+       the triangle child, regardless of which primitive is requested first. */
+    if (prim_type == SGL_PRIMITIVETYPE_QUADS) prim_type = SGL_PRIMITIVETYPE_TRIANGLES;
+    if (pip && (pip->slot.state == SG_RESOURCESTATE_VALID)) {
+        if (pip->pip[prim_type].id == SG_INVALID_ID) {
+            sg_pipeline_desc desc = pip->desc;
+            switch (prim_type) {
+                case SGL_PRIMITIVETYPE_POINTS: desc.primitive_type = SG_PRIMITIVETYPE_POINTS; break;
+                case SGL_PRIMITIVETYPE_LINES: desc.primitive_type = SG_PRIMITIVETYPE_LINES; break;
+                case SGL_PRIMITIVETYPE_LINE_STRIP: desc.primitive_type = SG_PRIMITIVETYPE_LINE_STRIP; break;
+                case SGL_PRIMITIVETYPE_TRIANGLES: desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES; break;
+                case SGL_PRIMITIVETYPE_TRIANGLE_STRIP: desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP; break;
+                default: SOKOL_ASSERT(false); break;
+            }
+            sg_pipeline child = sg_make_pipeline(&desc);
+            /* [TrussC fork] A nonzero FAILED handle must be freed too. Do not
+               poison siblings; leaving this child invalid retries next use. */
+            if ((child.id == SG_INVALID_ID) || (sg_query_pipeline_state(child) != SG_RESOURCESTATE_VALID)) {
+                _SGL_ERROR(MAKE_PIPELINE_FAILED);
+                if (child.id != SG_INVALID_ID) sg_destroy_pipeline(child);
+            } else {
+                pip->pip[prim_type] = child;
+            }
+            // [TrussC fork] Keep exhaustion log suppression intact before sampling.
+            if (_sgl.desc.pipeline_created) _sgl.desc.pipeline_created();
+        }
         return pip->pip[prim_type];
-    } else {
-        sg_pipeline dummy_id = { SG_INVALID_ID };
-        return dummy_id;
     }
+    sg_pipeline dummy_id = { SG_INVALID_ID };
+    return dummy_id;
 }
 
 //  ██████  ██████  ███    ██ ████████ ███████ ██   ██ ████████ ███████
@@ -4403,6 +4411,16 @@ SOKOL_API_IMPL void sgl_end(void) {
     SOKOL_ASSERT(ctx->vertices.next >= ctx->base_vertex);
     ctx->in_begin = false;
 
+    /* [TrussC] Resolve once before consuming dirty matrices. Failed children
+       skip only this draw, including its vertices, so later draws can merge
+       safely and still receive the current matrices. */
+    if (ctx->error.any) return;
+    sg_pipeline pip = _sgl_get_pipeline(ctx->pip_stack[ctx->pip_tos], ctx->cur_prim_type);
+    if (pip.id == SG_INVALID_ID) {
+        ctx->vertices.next = ctx->base_vertex;
+        return;
+    }
+
     bool matrix_dirty = ctx->matrix_dirty;
     if (matrix_dirty) {
         ctx->matrix_dirty = false;
@@ -4419,7 +4437,6 @@ SOKOL_API_IMPL void sgl_end(void) {
     }
 
     // check if command can be merged with current command
-    sg_pipeline pip = _sgl_get_pipeline(ctx->pip_stack[ctx->pip_tos], ctx->cur_prim_type);
     sg_view view = ctx->texturing_enabled ? ctx->cur_view : _sgl.def_view;
     sg_sampler smp = ctx->texturing_enabled ? ctx->cur_smp : _sgl.def_smp;
     _sgl_command_t* cur_cmd = _sgl_cur_command(ctx);
@@ -4449,7 +4466,7 @@ SOKOL_API_IMPL void sgl_end(void) {
             cmd->layer_id = ctx->layer_id;
             cmd->args.draw.view = view;
             cmd->args.draw.smp = smp;
-            cmd->args.draw.pip = _sgl_get_pipeline(ctx->pip_stack[ctx->pip_tos], ctx->cur_prim_type);
+            cmd->args.draw.pip = pip; // [TrussC] Reuse the resolved child (no retry in this draw).
             cmd->args.draw.base_vertex = ctx->base_vertex;
             cmd->args.draw.num_vertices = ctx->vertices.next - ctx->base_vertex;
             cmd->args.draw.uniform_index = ctx->uniforms.next - 1;
