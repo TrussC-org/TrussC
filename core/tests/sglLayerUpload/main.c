@@ -198,6 +198,53 @@ int main(void) {
         sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();
     }
 
+    // #1525: extra slots follow upload bytes, grow next frame, and never alias
+    // another upload in the same frame (including after an explicit reset).
+    {
+        sgl_context sized = sgl_make_context(&(sgl_context_desc_t){
+            .max_vertices = 500, .max_commands = 128 });
+        sgl_set_context(sized);
+        sg_buffer previous[16] = {0};
+        size_t previous_size[16] = {0};
+        bool sizes_ok = true, distinct = true, reuse_ok = true, growth_ok = true;
+        for (int round = 0; round < 3; ++round) {
+            sg_buffer selected[16] = {0};
+            for (int batch = 0; batch < 16; ++batch) {
+                sgl_tc_context_reset(sized);
+                const int tris = (batch + 1) * (round == 1 ? 10 : 1);
+                push_tris(tris);
+                sgl_draw();
+                _sgl_context_t* state = _sgl_lookup_context(sized.id);
+                const size_t bytes = (size_t)tris * 3 * STRIDE;
+                const size_t full = (size_t)state->vertices.cap * STRIDE;
+                size_t expected = full;
+                if (batch) {
+                    expected = 1;
+                    while (expected < bytes) expected *= 2;
+                    if (expected > full) expected = full;
+                }
+                selected[batch] = state->vbuf;
+                const size_t actual = sg_query_buffer_size(selected[batch]);
+                sizes_ok &= actual == (round == 2 ? previous_size[batch] : expected);
+                for (int earlier = 0; earlier < batch; ++earlier)
+                    distinct &= selected[batch].id != selected[earlier].id;
+                if (round == 1 && batch)
+                    growth_ok &= actual > previous_size[batch] && selected[batch].id != previous[batch].id;
+                if (round == 2)
+                    reuse_ok &= selected[batch].id == previous[batch].id;
+                previous[batch] = selected[batch];
+                previous_size[batch] = actual;
+            }
+            sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();
+        }
+        check("extra flush buffers use capped power-of-two upload sizes", sizes_ok);
+        check("16 flushes per frame use distinct buffers", distinct);
+        check("larger next-frame uploads recreate undersized slots", growth_ok);
+        check("smaller next-frame uploads reuse sufficient storage", reuse_ok);
+        sgl_destroy_context(sized);
+        sgl_set_context(ctx);
+    }
+
     sg_end_pass();
     // Capacity metadata exercises the signed backend size without large storage.
     {

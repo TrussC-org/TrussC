@@ -1364,6 +1364,22 @@ the fuller pool. Part 0 adds no trace hooks, descriptor callbacks, per-platform
 implementation changes, allocation, reclamation or frame polling. Part 1 below
 adds the lazy child creation callback; the pool query semantics are unchanged.
 
+## Extra flush buffer sizing (#1525)
+
+[TrussC fork] `_sgl_prepare_flush_buffer()` sizes extra per-flush vertex
+buffers to the upload's next power of two, capped at the existing full buffer
+capacity (including the signed backend size limit). The initial slot retains
+its existing capacity. An undersized slot is destroyed and recreated when
+selected in a later device frame; every changed upload still selects a distinct
+slot until `sg_commit()`, and unchanged layer draws retain their upload cache.
+Uniforms use the existing command storage and need no extra buffer allocation.
+Idle trimming is omitted to keep this change confined to allocation sizing;
+extra slots retain their peak size until context release/destruction.
+
+Regression coverage: `sglLayerUpload` checks capped allocation sizes, growth,
+reuse and distinct slots; `sglFlushBuffers --gpu-check` checks pixels across
+many growing flushes and subsequent device frames.
+
 ### Lazy sokol_gl primitive pipelines (#1512, part 1)
 
 **Classification:** KEEP decided by owner (2026-11-16).
