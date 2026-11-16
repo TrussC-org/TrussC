@@ -3861,6 +3861,14 @@ static bool _sgl_prepare_flush_buffer(_sgl_context_t* ctx, size_t data_size) {
         sg_buffer_desc desc;
         _sgl_clear(&desc, sizeof(desc));
         desc.size = capacity * sizeof(_sgl_vertex_t);
+        /* [TrussC fork] Extra flush slots follow the upload size (#1525).
+           Clamp the next power of two to the existing full-capacity bound,
+           including non-power-of-two capacities and the signed backend limit. */
+        if (ctx->flush_next > 0) {
+            size_t rounded_size = 1;
+            while (rounded_size < data_size && rounded_size <= desc.size / 2) rounded_size *= 2;
+            if (rounded_size >= data_size) desc.size = rounded_size;
+        }
         desc.usage.vertex_buffer = true;
         desc.usage.write_transient = true;
         desc.label = "sgl-vertex-buffer";

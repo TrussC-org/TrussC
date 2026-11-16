@@ -1356,3 +1356,19 @@ upstream `sg_query_stats()` at its pipeline creation/destruction sites to report
 the fuller pool. No trace hooks, descriptor callbacks, per-platform implementation
 changes, allocation, reclamation or frame polling are added. Pipeline creation
 semantics are unchanged.
+
+## Extra flush buffer sizing (#1525)
+
+[TrussC fork] `_sgl_prepare_flush_buffer()` sizes extra per-flush vertex
+buffers to the upload's next power of two, capped at the existing full buffer
+capacity (including the signed backend size limit). The initial slot retains
+its existing capacity. An undersized slot is destroyed and recreated when
+selected in a later device frame; every changed upload still selects a distinct
+slot until `sg_commit()`, and unchanged layer draws retain their upload cache.
+Uniforms use the existing command storage and need no extra buffer allocation.
+Idle trimming is omitted to keep this change confined to allocation sizing;
+extra slots retain their peak size until context release/destruction.
+
+Regression coverage: `sglLayerUpload` checks capped allocation sizes, growth,
+reuse and distinct slots; `sglFlushBuffers --gpu-check` checks pixels across
+many growing flushes and subsequent device frames.
