@@ -54,6 +54,9 @@ void deferGpuDestroy(sg_image img) noexcept;
 void deferGpuDestroy(sg_view view) noexcept;
 void deferGpuDestroy(sg_sampler smp) noexcept;
 void deferGpuDestroy(sg_pipeline pip) noexcept;
+// Sample pipeline usage only when resources are created or destroyed.
+void samplePipelinePools() noexcept;
+uint64_t pipelinePoolExhaustionEvents() noexcept;
 void deferGpuDestroy(sg_shader shd) noexcept;
 
 // Retire queued handles unreferenced by CPU recordings. Called after
