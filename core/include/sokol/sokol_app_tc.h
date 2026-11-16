@@ -919,7 +919,7 @@
     'Graceful exit' means that the application-provided cleanup callback will
     be called before the application quits.
 
-    On native desktop platforms sokol_app.h provides more control over the
+    On native desktop platforms and Android sokol_app.h provides more control over the
     application-quit-process. It's possible to initiate a 'programmatic quit'
     from the application code, and a quit initiated by the application user can
     be intercepted (for instance to show a custom dialog box).
@@ -1518,6 +1518,7 @@ typedef enum sapp_event_type {
     SAPP_EVENTTYPE_QUIT_REQUESTED,
     SAPP_EVENTTYPE_CLIPBOARD_PASTED,
     SAPP_EVENTTYPE_FILES_DROPPED,
+    SAPP_EVENTTYPE_ANDROID_BACK,
     SAPP_EVENTTYPE_TC_DEVICE_LOST,      // TrussC: shared D3D11 device lost (once per run)
     SAPP_EVENTTYPE_TC_REDRAW_REQUESTED, // TrussC: native content invalidation
     SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED, // TrussC: native resize needs a follow-up present
@@ -1922,6 +1923,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(ANDROID_NATIVE_ACTIVITY_DONE, "NativeActivity done") \
     _SAPP_LOGITEM_XMACRO(ANDROID_NATIVE_ACTIVITY_ONCREATE, "NativeActivity onCreate") \
     _SAPP_LOGITEM_XMACRO(ANDROID_CREATE_THREAD_PIPE_FAILED, "failed to create thread pipe") \
+    _SAPP_LOGITEM_XMACRO(ANDROID_CLEANUP_CONTEXT_FAILED, "failed to bind EGL context for Android cleanup") \
     _SAPP_LOGITEM_XMACRO(ANDROID_NATIVE_ACTIVITY_CREATE_SUCCESS, "NativeActivity successfully created") \
     _SAPP_LOGITEM_XMACRO(ANDROID_CHOREOGRAPHER_ENABLED, "Choreographer frame loop enabled") \
     _SAPP_LOGITEM_XMACRO(ANDROID_CHOREOGRAPHER_UNAVAILABLE, "Choreographer unavailable, using poll loop") \
@@ -2842,9 +2844,8 @@ _SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
 
     Structure mirrors sokol_app.h's Android backend including all TrussC
     patches: the Choreographer vsync-paced frame loop with ALooper poll
-    fallback (compiled in at __ANDROID_API__ >= 29), the BACK-key
-    no-shutdown fix (kiosk/screen-pinning survival -- BACK is consumed,
-    never tears down EGL), DPI scale from AConfiguration_getDensity()/160
+    fallback (compiled in at __ANDROID_API__ >= 29), cancellable BACK with
+    task backgrounding on the UI looper, DPI scale from AConfiguration_getDensity()/160
     with fb/win-ratio fallback, and the skip_present early-return. Input
     is multi-touch + the BACK key; orientation and immersive mode are
     TrussC-side JNI (tcPlatform_android.cpp), not sokol's business. */
@@ -3293,6 +3294,8 @@ typedef struct {
     pthread_cond_t cond;
     int read_from_main_fd;
     int write_from_main_fd;
+    int read_from_app_fd;
+    int write_from_app_fd;
 } _sapp_tc_android_pt_t;
 
 // [TrussC] Native fork record (retains upstream lineage where applicable).
@@ -3365,7 +3368,7 @@ typedef struct {
     bool init_called;
     bool constructing; // [TrussC] client publication uses the shared creation transaction
     bool cleanup_called;
-    bool quit_requested;        /* inert: lifecycle is activity-driven */
+    bool quit_requested;        /* cancellable Android programmatic quit */
     bool quit_ordered;
     bool event_consumed;
     bool html5_ask_leave_site;  /* inert */
@@ -14243,7 +14246,7 @@ _SOKOL_PRIVATE bool _sapp_tc_android_init_egl(void) {
     }
     EGLint alpha_size = _sapp_tc.desc.alpha ? 8 : 0;
     const EGLint cfg_attributes[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
@@ -14346,11 +14349,13 @@ _SOKOL_PRIVATE void _sapp_tc_android_cleanup_egl_surface(void) {
     }
 }
 
-_SOKOL_PRIVATE void _sapp_tc_android_app_event(sapp_event_type type) {
+_SOKOL_PRIVATE bool _sapp_tc_android_app_event(sapp_event_type type) {
+    bool event_consumed = false;
     if (_sapp_tc_events_enabled()) {
         _sapp_tc_init_event(type);
-        _sapp_tc_call_event(&_sapp_tc.event);
+        event_consumed = _sapp_tc_call_event(&_sapp_tc.event);
     }
+    return event_consumed;
 }
 
 _SOKOL_PRIVATE void _sapp_tc_android_update_dimensions(ANativeWindow* window, bool force_update) {
@@ -14415,11 +14420,21 @@ _SOKOL_PRIVATE void _sapp_tc_android_update_dimensions(ANativeWindow* window, bo
 }
 
 _SOKOL_PRIVATE void _sapp_tc_android_cleanup(void) {
-    if (_sapp_tc.android.surface != EGL_NO_SURFACE) {
-        /* egl context is bound, cleanup gracefully */
-        if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
-            _sapp_tc_call_cleanup();
+    if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
+        /* onDestroy normally arrives after the native window is gone.
+           Bind the same context to a small pbuffer on the app thread so
+           cleanup still runs before UI-thread exit(0) destroys statics. */
+        if (_sapp_tc.android.surface == EGL_NO_SURFACE) {
+            const EGLint attrs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+            _sapp_tc.android.surface = eglCreatePbufferSurface(
+                _sapp_tc.android.display, _sapp_tc.android.config, attrs);
         }
+        if (_sapp_tc.android.surface == EGL_NO_SURFACE ||
+            !eglMakeCurrent(_sapp_tc.android.display, _sapp_tc.android.surface,
+                _sapp_tc.android.surface, _sapp_tc.android.context)) {
+            _SAPP_PANIC(ANDROID_CLEANUP_CONTEXT_FAILED);
+        }
+        _sapp_tc_call_cleanup();
     }
     /* always try to cleanup by destroying egl context */
     _sapp_tc_android_cleanup_egl();
@@ -14511,19 +14526,33 @@ _SOKOL_PRIVATE bool _sapp_tc_android_touch_event(const AInputEvent* e) {
     return true;
 }
 
+_SOKOL_PRIVATE void _sapp_tc_android_background(void) {
+    /* NativeActivity's Java/UI looper owns Activity operations. */
+    /* The write blocks once the pipe is full. That takes tens of thousands of
+       unconsumed Back presses while the UI looper isn't draining; if onDestroy
+       then waits for this thread, both stall. Accepted as unreachable in
+       practice rather than coalescing posts. */
+    const char command = 1;
+    if (write(_sapp_tc.android.pt.write_from_app_fd, &command, sizeof(command)) != sizeof(command)) {
+        _SAPP_ERROR(ANDROID_WRITE_MSG_FAILED);
+    }
+}
+
 _SOKOL_PRIVATE bool _sapp_tc_android_key_event(const AInputEvent* e) {
     if (AInputEvent_getType(e) != AINPUT_EVENT_TYPE_KEY) {
         return false;
     }
     if (AKeyEvent_getKeyCode(e) == AKEYCODE_BACK) {
-        /* [TrussC tettou771] Patched: BACK key no longer triggers shutdown.
-           Upstream calls _sapp_tc_android_shutdown() here, which destroys the
-           EGL surface and invokes cleanup_cb. Under screen pinning, the OS
-           blocks ANativeActivity_finish(), so the process keeps running but
-           the EGL context is gone — the app appears frozen. Consume the
-           event without shutdown. Long-term fix: implement
-           SAPP_EVENTTYPE_QUIT_REQUESTED for Android (already supported on
-           macOS/Windows/Linux). */
+        // [TrussC tettou771] Former unconditional consumption replaced by
+        // upstream b633722 event; explicitly background NativeActivity if unconsumed.
+        const bool key_up = AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_UP;
+        const bool canceled = 0 != (AKeyEvent_getFlags(e) & AKEY_EVENT_FLAG_CANCELED);
+        if (key_up && !canceled) {
+            if (!_sapp_tc_android_app_event(SAPP_EVENTTYPE_ANDROID_BACK)) {
+                _sapp_tc_android_background();
+            }
+        }
+        /* Do not fall through to NativeActivity's default finish path. */
         return true;
     }
     return false;
@@ -14629,6 +14658,9 @@ _SOKOL_PRIVATE int _sapp_tc_android_main_cb(int fd, int events, void* data) {
             break;
         case _SOKOL_ANDROID_MSG_DESTROY:
             _SAPP_INFO(ANDROID_MSG_DESTROY);
+            // [TrussC] Name the system destroy in the exit log, like exitApp().
+            trussc::internal::setExitReasonIfEmpty("activity-destroy");
+            _sapp_tc.quit_ordered = true;
             _sapp_tc_android_cleanup();
             _sapp_tc.valid = false;
             _sapp_tc.android.is_thread_stopping = true;
@@ -14645,7 +14677,7 @@ _SOKOL_PRIVATE int _sapp_tc_android_main_cb(int fd, int events, void* data) {
 _SOKOL_PRIVATE bool _sapp_tc_android_should_update(void) {
     bool is_in_front = _sapp_tc.android.has_resumed && _sapp_tc.android.has_focus;
     bool has_surface = _sapp_tc.android.surface != EGL_NO_SURFACE;
-    return is_in_front && has_surface;
+    return !_sapp_tc.quit_ordered && is_in_front && has_surface;
 }
 
 #if __ANDROID_API__ >= 29
@@ -14704,8 +14736,19 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
     pthread_cond_broadcast(&_sapp_tc.android.pt.cond);
     pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
 
-    /* main loop */
+    /* upstream b633722: order quit once, then wait for Activity destruction. */
+    bool quit_handled = false;
     while (!_sapp_tc.android.is_thread_stopping) {
+        if (_sapp_tc.quit_requested && !_sapp_tc.quit_ordered) {
+            _sapp_tc_android_app_event(SAPP_EVENTTYPE_QUIT_REQUESTED);
+            if (_sapp_tc.quit_requested) {
+                _sapp_tc.quit_ordered = true;
+            }
+        }
+        if (_sapp_tc.quit_ordered && !quit_handled) {
+            _sapp_tc_android_shutdown();
+            quit_handled = true;
+        }
         #if __ANDROID_API__ >= 29
             if (_sapp_tc.android.choreographer != NULL) {
                 // Posts _sapp_tc_android_frame_callback with the choreographer to start our frame
@@ -14717,7 +14760,9 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
                 }
                 // Blocks until the next event. We don't need a while loop here because we're
                 // already being driven by the outer while loop.
-                ALooper_pollOnce(-1, NULL, NULL, NULL);
+                // [TrussC] A callback may have requested quit before this poll.
+                const bool quit_pending = !quit_handled && (_sapp_tc.quit_requested || _sapp_tc.quit_ordered);
+                ALooper_pollOnce(quit_pending ? 0 : -1, NULL, NULL, NULL);
                 continue;
             }
         #endif
@@ -14729,7 +14774,8 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
         /* process all events (or stop early if app is requested to quit) */
         bool process_events = true;
         while (process_events && !_sapp_tc.android.is_thread_stopping) {
-            bool block_until_event = !_sapp_tc.android.is_thread_stopping && !_sapp_tc_android_should_update();
+            const bool quit_pending = !quit_handled && (_sapp_tc.quit_requested || _sapp_tc.quit_ordered);
+            const bool block_until_event = !_sapp_tc.android.is_thread_stopping && !quit_pending && !_sapp_tc_android_should_update();
             process_events = ALooper_pollOnce(block_until_event ? -1 : 0, NULL, NULL, NULL) == ALOOPER_POLL_CALLBACK;
         }
     }
@@ -14758,6 +14804,23 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
 }
 
 /* android main/ui thread */
+_SOKOL_PRIVATE int _sapp_tc_android_ui_cb(int fd, int events, void* data) {
+    _SOKOL_UNUSED(events);
+    _SOKOL_UNUSED(data);
+    char command;
+    if (read(fd, &command, sizeof(command)) != sizeof(command)) {
+        _SAPP_ERROR(ANDROID_READ_MSG_FAILED);
+        return 1;
+    }
+    ANativeActivity* activity = _sapp_tc.android.activity;
+    JNIEnv* env = activity->env; /* only valid on this UI thread */
+    jclass cls = env->GetObjectClass(activity->clazz);
+    jmethodID move = env->GetMethodID(cls, "moveTaskToBack", "(Z)Z");
+    env->CallBooleanMethod(activity->clazz, move, JNI_TRUE);
+    env->DeleteLocalRef(cls);
+    return 1;
+}
+
 _SOKOL_PRIVATE void _sapp_tc_android_msg(_sapp_tc_android_msg_t msg) {
     if (write(_sapp_tc.android.pt.write_from_main_fd, &msg, sizeof(msg)) != sizeof(msg)) {
         _SAPP_ERROR(ANDROID_WRITE_MSG_FAILED);
@@ -14886,6 +14949,9 @@ _SOKOL_PRIVATE void _sapp_tc_android_on_destroy(ANativeActivity* activity) {
 
     close(_sapp_tc.android.pt.read_from_main_fd);
     close(_sapp_tc.android.pt.write_from_main_fd);
+    ALooper_removeFd(ALooper_forThread(), _sapp_tc.android.pt.read_from_app_fd);
+    close(_sapp_tc.android.pt.read_from_app_fd);
+    close(_sapp_tc.android.pt.write_from_app_fd);
 
     _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_DONE);
 
@@ -14916,6 +14982,15 @@ void ANativeActivity_onCreate(ANativeActivity* activity, void* saved_state, size
     }
     _sapp_tc.android.pt.read_from_main_fd = pipe_fd[0];
     _sapp_tc.android.pt.write_from_main_fd = pipe_fd[1];
+
+    /* Reverse pipe: Back defaults run on the Java/UI thread, never the app thread. */
+    if (pipe(pipe_fd) != 0) {
+        _SAPP_PANIC(ANDROID_CREATE_THREAD_PIPE_FAILED);
+    }
+    _sapp_tc.android.pt.read_from_app_fd = pipe_fd[0];
+    _sapp_tc.android.pt.write_from_app_fd = pipe_fd[1];
+    ALooper_addFd(ALooper_forThread(), _sapp_tc.android.pt.read_from_app_fd,
+        ALOOPER_POLL_CALLBACK, ALOOPER_EVENT_INPUT, _sapp_tc_android_ui_cb, NULL);
 
     pthread_mutex_init(&_sapp_tc.android.pt.mutex, NULL);
     pthread_cond_init(&_sapp_tc.android.pt.cond, NULL);

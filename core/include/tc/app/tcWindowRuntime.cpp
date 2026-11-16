@@ -627,7 +627,7 @@ CoreEvents& unavailableWindowEvents() {
         UnavailableEvents() {
             auto disable = [](auto&... event) { (FrameworkEventAccess::disableSubscriptions(event), ...); };
             disable(events.update, events.draw, events.onRender, events.afterFrame,
-                events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
+                events.exit, events.hotReloadUnload, events.exitRequested, events.backPressed, events.deviceLost,
                 events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,
                 events.occludedChanged, events.focusChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
@@ -1464,6 +1464,7 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_FILES_DROPPED:     return "filesDropped()";
             case SAPP_EVENTTYPE_CLIPBOARD_PASTED:  return "the clipboardPasted event";
             case SAPP_EVENTTYPE_TC_DEVICE_LOST:    return "the deviceLost event";
+            case SAPP_EVENTTYPE_ANDROID_BACK:      return "the backPressed event";
             case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
@@ -1939,6 +1940,21 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_TC_DEVICE_LOST:
                 dispatchDeviceLost(ev->device_lost_reason);
                 break;
+            case SAPP_EVENTTYPE_ANDROID_BACK:
+#ifdef __ANDROID__
+                {
+                    BackPressedEventArgs aggregate;
+                    try {
+                        auto saved = FrameworkEventAccess::snapshot(window.events().backPressed);
+                        notifyRequestListeners<BackPressedEventArgs>(saved, aggregate, "backPressed");
+                    } catch (...) {
+                        aggregate.cancel = true;
+                        reportTeardownFailure("Back notification");
+                    }
+                    if (aggregate.cancel) sapp_consume_event();
+                }
+#endif
+                break;
             case SAPP_EVENTTYPE_QUIT_REQUESTED:
                 if (!dispatchExitRequested()) sapp_cancel_quit();
                 break;
@@ -1999,6 +2015,7 @@ static inline bool validInjectedWindowEvent(const sapp_event& e) {
             for (int i = 0; i < e.num_touches; ++i)
                 if (!std::isfinite(e.touches[i].pos_x) || !std::isfinite(e.touches[i].pos_y)) return false;
             return true;
+        case SAPP_EVENTTYPE_ANDROID_BACK:
         case SAPP_EVENTTYPE_INVALID: case SAPP_EVENTTYPE_RESIZED: case SAPP_EVENTTYPE_ICONIFIED:
         case SAPP_EVENTTYPE_RESTORED: case SAPP_EVENTTYPE_FOCUSED: case SAPP_EVENTTYPE_UNFOCUSED:
         case SAPP_EVENTTYPE_SUSPENDED: case SAPP_EVENTTYPE_RESUMED: case SAPP_EVENTTYPE_QUIT_REQUESTED:

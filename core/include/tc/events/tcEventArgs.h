@@ -294,6 +294,11 @@ struct ExitRequestEventArgs {
     std::string reason;            // Optional Windows shutdown-block explanation
 };
 
+// Android Back request. Set cancel to skip Android's default Back behavior.
+struct BackPressedEventArgs {
+    bool cancel = false;
+};
+
 // OS close request for one Window. Each listener gets a fresh payload.
 struct CloseRequestEventArgs {
     bool cancel = false;

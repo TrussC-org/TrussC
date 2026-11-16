@@ -6317,6 +6317,95 @@ void tcApp::setup() {
 '''
 related = ["App::exit", "Window::setQuitOnClose", "CoreEvents::closeRequested"]
 
+["CoreEvents::backPressed"]
+description.en = "Android-only Back event; cancel it to keep the app in front, otherwise TrussC moves the task to the background."
+description.ja = "Android 専用の Back イベントです。取り消すと前面に留まり、それ以外は TrussC がタスクをバックグラウンドに移します。"
+description.ko = "Android 전용 Back 이벤트입니다. 취소하면 앱이 전면에 남고, 그렇지 않으면 TrussC가 태스크를 백그라운드로 이동합니다."
+details.en = '''
+- Listeners receive `BackPressedEventArgs&` on the main thread; with no listener or `cancel` left false, TrussC moves the task to the background on every supported Android version.
+- Other platforms never send this event.
+- To keep an installation running when Back is pressed, retain the listener in your tcApp and cancel the event:
+```cpp
+backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
+    e.cancel = true;   // keep the app; skip Android's default
+});
+```
+- An edge-swipe Back normally delivers touch-down before Android takes over the gesture; canceling Back does not undo that touch-down, so kiosk controls should act on uncanceled release. TrussC has no system gesture-inset API; keep controls away from the edges.
+- The bottom-edge Home and Recents swipe also delivers its first press to the app before the launcher takes over, so exhibit and kiosk apps should not act on a press near the screen edges; act on release, as below.
+```cpp
+void tcApp::touchReleased(const TouchEventArgs& e) {
+    if (!e.cancelled) logNotice("Touch") << "Activate";
+}
+```
+- Apps cannot block Home or Recents through this event.
+- TrussC has no API to lock down a device; for a kiosk, configure Android Settings → screen pinning, or Android lock-task / dedicated-device management.
+- The Android manifest template currently sets `minSdkVersion="26"` and `targetSdkVersion="35"` and does not set `enableOnBackInvokedCallback`.
+- When targeting API 36 or later, disable predictive Back in AndroidManifest.xml so Back is delivered:
+```xml
+<application android:enableOnBackInvokedCallback="false">
+```
+'''
+details.ja = '''
+- メインスレッドでリスナーに `BackPressedEventArgs&` を渡し、リスナーがない場合や `cancel` が false のままの場合は、対応するすべての Android バージョンで TrussC がタスクをバックグラウンドに移します。
+- 他のプラットフォームでは発生しません。
+- 展示で Back を押してもアプリを動かし続けるには、tcApp にリスナーを保持してイベントを取り消します。
+```cpp
+backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
+    e.cancel = true;   // keep the app; skip Android's default
+});
+```
+- 画面端のスワイプによる Back では、Android がジェスチャーを引き継ぐ前にタッチ開始が届くのが通常の動作です。Back を取り消してもタッチ開始は戻せないため、キオスクの操作は取り消されていないタッチ終了で確定します。TrussC にシステムジェスチャーのインセット API はありませんので、操作部は画面端から離します。
+- 画面下端からのホームや最近使ったアプリのスワイプでも、ランチャーが引き継ぐ前に最初のタッチがアプリに届きます。展示やキオスクのアプリでは、画面端付近のタッチ開始で動作せず、次のようにタッチ終了で確定します。
+```cpp
+void tcApp::touchReleased(const TouchEventArgs& e) {
+    if (!e.cancelled) logNotice("Touch") << "Activate";
+}
+```
+- このイベントで Home や Recents を阻止することはできません。
+- TrussC に端末を固定する API はありませんので、キオスクには Android の設定 → 画面の固定、または lock-task / 専用端末の管理を使います。
+- 現在の Android マニフェストのテンプレートは `minSdkVersion="26"` と `targetSdkVersion="35"` を設定し、`enableOnBackInvokedCallback` は設定していません。
+- API 36 以降を対象にする場合は、Back が届くように AndroidManifest.xml で predictive Back を無効にします。
+```xml
+<application android:enableOnBackInvokedCallback="false">
+```
+'''
+details.ko = '''
+- 메인 스레드에서 리스너에 `BackPressedEventArgs&`를 전달하며, 리스너가 없거나 `cancel`이 false이면 지원하는 모든 Android 버전에서 TrussC가 태스크를 백그라운드로 이동합니다.
+- 다른 플랫폼에서는 발생하지 않습니다.
+- 전시에서 Back을 눌러도 앱을 계속 실행하려면 tcApp에 리스너를 보관하고 이벤트를 취소합니다.
+```cpp
+backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
+    e.cancel = true;   // keep the app; skip Android's default
+});
+```
+- 화면 가장자리 스와이프 Back은 Android가 제스처를 넘겨받기 전에 터치 시작을 전달하는 것이 정상입니다. Back을 취소해도 터치 시작은 되돌릴 수 없으므로 키오스크 조작은 취소되지 않은 터치 종료에서 확정합니다. TrussC에는 시스템 제스처 인셋 API가 없으므로 조작부를 화면 가장자리에서 떨어뜨립니다.
+- 화면 아래 가장자리에서 홈이나 최근 앱으로 가는 스와이프도 런처가 넘겨받기 전에 첫 터치를 앱에 전달합니다. 전시나 키오스크 앱은 화면 가장자리 근처의 터치 시작에서 동작하지 말고, 다음과 같이 터치 종료에서 확정합니다.
+```cpp
+void tcApp::touchReleased(const TouchEventArgs& e) {
+    if (!e.cancelled) logNotice("Touch") << "Activate";
+}
+```
+- 이 이벤트로 Home이나 Recents를 차단할 수 없습니다.
+- TrussC에는 기기를 잠그는 API가 없으므로 키오스크에는 Android 설정 → 화면 고정 또는 lock-task / 전용 기기 관리를 사용합니다.
+- 현재 Android 매니페스트 템플릿은 `minSdkVersion="26"`과 `targetSdkVersion="35"`를 설정하며 `enableOnBackInvokedCallback`은 설정하지 않습니다.
+- API 36 이상을 대상으로 하면 Back이 전달되도록 AndroidManifest.xml에서 predictive Back을 비활성화합니다.
+```xml
+<application android:enableOnBackInvokedCallback="false">
+```
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener backListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
+        e.cancel = true;   // keep the app; skip Android's default
+    });
+}
+'''
+related = ["BackPressedEventArgs", "App::touchReleased", "TouchEventArgs::cancelled", "CoreEvents::exitRequested", "exitApp"]
+
 ["CoreEvents::exitRequested"]
 description.en = "Called on each App when the process is asked to quit, so the App can cancel it."
 description.ja = "プロセスの終了が要求されたときに各 App で呼ばれ、終了を取り消せる。"
@@ -8756,6 +8845,44 @@ details.ko = '''
 - 인자 타입에 `consumed` 필드가 있으면 동기적으로 호출된 리스너가 `e.consumed == true`인 상태로 반환한 뒤 전달을 중단하며, 같은 우선순위를 포함한 후속 리스너를 건너뜁니다. 이 필드가 없는 인자 타입은 이 방법으로 전달을 중단할 수 없습니다.
 - 리스너 등록과 큐를 사용하는 호출은 `Event<T>`를, App 콜백 및 노드와의 순서는 `App::mousePressed`를 참조하세요.
 '''
+
+["BackPressedEventArgs"]
+description.en = "Arguments for the Android backPressed event."
+description.ja = "Android の backPressed イベントの引数です。"
+description.ko = "Android의 backPressed 이벤트 인수입니다."
+details.en = '''
+- `cancel` starts false; set it true to skip Android's default Back behavior.
+- Each listener receives fresh arguments, so a later listener cannot undo an earlier cancellation.
+- Use the arguments only inside the callback; retain the listener as shown below.
+'''
+details.ja = '''
+- `cancel` は false から始まり、true にすると Android の既定の Back 動作を取り消します。
+- リスナーごとに新しい引数を渡すので、あとのリスナーは先の取り消しを元に戻せません。
+- 引数はコールバック内だけで使い、リスナーは次のように保持します。
+'''
+details.ko = '''
+- `cancel`은 false로 시작하며 true로 설정하면 Android의 기본 Back 동작을 취소합니다.
+- 리스너마다 새 인수를 전달하므로 이후 리스너가 앞선 취소를 되돌릴 수 없습니다.
+- 인수는 콜백 안에서만 사용하고 리스너는 다음과 같이 보관합니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener backListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    backListener = events().backPressed.listen([](BackPressedEventArgs& e) {
+        e.cancel = true;   // keep the app; skip Android's default
+    });
+}
+'''
+related = ["CoreEvents::backPressed", "BackPressedEventArgs::cancel"]
+
+["BackPressedEventArgs::cancel"]
+description.en = "Set true to skip Android's default Back behavior."
+description.ja = "true にすると Android の既定の Back 動作を取り消します。"
+description.ko = "true로 설정하면 Android의 기본 Back 동작을 취소합니다."
+related = ["BackPressedEventArgs", "CoreEvents::backPressed"]
 
 ["ExitRequestEventArgs"]
 description.en = "The argument of exitRequested: whether to cancel the quit, and an optional reason."
