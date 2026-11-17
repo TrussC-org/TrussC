@@ -3492,7 +3492,7 @@ void FullscreenShader::setParams(const T & params)  // Sets the uniform paramete
 ### GlyphBatch — Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused.
 
 ```cpp
-void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
+void GlyphBatch::add(uint32_t codepoint) [+8]  // Appends retained text at a position or with a matrix, avoiding per-string matrix-stack changes.
 void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
 void GlyphBatch::draw() [+1]  // Draws the retained glyphs with the current camera, target and blend mode; draw(transform) places the whole batch.
 const Color & GlyphBatch::getColor() const  // Returns the current batch color.

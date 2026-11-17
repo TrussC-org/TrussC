@@ -168,19 +168,21 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
         "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
         "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
-    lua->new_usertype<trussc::EaseMode>("EaseMode",
-        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
-        "In", sol::var(trussc::EaseMode::In),
-        "Out", sol::var(trussc::EaseMode::Out),
-        "InOut", sol::var(trussc::EaseMode::InOut));
+    {
+        sol::usertype<trussc::BlendDesc::Component> t = lua->new_usertype<trussc::BlendDesc::Component>("BlendDescComponent");
+        t["dst"] = &trussc::BlendDesc::Component::dst;
+        t["op"] = &trussc::BlendDesc::Component::op;
+        t["src"] = &trussc::BlendDesc::Component::src;
+    }
     lua->new_usertype<trussc::MixMode>("MixMode",
         sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
         "Auto", sol::var(trussc::MixMode::Auto),
         "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
+        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
+        t["error"] = &trussc::SendResult::error;
+        t["id"] = &trussc::SendResult::id;
+        t["ok"] = &trussc::SendResult::ok;
     }
 }
 #ifdef _MSC_VER

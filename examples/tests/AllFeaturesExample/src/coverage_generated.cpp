@@ -1769,6 +1769,9 @@ struct Cover_GlyphBatch : af::Scope<GlyphBatch> {
         (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<float>(), af::val<float>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Mat4>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().clear();
         (void)af::val<GlyphBatch>().draw();
         (void)af::val<GlyphBatch>().draw(af::val<const Mat4>());
