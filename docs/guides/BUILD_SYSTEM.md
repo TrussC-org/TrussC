@@ -511,6 +511,31 @@ Generated shader headers reach consumers through the `<name>_shaders` INTERFACE 
 
 Shader files using compute features (dispatch or storage buffers) use the suffix `*.compute.glsl` under `src/`, whether they contain `@cs`, `@vs`/`@fs`, or both. CMake rejects storage-buffer declarations in plain `.glsl` files and reports the required `.compute.glsl` filename. They have a separate sokol-shdc target set with `glsl310es` for GLES compute; ordinary `.glsl` graphics sources keep `glsl300es` for WebGL2. Include the resulting `*.compute.glsl.h` and pass its descriptor function to `ComputeShader::load()` or `Shader::load()` for its program. Both 300ES graphics and 310ES compute require a GLES 3.1 or later context when used together.
 
+### Experimental Vulkan build (Linux)
+
+Work in progress: not usable yet. Linux apps can't build with this switch until the sokol app layer gains Vulkan support.
+
+Configure an existing Linux CMake project with `-DTC_GFX_BACKEND=vulkan` to
+select the experimental backend. Leaving this cache setting empty keeps the
+platform default. The switch generates SPIR-V with the pinned sokol-shdc compiler.
+There is no working Vulkan app path yet; use the default Linux backend to build
+and run apps today:
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND=
+cmake --build --preset linux
+```
+
+The experimental Vulkan path allows one native window. Every additional
+`createWindow()` request returns `nullptr` and logs a Warning. Use the launch
+window in your tcApp:
+
+```cpp
+void tcApp::setup() {
+    getWindow()->setTitle("Vulkan single window");
+}
+```
+
 ### macOS Deployment Target
 
 TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.

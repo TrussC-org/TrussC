@@ -907,6 +907,14 @@ inline sapp_tc_window resolveParentWindow(const WindowSettings& settings) {
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
+#if defined(SOKOL_VULKAN)
+    // createWindow is the secondary-window API; the launch window is prepared
+    // separately. Warn for every rejected request, including hidden windows.
+    if (sapp_isvalid() || !internal::openWindows().empty()) {
+        logWarning("Window") << "Vulkan backend supports one window for now; this window was not created";
+        return nullptr;
+    }
+#endif
     if (internal::runtimeEnding()) return nullptr;
     if constexpr (!internal::supportsSecondaryWindows()) {
         logError("Window") << "createWindow(): secondary windows are supported on "

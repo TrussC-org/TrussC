@@ -94,6 +94,11 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     set(_TC_GRAPHICS_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
     set(_TC_COMPUTE_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl310es:wgsl")
 
+    if(TC_GFX_BACKEND STREQUAL "vulkan")
+        string(APPEND _TC_GRAPHICS_SLANG ":spirv_vk")
+        string(APPEND _TC_COMPUTE_SLANG ":spirv_vk")
+    endif()
+
     if(_TC_SHADERS_OUTPUT_DIR)
         file(MAKE_DIRECTORY "${_TC_SHADERS_OUTPUT_DIR}")
     endif()
