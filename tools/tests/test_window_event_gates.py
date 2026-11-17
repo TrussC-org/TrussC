@@ -51,12 +51,16 @@ code+=body(bridge,'bool sendNativeWindowEvent(')+'\n'
 code+=r'''
 struct Operations {bool (*sendEvent)(sapp_tc_window,void*,sapp_event*);};
 struct Binding {Operations* operations; sapp_tc_window handle; void* user;} binding;
-struct Window {};
+struct Window { bool isOpen() const { return true; } };
+bool runtimeEnding() { return false; }
+constexpr bool supportsSecondaryWindows() { return true; }
 struct TouchEventArgs;
 struct DragDropEventArgs {float x=0, y=0;};
 Window window;
+Window* resolveWindow() { return &window; }
 struct WindowRequestAccess {static Binding& binding(Window&) {return native::binding;}};
 '''
+code+=body(runtime_source,'bool sendEvent(')+'\n'
 code+=body(runtime_source,'struct InjectedWindowEvent {')+';\nthread_local InjectedWindowEvent* injectedWindowEvent=nullptr;\n'
 code+=body(runtime_source,'bool injectWindowEvent(')+'\n'
 code+=r'''
