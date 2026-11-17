@@ -187,6 +187,33 @@ void rowConversions() {
         }
     }
 
+    // Apple video players copy only the overlapping rectangle into retained
+    // pixels: source pitch is bytesPerRow, destination pitch is outputWidth * 4.
+    for (int width : {1, 3, 15, 17, 31, 33, 1919}) {
+        for (int padding : {0, 1, 19, 64}) {
+            for (int extraWidth : {-3, 0, 5}) {
+                const int outputWidth = std::max(1, width + extraWidth);
+                for (int outputHeight : {3, 5, 7}) {
+                    const SiteLayout layout{std::min(width, outputWidth),
+                        std::min(5, outputHeight), outputWidth, size_t(width) * 4 + padding};
+                    Bytes src(1 + layout.pitch * 5);
+                    fill(src);
+                    const auto original = src;
+                    Bytes retained(3 + size_t(outputWidth) * outputHeight * 4 + 19);
+                    fill(retained);
+                    for (int index : {1, 4}) {
+                        auto expected = retained;
+                        auto result = retained;
+                        rowSites[index].before(src.data() + 1, expected.data() + 3, layout);
+                        rowSites[index].after(src.data() + 1, result.data() + 3, layout);
+                        check(expected == result && src == original, rowSites[index].name,
+                              size_t(layout.width) * layout.height);
+                    }
+                }
+            }
+        }
+    }
+
     // Aperture origins are in top-down coded coordinates, even for bottom-up storage.
     for (int width : {1, 3, 15, 16, 17, 31, 33, 642}) {
         const int codedWidth = width == 642 ? 656 : width + 14;
@@ -218,6 +245,7 @@ void rowConversions() {
 constexpr int benchWidth = 1920, benchHeight = 1080;
 constexpr size_t benchPixels = benchWidth * benchHeight;
 constexpr size_t benchPitch = benchWidth * 4 + 64;
+constexpr SiteLayout apple4kLayout{3840, 2160, 3840, 3840 * 4 + 64};
 constexpr SiteLayout cropLayout{656, 368, 642, 656 * 4 + 64, {7, 3, 642, 362}};
 using Kernel = void (*)(const std::uint8_t*, std::uint8_t*);
 volatile unsigned benchChecksum = 0;
@@ -234,8 +262,24 @@ double batch(Kernel kernel, const Bytes& src, Bytes& dst) {
 int benchmark() {
     Bytes src(benchPitch * benchHeight), before(src.size(), 0xA5), after = before;
     fill(src);
-    struct Site { const char* name; Kernel before; Kernel after; };
+    struct Site {
+        const char* name;
+        Kernel before, after;
+        size_t extent = benchPitch * benchHeight;
+    };
     const Site sites[] = {
+        {"apple_video_bgra", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[1].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[1].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"apple_video_bgra_4k", [](auto s, auto d) {
+            rowSites[1].before(const_cast<std::uint8_t*>(s), d, apple4kLayout);
+        }, [](auto s, auto d) {
+            rowSites[1].after(const_cast<std::uint8_t*>(s), d, apple4kLayout);
+        }, apple4kLayout.pitch * apple4kLayout.height},
         {"linux_yuyv", [](auto s, auto d) { convertYUYVtoRGBA(s, d, benchPixels); },
             [](auto s, auto d) { simd::yuyvToRgba(s, d, benchPixels); }},
         {"windows_grabber_positive", [](auto s, auto d) {
@@ -349,12 +393,16 @@ int benchmark() {
 #elif defined(__GNUC__)
     std::printf("compiler=GCC %s\n", __VERSION__);
 #endif
-    std::printf("target=%s size=1920x1080 batches=9 frames_per_batch=20 warmup_frames=3\n", target);
+    std::printf("target=%s default_size=1920x1080 batches=9 frames_per_batch=20 warmup_frames=3\n", target);
 #if defined(_MSC_VER) && !defined(__clang__)
     std::printf("swizzle=scalar (MSVC guard)\n");
 #endif
     std::puts("site before_ms after_ms speedup");
     for (const auto& site : sites) {
+        src.resize(site.extent);
+        before.resize(site.extent);
+        after.resize(site.extent);
+        fill(src);
         std::fill(before.begin(), before.end(), 0xA5);
         std::fill(after.begin(), after.end(), 0xA5);
         site.before(src.data(), before.data());

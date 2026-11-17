@@ -10,6 +10,7 @@
 #import <CoreVideo/CoreVideo.h>
 
 #include "TrussC.h"
+#include "tc/utils/tcSimd.h"
 #include "tc/video/internal/tcVideoRotation.h"
 #include "../metal/tcVideoAsyncLoad.h"
 
@@ -435,13 +436,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
                     unsigned char* srcRow = baseAddress + y * bytesPerRow;
                     unsigned char* dstRow = _pixelBuffer + y * (size_t)_videoWidth * 4;
 
-                    for (size_t x = 0; x < copyW; x++) {
-                        // BGRA -> RGBA
-                        dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
-                        dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
-                        dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
-                        dstRow[x * 4 + 3] = srcRow[x * 4 + 3];  // A <- A
-                    }
+                    trussc::simd::bgraToRgba(srcRow, dstRow, copyW);
                 }
                 _hasNewFrame = YES;
             }
@@ -808,7 +803,9 @@ void VideoPlayer::updatePlatform() {
     }
     [impl update];
 
-    // Copy pixels from Objective-C side
+    // Keep the retained raw frame separate from the mutable, gamma-corrected
+    // player storage. Partial frames retain raw pixels outside the overlap.
+    // Aliasing these buffers would also change their independent ownership.
     if (impl.hasNewFrame && impl.pixelBuffer && pixels_) {
         std::lock_guard<std::mutex> lock(mutex_);
         

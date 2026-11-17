@@ -10,7 +10,7 @@ The swizzle is symmetric, so RGBA→BGRA uses the same dispatch kernel.
 The module does not require `TrussC.h`. Web and unsupported architectures
 use the scalar implementation (`TRUSSC_SIMD_SCALAR=1` can force it).
 
-Opt-in 1080p benchmark: `allCoreTests simdPixels --bench` or
+Opt-in benchmark: `allCoreTests simdPixels --bench` or
 `simdPixels --bench` (Release build). The normal run is unchanged.
 Original origin/main Linux YUYV, Windows grabber (both pitch signs) and recorder
 loops are checked byte-for-byte against the replacements before timing.
@@ -31,9 +31,13 @@ odd widths around vector boundaries, independent unaligned pointers, input and
 output padding, preserved/forced alpha, cropped player columns/untouched rows,
 and negative source-reader stride against those original loops. Apple recorder
 rows retain their existing top-down order. Native checks (#1408) kept tcSimd at
-the Apple grabbers and both Windows player paths; Apple Clang already
-vectorizes the original player and recorder loops, so those sites keep their
-original loops. Their rows stay here for later measurements.
+the Apple grabbers and both Windows player paths. Apple recorder loops remain
+scalar. #1513 restores per-row SIMD in the Apple video
+players. `apple_video_bgra` and `apple_video_bgra_4k` measure their exact original
+scalar loop against the SIMD row call at 1920x1080 and 3840x2160, with 64 bytes
+of source padding and tightly packed output. The normal test also checks both
+Apple players with smaller/larger destination dimensions, odd widths, byte-level
+source padding, unaligned pointers, preserved alpha and retained margins.
 
 Windows source-reader tests also compare offset apertures against the original
 cropped extraction loop: 642x362 visible in 656x368 coded, X/Y offsets (7,3)
