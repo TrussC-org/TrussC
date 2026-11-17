@@ -976,7 +976,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
         const auto selected = fixedPipelineRevision
             ? selectPipeline({fixedPipelineRevision, uint64_t(fixedPipeline.role)}, [&]() -> const PipelineKey& { return fixedPipeline; }).raw
             : pipeline(fixedPipeline).raw;
-        if (selected.id) sg_apply_pipeline(selected);
+        if (selected.id) {
+            sg_apply_pipeline(selected);
+            applyDrawStencilRef(stencilDescKey);
+        }
     }
     inPass = true;
     passStartedThisFrame = true;
@@ -3178,7 +3181,7 @@ PipelineCacheKey canonicalPipeline(const PipelineKey& request, const sg_pipeline
     for (const auto& face : {d.stencil.front, d.stencil.back}) {
         add(face.compare); add(face.fail_op); add(face.depth_fail_op); add(face.pass_op);
     }
-    add(d.stencil.read_mask); add(d.stencil.write_mask); add(d.stencil.ref); add(d.color_count);
+    add(d.stencil.read_mask); add(d.stencil.write_mask); add(d.color_count);
     for (const auto& color : d.colors) {
         add(color.pixel_format); add(color.write_mask); add(color.blend.enabled);
         add(color.blend.src_factor_rgb); add(color.blend.dst_factor_rgb); add(color.blend.op_rgb);
@@ -3325,6 +3328,11 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     // Clear recipes own their raster state and must ignore the user descriptor.
     if (stencilDescKey && request.role != PipelineRole::StencilClear && request.role != PipelineRole::Clear)
         applyStencilDesc(desc, stencilDescKey);
+    // All cached stencil recipes use a dynamic reference, including clear.
+    if (desc.stencil.enabled) {
+        desc.stencil.ref = 0;
+        desc.stencil._tc_dynamic_ref = true;
+    }
     // Normalize defaults before field-wise encoding (never hash padded structs).
     const auto normalized = sg_query_pipeline_defaults(&desc);
     const auto key = canonicalPipeline(request, normalized);

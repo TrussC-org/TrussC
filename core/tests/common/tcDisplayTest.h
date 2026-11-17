@@ -40,6 +40,11 @@ int runDisplayTest(const tc::WindowSettings& settings, int& failures,
         if (failures) tc::internal::appExitCode() = 1;
         std::fflush(stdout);
         std::fflush(stderr);
+#if defined(__EMSCRIPTEN__)
+        EM_ASM({
+            window.tcCoreTestVerdict = $0 ? 'FAIL core display test' : 'PASS core display test';
+        }, tc::internal::appExitCode());
+#endif
     };
     return tc::runApp<TestApp>(settings, runtime);
 }

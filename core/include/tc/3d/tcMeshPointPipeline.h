@@ -33,6 +33,7 @@ namespace internal {
 // bindings + uniforms + instance count), replayed later so it composites with
 // sokol_gl 2D and the PBR meshes in submission order. Mirrors PbrDrawCommand.
 struct PointDrawCommand {
+    uint32_t                  stencilDescKey = 0;
     sg_pipeline               pip;
     std::shared_ptr<PipelineGeneration> generation;
     sg_bindings               bind;
@@ -48,6 +49,7 @@ struct DeferredPointDraw { int layerId; PointDrawCommand cmd; };
 // Submit a packaged point draw to the GPU. Used from both flush sites.
 inline void executePointDraw(const PointDrawCommand& c) {
     sg_apply_pipeline(c.pip);
+    applyDrawStencilRef(c.stencilDescKey);
     sg_apply_bindings(&c.bind);
     sg_range vr{ &c.vsp, sizeof(c.vsp) };
     sg_apply_uniforms(UB_tc_pointcloud_vs_params, &vr);
@@ -94,6 +96,7 @@ public:
 
         auto& wctx = internal::currentWindowContext();
         PointDrawCommand cmd{};
+        cmd.stencilDescKey = currentTarget().stencilDescKey;
         cmd.vsp = makeParams();
         // No shader for this style (warned once in ensureInit()): skip.
         if (!(getPointStyle() == PointStyle::Pixel ? shaderPrimReady_ : shaderReady_)) return;

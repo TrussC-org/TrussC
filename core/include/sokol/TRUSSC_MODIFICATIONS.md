@@ -1441,3 +1441,36 @@ the SGL failure log preserves the single exhaustion Error.
 The framework retains equal sg/sgl pool capacities and the public default 1024;
 there is no eviction or upstream issue. Tests: `sglPoolLimits`, `sglVertexLayout`,
 and the unchanged display suite / renderRegression pixel comparison.
+
+## Per-draw stencil references (#1512, part 2b)
+
+[TrussC fork] `sgl_tc_stencil_ref(uint8_t)` supplies CPU recording state per
+context. Draw commands snapshot the enabled flag and reference from the lazy
+parent descriptor/current override; changed references prevent merging. Replay
+tracks references locally and reapplies after pipeline switches, including the
+first command of every replay. Only `_tc_dynamic_ref` pipelines consume the
+override. Opted-out sgl pipelines retain their baked references even after
+framework loads and stack pops. Lazy primitive children remain unchanged.
+
+[TrussC fork] `sg_stencil_state._tc_dynamic_ref` is an internal descriptor opt-in
+for TrussC's cached pipelines: debug builds assert at the common draw submission
+that a reference was explicitly applied since the last pipeline application.
+Direct sokol users and fixed Fbo round-trip pipelines keep their baked contract.
+`sg_apply_stencil_ref` acknowledges equal values for this check but avoids backend
+dispatch; `sg_frame_stats.num_set_stencil_ref` counts actual dynamic changes.
+Non-stencil calls return before this bookkeeping. TrussC's pipeline keys and
+all selection shortcuts exclude the value; cached pipelines use reference zero.
+Deferred Shader/glyph/PBR/point records retain the semantic value. Stencil clear
+also shares a zero-ref pipeline and applies its value explicitly. The eight
+fixed FboStencil writes/reads keep intentional baked refs (one bit / zero).
+The LUT addon, Linux NV12 draw, and shared ImGui pipeline adapter apply the current
+target's reference immediately after selecting their pipeline.
+
+Tests: `sglStencilRef` checks splitting, capture, raw/replay/pass ordering,
+redundant changes, direct caller compatibility and the omission assertion.
+Mixed framework/user recording and replay in both orders preserve dynamic 17
+and baked 61 through pipeline loads and pops.
+`stencilDesc --gpu-check` adds 255-mask sgl/Shader readbacks and constant pipeline
+counts; the existing path matrix covers all ordinary non-zero stencil draws.
+That matrix includes LUT color grading, synthetic NV12 textures on Linux, and
+independent ImGui contexts, with distinct nonzero refs for each submission path.

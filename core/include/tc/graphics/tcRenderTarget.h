@@ -7,6 +7,7 @@
 // Included from TrussC.h after BlendMode, CameraContext and the sokol headers.
 // =============================================================================
 #include "impl/tcImportError.h"
+#include "tc/gpu/tcStencilRef.h"
 #include <unordered_map>
 #include <array>
 #include <cstdint>
@@ -245,6 +246,10 @@ enum class PipelineFamily { Immediate, Raw };
 enum class PipelineRole { Fill, Premult, Coverage, Clear, Geometry3D,
     Pbr, PointSplat, PointPixel, Shader, Shadow, Mip, Blit, Ibl, ImGui, StencilClear,
     GlyphBatch };
+// Reference belongs to draw state; retain a bit for enabled value-only state.
+constexpr uint32_t pipelineStencilKey(uint32_t key) {
+    return key ? (key & ~0xFFu) | (1u << 21) : 0;
+}
 struct ImmediateSelection {
     PipelineRole role = PipelineRole::Fill;
     BlendMode blend = BlendMode::Alpha;
@@ -256,7 +261,7 @@ struct ImmediateSelection {
     uint32_t stencilDescKey = 0;
     bool operator==(const ImmediateSelection& other) const {
         return role == other.role && blend == other.blend && depth == other.depth &&
-            customBlendId == other.customBlendId && stencilDescKey == other.stencilDescKey;
+            customBlendId == other.customBlendId && pipelineStencilKey(stencilDescKey) == pipelineStencilKey(other.stencilDescKey);
     }
 };
 inline ImmediateSelection fillSelection(BlendMode blend, bool depth = false, uint32_t customId = blendDescId(BlendDesc{})) {
@@ -277,7 +282,7 @@ struct PipelineKey {
 // the entire encoding even on a hash collision.
 struct PipelineCacheKey {
     // Exactly the fields encoded by canonicalPipeline; no allocation on lookup.
-    static constexpr size_t fieldCount = 35 + 3 * SG_MAX_VERTEXBUFFER_BINDSLOTS +
+    static constexpr size_t fieldCount = 34 + 3 * SG_MAX_VERTEXBUFFER_BINDSLOTS +
         3 * SG_MAX_VERTEX_ATTRIBUTES + 9 * SG_MAX_COLOR_ATTACHMENTS;
     std::array<uint32_t, fieldCount> fields{};
     bool operator==(const PipelineCacheKey& other) const { return fields == other.fields; }
@@ -301,7 +306,7 @@ struct PipelineSelectionId {
     static PipelineSelectionId immediate(ImmediateSelection selection, uint32_t customBlendId = 0) {
         return {0, uint64_t(selection.role) | (uint64_t(selection.blend) << 8) |
             (uint64_t(selection.depth) << 16) | (uint64_t(selection.blend == BlendMode::Custom ? selection.customBlendId : customBlendId) << 32),
-            0, selection.stencilDescKey};
+            0, pipelineStencilKey(selection.stencilDescKey)};
     }
 };
 struct PipelineSelectionHash {
@@ -393,7 +398,8 @@ inline void applyStencilDesc(sg_pipeline_desc& pipeline, uint32_t key) {
     stencil.front.fail_op = stencil.front.depth_fail_op = SG_STENCILOP_KEEP;
     stencil.front.pass_op = key & (1u << 11) ? SG_STENCILOP_REPLACE : SG_STENCILOP_KEEP;
     stencil.back = stencil.front;
-    stencil.ref = uint8_t(key);
+    stencil.ref = 0;
+    stencil._tc_dynamic_ref = true;
     stencil.read_mask = uint8_t((key >> 12) ^ 0xFFu);
     stencil.write_mask = key & (1u << 11) ? stencil.read_mask : 0;
     if (key & (1u << 20)) pipeline.colors[0].write_mask = SG_COLORMASK_NONE;
@@ -528,7 +534,7 @@ struct RenderTarget {
         auto& bundle = resources();
         if (!sg_isvalid()) return {};
         id.attachments = pipelineSignature();
-        id.stencilDescKey = stencilDescKey;
+        id.stencilDescKey = pipelineStencilKey(stencilDescKey);
         if (bundle.selectionCache) {
             auto found = bundle.selectionCache->find(id);
             if (found != bundle.selectionCache->end())
@@ -587,13 +593,13 @@ public:
         auto& bundle = target.resources();
         if (!sg_isvalid()) return {};
         if (lastOwner_ == target.ownerId && lastGeneration_ == bundle.generation &&
-            lastSignature_ == target.pipelineSignature() && lastStencilDescKey_ == target.stencilDescKey)
+            lastSignature_ == target.pipelineSignature() && lastStencilDescKey_ == pipelineStencilKey(target.stencilDescKey))
             return {last_.immediate, last_.raw, bundle.rawCache};
         auto selected = target.selectPipeline({revision_, uint64_t(key_.role)}, [&]() -> const PipelineKey& { return key_; });
         lastOwner_ = target.ownerId;
         lastGeneration_ = bundle.generation;
         lastSignature_ = target.pipelineSignature();
-        lastStencilDescKey_ = target.stencilDescKey;
+        lastStencilDescKey_ = pipelineStencilKey(target.stencilDescKey);
         last_ = selected;
         return {selected.immediate, selected.raw, bundle.rawCache};
     }

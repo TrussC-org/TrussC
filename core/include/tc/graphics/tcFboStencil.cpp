@@ -42,6 +42,7 @@ bool clearTargetStencil(uint8_t value) {
     const auto selected = target.pipeline(PipelineKey::raw(PipelineRole::StencilClear, desc));
     if (!selected.raw.id) return false;
     sg_apply_pipeline(selected.raw);
+    sg_apply_stencil_ref(value);
     sg_apply_viewport(0, 0, target.width, target.height, true);
     sg_apply_scissor_rect(0, 0, target.width, target.height, true);
     // The fullscreen triangle has no bindings; applying empty ones fails validation.

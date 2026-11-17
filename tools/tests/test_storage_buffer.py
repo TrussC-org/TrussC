@@ -51,6 +51,7 @@ enum class PrimitiveType { Lines, LineStrip, Triangles };
 namespace internal {
 struct ShaderStreamState { sg_buffer vertices{}, indices{}; };
 struct DeferredShaderDraw {
+    uint32_t stencilDescKey = 0;
     std::shared_ptr<ShaderStreamState> stream;
     sg_pipeline pipeline{};
     uint64_t pipelineGeneration = 0;
@@ -61,6 +62,7 @@ struct DeferredShaderDraw {
     int layerId = 0;
 };
 struct Target {
+    uint32_t stencilDescKey = 0;
     bool isFbo = false;
     int sglLayerNext = 1;
     std::vector<DeferredShaderDraw> deferredShaderDraws;
@@ -72,6 +74,7 @@ WindowContext& currentWindowContext() { return context; }
 Target& currentTarget() { return target; }
 bool ensureCurrentPass() { return true; }
 void applyTargetDrawingState() {}
+void applyDrawStencilRef(uint32_t key) { if (key) sg_apply_stencil_ref(uint8_t(key)); }
 void reportImportError(const char*, const char*) { std::abort(); }
 bool appendTargetRecording(Target&, std::vector<DeferredShaderDraw>& list, DeferredShaderDraw draw) {
     list.push_back(std::move(draw)); return true;
