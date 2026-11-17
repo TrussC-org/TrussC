@@ -52,6 +52,7 @@ struct PbrDrawCommand {
     tc_pbr_fs_params_t fsp;
     int                indexCount;
     int                vertexCount;
+    uint32_t           stencilDescKey = 0;
 };
 
 // Which registered lights get the PBR shader's single projector slot and
@@ -410,7 +411,7 @@ public:
         // Defer on the active target and advance its layer so later 2D
         // composites on top. Both pass types keep the same submission order.
         PbrDrawCommand cmd{ pip, selection.generation, shadowGeneration, bind, vsp, fsp,
-                            mesh.getGpuIndexCount(), mesh.getGpuVertexCount() };
+                            mesh.getGpuIndexCount(), mesh.getGpuVertexCount(), currentTarget().stencilDescKey };
         if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredPbrDraws,
                 DeferredPbrDraw{wctx.currentTarget->sglLayerNext, cmd})) return;
         wctx.currentTarget->advanceLayer();
@@ -420,6 +421,7 @@ public:
     // replayed from RenderTarget::flushLayers() for the swapchain.
     void executePbrDraw(const PbrDrawCommand& c) {
         sg_apply_pipeline(c.pip);
+        applyDrawStencilRef(c.stencilDescKey);
         sg_apply_bindings(&c.bind);
         sg_range vr{ &c.vsp, sizeof(c.vsp) };
         sg_apply_uniforms(UB_tc_pbr_vs_params, &vr);
@@ -704,6 +706,7 @@ public:
         const auto selected = shadowRecipe_.select(internal::currentTarget());
         if (!selected.raw.id) { sh.scope.reset(); discard(); return; }
         sg_apply_pipeline(selected.raw);
+        applyDrawStencilRef(currentTarget().stencilDescKey);
 
         sh.inPass = true;
     }

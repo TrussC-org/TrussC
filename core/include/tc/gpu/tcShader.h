@@ -404,6 +404,7 @@ public:
             const auto selection = vertexPipelineRecipe_.select(internal::currentTarget());
             if (selection.raw.id) {
                 internal::DeferredShaderDraw draw;
+                draw.stencilDescKey = internal::currentTarget().stencilDescKey;
                 draw.pipeline = selection.raw;
                 draw.pipelineGeneration = selection.generation;
                 draw.vertexCount = vertexCount;
@@ -452,6 +453,7 @@ public:
             indexBuffer = stream_->indices;
         }
         internal::DeferredShaderDraw draw;
+        draw.stencilDescKey = internal::currentTarget().stencilDescKey;
         draw.stream = stream_;
         const auto selection = selectPipelineForCurrentTarget_();
         draw.pipeline = selection.raw;
@@ -741,6 +743,7 @@ public:
         setupBindings(bind);
         if (!validateStorageBindings(bind)) return;
         sg_apply_pipeline(selected.raw);
+        internal::applyDrawStencilRef(internal::currentTarget().stencilDescKey);
         sg_apply_bindings(&bind);
 
         // Apply uniform params

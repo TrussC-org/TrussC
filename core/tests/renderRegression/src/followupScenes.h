@@ -47,6 +47,8 @@ void drawDepthStencil(float w, float h) {
             mask ? SG_STENCILOP_REPLACE : SG_STENCILOP_KEEP;
         if (mask) key.desc.colors[0].write_mask = SG_COLORMASK_NONE;
         sgl_load_pipeline(internal::currentTarget().pipeline(key).immediate);
+        // Cached TrussC pipelines use zero; this raw fixture supplies its draw ref.
+        sgl_tc_stencil_ref(1);
         sgl_c4f(color.r, color.g, color.b, 1);
         sgl_begin_quads();
         sgl_v3f(2*x/w-1, 1-2*y/h, z);

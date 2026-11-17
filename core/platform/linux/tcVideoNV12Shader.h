@@ -33,6 +33,7 @@ public:
         const auto selected = selectPipelineForCurrentTarget_();
         if (!selected.raw.id) return;
         sg_apply_pipeline(selected.raw);
+        internal::applyDrawStencilRef(internal::currentTarget().stencilDescKey);
         tc_video_nv12_vs_params_t params = {};
         const auto& target = internal::currentTarget();
         auto mvp = target.camera.currentProjectionMatrix * target.camera.currentViewMatrix * target.currentMatrix;
