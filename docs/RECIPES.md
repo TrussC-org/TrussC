@@ -38,3 +38,20 @@ int main() {
     return runHeadlessApp<tcApp>(settings);
 }
 ```
+
+## Keep Linux video playback lag small
+
+Linux `VideoPlayer` shows the newest available picture for the playback time, skipping older pictures. `setResyncThreshold()` controls when playback tries to catch up; its default of 0.5 seconds is not a maximum lag.
+
+When decoding cannot keep up, lag is bounded by the keyframe interval and by how far decoding falls behind; under heavy load it can reach a few times the interval. Encoding with shorter keyframe intervals keeps lag smaller:
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+When recording with `VideoWriter`, set `VideoRecordSettings::keyframeInterval` in `tcApp::setup()` before passing the settings to `open()` (in frames; `30` is one second at 30 fps):
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```

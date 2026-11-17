@@ -5111,7 +5111,7 @@ std::string VideoPlayerBase::getHwAccelName() const  // Return the reported deco
 float VideoPlayerBase::getPan() const  // Returns the stored stereo pan.
 unsigned char * VideoPlayerBase::getPixels() [+1]  // Return a pointer to the player's RGBA pixel buffer.
 float VideoPlayerBase::getPosition() const  // Return the normalized playback position.
-float VideoPlayerBase::getResyncThreshold() const  // Returns the hard resynchronization threshold.
+float VideoPlayerBase::getResyncThreshold() const  // Returns the playback catch-up threshold in seconds.
 float VideoPlayerBase::getSpeed() const  // Returns the stored playback speed.
 Texture & VideoPlayerBase::getTexture() [+1]  // Return the player's video texture.
 int VideoPlayerBase::getTotalFrames() const  // Return the total frame count.
@@ -5150,7 +5150,7 @@ void VideoPlayerBase::setPaused(bool paused)  // Pauses or resumes playback.
 void VideoPlayerBase::setPausedImpl(bool paused)  // Provide backend pause control.
 void VideoPlayerBase::setPosition(float pct)  // Seek to a normalized playback position.
 void VideoPlayerBase::setPositionImpl(float pct)  // Provide backend seeking to a normalized position.
-void VideoPlayerBase::setResyncThreshold(float seconds)  // Sets the threshold for hard playback resynchronization.
+void VideoPlayerBase::setResyncThreshold(float seconds)  // Sets the Linux playback lag threshold for trying to catch up (default 0.5 seconds), not a maximum lag; keyframe spacing and decoding speed determine the lag. HapPlayer uses it for hard audio resynchronization.
 void VideoPlayerBase::setSpeed(float speed)  // Sets the requested playback speed.
 void VideoPlayerBase::setSpeedImpl(float speed)  // Apply playback speed to the playback backend.
 void VideoPlayerBase::setVolume(float vol)  // Sets the audio volume.

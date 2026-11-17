@@ -963,6 +963,15 @@ public:
         player.done_ = !player.hasError() && player.isFinishedPlatform();
     }
     static int decodeThreadsForTests(const VideoPlayer& player);
+    struct PlaybackSnapshot {
+        double presentedPts, decodedPts, seekTarget, clockPts;
+        uint64_t seeks;
+        size_t queued;
+        bool presented, finished, seekPending;
+        double startTimeShift;
+    };
+    static PlaybackSnapshot stepPlaybackForTests(VideoPlayer& player, double clock, int decodeSteps,
+                                                 bool preparePlayback = false);
     static void stopAudioForTests(VideoPlayer& player);
     // Synthetic planes exercise VideoPlayer::draw -> drawNV12Platform without a
     // decoder/device. The supplied shader is borrowed only for this draw.
