@@ -436,6 +436,7 @@ inline void loadTemporaryPipeline(sgl_pipeline pipeline) {
     assert(it == pipelineOwnerCtx().end() || it->second == currentTarget().resources().context.id);
 #endif
     sgl_load_pipeline(pipeline);
+    sgl_tc_stencil_ref(uint8_t(currentTarget().stencilDescKey));
 }
 inline void loadPipeline(sgl_pipeline pipeline) {
     const auto& selections = currentTarget().resources().selections;

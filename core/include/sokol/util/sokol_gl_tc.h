@@ -925,6 +925,9 @@ SOKOL_GL_API_DECL void sgl_layer(int layer_id);
 /* pipeline stack functions */
 SOKOL_GL_API_DECL void sgl_load_default_pipeline(void);
 SOKOL_GL_API_DECL void sgl_load_pipeline(sgl_pipeline pip);
+/* [TrussC fork] Per-context recording state for _tc_dynamic_ref pipelines;
+   opted-out pipelines always keep their own immutable refs, including on pop. */
+SOKOL_GL_API_DECL void sgl_tc_stencil_ref(uint8_t ref);
 SOKOL_GL_API_DECL void sgl_push_pipeline(void);
 SOKOL_GL_API_DECL void sgl_pop_pipeline(void);
 
@@ -2524,6 +2527,10 @@ typedef enum {
 
 typedef struct {
     sg_pipeline pip;
+    /* [TrussC fork] Snapshot the dynamic reference and enabled state. */
+    uint8_t stencil_ref;
+    bool stencil_enabled;
+    bool stencil_ref_override; /* [TrussC fork] Direct callers keep baked refs. */
     sg_view view;
     sg_sampler smp;
     int base_vertex;
@@ -2619,6 +2626,12 @@ typedef struct {
     sg_view cur_view;
     sg_sampler cur_smp;
     bool texturing_enabled;
+    /* [TrussC fork] CPU recording state, independent of the replay cursor. */
+    bool stencil_ref_override;
+    uint8_t stencil_ref;
+    bool stencil_enabled; /* [TrussC fork] Cached on pipeline stack changes. */
+    uint8_t pipeline_stencil_ref; /* [TrussC fork] Direct sgl baked default. */
+    bool pipeline_stencil_dynamic; /* [TrussC fork] Only opted-in pipelines use overrides. */
     bool matrix_dirty;      /* reset in sgl_end(), set in any of the matrix stack functions */
 
     /* sokol-gfx resources */
@@ -3915,6 +3928,8 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         uint32_t cur_tex_id = SG_INVALID_ID;
         uint32_t cur_smp_id = SG_INVALID_ID;
         int cur_uniform_index = -1;
+        /* [TrussC fork] Local to this replay: raw draws/passes may intervene. */
+        int cur_stencil_ref = -1;
 
         /* [TrussC fork] Unchanged layer draws reuse their upload. A rewind or
            newly recorded vertices require a separate write-transient buffer. */
@@ -3972,10 +3987,18 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                         if (args->pip.id != cur_pip_id) {
                             sg_apply_pipeline(args->pip);
                             cur_pip_id = args->pip.id;
+                            /* [TrussC fork] Every apply_pipeline resets the ref. */
+                            cur_stencil_ref = args->stencil_ref_override ? -1 : args->stencil_ref;
                             // when pipeline changes, also need to re-apply uniforms and bindings
                             cur_tex_id = SG_INVALID_ID;
                             cur_smp_id = SG_INVALID_ID;
                             cur_uniform_index = -1;
+                        }
+                        /* [TrussC fork] No extra calls on the non-stencil path.
+                           sg_apply_stencil_ref also skips equal baked values. */
+                        if (args->stencil_enabled && cur_stencil_ref != args->stencil_ref) {
+                            sg_apply_stencil_ref(args->stencil_ref);
+                            cur_stencil_ref = args->stencil_ref;
                         }
                         if ((cur_tex_id != args->view.id) || (cur_smp_id != args->smp.id)) {
                             ctx->bind.views[0] = args->view;
@@ -4176,6 +4199,23 @@ SOKOL_API_IMPL void sgl_destroy_pipeline(sgl_pipeline pip_id) {
     _sgl_destroy_pipeline(pip_id);
 }
 
+/* [TrussC fork] Capture reference changes without resolving a lazy child. */
+SOKOL_API_IMPL void sgl_tc_stencil_ref(uint8_t ref) {
+    _sgl_context_t* ctx = _sgl.cur_ctx;
+    if (ctx) {
+        ctx->stencil_ref_override = true;
+        ctx->stencil_ref = ref;
+    }
+}
+
+/* [TrussC fork] Pipeline metadata changes at load/pop, not on each draw. */
+static void _sgl_update_stencil_state(_sgl_context_t* ctx) {
+    const _sgl_pipeline_t* pip = _sgl_lookup_pipeline(ctx->pip_stack[ctx->pip_tos].id);
+    ctx->stencil_enabled = pip && pip->desc.stencil.enabled;
+    ctx->pipeline_stencil_dynamic = pip && pip->desc.stencil._tc_dynamic_ref;
+    if (ctx->stencil_enabled) ctx->pipeline_stencil_ref = pip->desc.stencil.ref;
+}
+
 SOKOL_API_IMPL void sgl_load_pipeline(sgl_pipeline pip_id) {
     SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
     _sgl_context_t* ctx = _sgl.cur_ctx;
@@ -4184,6 +4224,7 @@ SOKOL_API_IMPL void sgl_load_pipeline(sgl_pipeline pip_id) {
     }
     SOKOL_ASSERT((ctx->pip_tos >= 0) && (ctx->pip_tos < _SGL_MAX_STACK_DEPTH));
     ctx->pip_stack[ctx->pip_tos] = pip_id;
+    _sgl_update_stencil_state(ctx); /* [TrussC fork] */
 }
 
 SOKOL_API_IMPL void sgl_load_default_pipeline(void) {
@@ -4194,6 +4235,7 @@ SOKOL_API_IMPL void sgl_load_default_pipeline(void) {
     }
     SOKOL_ASSERT((ctx->pip_tos >= 0) && (ctx->pip_tos < _SGL_MAX_STACK_DEPTH));
     ctx->pip_stack[ctx->pip_tos] = ctx->def_pip;
+    _sgl_update_stencil_state(ctx); /* [TrussC fork] */
 }
 
 SOKOL_API_IMPL void sgl_push_pipeline(void) {
@@ -4219,6 +4261,7 @@ SOKOL_API_IMPL void sgl_pop_pipeline(void) {
     }
     if (ctx->pip_tos > 0) {
         ctx->pip_tos--;
+        _sgl_update_stencil_state(ctx); /* [TrussC fork] */
     } else {
         ctx->error.stack_underflow = true;
         ctx->error.any = true;
@@ -4238,6 +4281,7 @@ SOKOL_API_IMPL void sgl_defaults(void) {
     ctx->texturing_enabled = false;
     ctx->cur_view = _sgl.def_view;
     ctx->cur_smp = _sgl.def_smp;
+    ctx->stencil_ref_override = false; /* [TrussC fork] Reset recording state. */
     sgl_load_default_pipeline();
     _sgl_identity(_sgl_matrix_texture(ctx));
     _sgl_identity(_sgl_matrix_modelview(ctx));
@@ -4421,6 +4465,11 @@ SOKOL_API_IMPL void sgl_end(void) {
         return;
     }
 
+    /* [TrussC fork] Disabled draws need no reference lookup or comparison. */
+    const bool stencil_enabled = ctx->stencil_enabled;
+    const bool stencil_ref_override = ctx->stencil_ref_override && ctx->pipeline_stencil_dynamic;
+    const uint8_t stencil_ref = stencil_enabled
+        ? (stencil_ref_override ? ctx->stencil_ref : ctx->pipeline_stencil_ref) : 0;
     bool matrix_dirty = ctx->matrix_dirty;
     if (matrix_dirty) {
         ctx->matrix_dirty = false;
@@ -4449,7 +4498,9 @@ SOKOL_API_IMPL void sgl_end(void) {
             !matrix_dirty &&
             (cur_cmd->args.draw.view.id == view.id) &&
             (cur_cmd->args.draw.smp.id == smp.id) &&
-            (cur_cmd->args.draw.pip.id == pip.id))
+            (cur_cmd->args.draw.pip.id == pip.id) &&
+            /* [TrussC fork] Values share pipelines, but never merge draws. */
+            (!stencil_enabled || cur_cmd->args.draw.stencil_ref == stencil_ref))
         {
             merge_cmd = true;
         }
@@ -4464,6 +4515,10 @@ SOKOL_API_IMPL void sgl_end(void) {
             SOKOL_ASSERT(ctx->uniforms.next > 0);
             cmd->cmd = SGL_COMMAND_DRAW;
             cmd->layer_id = ctx->layer_id;
+            /* [TrussC fork] Freeze the value at recording, not replay. */
+            cmd->args.draw.stencil_enabled = stencil_enabled;
+            cmd->args.draw.stencil_ref_override = stencil_ref_override; /* [TrussC fork] */
+            cmd->args.draw.stencil_ref = stencil_ref;
             cmd->args.draw.view = view;
             cmd->args.draw.smp = smp;
             cmd->args.draw.pip = pip; // [TrussC] Reuse the resolved child (no retry in this draw).

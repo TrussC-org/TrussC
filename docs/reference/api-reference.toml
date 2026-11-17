@@ -41235,6 +41235,71 @@ details.ko = '''
 '''
 related = ["VideoPlayer::getGammaCorrection"]
 
+["VideoPlayer::setDecodeThreads"]
+category = "video"
+keywords = ["decode", "threads", "ffmpeg", "memory", "linux"]
+description.en = "Sets the decoder thread preference for the next load."
+description.ja = "次の読み込みで使うデコードスレッド数を設定します。"
+description.ko = "다음 로드에 사용할 디코더 스레드 수를 설정합니다."
+details.en = '''
+- Call before `load()`. The default `0` requests FFmpeg's automatic choice and preserves existing behavior; negative values are clamped to `0`.
+- Currently only affects the Linux backend; other platforms ignore it. The snippet sets the preference before loading.
+- One value applies to hardware and software decoding, including software fallback. Changes after loading take effect at the next `load()` and do not reconfigure the loaded decoder, even on fallback.
+- In software decoding measurements on a 20-thread i5-13500 (auto opened 16 threads), choosing `4` instead of `0` cut peak memory to about a third and decode speed by about 40% across 1080p/4K H.264 and 8K H.265. Automatic (`0`) was fastest; choose based on memory and playback needs.
+'''
+details.ja = '''
+- `load()` の前に呼びます。既定値の `0` は FFmpeg の自動選択で、従来の動作を維持します。負の値は `0` に丸められます。
+- この設定を反映するのは Linux バックエンドだけです。他のプラットフォームでは無視されます。スニペットのように読み込み前に設定します。
+- ハードウェアとソフトウェアのデコード、およびソフトウェアへのフォールバックで同じ値を使います。読み込み後の変更は次の `load()` で適用され、フォールバック時もロード済みのデコーダは再設定されません。
+- 20 スレッドの i5-13500（自動選択では 16 スレッド）でのソフトウェアデコード測定では、1080p/4K H.264 と 8K H.265 で `0` から `4` にするとピークメモリが約 3 分の 1 になり、デコード速度は約 40% 低下しました。自動選択（`0`）が最速でした。メモリと再生の要件に合わせて選びます。
+'''
+details.ko = '''
+- `load()` 전에 호출합니다. 기본값 `0`은 FFmpeg의 자동 선택으로 기존 동작을 유지합니다. 음수는 `0`으로 조정합니다.
+- 현재 Linux 백엔드에만 적용하며 다른 플랫폼에서는 무시합니다. 스니펫처럼 로드 전에 설정합니다.
+- 하드웨어 및 소프트웨어 디코딩과 소프트웨어 폴백에 같은 값을 사용합니다. 로드 후 변경은 다음 `load()`에 적용하며 폴백 시에도 로드된 디코더를 다시 설정하지 않습니다.
+- 20스레드 i5-13500(자동 선택 시 16스레드)에서 소프트웨어 디코딩을 측정한 결과, 1080p/4K H.264 및 8K H.265에서 `0` 대신 `4`를 선택하면 최대 메모리는 약 3분의 1로 줄고 디코딩 속도는 약 40% 감소했습니다. 자동 선택(`0`)이 가장 빨랐습니다. 메모리와 재생 요구에 맞게 선택합니다.
+'''
+related = ["VideoPlayer::getDecodeThreads", "VideoPlayer::setUseHwAccel"]
+snippet = '''
+class tcApp : public App {
+    VideoPlayer player;
+    void setup() override {
+        player.setDecodeThreads(4);
+        player.load("movie.mp4");
+    }
+};
+'''
+
+["VideoPlayer::getDecodeThreads"]
+category = "video"
+keywords = ["decode", "threads", "ffmpeg", "preference"]
+description.en = "Returns the stored decoder thread preference."
+description.ja = "保存されているデコードスレッド数の設定を返します。"
+description.ko = "저장된 디코더 스레드 수 설정을 반환합니다."
+details.en = '''
+- Returns the stored preference, default `0` (FFmpeg automatic), rather than the active decoder's thread count. Negative input to the setter is stored as `0`.
+- Currently only affects the Linux backend. Set the preference before loading as in the snippet; changes after loading apply at the next `load()`. See `setDecodeThreads()` for the measured memory/speed trade-off.
+'''
+details.ja = '''
+- 動作中のデコーダのスレッド数ではなく、保存された設定を返します。既定値は `0`（FFmpeg の自動選択）で、設定時の負の値は `0` になります。
+- この設定を反映するのは Linux バックエンドだけです。スニペットのように読み込み前に設定し、読み込み後の変更は次の `load()` で適用されます。測定されたメモリと速度の関係は `setDecodeThreads()` を参照してください。
+'''
+details.ko = '''
+- 활성 디코더의 스레드 수가 아닌 저장된 설정을 반환합니다. 기본값은 `0`(FFmpeg 자동 선택)이며 설정 시 음수는 `0`으로 저장합니다.
+- 현재 Linux 백엔드에만 적용합니다. 스니펫처럼 로드 전에 설정하며 로드 후 변경은 다음 `load()`에 적용합니다. 측정한 메모리와 속도의 관계는 `setDecodeThreads()`를 참조합니다.
+'''
+related = ["VideoPlayer::setDecodeThreads"]
+snippet = '''
+class tcApp : public App {
+    VideoPlayer player;
+    void setup() override {
+        player.setDecodeThreads(4);
+        player.load("movie.mp4");
+        logNotice("VideoPlayer") << player.getDecodeThreads();
+    }
+};
+'''
+
 ["VideoPlayer::setUseHwAccel"]
 category = "video"
 keywords = ["hardware", "gpu decode", "vaapi", "cuda", "acceleration"]

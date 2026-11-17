@@ -327,6 +327,7 @@ private:
         const auto selected = recipe.select(internal::currentTarget());
         if (!selected.raw.id) return;
         sg_apply_pipeline(selected.raw);
+        internal::applyDrawStencilRef(internal::currentTarget().stencilDescKey);
         sg_apply_bindings(&bindings);
         if (uniformSize > 0) {
             sg_range r = { uniformData, uniformSize };

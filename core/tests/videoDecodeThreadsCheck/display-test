@@ -1,0 +1,1 @@
+skip "Opt-in real GPU playback check; supply a clip manually (README.md)" {test}

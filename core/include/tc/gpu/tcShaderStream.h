@@ -13,6 +13,7 @@
 #include "../../sokol/sokol_gfx.h"
 #endif
 #include "tcGpuDestroyQueue.h"
+#include "tcStencilRef.h"
 #include "../app/tcExit.h"
 
 namespace trussc {
@@ -148,6 +149,7 @@ struct DeferredShaderDraw {
     int instanceCount = 1;
     int layerId = 0;                    // sokol_gl layer this draw follows
     std::shared_ptr<PipelineGeneration> pipelineGeneration;
+    uint32_t stencilDescKey = 0;        // captured at submission, never at flush
     sg_pipeline pipeline = {};          // resolved for the target at submission
     sg_bindings bindings = {};          // buffers + views/samplers snapshot
     std::vector<std::pair<int, std::vector<uint8_t>>> uniforms;  // slot -> block bytes
@@ -270,6 +272,7 @@ inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
     try {
         if (d.vertexCount > 0) {
             sg_apply_pipeline(d.pipeline);
+            applyDrawStencilRef(d.stencilDescKey);
             for (const auto& [slot, data] : d.uniforms) {
                 const sg_range range = {data.data(), data.size()};
                 sg_apply_uniforms(slot, &range);
@@ -290,6 +293,7 @@ inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
         }
         if (!d.uploadedIndexCount) return;
         sg_apply_pipeline(d.pipeline);
+        applyDrawStencilRef(d.stencilDescKey);
         for (const auto& [slot, data] : d.uniforms) {
             const sg_range range = {data.data(), data.size()};
             sg_apply_uniforms(slot, &range);

@@ -28,6 +28,7 @@ sg_pipeline appliedPipeline = {};
 void applyPipeline(sg_pipeline pipeline) {
     appliedPipeline = pipeline;
     sg_apply_pipeline(pipeline);
+    tc::internal::applyDrawStencilRef(tc::internal::currentTarget().stencilDescKey);
 }
 void applyViewport(int x, int y, int w, int h, bool originTopLeft) {
     sg_apply_viewport(x, y, w, h, originTopLeft && tc::internal::currentTarget().rectangleOriginTopLeft());

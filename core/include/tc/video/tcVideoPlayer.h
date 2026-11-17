@@ -114,6 +114,7 @@ public:
             prepared.loop_ = loop_;
             prepared.autoPoster_ = autoPoster_;
             prepared.audioStreaming_ = audioStreaming_;
+            prepared.decodeThreads_ = decodeThreads_;
             moveFrom(std::move(prepared));
             applyCachedStateToPlatform();
 #else
@@ -478,6 +479,20 @@ public:
         return useHwAccel_;
     }
 
+    /// Set decode threads for both hardware and software decoding.
+    /// Must be called **before** load(). Default: 0 (FFmpeg's automatic choice).
+    /// Changes after load() take effect at the next load(); fallback keeps the loaded value.
+    /// Negative values are clamped to 0.
+    /// Currently only affects the Linux backend.
+    void setDecodeThreads(int count) {
+        decodeThreads_ = count < 0 ? 0 : count;
+    }
+
+    /// Get the decode thread preference (not the active decoder's thread count).
+    int getDecodeThreads() const {
+        return decodeThreads_;
+    }
+
     // =========================================================================
     // Pixel access
     // =========================================================================
@@ -608,6 +623,7 @@ private:
 
     // HW decode preference (default on; Linux backend honors this)
     bool useHwAccel_ = true;
+    int decodeThreads_ = 0;
     bool audioStreaming_ = true;
     int rotationDeg_ = 0;
 
@@ -655,6 +671,7 @@ private:
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         audioStreaming_ = other.audioStreaming_;
+        decodeThreads_ = other.decodeThreads_;
         rotationDeg_ = other.rotationDeg_;
         other.rotationDeg_ = 0;
         platformHandle_  = other.platformHandle_;
@@ -945,6 +962,7 @@ public:
         player.dispatchPlaybackError();
         player.done_ = !player.hasError() && player.isFinishedPlatform();
     }
+    static int decodeThreadsForTests(const VideoPlayer& player);
     static void stopAudioForTests(VideoPlayer& player);
     // Synthetic planes exercise VideoPlayer::draw -> drawNV12Platform without a
     // decoder/device. The supplied shader is borrowed only for this draw.
