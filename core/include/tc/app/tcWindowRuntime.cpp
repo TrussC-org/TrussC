@@ -189,12 +189,13 @@ namespace {
 // the process or another Window which happened to receive the native callback.
 template<class T, class Snapshot>
 void notifyRequestListeners(const Snapshot& saved, T& aggregate, const char* name) {
-    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto enter) {
         T fresh;
         try {
-            AppCallbackScope subscriber(std::move(owner));
-            EntryStackGuard guard(AppEntry::Event, name);
-            callback(fresh);
+            enter([&] {
+                EntryStackGuard guard(AppEntry::Event, name);
+                callback(fresh);
+            });
         } catch (...) {
             fresh.cancel = true;
             reportTeardownFailure("request listener");
@@ -214,11 +215,12 @@ void dispatchConsoleEvent(ConsoleEventArgs& args) {
     EntryStackGuard guard(AppEntry::Event, "console");
     TeardownSteps steps;
     auto saved = FrameworkEventAccess::snapshot(runtime().events.console);
-    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto enter) {
         steps.run("Runtime console listener", [&] {
-            AppCallbackScope subscriber(std::move(owner));
-            EntryStackGuard listener(AppEntry::Event, "console");
-            callback(args);
+            enter([&] {
+                EntryStackGuard listener(AppEntry::Event, "console");
+                callback(args);
+            });
         });
     });
 }
@@ -231,11 +233,12 @@ void dispatchFilesOpened(std::vector<fs::path> files) {
     FilesOpenedEventArgs args{std::move(files)};
     auto saved = FrameworkEventAccess::snapshot(runtime().events.filesOpened);
     TeardownSteps steps;
-    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto enter) {
         steps.run("Runtime filesOpened listener", [&] {
-            AppCallbackScope subscriber(std::move(owner));
-            EntryStackGuard listener(AppEntry::Event, "filesOpened");
-            callback(args);
+            enter([&] {
+                EntryStackGuard listener(AppEntry::Event, "filesOpened");
+                callback(args);
+            });
         });
     });
 }
@@ -335,11 +338,12 @@ void dispatchDeviceLost(uint32_t reason) noexcept {
     TeardownSteps steps;
     steps.run("device loss notification", [&] {
         notifyProcessEvent(runtime().events.deviceLost, &CoreEvents::deviceLost, "deviceLost",
-            [&](const auto& saved) { FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+            [&](const auto& saved) { FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto enter) {
                 steps.run("device loss listener", [&] {
-                    AppCallbackScope subscriber(std::move(owner));
-                    EntryStackGuard listener(AppEntry::Event, "deviceLost");
-                    callback(args);
+                    enter([&] {
+                        EntryStackGuard listener(AppEntry::Event, "deviceLost");
+                        callback(args);
+                    });
                 });
             }); });
     });
@@ -356,11 +360,12 @@ void dispatchHotReloadUnload(const void* generation) noexcept {
     TeardownSteps steps;
     steps.run("hot reload notification", [&] {
         notifyProcessEvent(runtime().events.hotReloadUnload, &CoreEvents::hotReloadUnload, "hotReloadUnload",
-            [&](const auto& saved) { FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+            [&](const auto& saved) { FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto enter) {
                 steps.run("hot reload listener", [&] {
-                    AppCallbackScope subscriber(std::move(owner));
-                    EntryStackGuard listener(AppEntry::Event, "hotReloadUnload");
-                    callback();
+                    enter([&] {
+                        EntryStackGuard listener(AppEntry::Event, "hotReloadUnload");
+                        callback();
+                    });
                 });
             }); }, generation, true);
     });
@@ -697,6 +702,78 @@ AppCallbackScope::~AppCallbackScope() noexcept {
     sapp_tc_gl_restore({display_, context_, draw_, read_, drawWindow_, readWindow_});
     --runtime().entries;
 }
+EventDispatchContext captureEventDispatchContext() noexcept {
+    EventDispatchContext result;
+    if (!isMainThread()) return result;
+    result.mainThread = true;
+    result.selected = &currentWindowCtx();
+    result.original = currentWindowCtx();
+    auto owner = currentAppOwner();
+    if (owner && owner->context == result.original && runtime().entries != 0)
+        result.eligibleOwner = owner.get();
+    return result;
+}
+void repairEventContext(WindowContext* context) noexcept {
+    TeardownSteps steps;
+    steps.run("event callback context restoration", [&] { restoreWindowContext(context); });
+    currentWindowCtx() = context;
+}
+void unregisterAppListener(const std::shared_ptr<AppListenerCancellation>& record) noexcept {
+    std::shared_ptr<AppListenerCancellation> discarded;
+    if (auto owner = record ? record->owner.lock() : nullptr) {
+        std::lock_guard lock(owner->cancellationsMutex);
+        auto found = owner->listeners.find(record->id);
+        if (found != owner->listeners.end()) {
+            discarded = std::move(found->second);
+            owner->listeners.erase(found);
+        }
+    }
+}
+std::shared_ptr<AppListenerCancellation> registerAppListener(const std::shared_ptr<AppOwner>& owner,
+    std::shared_ptr<std::atomic<bool>> alive, bool exitEvent, std::function<void()> remove) {
+    auto record = std::make_shared<AppListenerCancellation>();
+    record->alive = std::move(alive);
+    record->exitEvent = exitEvent;
+    record->remove = std::move(remove);
+    std::lock_guard lock(owner->cancellationsMutex);
+    if (owner->retiring || owner->ended || owner->callbacksClosing || !owner->token->load()) {
+        record->alive->store(false, std::memory_order_release);
+    } else {
+        record->id = owner->nextListenerId++;
+        owner->listeners.emplace(record->id, record);
+        record->owner = owner;
+    }
+    return record;
+}
+void invalidateAppListeners(const std::shared_ptr<AppOwner>& owner, bool all) noexcept {
+    if (!owner) return;
+    // Empty/default std::map may allocate an iterator proxy on MSVC Debug.
+    // Mark every affected flag before removing anything that can reenter.
+    {
+        std::lock_guard lock(owner->cancellationsMutex);
+        if (all) owner->callbacksClosing.store(true, std::memory_order_release);
+        else owner->token->store(false, std::memory_order_release);
+        for (const auto& [id, record] : owner->listeners)
+            if (all || !record->exitEvent) record->alive->store(false, std::memory_order_release);
+    }
+    TeardownSteps steps;
+    for (;;) {
+        std::shared_ptr<AppListenerCancellation> record;
+        {
+            std::lock_guard lock(owner->cancellationsMutex);
+            auto found = owner->listeners.begin();
+            while (found != owner->listeners.end() && found->second->alive->load(std::memory_order_acquire)) ++found;
+            if (found == owner->listeners.end()) break;
+            record = std::move(found->second);
+            owner->listeners.erase(found);
+        }
+        steps.run("App event listener invalidation", record->remove);
+    }
+}
+void endCurrentAppRun() noexcept {
+    if (auto owner = currentAppOwner()) invalidateAppListeners(owner, false);
+    if (auto token = appRunToken()) token->store(false, std::memory_order_release);
+}
 const void* nextAppGeneration() {
     auto& next = runtime().nextGeneration;
     if (next == UINTPTR_MAX) throw std::overflow_error("App generations exhausted");
@@ -809,9 +886,10 @@ bool isAppExitEvent(const void* event) noexcept {
 }
 void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
     if (!owner || owner->retiring.exchange(true)) return;
+    owner->token->store(false, std::memory_order_release);
+    invalidateAppListeners(owner, true);
     runtime().attachments.erase(owner->app);
     std::erase_if(runtime().owners, [&](const auto& weak) { auto live = weak.lock(); return !live || live == owner; });
-    owner->token->store(false, std::memory_order_release);
     {
         std::lock_guard lock(owner->cancellationsMutex);
         owner->window = nullptr;
@@ -914,7 +992,7 @@ void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context) n
     auto owner = appOwner(*app);
     if (!owner || owner->ended) return;
     owner->ended = true;
-    owner->token->store(false, std::memory_order_release);
+    invalidateAppListeners(owner, false);
     {
         std::lock_guard lock(owner->cancellationsMutex);
         owner->window = nullptr;
@@ -929,7 +1007,7 @@ void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context) n
         FrameworkEventAccess::notifyShutdown(context.coreEvents->exit, steps);
     app->cleanupCalled_ = true;
     steps.run("App exit", [&] { deliverAppExit(*app); });
-    owner->callbacksClosing = true;
+    invalidateAppListeners(owner, true);
     steps.run("App audio detach", [&] { detachAppAudio(*app); });
     resetAppNodeReferences(*app);
     steps.run("App tree cleanup", [&] { app->cleanupTree(); });
@@ -1263,11 +1341,12 @@ void processQueues() {
 void processMaintenance() {
     TeardownSteps steps;
     auto listeners = FrameworkEventAccess::snapshot(runtime().maintenance);
-    FrameworkEventAccess::forEachOwned(listeners, [&](auto& callback, auto owner) {
+    FrameworkEventAccess::forEachOwned(listeners, [&](auto& callback, auto enter) {
         steps.run("Runtime maintenance listener", [&] {
-            AppCallbackScope subscriber(std::move(owner));
-            EntryStackGuard guard(AppEntry::Event, "maintenance");
-            callback();
+            enter([&] {
+                EntryStackGuard guard(AppEntry::Event, "maintenance");
+                callback();
+            });
         });
     });
     if (sg_isvalid()) sapp_tc_gl_ensure_context();
@@ -2218,12 +2297,14 @@ bool allowWindowClose(sapp_tc_window handle, void* user) noexcept {
                 std::count_if(runtime().windows.begin(), runtime().windows.end(),
                     [](const auto& w) { return w->isOpen() && !WindowRequestAccess::closeRequested(*w); }) == 1) {
             if (!dispatchExitRequested()) return;
+            WindowRequestAccess::acceptCodeQuit(*window);
             setExitReason("last-window-close");
             prepareRuntimeExit();
             if (headless::isActive()) headless::running = false;
             else sapp_quit();
             return; // Common ending owns every Window; native must not close W first.
         }
+        WindowRequestAccess::acceptCodeQuit(*window);
         allow = true;
     });
     return allow;

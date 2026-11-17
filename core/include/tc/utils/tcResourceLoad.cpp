@@ -485,7 +485,7 @@ void cancelResourceBackends() {
     }
 }
 void finishResourceLoadsAtExit() {
-    if (auto token = appRunToken()) token->store(false);
+    endCurrentAppRun();
     cancelResourceBackends();
     auto& owner = host();
 #ifndef __EMSCRIPTEN__

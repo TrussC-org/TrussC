@@ -383,7 +383,10 @@ public:
         w.appEventState_ = std::move(state);
     }
     static void cancelClose(Window& w) noexcept { w.closeRequested_ = false; }
-    static void acceptCodeQuit(Window& w) noexcept { w.closeRequested_ = true; }
+    static void acceptCodeQuit(Window& w) noexcept {
+        w.closeRequested_ = true;
+        if (w.app_) invalidateAppListeners(appOwner(*w.app_), false);
+    }
     static void applyPendingApp(Window& w) { w.applyPendingApp(); }
     static void endApp(Window& w) noexcept { w.endApp(); }
     static void endForShutdown(Window& w) noexcept { w.closingApp_ = true; w.closeRequested_ = true; w.endApp(); }
@@ -545,7 +548,9 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                 auto app = exiting ? exitingApp_.lock() : app_;
                 if (!app && exiting) app = app_;
                 if (app) {
-                    internal::AppCallbackScope owner(internal::appOwner(*app));
+                    auto owner = internal::appOwner(*app);
+                    if (!exiting && (owner->ended || owner->retiring || owner->callbacksClosing || !owner->token->load())) return;
+                    internal::AppCallbackScope scope(std::move(owner));
                     callback(*app, args...);
                 }
             }, EventPriority::App));
@@ -657,7 +662,7 @@ inline Window::~Window() {
 inline void Window::close() {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
     if (internal::codeCloseExitsRuntime(*this)) return;
-    closeRequested_ = true;
+    internal::WindowRequestAccess::acceptCodeQuit(*this);
     if (binding_.handle.id) sapp_tc_window_request_close(binding_.handle);
     // Surface-only hosts drain this request at the outer host boundary.
 }
@@ -665,7 +670,7 @@ inline void Window::teardown() noexcept {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || exitDelivered_) return;
     auto keepAlive = hostOwner_.lock();
     exitDelivered_ = true;
-    closeRequested_ = true;
+    internal::WindowRequestAccess::acceptCodeQuit(*this);
     internal::WindowLifecycleScope lifecycle(*this);
     internal::TeardownSteps steps;
     auto* previous = internal::currentWindowCtx();

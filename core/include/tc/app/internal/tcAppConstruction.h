@@ -20,6 +20,7 @@ class Window;
 namespace internal {
 class WindowRequestAccess;
 struct WindowContext;
+struct AppListenerCancellation;
 // One host-owned lifetime for construction, pending publication and attachment.
 struct AppOwner {
     std::shared_ptr<std::atomic<bool>> token = std::make_shared<std::atomic<bool>>(true);
@@ -34,6 +35,8 @@ struct AppOwner {
     std::mutex cancellationsMutex;
     std::map<uint64_t, std::function<void()>> cancellations;
     uint64_t nextCancellationId = 0;
+    std::map<uint64_t, std::shared_ptr<AppListenerCancellation>> listeners;
+    uint64_t nextListenerId = 0;
 };
 struct AppConstructionTicket {
     std::shared_ptr<std::atomic<bool>> runToken;
@@ -61,6 +64,29 @@ struct AppCancellation {
 // Events prepare the handle before publishing, then register after unlocking.
 [[nodiscard]] std::shared_ptr<AppCancellation> ownAppCancellation(
     std::function<void()>, std::shared_ptr<AppCancellation> registration = {});
+// Listener records share their single alive flag with snapshots and Main work.
+struct AppListenerCancellation {
+    std::weak_ptr<AppOwner> owner;
+    uint64_t id = 0;
+    std::shared_ptr<std::atomic<bool>> alive;
+    bool exitEvent = false;
+    std::function<void()> remove;
+};
+void unregisterAppListener(const std::shared_ptr<AppListenerCancellation>&) noexcept;
+std::shared_ptr<AppListenerCancellation> registerAppListener(const std::shared_ptr<AppOwner>&,
+    std::shared_ptr<std::atomic<bool>>, bool exitEvent, std::function<void()>);
+void invalidateAppListeners(const std::shared_ptr<AppOwner>&, bool all) noexcept;
+void endCurrentAppRun() noexcept;
+// Captured once per dispatch; worker/attribution-only scopes cannot take the
+// same-owner shortcut. The enclosing Runtime entry keeps the owner alive.
+struct EventDispatchContext {
+    const AppOwner* eligibleOwner = reinterpret_cast<const AppOwner*>(uintptr_t(1));
+    bool mainThread = false;
+    WindowContext** selected = nullptr;
+    WindowContext* original = nullptr;
+};
+EventDispatchContext captureEventDispatchContext() noexcept;
+void repairEventContext(WindowContext*) noexcept;
 // Restores nested ownership without changing the caller's rendering lease.
 class AppOwnerScope {
 public:

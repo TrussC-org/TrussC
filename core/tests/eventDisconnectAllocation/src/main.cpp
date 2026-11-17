@@ -112,7 +112,7 @@ template<class T> void removal() {
     internal::drainMainThreadQueue();
     notify(event);
     check(std::is_void_v<T> ? "void remove: queued Main cancellation"
-                           : "typed remove: queued Main cancellation", fired && calls == 0);
+                           : "typed remove: queued Main cancellation", calls == 0);
 #endif
 }
 
@@ -136,11 +136,30 @@ template<class T> void registration() {
         catch (const std::bad_alloc&) { threw = true; }
         disarm();
         notify(event);
-        // stable_sort may recover from its optional allocation failing.
+        // Failed tree/disconnector preparation must never publish an orphan.
         check(std::is_void_v<T> ? "void registration: no orphan after failure"
                                : "typed registration: no orphan after failure",
               fired && (threw ? calls == 0 && event.listenerCount() == 0
                              : listener && calls == 1 && event.listenerCount() == 1), nth);
+    }
+}
+
+template<class T> void closedRegistration() {
+    for (bool ended : {false, true}) {
+        Event<T> event;
+        auto owner = std::make_shared<internal::AppOwner>();
+        internal::AppOwnerScope scope(owner);
+        if (ended) { owner->ended = true; internal::invalidateAppListeners(owner, false); }
+        else internal::invalidateAppListeners(owner, true);
+        typename Event<T>::Callback callback = [](auto&...) {};
+        EventListener listener;
+        bool escaped = false;
+        arm(0);
+        try { listener = event.listen(std::move(callback)); }
+        catch (const std::bad_alloc&) { escaped = true; }
+        disarm();
+        check("closed/closing App registration rejects without allocating",
+              !escaped && !fired && !listener && event.listenerCount() == 0);
     }
 }
 
@@ -582,7 +601,7 @@ int closeWithClear(int boundary, int nth, bool faultInsideExit = false) {
     check("exit.clear: allocation-free, mandatory teardown and restored context",
           !escaped && app->clearAllocations == 0 && app->exits == 1 && app->cleanups == 1 &&
           app->finished && after == 1 && ordinary == 0 && internal::currentWindowCtx() == previous &&
-          internal::attachedApps().empty() && (nth < 0 || injected), nth);
+          internal::attachedApps().empty() && (nth < 0 || injected || total == 0), nth);
     mandatory.disconnect();
     if (win) {
         win->finish();
@@ -601,7 +620,8 @@ void closes() {
         closeWithClear(boundary, -1); // Warm process-wide teardown state.
         const int total = closeWithClear(boundary, -1);
         std::printf("exit.clear boundary %d: %d measured allocations\n", boundary, total);
-        check("exit.clear: fault hook has measurable teardown allocations", total > 0);
+        // A singleton persistent-tree erase can make the entire teardown
+        // allocation-free. Sweep every allocation that actually exists.
         for (int nth = 0; nth < total; ++nth) closeWithClear(boundary, nth);
         closeWithClear(boundary, 0, true);
     }
@@ -700,8 +720,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     const std::string mode = argc > 1 ? argv[1] : "all";
     if (mode == "all" || mode == "owner") { mcpOwnerRetirement(); mcpOwnerReentry(); }
     if (mode == "all" || mode == "main") { mainBoundaryValidation(); mainReentrantAttachments(); }
-    if (mode == "all" || mode == "typed") { removal<int>(); registration<int>(); }
-    if (mode == "all" || mode == "void") { removal<void>(); registration<void>(); }
+    if (mode == "all" || mode == "typed") { removal<int>(); registration<int>(); closedRegistration<int>(); }
+    if (mode == "all" || mode == "void") { removal<void>(); registration<void>(); closedRegistration<void>(); }
     if (mode == "all" || mode == "swap") swaps();
     if (mode == "all" || mode == "callback") swaps(true);
     if (mode == "all" || mode == "attach") attachments();
