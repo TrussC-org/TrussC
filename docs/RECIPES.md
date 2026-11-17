@@ -49,6 +49,12 @@ When decoding cannot keep up, lag is bounded by the keyframe interval and by how
 ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
 ```
 
+Forward catch-up jumps use the container's seek index. A file without one (for example some Matroska files) is only decoded forward, without jumps. Remux it to MP4 without re-encoding:
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
 When recording with `VideoWriter`, set `VideoRecordSettings::keyframeInterval` in `tcApp::setup()` before passing the settings to `open()` (in frames; `30` is one second at 30 fps):
 
 ```cpp
