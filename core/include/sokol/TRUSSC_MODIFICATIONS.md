@@ -382,12 +382,14 @@ surface and typed text/drop/ImGui coverage.
 
 ### Injected input provenance and private MCP drag snapshot
 
-**Classification:** MOVE to TrussC (completed event 2).
+**Classification:** MOVE to TrussC (completed event 2 and event 4 #1404 A/B).
 
 **Historical code locations (removed in event 2):** `sapp_event_source`, `sapp_window_inject_event`, `sapp_event.source`, `sapp_event.button_snapshot`; `util/sokol_window_event.h` and Runtime converters.
 
 **Current code locations:** Runtime `injectWindowEvent` and `WindowEventContext`;
-`core/platform/tcNativeWindowEvent.h`; MCP `InputTarget` in `tcStandardTools.cpp`.
+`core/platform/tcNativeWindowEvent.h`; MCP `InputTarget` in `tcStandardTools.cpp`;
+public `tc/events/tcInputEvent.h`, `tc/events/tcEventArgs.h` and
+`Window::injectInput` in `tc/app/tcWindowRuntime.cpp`.
 
 **Completed slice:** event 2 Runtime injection/MCP. Runtime validates input,
 copies the raw event and carries an internal injected flag and MCP held-button
@@ -396,13 +398,15 @@ the existing native send gate, including admission, busy state and input wakes.
 Raw notification still precedes typed notification, so simgui receives the same
 DOWN/MOVE/UP. Raw `sapp_event` listeners no longer see source or snapshot fields.
 
-Provenance stays private in the Runtime. Public typed provenance is decided
-together with the #1404 A/B Window injection surface (event 4–5); typed arguments
-remain unchanged in event 2. The private MCP `tc_mouse_move(button)` drag-only
+Event 4 completes the #1404 A/B Window injection surface on the TrussC side.
+`InputEvent` builders feed `Window::injectInput` through the same Runtime gate.
+Typed key, mouse, scroll and touch arguments carry `injected` and `sourceTag`;
+native events keep false/empty defaults, public injection sets the supplied tag,
+and MCP sets `"mcp"`. Sokol carries no injection code or source markers. The private MCP `tc_mouse_move(button)` drag-only
 held-button snapshot remains available; full gestures still use
 press/move/release. Current scheduling stays, including the dev-tool wake
-limitation recorded with source admission. New public API usage goes to the
-owner before its later implementation.
+limitation recorded with source admission. The event 4 API follows the owner
+approved usage proposal; drag/drop, clipboard, Back and console args stay unchanged.
 
 ### Touch capacity
 

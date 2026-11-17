@@ -69089,3 +69089,831 @@ std::vector<float> values{1.0f, 2.0f, 3.0f};
 std::vector<float> target{1.0f, 2.0f, 4.0f};
 float error = mse(values, target); // about 0.333333
 '''
+
+["InputEvent"]
+description.en = "Copies input to send to a Window with Window::injectInput."
+description.ja = "Window::injectInput で Window に送る入力をコピーして保持します。"
+description.ko = "Window::injectInput으로 Window에 보낼 입력을 복사하여 보관합니다."
+details.en = '''
+Use InputEvent to feed external controllers or relay App input to another Window. Builders copy the input values. The delivered copy starts with consumed=false, and injectInput sets injected and sourceTag fresh. A move while pressed becomes a drag. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio");
+getWindow()->injectInput(InputEvent::mouseMoved({80, 30}), "tuio");
+getWindow()->injectInput(InputEvent::mouseReleased({80, 30}, MouseButton::Left), "tuio");
+```
+'''
+details.ja = '''
+InputEvent は外部コントローラーの入力や App 入力の別 Window への中継に使います。builder は入力値をコピーします。送信先では consumed=false から始まり、injectInput が injected と sourceTag を新しく設定します。ボタンを押したまま移動するとドラッグになります。tcApp::setup() 内で次のように使います。
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio");
+getWindow()->injectInput(InputEvent::mouseMoved({80, 30}), "tuio");
+getWindow()->injectInput(InputEvent::mouseReleased({80, 30}, MouseButton::Left), "tuio");
+```
+'''
+details.ko = '''
+InputEvent는 외부 컨트롤러 입력이나 App 입력을 다른 Window로 중계할 때 사용합니다. builder는 입력값을 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injectInput이 injected와 sourceTag를 새로 설정합니다. 버튼을 누른 채 이동하면 드래그가 됩니다. tcApp::setup() 안에서 다음과 같이 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio");
+getWindow()->injectInput(InputEvent::mouseMoved({80, 30}), "tuio");
+getWindow()->injectInput(InputEvent::mouseReleased({80, 30}, MouseButton::Left), "tuio");
+```
+'''
+related = ["Window::injectInput", "InputModifiers"]
+
+["InputModifiers"]
+description.en = "Modifier flags copied into an injected key, mouse or scroll event."
+description.ja = "注入するキー・マウス・スクロール入力にコピーする修飾キーのフラグです。"
+description.ko = "주입할 키, 마우스 또는 스크롤 이벤트에 복사하는 수식 키 플래그입니다."
+details.en = '''
+shift, ctrl, alt and super default to false. Set flags on the builder; this describes that event. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+shift、ctrl、alt、super の既定値は false です。builder でそのイベントの修飾キーを指定します。tcApp::setup() 内で次のように使います。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+shift, ctrl, alt, super의 기본값은 false입니다. builder에서 해당 이벤트의 수식 키를 지정합니다. tcApp::setup() 안에서 다음과 같이 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputEvent"]
+
+["Window::injectInput"]
+description.en = "Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values)."
+description.ja = "入力イベントをデバイスからの入力と同じようにこの Window に送ります。Window が受け取れない場合（閉じている場合や値が不正な場合）は false を返します。"
+description.ko = "입력 이벤트를 장치에서 받은 입력처럼 이 Window에 보냅니다. Window가 받을 수 없으면(닫혀 있거나 값이 잘못된 경우) false를 반환합니다."
+details.en = '''
+Positions use the destination App content coordinates: top-left origin, logical points by default or framebuffer pixels with pixelPerfect. The current destination DPI converts positions exactly once; Window::getWidth/getHeight stay logical. Scroll retains wheel units and the current cursor position; movement deltas use the destination pointer history. Accepted events carry injected=true and the supplied tag (empty by default); MCP uses "mcp". Input from a device carries false and an empty tag. In tcApp::setup():
+```cpp
+bool accepted = getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+logNotice("input") << accepted;
+```
+- injectInput returns false when the Window cannot receive input or the values are invalid. For optional use on an unattached/headless App or during teardown, getWindow() can be null:
+```cpp
+if (auto* window = getWindow()) window->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+- Relay App callbacks in window content space. Node callbacks use local pos; pass globalPos to a tcApp helper for node-origin positions:
+```cpp
+void forwardNodePress(const MouseEventArgs& e) {
+    getWindow()->injectInput(InputEvent::mousePressed(e.globalPos, static_cast<MouseButton>(e.button)), "relay");
+}
+```
+- Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh.
+'''
+details.ja = '''
+位置は宛先 App のコンテンツ座標です。左上を原点とし、既定では論理ポイント、pixelPerfect ではフレームバッファのピクセルです。宛先の現在の DPI で一度だけ変換し、Window::getWidth/getHeight は論理ポイントのままです。スクロールはホイールの単位と現在のカーソル位置を保ち、移動量は宛先のポインター履歴から求めます。受け入れた入力には injected=true と指定タグ（既定は空）を設定し、MCP は "mcp" を使います。デバイスからの入力は false と空タグです。tcApp::setup() 内で次のように使います。
+```cpp
+bool accepted = getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+logNotice("input") << accepted;
+```
+- 宛先が利用できない場合や入力が不正な場合は false を返します。未接続・ヘッドレスの App や終了処理中では getWindow() が null になることがあるため、任意の送信では確認します。
+```cpp
+if (auto* window = getWindow()) window->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+- App コールバックはウィンドウのコンテンツ座標です。Node の pos はローカル座標なので、Node からの位置を tcApp のヘルパーに渡す場合は globalPos を使います。
+```cpp
+void forwardNodePress(const MouseEventArgs& e) {
+    getWindow()->injectInput(InputEvent::mousePressed(e.globalPos, static_cast<MouseButton>(e.button)), "relay");
+}
+```
+- 受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。
+'''
+details.ko = '''
+위치는 대상 App의 콘텐츠 좌표입니다. 왼쪽 위가 원점이며 기본적으로 논리 포인트, pixelPerfect에서는 프레임버퍼 픽셀입니다. 대상의 현재 DPI로 한 번만 변환하며 Window::getWidth/getHeight는 논리 포인트를 유지합니다. 스크롤은 휠 단위와 현재 커서 위치를 유지하고 이동량은 대상의 포인터 이력에서 계산합니다. 수락한 입력에는 injected=true와 지정 태그(기본값은 빈 문자열)를 설정하며 MCP는 "mcp"를 사용합니다. 장치에서 받은 입력은 false와 빈 태그를 사용합니다. tcApp::setup() 안에서 다음과 같이 사용합니다.
+```cpp
+bool accepted = getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+logNotice("input") << accepted;
+```
+- 대상을 사용할 수 없거나 입력이 잘못되면 false를 반환합니다. 연결되지 않은 App, 헤드리스 App 또는 종료 처리 중에는 getWindow()가 null일 수 있으므로 선택적으로 전송할 때 확인합니다.
+```cpp
+if (auto* window = getWindow()) window->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+- App 콜백은 윈도 콘텐츠 좌표를 사용합니다. Node의 pos는 로컬 좌표이므로 Node에서 받은 위치를 tcApp 헬퍼에 전달할 때는 globalPos를 사용합니다.
+```cpp
+void forwardNodePress(const MouseEventArgs& e) {
+    getWindow()->injectInput(InputEvent::mousePressed(e.globalPos, static_cast<MouseButton>(e.button)), "relay");
+}
+```
+- 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다.
+'''
+related = ["InputEvent", "InputModifiers", "App::getWindow"]
+
+["InputModifiers::shift"]
+description.en = "The injected event’s shift modifier flag."
+description.ja = "注入するイベントの shift 修飾フラグです。"
+description.ko = "주입할 이벤트의 shift 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.shift = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.shift = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.shift = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputModifiers::ctrl"]
+description.en = "The injected event’s ctrl modifier flag."
+description.ja = "注入するイベントの ctrl 修飾フラグです。"
+description.ko = "주입할 이벤트의 ctrl 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputModifiers::alt"]
+description.en = "The injected event’s alt modifier flag."
+description.ja = "注入するイベントの alt 修飾フラグです。"
+description.ko = "주입할 이벤트의 alt 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.alt = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.alt = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.alt = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputModifiers::super"]
+description.en = "The injected event’s super modifier flag."
+description.ja = "注入するイベントの super 修飾フラグです。"
+description.ko = "주입할 이벤트의 super 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.super = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.super = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.super = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputEvent::keyPressed"]
+description.en = "Builds a keyPressed input from values or received arguments."
+description.ja = "値または受信した引数から keyPressed 入力を作ります。"
+description.ko = "값 또는 받은 인자로 keyPressed 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::keyReleased"]
+description.en = "Builds a keyReleased input from values or received arguments."
+description.ja = "値または受信した引数から keyReleased 入力を作ります。"
+description.ko = "값 또는 받은 인자로 keyReleased 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mousePressed"]
+description.en = "Builds a mousePressed input from values or received arguments."
+description.ja = "値または受信した引数から mousePressed 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mousePressed 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "osc");
+```
+
+Relay received App arguments to an open shared_ptr<Window> otherWindow member:
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::mousePressed(e), "relay");
+}
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "osc");
+```
+
+受信した App の引数を、開いている shared_ptr<Window> 型の otherWindow メンバーへ中継します。
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::mousePressed(e), "relay");
+}
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "osc");
+```
+
+받은 App 인자를 열려 있는 shared_ptr<Window> 형식의 otherWindow 멤버로 중계합니다.
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::mousePressed(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseReleased"]
+description.en = "Builds a mouseReleased input from values or received arguments."
+description.ja = "値または受信した引数から mouseReleased 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mouseReleased 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseMoved"]
+description.en = "Builds a mouseMoved input from values or received arguments."
+description.ja = "値または受信した引数から mouseMoved 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mouseMoved 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseScrolled"]
+description.en = "Builds a mouseScrolled input from values or received arguments."
+description.ja = "値または受信した引数から mouseScrolled 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mouseScrolled 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mouseScrolled({0, -1}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mouseScrolled({0, -1}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mouseScrolled({0, -1}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::touchPressed"]
+description.en = "Builds a touchPressed input from received touch arguments."
+description.ja = "受信したタッチ引数から touchPressed 入力を作ります。"
+description.ko = "받은 터치 인자로 touchPressed 입력을 만듭니다."
+details.en = '''
+Copies touch count, IDs, positions, pressure and changed flags; touchReleased also copies cancellation. The delivered copy starts with consumed=false, and injected/sourceTag are set fresh. Relay from a tcApp callback to an open otherWindow member:
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchPressed(e), "relay");
+}
+```
+'''
+details.ja = '''
+タッチ数、ID、位置、圧力、changed をコピーします。touchReleased はキャンセル状態もコピーします。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp のコールバックから開いている otherWindow メンバーに中継します。
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchPressed(e), "relay");
+}
+```
+'''
+details.ko = '''
+터치 수, ID, 위치, 압력, changed를 복사합니다. touchReleased는 취소 상태도 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp 콜백에서 열려 있는 otherWindow 멤버로 중계합니다.
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchPressed(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "TouchEventArgs"]
+
+["InputEvent::touchMoved"]
+description.en = "Builds a touchMoved input from received touch arguments."
+description.ja = "受信したタッチ引数から touchMoved 入力を作ります。"
+description.ko = "받은 터치 인자로 touchMoved 입력을 만듭니다."
+details.en = '''
+Copies touch count, IDs, positions, pressure and changed flags; touchReleased also copies cancellation. The delivered copy starts with consumed=false, and injected/sourceTag are set fresh. Relay from a tcApp callback to an open otherWindow member:
+```cpp
+void touchMoved(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchMoved(e), "relay");
+}
+```
+'''
+details.ja = '''
+タッチ数、ID、位置、圧力、changed をコピーします。touchReleased はキャンセル状態もコピーします。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp のコールバックから開いている otherWindow メンバーに中継します。
+```cpp
+void touchMoved(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchMoved(e), "relay");
+}
+```
+'''
+details.ko = '''
+터치 수, ID, 위치, 압력, changed를 복사합니다. touchReleased는 취소 상태도 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp 콜백에서 열려 있는 otherWindow 멤버로 중계합니다.
+```cpp
+void touchMoved(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchMoved(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "TouchEventArgs"]
+
+["InputEvent::touchReleased"]
+description.en = "Builds a touchReleased input from received touch arguments."
+description.ja = "受信したタッチ引数から touchReleased 入力を作ります。"
+description.ko = "받은 터치 인자로 touchReleased 입력을 만듭니다."
+details.en = '''
+Copies touch count, IDs, positions, pressure and changed flags; touchReleased also copies cancellation. The delivered copy starts with consumed=false, and injected/sourceTag are set fresh. Relay from a tcApp callback to an open otherWindow member:
+```cpp
+void touchReleased(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchReleased(e), "relay");
+}
+```
+'''
+details.ja = '''
+タッチ数、ID、位置、圧力、changed をコピーします。touchReleased はキャンセル状態もコピーします。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp のコールバックから開いている otherWindow メンバーに中継します。
+```cpp
+void touchReleased(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchReleased(e), "relay");
+}
+```
+'''
+details.ko = '''
+터치 수, ID, 위치, 압력, changed를 복사합니다. touchReleased는 취소 상태도 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp 콜백에서 열려 있는 otherWindow 멤버로 중계합니다.
+```cpp
+void touchReleased(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchReleased(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "TouchEventArgs"]
+
+["KeyEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["KeyEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseMoveEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseMoveEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseDragEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseDragEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["ScrollEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["ScrollEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["TouchEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["TouchEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
