@@ -12,8 +12,8 @@ configure; select only `tcxBox2d3` for a v3 project:
 tcxBox2d3
 ```
 
-Slice 2 provides World, an owning RigidBody2D Mod, shapes as v3 ids, and Node
-sync from body-move events. Events and drag have no TrussC API yet (slices 3–4).
+World, an owning RigidBody2D Mod, shapes as v3 ids, Node sync from body-move
+events, and post-step events are available. Drag follows in slice 4.
 Classic CircleBody, RectBody and PolyShape remain in the frozen v2 addon.
 
 ```cpp
@@ -224,8 +224,143 @@ b2World_SetGravity(world.id(), {0.0f, 10.0f});
 ```
 
 Filters are upstream's 64-bit `b2Filter` in `b2ShapeDef`. Fixed rotation uses
-upstream motion locks. The planned contact/sensor/hit events will be delivered
-only after managed steps, without Stay; no TrussC event API exists in this slice.
+upstream motion locks.
+
+## Events
+
+tcxBox2d3 delivers contact, sensor and hit events on RigidBody2D after each world.update().
+Delivery follows Node sync, in this order: contact begin, contact end, hit,
+sensor begin, sensor end; each category preserves v3's array order. Each event
+notifies shape A then B (sensor then visitor for sensor events). There is no Stay.
+Raw `b2World_Step` calls do not deliver TrussC events; use the managed step:
+
+```cpp
+world.update();
+```
+
+Contact begin/end flags are on from creation for every shape created by a
+RigidBody2D Mod, regardless of listeners. Subscribing after a broad-phase
+contact exists still receives future begin/end events; past events are not replayed.
+
+At the next managed step after a listener state change, sensor flags are enabled
+on **all Mod-created shapes in that World** while any Mod listens to sensor
+begin/end. v3 requires both sensor and visitor flags and reads them each step: subscribing during an
+existing overlap produces a begin on the next step. Removing the last sensor
+listener turns off the automatic flags. Hit listeners enable hit flags only on
+the listening Mod's shapes. Removing the last hit listener turns off those
+automatic flags too. Explicit true sensor/hit flags from shape definitions
+remain enabled. Shapes added later participate on the next managed step.
+
+Raw shapes have no owning Mod; when mixing raw sensor/visitor shapes, enable
+their sensor flag explicitly (inside tcApp setup, with the raw shape id):
+
+```cpp
+b2Shape_EnableSensorEvents(rawShapeId, true);
+```
+
+Raw ids also let you turn off flags on managed shapes. Contact flags are never
+reapplied; raw sensor/hit overrides stick until the corresponding automatic listener state next changes (none ↔ some):
+
+```cpp
+b2Shape_EnableContactEvents(rb->shapeIds().front(), false);
+b2Shape_EnableSensorEvents(rb->shapeIds().front(), false);
+b2Shape_EnableHitEvents(rb->shapeIds().front(), false);
+```
+
+Keep the EventListener handles as tcApp members, for example
+`EventListener contactBegin, contactEnd, sensorBegin, sensorEnd, hit;`.
+`ContactEvent`, `SensorEvent` and `HitEvent` carry `shape`, `otherShape` and
+`other`. Each receiver sees its own shape first. `other` is null if its owner
+is gone or unmanaged; check it before accessing the other Mod:
+
+```cpp
+contactBegin = rb->onContactBegin.listen([](box2d::ContactEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("touching");
+});
+```
+
+```cpp
+contactEnd = rb->onContactEnd.listen([](box2d::ContactEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("separated");
+});
+```
+
+```cpp
+sensorBegin = rb->onSensorBegin.listen([](box2d::SensorEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("touching");
+});
+```
+
+```cpp
+sensorEnd = rb->onSensorEnd.listen([](box2d::SensorEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("separated");
+});
+```
+
+For hit events, listen in setup, before bodies touch:
+
+```cpp
+hit = rb->onHit.listen([](box2d::HitEvent& e) {
+    logNotice() << e.approachSpeed;
+});
+```
+
+Hit events need an approach speed above v3's `hitEventThreshold` (default
+1 m/s = 30 pixels/s); move the body fast enough for an impact:
+
+```cpp
+rb->setVelocity(Vec2(0, 300));
+```
+
+Contact begin and hit carry `point` in world pixels and a unit `normal` pointing
+from the receiving body toward the other body. Begin uses the first point of
+v3's current contact manifold (resolved from its contactId after the step),
+reconstructed from body A's world center and anchorA. A zero-point manifold
+uses the midpoint of the two body origins. Contact end leaves point/normal
+zero. Hit also carries `approachSpeed` in pixels/second.
+
+Every v3 event array is copied before Node observers or event listeners run.
+Receivers and `other` are resolved again before each listener. Destroyed
+receivers are skipped; destroying/resetting World stops the old step's delivery.
+v3.2 emits end events on body destruction; surviving owners receive those on
+the next managed step with null `other`. Shape ids retain their generation but
+may be stale; validate before raw API access:
+
+```cpp
+if (!b2Shape_IsValid(e.otherShape)) return;
+auto bodyId = b2Shape_GetBody(e.otherShape);
+```
+
+Listener changes follow core Event semantics: removal takes effect immediately;
+a listener added during a notification starts at the next notification.
+Delivery is synchronous on the thread calling update, including listeners
+registered with Deliver::Main; step from the app's update thread:
+
+```cpp
+void update() override { world.update(); }
+```
+
+Re-entrant `world.update()` is refused with a Warning on every call. Request
+a step in a listener and perform it next frame instead (tcApp members):
+
+```cpp
+bool stepRequested = false;
+void requestStep() { stepRequested = true; }
+void update() override { if (std::exchange(stepRequested, false)) world.update(); }
+```
+
+Concurrent World mutation or dispatch from multiple threads is unsupported;
+there is no API for cross-thread physics mutation. Rare nested interleavings
+outside owner destruction, re-setup, and listener changes have no added ordering
+guarantees. Keep physics changes on the app update thread:
+
+```cpp
+void update() override { world.update(); }
+```
 
 ## Offline build
 
