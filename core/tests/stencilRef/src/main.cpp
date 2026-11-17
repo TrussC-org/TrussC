@@ -61,9 +61,12 @@ class StencilRefApp : public App {
             sg_query_pipeline_state(mixed) == SG_RESOURCESTATE_VALID &&
             sg_query_pipeline_state(disabled) == SG_RESOURCESTATE_VALID);
 
+        // Public Fbo clip control also changes the raw scissor origin.
+        // Use the same rectangle convention as TrussC drawing.
         auto drawFaces = [](int row) {
             for (int face = 0; face < 2; ++face) {
-                sg_apply_scissor_rect(0, row * 4 + face * 2, 24, 2, true);
+                sg_apply_scissor_rect(0, row * 4 + face * 2, 24, 2,
+                    internal::currentTarget().rectangleOriginTopLeft());
                 sg_draw(face * 3, 3, 1);
             }
         };
@@ -73,7 +76,8 @@ class StencilRefApp : public App {
         for (int column = 0; column < 3; ++column) {
             sg_apply_stencil_ref(uint8_t(column + 129)); // masked to 1, 2, 3
             sg_apply_bindings(&bindings);
-            sg_apply_scissor_rect(column * 8, 0, 8, 40, true);
+            sg_apply_scissor_rect(column * 8, 0, 8, 40,
+                internal::currentTarget().rectangleOriginTopLeft());
             sg_draw(0, 3, 1);
         }
         sg_apply_pipeline(equal);
