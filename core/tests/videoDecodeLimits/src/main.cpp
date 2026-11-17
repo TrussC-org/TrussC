@@ -25,6 +25,13 @@ using Limits = tc::internal::VideoDecodeLimits;
 using Status = tc::internal::VideoDecodeStatus;
 
 void layoutChecks() {
+    tc::VideoPlayer preference;
+    preference.setDecodeThreads(4);
+    tc::VideoPlayer moved(std::move(preference));
+    check("move construction preserves decode thread preference", moved.getDecodeThreads() == 4);
+    tc::VideoPlayer assigned;
+    assigned = std::move(moved);
+    check("move assignment preserves decode thread preference", assigned.getDecodeThreads() == 4);
     const auto rectCheck = [](const char* label, int64_t xFixed, int64_t yFixed,
                               int64_t width, int64_t height, tc::internal::VideoDisplayRect expected) {
         const auto rect = tc::internal::videoDisplayRect(656, 368, xFixed, yFixed, width, height);
@@ -455,9 +462,10 @@ void softwareReopenChecks(const tc::fs::path& path) {
     AVBufferRef* device = av_buffer_alloc(1);
     context->hw_device_ctx = av_buffer_ref(device);
     AVHWDeviceType type = AV_HWDEVICE_TYPE_DRM;
-    const bool reopened = tc::internal::reopenVideoCodecSoftware(context, device, type, input->streams[0]->codecpar);
+    const bool reopened = tc::internal::reopenVideoCodecSoftware(context, device, type, input->streams[0]->codecpar, 4);
     check("probe fallback opens software decoder and clears hardware state",
         reopened && context && !context->hw_device_ctx && !device && type == AV_HWDEVICE_TYPE_NONE);
+    check("software fallback preserves decode thread preference", reopened && context && context->thread_count == 4);
     int decoded = 0;
     AVPacket* packet = av_packet_alloc();
     if (reopened) {
@@ -474,7 +482,7 @@ void softwareReopenChecks(const tc::fs::path& path) {
     AVCodecParameters* invalid = avcodec_parameters_alloc();
     invalid->codec_id = AV_CODEC_ID_NONE;
     check("software reopen failure is reported with hardware cleared",
-        !tc::internal::reopenVideoCodecSoftware(context, device, type, invalid) &&
+        !tc::internal::reopenVideoCodecSoftware(context, device, type, invalid, 4) &&
         !context && !device && type == AV_HWDEVICE_TYPE_NONE);
     avcodec_parameters_free(&invalid);
     av_packet_free(&packet);
@@ -487,8 +495,10 @@ void ffmpegChecks(const tc::fs::path& dir, bool large) {
     extractionRejectionChecks(dir);
     auto status = std::make_shared<Status>();
     AVCodecContext* codec = avcodec_alloc_context3(avcodec_find_decoder(AV_CODEC_ID_FFV1));
-    if (codec) tc::internal::configureVideoCodec(codec);
+    if (codec) tc::internal::configureVideoCodec(codec, 0);
     check("FFmpeg decode thread count is auto", codec && codec->thread_count == 0);
+    if (codec) tc::internal::configureVideoCodec(codec, 4);
+    check("explicit decode thread count is passed through before open", codec && codec->thread_count == 4);
     avcodec_free_context(&codec);
     check("wide fixture generated", makeVideo(dir / "wide.mkv", 10240, 1080, 1));
     playHeadless(dir / "wide.mkv", "10240x1080 CPU frame decodes");
@@ -519,6 +529,25 @@ void ffmpegChecks(const tc::fs::path& dir, bool large) {
     playHeadless(dir / "changed.mkv", "mid-stream size change plays safely");
     check("small fixture generated", makeVideo(dir / "small.mkv", 64, 32, 8));
     softwareReopenChecks(dir / "small.mkv");
+    {
+        using Access = tc::internal::VideoPlayerPlatformAccess;
+        tc::VideoPlayer player;
+        check("decode threads default to auto", player.getDecodeThreads() == 0);
+        player.setDecodeThreads(-4);
+        check("negative decode threads clamp to auto", player.getDecodeThreads() == 0);
+        player.setUseHwAccel(false);
+        player.setAutoPoster(false);
+        player.setDecodeThreads(4);
+        check("explicit decode thread preference is stored", player.getDecodeThreads() == 4);
+        check("thread-setting fixture loads", bool(player.load(dir / "small.mkv")));
+        check("player passes decode threads to FFmpeg", Access::decodeThreadsForTests(player) == 4);
+        player.setDecodeThreads(1);
+        check("setting after load leaves active decoder unchanged",
+            player.getDecodeThreads() == 1 && Access::decodeThreadsForTests(player) == 4);
+        check("thread-setting fixture reloads", bool(player.load(dir / "small.mkv")));
+        check("next load applies changed preference", Access::decodeThreadsForTests(player) == 1);
+        player.close();
+    }
     playHeadless(dir / "small.mkv", "small video loads");
     tc::Pixels image;
     check("thumbnail decodes", tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0) && image.getWidth() == 64 && image.getData()[0] != 0);
