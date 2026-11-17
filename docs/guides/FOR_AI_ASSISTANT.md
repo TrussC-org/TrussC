@@ -5039,6 +5039,7 @@ std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]
 int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Returns the source audio sample rate.
 bool VideoPlayer::getAutoPoster() const [macos,windows,linux,ios,web]  // Returns whether automatic poster frames are enabled.
 int VideoPlayer::getCurrentFrameImpl() const [macos,windows,linux,ios,web]  // Returns the current frame index through the playback backend.
+int VideoPlayer::getDecodeThreads() const [macos,windows,linux,ios,web]  // Returns the stored decoder thread preference.
 float VideoPlayer::getDuration() const [macos,windows,linux,ios,web]  // Returns the total video duration.
 float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Returns the video's frame rate.
 float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Returns the gamma correction setting.
@@ -5064,6 +5065,7 @@ void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Starts or resumes
 void VideoPlayer::previousFrameImpl() [macos,windows,linux,ios,web]  // Moves back one frame through the playback backend.
 void VideoPlayer::setAudioStreaming(bool streaming) [macos,windows,linux,ios,web]  // Sets the audio streaming preference.
 void VideoPlayer::setAutoPoster(bool on) [macos,windows,linux,ios,web]  // Controls automatic still frames that bridge playback transitions.
+void VideoPlayer::setDecodeThreads(int count) [macos,windows,linux,ios,web]  // Sets the decoder thread preference for the next load.
 void VideoPlayer::setFrameImpl(int frame) [macos,windows,linux,ios,web]  // Seeks to a frame through the playback backend.
 void VideoPlayer::setGammaCorrection(float gamma) [macos,windows,linux,ios,web]  // Sets the gamma correction exponent.
 void VideoPlayer::setLoopImpl(bool loop) [macos,windows,linux,ios,web]  // Applies the loop setting to the playback backend.
