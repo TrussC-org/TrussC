@@ -59,6 +59,7 @@ public:
         e.mods_ = mods;
         return e;
     }
+    // Template so the brace form mouseMoved({x, y}) picks the Vec2 overload, not this args overload.
     template<class = void>
     static InputEvent mouseMoved(const MouseMoveEventArgs& event) {
         return mouseMoved(event.pos, modifiers(event));
@@ -69,6 +70,7 @@ public:
         e.mods_ = mods;
         return e;
     }
+    // Template so the brace form mouseScrolled({x, y}) picks the Vec2 overload, not this args overload.
     template<class = void>
     static InputEvent mouseScrolled(const ScrollEventArgs& event) {
         return mouseScrolled(event.scroll, modifiers(event));

@@ -345,8 +345,8 @@ bool onMouseDrag  (const MouseDragEventArgs& e) override; // + .delta + .button
 bool onMouseScroll(const ScrollEventArgs& e) override;    // .scroll
 ```
 
-Key, mouse, scroll and touch arguments include `injected` (false for native
-input) and `sourceTag` (empty for native input). `Window::injectInput` sets
+Key, mouse, scroll and touch arguments include `injected` (false for input
+from a device) and `sourceTag` (empty for input from a device). `Window::injectInput` sets
 `injected = true` and the supplied tag; MCP input uses `"mcp"`.
 
 One struct per event kind (no meaningless fields); `button` is an `int`

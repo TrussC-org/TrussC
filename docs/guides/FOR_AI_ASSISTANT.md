@@ -629,8 +629,8 @@ There is one struct per event kind so no field is ever meaningless. Fields:
 - `button` — `int`, compare with `MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (press/drag).
 - `scroll` — `Vec2` scroll amount (ScrollEventArgs).
 - `shift` / `ctrl` / `alt` / `super` — modifier keys, on every kind.
-- `injected` — true for `Window::injectInput` and MCP input, false for native input. Key and touch args also carry this field.
-- `sourceTag` — the supplied injection tag, `"mcp"` for MCP, or empty for native input. Key and touch args also carry this field.
+- `injected` — true for `Window::injectInput` and MCP input, false for input from a device. Key and touch args also carry this field.
+- `sourceTag` — the supplied injection tag, `"mcp"` for MCP, or empty for input from a device. Key and touch args also carry this field.
 
 > Legacy scalar mirrors (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY`) are
 > kept for source compatibility and slated for removal at v1.0 — prefer the
@@ -3607,7 +3607,7 @@ void Image::setDirty()  // Marks the image as needing a texture update.
 void Image::update()  // Uploads pending CPU pixel changes to the texture.
 ```
 
-### InputEvent — Copies input for delivery to a Window through the Runtime input gate.
+### InputEvent — Copies input to send to a Window with Window::injectInput.
 
 ```cpp
 InputEvent InputEvent::keyPressed(int key, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds a keyPressed input from values or received arguments.
@@ -5223,7 +5223,7 @@ int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
-bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends copied input to this Window and returns the existing Runtime gate acceptance.
+bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values).
 bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
 bool Window::isFullscreen() const  // Returns this window's observed fullscreen state.
 bool Window::isOccluded() const  // Returns whether this window is explicitly hidden, minimized or fully occluded.
