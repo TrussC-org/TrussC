@@ -3,6 +3,9 @@
 #include "../../../../core/tests/common/tcWindowTest.h"
 #include <cstdio>
 #include <type_traits>
+#if defined(__linux__)
+#include <dirent.h>
+#endif
 
 namespace {
 int failures = 0;
@@ -519,6 +522,155 @@ void testEventLifetime() {
     }
 }
 
+void testDrag() {
+    World world;
+    world.startDrag(nullptr, {30, 60});
+    world.updateDrag({60, 90});
+    world.endDrag();
+    world.setup();
+    auto node = liveNode();
+    node->setPos(120, 180);
+    auto* rb = node->addMod<RigidBody2D>(world, b2_dynamicBody);
+    rb->addBox(60, 30);
+    b2Body_SetAwake(rb->id(), false);
+    world.startDrag(rb, {135, 180});
+    b2JointId joint{};
+    check("drag creates one motor joint", b2Body_GetJoints(rb->id(), &joint, 1) == 1 &&
+          b2Joint_GetType(joint) == b2_motorJoint);
+    auto cursor = b2Joint_GetBodyA(joint);
+    check("cursor is kinematic at pixel press position", b2Body_GetType(cursor) == b2_kinematicBody &&
+          approxEq(b2Body_GetPosition(cursor).x, 4.5f) && approxEq(b2Body_GetPosition(cursor).y, 6));
+    check("drag preserves local grab point", approxEq(b2Joint_GetLocalFrameB(joint).p.x, 0.5f));
+    check("drag wakes sleeping target", b2Body_IsAwake(rb->id()));
+    const auto mass = b2Body_GetMassData(rb->id());
+    check("upstream spring and angular friction settings", approxEq(b2MotorJoint_GetLinearHertz(joint), 7.5f) &&
+          approxEq(b2MotorJoint_GetLinearDampingRatio(joint), 1) &&
+          approxEq(b2MotorJoint_GetMaxSpringForce(joint), 100 * mass.mass * 10) &&
+          approxEq(b2MotorJoint_GetMaxVelocityTorque(joint), 0.25f * std::sqrt(mass.rotationalInertia / mass.mass) * mass.mass * 10));
+    world.updateDrag({255, 210});
+    for (int i = 0; i < 120; ++i) world.update();
+    const auto grab = b2Body_GetWorldPoint(rb->id(), b2Joint_GetLocalFrameB(joint).p);
+    check("spring tracks moved pixel target at original grab point", std::abs(grab.x * 30 - 255) < 2 &&
+          std::abs(grab.y * 30 - 210) < 2);
+    check("cursor reaches target through managed step", approxEq(b2Body_GetPosition(cursor).x, 8.5f) &&
+          approxEq(b2Body_GetPosition(cursor).y, 7));
+    world.startDrag(rb, rb->getPosition());
+    check("starting again replaces joint and cursor", !b2Joint_IsValid(joint) && !b2Body_IsValid(cursor) &&
+          b2Body_GetJointCount(rb->id()) == 1 && b2World_GetCounters(world.id()).bodyCount == 2);
+    b2Body_GetJoints(rb->id(), &joint, 1);
+    cursor = b2Joint_GetBodyA(joint);
+    world.endDrag();
+    world.endDrag();
+    world.updateDrag({300, 300});
+    check("endDrag is idempotent and removes all drag resources", !b2Joint_IsValid(joint) &&
+          !b2Body_IsValid(cursor) && b2World_GetCounters(world.id()).bodyCount == 1 && b2Body_GetJointCount(rb->id()) == 0);
+
+    World otherWorld; otherWorld.setup();
+    auto otherNode = liveNode();
+    auto* foreign = otherNode->addMod<RigidBody2D>(otherWorld, b2_dynamicBody);
+    world.startDrag(foreign, {0, 0});
+    world.startDrag(nullptr, {0, 0});
+    auto staticNode = liveNode();
+    auto* staticBody = staticNode->addMod<RigidBody2D>(world, b2_staticBody);
+    world.startDrag(staticBody, {0, 0});
+    check("null, foreign and static targets create no drag", b2World_GetCounters(world.id()).jointCount == 0 &&
+          b2World_GetCounters(world.id()).bodyCount == 2);
+    auto secondNode = liveNode();
+    auto* second = secondNode->addMod<RigidBody2D>(world, b2_dynamicBody);
+    second->addCircle(15);
+    world.startDrag(rb, rb->getPosition());
+    b2Body_GetJoints(rb->id(), &joint, 1);
+    cursor = b2Joint_GetBodyA(joint);
+    world.startDrag(second, {0, 0});
+    check("starting another body transfers the single drag", !b2Joint_IsValid(joint) &&
+          !b2Body_IsValid(cursor) && b2Body_GetJointCount(rb->id()) == 0 && b2Body_GetJointCount(second->id()) == 1);
+    world.setup();
+    secondNode->removeMod<RigidBody2D>();
+    second = secondNode->addMod<RigidBody2D>(world, b2_dynamicBody);
+    second->addCircle(15);
+    world.startDrag(second, {0, 0});
+    node.reset(); // old-world Mod must not clear the new world's drag
+    check("stale Mod destruction leaves replacement-world drag intact", b2Body_GetJointCount(second->id()) == 1);
+    world.endDrag();
+    for (int action = 0; action < 4; ++action) {
+        auto ownedWorld = std::make_unique<World>(); ownedWorld->setup();
+        auto owner = liveNode();
+        auto* target = owner->addMod<RigidBody2D>(*ownedWorld, b2_dynamicBody);
+        auto shapeDef = b2DefaultShapeDef(); shapeDef.density = 3;
+        target->addCircle(30, shapeDef);
+        ownedWorld->startDrag(target, {0, 0});
+        b2Body_GetJoints(target->id(), &joint, 1);
+        cursor = b2Joint_GetBodyA(joint);
+        check("drag force scales with target mass", approxEq(b2MotorJoint_GetMaxSpringForce(joint) / b2Body_GetMass(target->id()), 1000));
+        if (action == 0) owner->removeMod<RigidBody2D>();
+        if (action == 1) owner.reset();
+        if (action == 2) ownedWorld->setup();
+        if (action == 3) ownedWorld.reset();
+        check("Mod/Node/reset/World destruction clears drag immediately", !b2Joint_IsValid(joint) && !b2Body_IsValid(cursor));
+        if (ownedWorld) {
+            ownedWorld->updateDrag({60, 90}); ownedWorld->endDrag(); ownedWorld->update();
+            check("world remains usable after target destruction/reset", b2World_GetCounters(ownedWorld->id()).jointCount == 0 &&
+                  b2World_GetCounters(ownedWorld->id()).bodyCount == 0);
+            owner = liveNode();
+            target = owner->addMod<RigidBody2D>(*ownedWorld, b2_dynamicBody);
+            target->addBox(30, 30);
+            ownedWorld->startDrag(target, {0, 0});
+            check("new drag works after target destruction/reset", b2Body_GetJointCount(target->id()) == 1);
+        }
+    }
+}
+
+#if defined(__linux__)
+int nativeThreadCount() {
+    auto* tasks = opendir("/proc/self/task");
+    if (!tasks) return -1;
+    int count = 0;
+    while (auto* entry = readdir(tasks)) {
+        if (entry->d_name[0] != '.') ++count;
+    }
+    closedir(tasks);
+    return count;
+}
+#endif
+void testWorkerScene() {
+#if defined(__linux__)
+    const int serialThreads = nativeThreadCount();
+    check("Linux thread enumeration available", serialThreads > 0);
+#endif
+    for (int workers : {1, 4}) {
+        World world;
+        world.setWorkerCount(workers);
+        world.setup();
+        check("scene setup uses requested worker count", b2World_GetWorkerCount(world.id()) == workers);
+        auto groundDef = b2DefaultBodyDef(); groundDef.position = {0, 20};
+        auto ground = b2CreateBody(world.id(), &groundDef);
+        auto shapeDef = b2DefaultShapeDef();
+        auto floor = b2MakeBox(30, 1); b2CreatePolygonShape(ground, &shapeDef, &floor);
+        std::vector<b2BodyId> bodies;
+        auto box = b2MakeBox(0.4f, 0.4f);
+        for (int i = 0; i < 256; ++i) {
+            auto def = b2DefaultBodyDef(); def.type = b2_dynamicBody;
+            def.position = {float(i % 16) - 8, float(i / 16)};
+            auto body = b2CreateBody(world.id(), &def);
+            b2CreatePolygonShape(body, &shapeDef, &box); bodies.push_back(body);
+        }
+        for (int i = 0; i < 120; ++i) world.update();
+#if defined(__linux__)
+        check("setup creates the requested built-in scheduler threads",
+              nativeThreadCount() == serialThreads + (workers - 1));
+#endif
+        bool valid = true;
+        for (auto body : bodies) {
+            auto p = b2Body_GetPosition(body);
+            valid &= b2Body_IsValid(body) && std::isfinite(p.x) && std::isfinite(p.y) && p.y < 20;
+        }
+        check("scene steps with valid bounded bodies at 1 and 4 workers", valid);
+    }
+#if defined(__linux__)
+    check("world destruction releases scheduler threads", nativeThreadCount() == serialThreads);
+#endif
+}
+
 } // namespace
 
 int main() {
@@ -553,10 +705,6 @@ int main() {
         tcx::box2d::World world;
         world.setup();
         check("default worker count is one", b2World_GetWorkerCount(world.id()) == 1);
-        world.setWorkerCount(2);
-        check("worker count changes at runtime", b2World_GetWorkerCount(world.id()) == 2);
-        world.update();
-        world.setWorkerCount(1);
         auto gravity = b2World_GetGravity(world.id());
         check("default gravity points down in y-down space", gravity.y > 0.0f && nearlyEqual(gravity.y, 10));
         auto body = fallingBody(world.id());
@@ -569,10 +717,17 @@ int main() {
         world.setWorkerCount(2);
         world.setup();
         check("worker count can be set before setup", b2World_GetWorkerCount(world.id()) == 2);
+        world.setWorkerCount(4);
+        check("setting worker count leaves current world unchanged", b2World_GetWorkerCount(world.id()) == 2);
+        world.setup();
+        check("next setup applies stored worker count", b2World_GetWorkerCount(world.id()) == 4);
         world.setWorkerCount(0);
-        check("worker count uses upstream clamping", b2World_GetWorkerCount(world.id()) == 1);
+        world.setup();
+        check("setup uses upstream worker count clamping", b2World_GetWorkerCount(world.id()) == 1);
     }
     tcCoreTest::WindowFixture receiver;
+    testDrag();
+    testWorkerScene();
     testEventKinds();
     testEventOrder();
     testEventFlags();

@@ -1,14 +1,17 @@
 #include "tcxBox2dMod.h"
+#include <cmath>
 
 namespace tcx::box2d {
 
 World::~World() {
+    endDrag();
     ++owners_->epoch;
     owners_->bodies.clear();
     if (b2World_IsValid(worldId_)) b2DestroyWorld(worldId_);
 }
 
 void World::setup() {
+    endDrag();
     if (b2World_IsValid(worldId_)) b2DestroyWorld(worldId_);
     ++owners_->epoch;
     owners_->bodies.clear();
@@ -39,6 +42,11 @@ void World::update() {
     for (auto* body : owners->bodies)
         sensorListeners |= body->onSensorBegin.listenerCount() || body->onSensorEnd.listenerCount();
     for (auto* body : owners->bodies) body->updateEventFlags(sensorListeners);
+    if (B2_IS_NON_NULL(owners->dragJoint)) {
+        if (!b2Joint_IsValid(owners->dragJoint)) clearDrag(*owners);
+        else b2Body_SetTargetTransform(owners->cursorBody,
+                                      {owners->dragTarget, b2Rot_identity}, 1.0f / 60.0f, true);
+    }
     b2World_Step(steppedWorld, 1.0f / 60.0f, subSteps_);
 
     enum class Kind { ContactBegin, ContactEnd, Hit, SensorBegin, SensorEnd };
@@ -128,6 +136,59 @@ void World::update() {
     }
 }
 
+void World::clearDrag(Owners& owners) {
+    // Body/joint ids do not contain the world's generation. Guard the world first.
+    if (b2World_IsValid(owners.worldId)) {
+        if (b2Joint_IsValid(owners.dragJoint)) b2DestroyJoint(owners.dragJoint);
+        if (b2Body_IsValid(owners.cursorBody)) b2DestroyBody(owners.cursorBody);
+    }
+    owners.dragJoint = b2_nullJointId;
+    owners.cursorBody = b2_nullBodyId;
+    owners.draggedBody = b2_nullBodyId;
+}
+
+void World::endDrag() { clearDrag(*owners_); }
+
+void World::startDrag(RigidBody2D* body, tc::Vec2 position) {
+    endDrag();
+    if (!b2World_IsValid(worldId_) || !owners_->bodies.count(body) ||
+        !b2Body_IsValid(body->id()) || b2Body_GetType(body->id()) != b2_dynamicBody ||
+        !std::isfinite(position.x) || !std::isfinite(position.y)) return;
+
+    const b2Vec2 target = {position.x / 30.0f, position.y / 30.0f};
+    auto cursor = b2DefaultBodyDef();
+    cursor.type = b2_kinematicBody;
+    cursor.position = target;
+    cursor.enableSleep = false;
+    owners_->cursorBody = b2CreateBody(worldId_, &cursor);
+    owners_->draggedBody = body->id();
+    owners_->dragTarget = target;
+
+    // Box2D v3.2 samples/sample.cpp: motor-joint spring and angular friction.
+    auto joint = b2DefaultMotorJointDef();
+    joint.base.bodyIdA = owners_->cursorBody;
+    joint.base.bodyIdB = body->id();
+    joint.base.localFrameB.p = b2Body_GetLocalPoint(body->id(), target);
+    joint.linearHertz = 7.5f;
+    joint.linearDampingRatio = 1.0f;
+    const auto mass = b2Body_GetMassData(body->id());
+    const float mg = mass.mass * b2Length(b2World_GetGravity(worldId_));
+    joint.maxSpringForce = 100.0f * mg;
+    if (mass.mass > 0.0f)
+        joint.maxVelocityTorque = 0.25f * std::sqrt(mass.rotationalInertia / mass.mass) * mg;
+    owners_->dragJoint = b2CreateMotorJoint(worldId_, &joint);
+    b2Body_SetAwake(body->id(), true);
+}
+
+void World::updateDrag(tc::Vec2 position) {
+    if (!b2World_IsValid(worldId_) || !b2Joint_IsValid(owners_->dragJoint)) {
+        endDrag();
+        return;
+    }
+    if (std::isfinite(position.x) && std::isfinite(position.y))
+        owners_->dragTarget = {position.x / 30.0f, position.y / 30.0f};
+}
+
 void World::setSubSteps(int count) {
     if (count > 0) subSteps_ = count;
 }
@@ -141,7 +202,6 @@ void World::setGravity(const tc::Vec2& gravity) {
 
 void World::setWorkerCount(int count) {
     workerCount_ = count;
-    if (b2World_IsValid(worldId_)) b2World_SetWorkerCount(worldId_, count);
 }
 
 } // namespace tcx::box2d

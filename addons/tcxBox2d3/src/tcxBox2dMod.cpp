@@ -75,6 +75,8 @@ void RigidBody2D::setup() {
     owners->bodies.insert(this);
 }
 void RigidBody2D::onDestroy() {
+    if (auto owners = owners_.lock(); owners && b2StoreWorldId(owners->worldId) == b2StoreWorldId(worldId_) &&
+        B2_ID_EQUALS(owners->draggedBody, bodyId_)) World::clearDrag(*owners);
     if (b2Body_IsValid(id())) b2DestroyBody(bodyId_);
     bodyId_ = b2_nullBodyId;
     if (auto owners = owners_.lock()) owners->bodies.erase(this);
