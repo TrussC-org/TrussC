@@ -405,6 +405,7 @@ jobs:
         run: |
           sh core/tests/nativeWindow/contracts-test
           python3 core/tests/sessionEndBusy/native-test.py
+          python3 core/tests/androidStencil/native-test.py
           python3 core/tests/windowState/pre-window-native.py
           sh core/tests/nativeWindow/backend-default-test
 
