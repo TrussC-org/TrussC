@@ -15,6 +15,7 @@ code=r'''
 #include <stdexcept>
 #include <limits>
 #include <string>
+#include <cmath>
 int checks=0, failures=0;
 void check(const char* name,bool ok){++checks;if(!ok){++failures;printf("event-gates: FAIL: %s\n",name);}}
 '''+shared+r'''
@@ -52,6 +53,7 @@ struct Operations {bool (*sendEvent)(sapp_tc_window,void*,sapp_event*);};
 struct Binding {Operations* operations; sapp_tc_window handle; void* user;} binding;
 struct Window {};
 struct TouchEventArgs;
+struct DragDropEventArgs {float x=0, y=0;};
 Window window;
 struct WindowRequestAccess {static Binding& binding(Window&) {return native::binding;}};
 '''
@@ -60,7 +62,7 @@ code+=body(runtime_source,'bool injectWindowEvent(')+'\n'
 code+=r'''
 bool inject(sapp_tc_window h,const sapp_event* event) {
     static Operations operations{[](sapp_tc_window h,void*,sapp_event* e){return sendNativeWindowEvent(h,e);}};
-    binding={&operations,h,nullptr};return injectWindowEvent(window,event,false,{},nullptr);
+    binding={&operations,h,nullptr};return injectWindowEvent(window,event,false,{},nullptr,nullptr);
 }
 '''
 for marker in ['extern "C" bool sapp_tc_window_close_recorded(']:
