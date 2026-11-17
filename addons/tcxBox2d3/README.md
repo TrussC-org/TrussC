@@ -13,7 +13,7 @@ tcxBox2d3
 ```
 
 World, an owning RigidBody2D Mod, shapes as v3 ids, Node sync from body-move
-events, and post-step events are available. Drag follows in slice 4.
+events, post-step events, and drag are available.
 Classic CircleBody, RectBody and PolyShape remain in the frozen v2 addon.
 
 ```cpp
@@ -208,14 +208,6 @@ world.setSubSteps(4);
 world.setup();
 ```
 
-Workers default to one. `setWorkerCount` uses the built-in v3 task system and
-upstream clamping, before setup or at runtime:
-
-```cpp
-world.setup();
-world.setWorkerCount(2);
-```
-
 Raw settings use meters:
 
 ```cpp
@@ -225,6 +217,78 @@ b2World_SetGravity(world.id(), {0.0f, 10.0f});
 
 Filters are upstream's 64-bit `b2Filter` in `b2ShapeDef`. Fixed rotation uses
 upstream motion locks.
+
+## Drag
+
+`startDrag(rb, position)` grabs a dynamic RigidBody2D at a world pixel position.
+`updateDrag(position)` moves its target in world pixels; `endDrag()` releases it.
+The helper uses the v3.2 sample's kinematic cursor and motor-joint spring:
+7.5 Hz, damping ratio 1, maximum spring force 100 × body mass × gravity
+magnitude, and angular friction torque 0.25 × sqrt(inertia / mass) × mass ×
+gravity magnitude. The cursor follows its target during `world.update()`.
+
+Wire the existing `tcApp` body to press, move, and release:
+
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    world.startDrag(rb, e.pos);
+}
+```
+
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    world.updateDrag(e.pos);
+}
+```
+
+```cpp
+void mouseReleased(const MouseEventArgs&) override {
+    world.endDrag();
+}
+```
+
+Each World has one drag. Starting again replaces it, and releasing without a
+drag does nothing. Null targets, bodies from another World, and static or
+kinematic bodies do not start a drag; pass a dynamic Mod from this World:
+
+```cpp
+rb = node->addMod<box2d::RigidBody2D>(world, b2_dynamicBody);
+rb->addBox(80, 40);
+world.startDrag(rb, rb->getPosition());
+```
+
+Mod or Node destruction, World re-setup, and World destruction release the
+drag automatically. A saved Mod pointer is still yours to clear when removing
+its owner:
+
+```cpp
+node->removeMod<box2d::RigidBody2D>();
+rb = nullptr;
+```
+
+As in the upstream sample, zero gravity gives zero spring force. Set nonzero
+gravity before starting a drag that should pull a body:
+
+```cpp
+world.setGravity(Vec2(0, 300));
+world.startDrag(rb, rb->getPosition());
+```
+
+## Workers
+
+Workers default to one and use Box2D's built-in task system. Call it before
+setup(). If you change it later, it takes effect at the next setup().
+
+```cpp
+world.setWorkerCount(4);
+world.setup();
+```
+
+More workers can help scenes with many awake bodies; small scenes may gain
+nothing because scheduling has a cost.
+
+`world.update()` remains synchronous. Worker threads run Box2D tasks inside
+the step; Node sync and event listeners run afterward on the calling thread.
 
 ## Events
 

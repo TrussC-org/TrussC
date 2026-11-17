@@ -33,8 +33,13 @@ public:
     void setSubSteps(int count);
     // Pixels per second squared; may also be set before setup().
     void setGravity(const tc::Vec2& gravity);
-    // Upstream built-in task system; defaults to one, changeable at runtime.
+    // Built-in worker count defaults to one; changes take effect at the next setup().
     void setWorkerCount(int count);
+    // Pixel coordinates; one dynamic managed body at a time. Replaces any drag.
+    void startDrag(RigidBody2D* body, tc::Vec2 position);
+    void updateDrag(tc::Vec2 position);
+    // Safe to call without an active drag.
+    void endDrag();
     b2WorldId id() const { return worldId_; }
 
 private:
@@ -44,7 +49,12 @@ private:
         uint64_t epoch = 0;
         b2WorldId worldId = b2_nullWorldId;
         std::unordered_set<RigidBody2D*> bodies;
+        b2BodyId draggedBody = b2_nullBodyId;
+        b2BodyId cursorBody = b2_nullBodyId;
+        b2JointId dragJoint = b2_nullJointId;
+        b2Vec2 dragTarget{};
     };
+    static void clearDrag(Owners& owners);
     std::shared_ptr<Owners> owners_ = std::make_shared<Owners>();
     b2WorldId worldId_ = b2_nullWorldId;
     tc::Vec2 gravity_{0.0f, 300.0f}; // 10 m/s^2 downward in TrussC's y-down pixels
