@@ -14245,44 +14245,66 @@ _SOKOL_PRIVATE bool _sapp_tc_android_init_egl(void) {
         return false;
     }
     EGLint alpha_size = _sapp_tc.desc.alpha ? 8 : 0;
-    const EGLint cfg_attributes[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, alpha_size,
-        EGL_DEPTH_SIZE, 16,
-        EGL_STENCIL_SIZE, 0,
-        EGL_NONE,
-    };
-    // Bound (platform): the Android EGL SDK writes only the requested number of configuration handles into this fixed array. Overflow omits further configurations.
-    EGLConfig available_cfgs[32];
-    EGLint cfg_count;
-    eglChooseConfig(display, cfg_attributes, available_cfgs, 32, &cfg_count);
-    SOKOL_ASSERT(cfg_count > 0);
-    SOKOL_ASSERT(cfg_count <= 32);
-
-    /* find config with 8-bit rgb buffer if available, ndk sample does not trust egl spec */
-    EGLConfig config;
-    bool exact_cfg_found = false;
-    for (int i = 0; i < cfg_count; ++i) {
-        EGLConfig c = available_cfgs[i];
-        EGLint r, g, b, a, d;
-        if (eglGetConfigAttrib(display, c, EGL_RED_SIZE, &r) == EGL_TRUE &&
-            eglGetConfigAttrib(display, c, EGL_GREEN_SIZE, &g) == EGL_TRUE &&
-            eglGetConfigAttrib(display, c, EGL_BLUE_SIZE, &b) == EGL_TRUE &&
-            eglGetConfigAttrib(display, c, EGL_ALPHA_SIZE, &a) == EGL_TRUE &&
-            eglGetConfigAttrib(display, c, EGL_DEPTH_SIZE, &d) == EGL_TRUE &&
-            r == 8 && g == 8 && b == 8 && (alpha_size == 0 || a == alpha_size) && d == 16) {
-            exact_cfg_found = true;
-            config = c;
+    // [TrussC] Android screen stencil: deliberately diverge from upstream's 16/0.
+    // Try 24/8, then any config with stencil >= 8, then the old 16/0 request.
+    EGLConfig config = 0;
+    int best_score = 0;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (config && (best_score == 0 || attempt == 2)) {
             break;
         }
+        const EGLint cfg_attributes[] = {
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_ALPHA_SIZE, alpha_size,
+            EGL_DEPTH_SIZE, attempt == 0 ? 24 : (attempt == 1 ? 0 : 16),
+            EGL_STENCIL_SIZE, attempt < 2 ? 8 : 0,
+            EGL_NONE,
+        };
+        // Bound (platform): the Android EGL SDK writes only the requested number of configuration handles into this fixed array. Overflow omits further configurations.
+        EGLConfig available_cfgs[32];
+        EGLint cfg_count = 0;
+        if (eglChooseConfig(display, cfg_attributes, available_cfgs, 32, &cfg_count) != EGL_TRUE) {
+            return false;
+        }
+        SOKOL_ASSERT(cfg_count <= 32);
+        // Prefer exact 24/8 and 8-bit RGB; otherwise use the closest depth/stencil.
+        // On the final fallback retain the old exact 8-bit RGB / depth-16 choice.
+        for (int i = 0; i < cfg_count; ++i) {
+            EGLConfig c = available_cfgs[i];
+            EGLint r, g, b, a, d, stencil;
+            if (eglGetConfigAttrib(display, c, EGL_RED_SIZE, &r) != EGL_TRUE ||
+                eglGetConfigAttrib(display, c, EGL_GREEN_SIZE, &g) != EGL_TRUE ||
+                eglGetConfigAttrib(display, c, EGL_BLUE_SIZE, &b) != EGL_TRUE ||
+                eglGetConfigAttrib(display, c, EGL_ALPHA_SIZE, &a) != EGL_TRUE ||
+                eglGetConfigAttrib(display, c, EGL_DEPTH_SIZE, &d) != EGL_TRUE ||
+                eglGetConfigAttrib(display, c, EGL_STENCIL_SIZE, &stencil) != EGL_TRUE) {
+                continue;
+            }
+            const bool color_matches = r == 8 && g == 8 && b == 8 && (alpha_size == 0 || a == alpha_size);
+            const int score = attempt == 2 ? (color_matches && d == 16 ? 0 : 1) :
+                (d == 24 && stencil == 8 ? 0 : 10000) + (color_matches ? 0 : 1000) +
+                (d > 24 ? d - 24 : 24 - d) + (stencil - 8);
+            if (!config || score < best_score) {
+                best_score = score;
+                config = c;
+            }
+        }
     }
-    if (!exact_cfg_found) {
-        config = available_cfgs[0];
+    if (!config) {
+        return false;
     }
+    EGLint stencil_size = 0;
+    if (eglGetConfigAttrib(display, config, EGL_STENCIL_SIZE, &stencil_size) != EGL_TRUE) {
+        return false;
+    }
+    if (stencil_size == 0) {
+        _SAPP_WARN_MSG(OK, "Android EGL config has no stencil buffer; screen StencilDesc requires a stencil attachment");
+    }
+    // [TrussC] End Android screen stencil config selection.
 
     EGLint ctx_attributes[] = {
         EGL_CONTEXT_MAJOR_VERSION, _sapp_tc.desc.gl.major_version,
@@ -15150,7 +15172,14 @@ SOKOL_API_IMPL sapp_pixel_format sapp_color_format(void) {
 }
 
 SOKOL_API_IMPL sapp_pixel_format sapp_depth_format(void) {
-    return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    // [TrussC] Report the chosen Android EGL attachment to environment/swapchain.
+    EGLint stencil_size = 0;
+    if (_sapp_tc.android.display != EGL_NO_DISPLAY && _sapp_tc.android.config &&
+        eglGetConfigAttrib(_sapp_tc.android.display, _sapp_tc.android.config,
+            EGL_STENCIL_SIZE, &stencil_size) == EGL_TRUE && stencil_size > 0) {
+        return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    }
+    return SAPP_PIXELFORMAT_DEPTH;
 }
 
 SOKOL_API_IMPL int sapp_sample_count(void) {

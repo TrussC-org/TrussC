@@ -728,6 +728,24 @@ the EGL config supports both window and pbuffer surfaces. Cleanup-called gating
 prevents duplicate cleanup on destruction. The API 36 predictive-Back manifest requirement and the current
 API 35 template are documented in the en/ja/ko reference source.
 
+### Android default framebuffer stencil (2026-11-17)
+
+**Classification:** KEEP decided by owner (Android screen stencil).
+
+**Code locations:** `_sapp_tc_android_init_egl`, Android `sapp_depth_format`
+(`// [TrussC] Android screen stencil`, `// [TrussC] Report the chosen Android EGL attachment`).
+
+**Planned slice:** none; retain the current behavior.
+
+Deliberately diverge from upstream sokol_app's Android depth-16/stencil-0
+request: prefer depth-24/stencil-8, then the closest available stencil >= 8
+configuration, then the old depth-16/stencil-0 selection.
+Keep window and pbuffer support for cleanup. Warn through the existing Android
+sokol logger if the chosen config has no stencil. The Android depth-format
+query reports DEPTH_STENCIL only when the selected EGL config has stencil,
+otherwise DEPTH; existing environment/swapchain translation and screen
+RenderTarget metadata consume that value without a new fork API.
+
 ### Android display density
 
 **Classification:** KEEP decided by owner (density/160).
