@@ -41900,6 +41900,12 @@ When decoding cannot keep up, lag is bounded by the keyframe interval and by how
 ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
 ```
 
+Forward catch-up jumps use the container's seek index. A file without one (for example some Matroska files) is only decoded forward, without jumps. Remux it to MP4 without re-encoding:
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
 When recording with `VideoWriter`, set `VideoRecordSettings::keyframeInterval` in `tcApp::setup()` before passing the settings to `open()` (in frames; `30` is one second at 30 fps):
 
 ```cpp
@@ -41926,6 +41932,12 @@ void tcApp::setup() {
 ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
 ```
 
+先へのジャンプはコンテナのシーク用インデックスを使います。インデックスのないファイル（一部の Matroska など）ではジャンプせず、先へデコードするだけになります。再エンコードせずに MP4 へ入れ替えてください。
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
 `VideoWriter` で録画する場合は、`tcApp::setup()` で `open()` に設定を渡す前に `VideoRecordSettings::keyframeInterval` を指定します。単位はフレームで、30 fps の場合、`30` は1秒です。
 
 ```cpp
@@ -41950,6 +41962,12 @@ void tcApp::setup() {
 
 ```sh
 ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+앞으로의 점프는 컨테이너의 탐색 인덱스를 사용합니다. 인덱스가 없는 파일(일부 Matroska 등)에서는 점프하지 않고 앞으로 디코딩만 합니다. 재인코딩 없이 MP4로 바꿉니다.
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
 ```
 
 `VideoWriter`로 녹화할 때는 `tcApp::setup()`에서 `open()`에 설정을 전달하기 전에 `VideoRecordSettings::keyframeInterval`을 지정합니다. 단위는 프레임이며 30 fps에서 `30`은 1초입니다.
