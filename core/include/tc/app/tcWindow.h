@@ -18,6 +18,7 @@
 
 #include "internal/tcWindowRuntime.h"
 #include "tcExit.h"
+#include "../events/tcInputEvent.h"
 
 namespace trussc {
 
@@ -75,6 +76,10 @@ public:
 
     // This window's event stream (mousePressed / keyPressed / draw / ...).
     CoreEvents& events() { return events_; }
+
+    // Positions use this App's content coordinates (logical points, or pixels
+    // in pixelPerfect mode). Returns the existing Runtime gate acceptance.
+    bool injectInput(const InputEvent& event, const std::string& tag = {});
 
     // Request closure at the next safe boundary. Pending replacement is
     // canceled. App ending and owner retirement precede native/GPU disposal.

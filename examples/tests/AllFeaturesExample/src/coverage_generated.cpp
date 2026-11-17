@@ -1928,6 +1928,35 @@ struct Cover_Image : af::Scope<Image> {
     }
 };
 
+struct Cover_InputEvent : af::Scope<InputEvent> {
+    ~Cover_InputEvent(); // Never instantiated.
+    static void run() {
+        (void)af::val<InputEvent>().keyPressed(af::val<int>(), af::val<InputModifiers>(), af::val<bool>());
+        (void)af::val<InputEvent>().keyPressed(af::val<const KeyEventArgs>());
+        (void)af::val<InputEvent>().keyReleased(af::val<int>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().keyReleased(af::val<const KeyEventArgs>());
+        (void)af::val<InputEvent>().mouseMoved(af::val<Vec2>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().mousePressed(af::val<Vec2>(), af::val<MouseButton>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().mousePressed(af::val<const MouseEventArgs>());
+        (void)af::val<InputEvent>().mouseReleased(af::val<Vec2>(), af::val<MouseButton>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().mouseReleased(af::val<const MouseEventArgs>());
+        (void)af::val<InputEvent>().mouseScrolled(af::val<Vec2>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().touchMoved(af::val<const TouchEventArgs>());
+        (void)af::val<InputEvent>().touchPressed(af::val<const TouchEventArgs>());
+        (void)af::val<InputEvent>().touchReleased(af::val<const TouchEventArgs>());
+    }
+};
+
+struct Cover_InputModifiers : af::Scope<InputModifiers> {
+    ~Cover_InputModifiers(); // Never instantiated.
+    static void run() {
+        (void)af::val<InputModifiers>().alt;
+        (void)af::val<InputModifiers>().ctrl;
+        (void)af::val<InputModifiers>().shift;
+        (void)af::val<InputModifiers>().super;
+    }
+};
+
 struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
     ~Cover_JsonReadReflector(); // Never instantiated.
     static void run() {
@@ -1988,9 +2017,11 @@ struct Cover_KeyEventArgs : af::Scope<KeyEventArgs> {
         (void)af::val<KeyEventArgs>().alt;
         (void)af::val<KeyEventArgs>().consumed;
         (void)af::val<KeyEventArgs>().ctrl;
+        (void)af::val<KeyEventArgs>().injected;
         (void)af::val<KeyEventArgs>().isRepeat;
         (void)af::val<KeyEventArgs>().key;
         (void)af::val<KeyEventArgs>().shift;
+        (void)af::val<KeyEventArgs>().sourceTag;
         (void)af::val<KeyEventArgs>().super;
     }
 };
@@ -2388,8 +2419,10 @@ struct Cover_MouseDragEventArgs : af::Scope<MouseDragEventArgs> {
         (void)af::val<MouseDragEventArgs>().deltaY;
         (void)af::val<MouseDragEventArgs>().globalDelta;
         (void)af::val<MouseDragEventArgs>().globalPos;
+        (void)af::val<MouseDragEventArgs>().injected;
         (void)af::val<MouseDragEventArgs>().pos;
         (void)af::val<MouseDragEventArgs>().shift;
+        (void)af::val<MouseDragEventArgs>().sourceTag;
         (void)af::val<MouseDragEventArgs>().super;
         (void)af::val<MouseDragEventArgs>().syncLegacy();
         (void)af::val<MouseDragEventArgs>().x;
@@ -2405,8 +2438,10 @@ struct Cover_MouseEventArgs : af::Scope<MouseEventArgs> {
         (void)af::val<MouseEventArgs>().consumed;
         (void)af::val<MouseEventArgs>().ctrl;
         (void)af::val<MouseEventArgs>().globalPos;
+        (void)af::val<MouseEventArgs>().injected;
         (void)af::val<MouseEventArgs>().pos;
         (void)af::val<MouseEventArgs>().shift;
+        (void)af::val<MouseEventArgs>().sourceTag;
         (void)af::val<MouseEventArgs>().super;
         (void)af::val<MouseEventArgs>().syncLegacy();
         (void)af::val<MouseEventArgs>().x;
@@ -2425,8 +2460,10 @@ struct Cover_MouseMoveEventArgs : af::Scope<MouseMoveEventArgs> {
         (void)af::val<MouseMoveEventArgs>().deltaY;
         (void)af::val<MouseMoveEventArgs>().globalDelta;
         (void)af::val<MouseMoveEventArgs>().globalPos;
+        (void)af::val<MouseMoveEventArgs>().injected;
         (void)af::val<MouseMoveEventArgs>().pos;
         (void)af::val<MouseMoveEventArgs>().shift;
+        (void)af::val<MouseMoveEventArgs>().sourceTag;
         (void)af::val<MouseMoveEventArgs>().super;
         (void)af::val<MouseMoveEventArgs>().syncLegacy();
         (void)af::val<MouseMoveEventArgs>().x;
@@ -3559,11 +3596,13 @@ struct Cover_ScrollEventArgs : af::Scope<ScrollEventArgs> {
         (void)af::val<ScrollEventArgs>().consumed;
         (void)af::val<ScrollEventArgs>().ctrl;
         (void)af::val<ScrollEventArgs>().globalPos;
+        (void)af::val<ScrollEventArgs>().injected;
         (void)af::val<ScrollEventArgs>().pos;
         (void)af::val<ScrollEventArgs>().scroll;
         (void)af::val<ScrollEventArgs>().scrollX;
         (void)af::val<ScrollEventArgs>().scrollY;
         (void)af::val<ScrollEventArgs>().shift;
+        (void)af::val<ScrollEventArgs>().sourceTag;
         (void)af::val<ScrollEventArgs>().super;
         (void)af::val<ScrollEventArgs>().syncLegacy();
     }
@@ -4220,7 +4259,9 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
     static void run() {
         (void)af::val<TouchEventArgs>().cancelled;
         (void)af::val<const TouchEventArgs>().id();
+        (void)af::val<TouchEventArgs>().injected;
         (void)af::val<TouchEventArgs>().numTouches;
+        (void)af::val<TouchEventArgs>().sourceTag;
         (void)af::val<TouchEventArgs>().touches;
         (void)af::val<const TouchEventArgs>().x();
         (void)af::val<const TouchEventArgs>().y();
@@ -5138,6 +5179,7 @@ struct Cover_Window : af::Scope<Window> {
 #endif
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
+        (void)af::val<Window>().injectInput(af::val<const InputEvent>(), af::val<const std::string>());
         (void)af::val<const Window>().isFocused();
         (void)af::val<const Window>().isFullscreen();
         (void)af::val<const Window>().isOccluded();
@@ -5380,6 +5422,8 @@ void af::coverGenerated() {
     af_generated::Cover_IVec3::run();
     af_generated::Cover_IesProfile::run();
     af_generated::Cover_Image::run();
+    af_generated::Cover_InputEvent::run();
+    af_generated::Cover_InputModifiers::run();
     af_generated::Cover_JsonReadReflector::run();
     af_generated::Cover_JsonWriteReflector::run();
     af_generated::Cover_KeyEventArgs::run();

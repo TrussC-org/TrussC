@@ -20,6 +20,71 @@ Window::Window()
     internal::WindowRequestAccess::prepareInitialBindings(*this);
 }
 
+bool Window::injectInput(const InputEvent& input, const std::string& tag) {
+    // Read the destination's current DPI without selecting another window.
+    auto metadata = binding_.metadata;
+    if (binding_.operations && binding_.operations->readMetadata)
+        binding_.operations->readMetadata(binding_.handle, binding_.user, metadata);
+    const float dpi = metadata.dpi_scale > 0 ? metadata.dpi_scale : ctx_.dpiScale;
+    const float factor = internal::pixelPerfectMode() ? 1.0f : dpi;
+    sapp_event event{};
+    const auto& mods = input.mods_;
+    event.modifiers = (mods.shift ? SAPP_MODIFIER_SHIFT : 0) |
+        (mods.ctrl ? SAPP_MODIFIER_CTRL : 0) | (mods.alt ? SAPP_MODIFIER_ALT : 0) |
+        (mods.super ? SAPP_MODIFIER_SUPER : 0);
+    // Keep held buttons on ordinary moves; the Runtime owns drag synthesis.
+    for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
+        if (ctx_.pressedMouseButtons & (1u << button)) event.modifiers |= SAPP_MODIFIER_LMB << button;
+    event.mouse_x = input.pos_.x * factor;
+    event.mouse_y = input.pos_.y * factor;
+    event.mouse_button = static_cast<sapp_mousebutton>(input.button_);
+    // Keep invalid integer keys representable until the Runtime gate rejects them.
+    event.key_code = input.key_ < 0 ? SAPP_KEYCODE_INVALID : static_cast<sapp_keycode>(input.key_);
+    event.key_repeat = input.repeat_;
+    event.scroll_x = input.scroll_.x;
+    event.scroll_y = input.scroll_.y;
+    using Kind = InputEvent::Kind;
+    switch (input.kind_) {
+        case Kind::KeyPressed: event.type = SAPP_EVENTTYPE_KEY_DOWN; break;
+        case Kind::KeyReleased: event.type = SAPP_EVENTTYPE_KEY_UP; break;
+        case Kind::MousePressed:
+            event.type = SAPP_EVENTTYPE_MOUSE_DOWN;
+            break;
+        case Kind::MouseReleased:
+            event.type = SAPP_EVENTTYPE_MOUSE_UP;
+            break;
+        case Kind::MouseMoved: event.type = SAPP_EVENTTYPE_MOUSE_MOVE; break;
+        case Kind::MouseScrolled: event.type = SAPP_EVENTTYPE_MOUSE_SCROLL; break;
+        case Kind::TouchPressed: event.type = SAPP_EVENTTYPE_TOUCHES_BEGAN; break;
+        case Kind::TouchMoved: event.type = SAPP_EVENTTYPE_TOUCHES_MOVED; break;
+        case Kind::TouchReleased:
+            event.type = input.touch_.cancelled ? SAPP_EVENTTYPE_TOUCHES_CANCELLED : SAPP_EVENTTYPE_TOUCHES_ENDED;
+            break;
+    }
+    if (event.type == SAPP_EVENTTYPE_MOUSE_MOVE) {
+        const float basis = internal::pixelPerfectMode() ? dpi : 1.0f;
+        event.mouse_dx = ctx_.pointerValid ? (input.pos_.x - ctx_.pointerLogicalX * basis) * factor : 0;
+        event.mouse_dy = ctx_.pointerValid ? (input.pos_.y - ctx_.pointerLogicalY * basis) * factor : 0;
+    }
+    if (event.type == SAPP_EVENTTYPE_MOUSE_DOWN || event.type == SAPP_EVENTTYPE_MOUSE_UP) {
+        const int button = static_cast<int>(input.button_);
+        if (button >= SAPP_MOUSEBUTTON_LEFT && button <= SAPP_MOUSEBUTTON_MIDDLE) {
+            if (event.type == SAPP_EVENTTYPE_MOUSE_DOWN) event.modifiers |= SAPP_MODIFIER_LMB << button;
+            else event.modifiers &= ~(SAPP_MODIFIER_LMB << button);
+        }
+    }
+    event.num_touches = input.touch_.numTouches;
+    // Bound (platform): copy at most MAX_TOUCHES array entries; the gate rejects the unchanged invalid count.
+    for (int i = 0; i < event.num_touches && i < TouchEventArgs::MAX_TOUCHES; ++i) {
+        const auto& touch = input.touch_.touches[i];
+        event.touches[i].identifier = static_cast<uintptr_t>(touch.id);
+        event.touches[i].pos_x = touch.x * factor;
+        event.touches[i].pos_y = touch.y * factor;
+        event.touches[i].changed = touch.changed;
+    }
+    return internal::injectWindowEvent(*this, &event, false, tag, &input.touch_);
+}
+
 void Window::setVisible(bool visible) {
     if (!isOpen()) return;
     if constexpr (!internal::supportsSecondaryWindows()) {
@@ -1746,6 +1811,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             ctx.mouseButton = -1;
             ctx.mousePressed = false;
             MouseEventArgs args;
+            args.injected = delivery.injected;
+            args.sourceTag = delivery.sourceTag;
             args.pos = args.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
             args.button = button;
             args.shift = hasModShift;
@@ -1791,6 +1858,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     ctx.keysPressed.clear();
                     for (int key : heldKeys) {
                         KeyEventArgs args;
+                        args.injected = delivery.injected;
+                        args.sourceTag = delivery.sourceTag;
                         args.key = key;
                         window.events().keyReleased.notify(args);
                     }
@@ -1803,6 +1872,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_KEY_DOWN: {
                 // Notify event system
                 KeyEventArgs args;
+                args.injected = delivery.injected;
+                args.sourceTag = delivery.sourceTag;
                 args.key = ev->key_code;
                 args.isRepeat = ev->key_repeat;
                 args.shift = hasModShift;
@@ -1821,6 +1892,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 // A late OS key-up must not repeat a focus-loss release.
                 if (ctx.keysPressed.erase(ev->key_code) == 0) break;
                 KeyEventArgs args;
+                args.injected = delivery.injected;
+                args.sourceTag = delivery.sourceTag;
                 args.key = ev->key_code;
                 args.isRepeat = false;
                 args.shift = hasModShift;
@@ -1841,6 +1914,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
 
                 // App-level args: no node transform, so pos == globalPos.
                 MouseEventArgs args;
+                args.injected = delivery.injected;
+                args.sourceTag = delivery.sourceTag;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                 args.button = ev->mouse_button;
                 args.shift = hasModShift;
@@ -1879,6 +1954,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 // Rich carrier (internal::MouseEventRaw); the per-kind public type is
                 // built from it at the boundary (internal::toDragArgs / internal::toMoveArgs).
                 internal::MouseEventRaw args;
+                args.injected = delivery.injected;
+                args.sourceTag = delivery.sourceTag;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                 args.delta = args.globalDelta = delta;
                 args.shift = hasModShift;
@@ -1902,6 +1979,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 break;
             case SAPP_EVENTTYPE_MOUSE_SCROLL: {
                 ScrollEventArgs args;
+                args.injected = delivery.injected;
+                args.sourceTag = delivery.sourceTag;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                 args.scroll = Vec2(ev->scroll_x, ev->scroll_y);
                 args.shift = hasModShift;
@@ -1921,6 +2000,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
                 static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
                 TouchEventArgs touchArgs;
+                touchArgs.injected = delivery.injected;
+                touchArgs.sourceTag = delivery.sourceTag;
                 touchArgs.numTouches = std::max(0, ev->num_touches);
                 // Bound (platform): OS touch events must fit the SDK-sized event array. Overflow clamps the delivered touch count.
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
@@ -1930,6 +2011,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
                     touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
                     touchArgs.touches[i].changed = ev->touches[i].changed;
+                    if (delivery.touch) touchArgs.touches[i].pressure = delivery.touch->touches[i].pressure;
                 }
 
                 if (phase == internal::TouchPhase::Began) window.events().touchPressed.notify(touchArgs);
@@ -1964,6 +2046,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     ctx.mousePressed = true;
 
                     MouseEventArgs margs;
+                    margs.injected = delivery.injected;
+                    margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.button = MOUSE_BUTTON_LEFT;
                     margs.syncLegacy();
@@ -1972,6 +2056,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     const Vec2 delta = touchDelta;
 
                     internal::MouseEventRaw margs;
+                    margs.injected = delivery.injected;
+                    margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.delta = margs.globalDelta = delta;
                     margs.button = MOUSE_BUTTON_LEFT;
@@ -1985,6 +2071,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     ctx.mousePressed = false;
 
                     MouseEventArgs margs;
+                    margs.injected = delivery.injected;
+                    margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.button = MOUSE_BUTTON_LEFT;
                     margs.syncLegacy();
@@ -2111,15 +2199,17 @@ static inline bool validInjectedWindowEvent(const sapp_event& e) {
 struct InjectedWindowEvent {
     Window* window;
     bool heldButtonSnapshot;
+    std::string sourceTag;
+    const TouchEventArgs* touch;
     bool pending = true;
 };
 thread_local InjectedWindowEvent* injectedWindowEvent = nullptr;
 }
-bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonSnapshot) {
+bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonSnapshot, const std::string& tag, const TouchEventArgs* touch) {
     const auto& binding = WindowRequestAccess::binding(window);
     if (!input || !validInjectedWindowEvent(*input) || !binding.operations || !binding.operations->sendEvent) return false;
     sapp_event event = *input;
-    InjectedWindowEvent injection{&window, heldButtonSnapshot};
+    InjectedWindowEvent injection{&window, heldButtonSnapshot, tag, touch};
     struct Scope {
         InjectedWindowEvent* previous = injectedWindowEvent;
         ~Scope() { injectedWindowEvent = previous; }
@@ -2192,6 +2282,8 @@ void enterWindowEvent(const sapp_event* event, sapp_tc_window handle, void* user
             injectedWindowEvent->pending = false;
             delivery.injected = true;
             delivery.heldButtonSnapshot = injectedWindowEvent->heldButtonSnapshot;
+            delivery.sourceTag = injectedWindowEvent->sourceTag;
+            delivery.touch = injectedWindowEvent->touch;
         }
         WindowEntryScope entry(*window, false, false, false);
         if (!entry) return;
