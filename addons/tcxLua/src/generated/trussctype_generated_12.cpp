@@ -151,90 +151,81 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["setWritingMode"] = &trussc::GlyphBatch::setWritingMode;
     }
     {
-        sol::usertype<trussc::MouseMoveEventArgs> t = lua->new_usertype<trussc::MouseMoveEventArgs>("MouseMoveEventArgs");
-        t["alt"] = &trussc::MouseMoveEventArgs::alt;
-        t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseMoveEventArgs::ctrl;
-        t["delta"] = &trussc::MouseMoveEventArgs::delta;
-        t["deltaX"] = &trussc::MouseMoveEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseMoveEventArgs::deltaY;
-        t["globalDelta"] = &trussc::MouseMoveEventArgs::globalDelta;
-        t["globalPos"] = &trussc::MouseMoveEventArgs::globalPos;
-        t["injected"] = &trussc::MouseMoveEventArgs::injected;
-        t["pos"] = &trussc::MouseMoveEventArgs::pos;
-        t["shift"] = &trussc::MouseMoveEventArgs::shift;
-        t["sourceTag"] = &trussc::MouseMoveEventArgs::sourceTag;
-        t["super"] = &trussc::MouseMoveEventArgs::super;
-        t["x"] = &trussc::MouseMoveEventArgs::x;
-        t["y"] = &trussc::MouseMoveEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
-    }
-    {
-        auto constructors = tcxLuaConstructors<trussc::ColorOKLab
-            , trussc::ColorOKLab()
-            , trussc::ColorOKLab(float, float, float)
-            , trussc::ColorOKLab(float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::Logger
+            , trussc::Logger()
         >();
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab", constructors, sol::call_constructor, constructors);
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
+        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
+        t["onLog"] = tcx_lua_detail::eventProperty<trussc::Logger>(&trussc::Logger::onLog);
+        t["closeFile"] = &trussc::Logger::closeFile;
+        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
+        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
+        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
+        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
+        t["isFileOpen"] = &trussc::Logger::isFileOpen;
+        t["log"] = &trussc::Logger::log;
+        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
+        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
+        t["setLogFile"] = &trussc::Logger::setLogFile;
+        t["setLogLevel"] = &trussc::Logger::setLogLevel;
+        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
+    }
+    lua->new_usertype<trussc::BlendFactor>("BlendFactor",
+        sol::meta_function::equal_to, [](trussc::BlendFactor a, trussc::BlendFactor b){ return a == b; },
+        "Zero", sol::var(trussc::BlendFactor::Zero),
+        "One", sol::var(trussc::BlendFactor::One),
+        "SrcColor", sol::var(trussc::BlendFactor::SrcColor),
+        "OneMinusSrcColor", sol::var(trussc::BlendFactor::OneMinusSrcColor),
+        "SrcAlpha", sol::var(trussc::BlendFactor::SrcAlpha),
+        "OneMinusSrcAlpha", sol::var(trussc::BlendFactor::OneMinusSrcAlpha),
+        "DstColor", sol::var(trussc::BlendFactor::DstColor),
+        "OneMinusDstColor", sol::var(trussc::BlendFactor::OneMinusDstColor),
+        "DstAlpha", sol::var(trussc::BlendFactor::DstAlpha),
+        "OneMinusDstAlpha", sol::var(trussc::BlendFactor::OneMinusDstAlpha));
+    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
+        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
+        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
+        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
+        "Lines", sol::var(trussc::PrimitiveMode::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
+        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
+        "Points", sol::var(trussc::PrimitiveMode::Points));
+    {
+        sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
+        t["error"] = &trussc::SaveResult::error;
+        t["message"] = &trussc::SaveResult::message;
+        t["ok"] = &trussc::SaveResult::ok;
+        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
+        t["success"] = &trussc::SaveResult::success;
+    }
+    lua->new_usertype<trussc::BlendOp>("BlendOp",
+        sol::meta_function::equal_to, [](trussc::BlendOp a, trussc::BlendOp b){ return a == b; },
+        "Add", sol::var(trussc::BlendOp::Add),
+        "Subtract", sol::var(trussc::BlendOp::Subtract),
+        "ReverseSubtract", sol::var(trussc::BlendOp::ReverseSubtract),
+        "Minimum", sol::var(trussc::BlendOp::Minimum),
+        "Maximum", sol::var(trussc::BlendOp::Maximum));
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    {
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["accuracy"] = &trussc::Location::accuracy;
+        t["altitude"] = &trussc::Location::altitude;
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
     }
     {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["name"] = &trussc::Platform::name;
+        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
+        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
+        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
     }
     {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
-    }
-    {
-        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
-        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
-        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
-        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
-        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
-    }
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
-    {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
-    }
-    {
-        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
-        t["message"] = &trussc::MicStartResult::message;
-        t["success"] = &trussc::MicStartResult::success;
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        t["message"] = &trussc::UdpErrorEventArgs::message;
     }
     {
         sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");

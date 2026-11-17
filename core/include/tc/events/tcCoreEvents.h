@@ -38,6 +38,8 @@ public:
     Event<KeyEventArgs> keyPressed{EventPriority::BeforeApp};
     Event<KeyEventArgs> keyReleased{EventPriority::BeforeApp};
 
+    Event<CharEventArgs> charInput{EventPriority::BeforeApp};
+
     // Mouse (one struct per kind so no field is ever meaningless)
     Event<MouseEventArgs> mousePressed{EventPriority::BeforeApp};
     Event<MouseEventArgs> mouseReleased{EventPriority::BeforeApp};
