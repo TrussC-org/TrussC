@@ -513,28 +513,42 @@ Shader files using compute features (dispatch or storage buffers) use the suffix
 
 ### Experimental Vulkan build (Linux)
 
-Work in progress: not usable yet. Linux apps can't build with this switch until the sokol app layer gains Vulkan support.
-
-Configure an existing Linux CMake project with `-DTC_GFX_BACKEND=vulkan` to
-select the experimental backend. Leaving this cache setting empty keeps the
-platform default. The switch generates SPIR-V with the pinned sokol-shdc compiler.
-There is no working Vulkan app path yet; use the default Linux backend to build
-and run apps today:
+The experimental Linux Vulkan backend builds and presents a single X11 window
+with depth and MSAA. The production Runtime clear-color smoke passes 16 frames
+on lavapipe under Xvfb at 1 sample and 4x MSAA; emptyExample also presents and
+exits cleanly. Configure an existing Linux CMake project to select Vulkan and
+generate SPIR-V with the pinned sokol-shdc:
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND=
+cmake --preset linux -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
 
-The experimental Vulkan path allows one native window. Every additional
-`createWindow()` request returns `nullptr` and logs a Warning. Use the launch
-window in your tcApp:
+StorageBuffer readback, byte/float Fbo readback and screenshot/window capture
+are not supported on Vulkan yet (2b or later). There is no API to enable them.
+StorageBuffer asynchronous reads deliver deferred failure; synchronous reads
+return failure. Fbo readback and window capture warn on every call and return
+false. MCP capture and image analysis report the failure; Fbo/window recording
+stops at its first readback failure. Use the default GL backend when these
+features are needed:
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
+
+The Vulkan backend allows one native window. Every additional `createWindow()`
+request returns `nullptr` and logs a Warning. Use the launch window in your tcApp:
 
 ```cpp
 void tcApp::setup() {
     getWindow()->setTitle("Vulkan single window");
 }
 ```
+
+Validation layers, stencil reference, multiwindow, real GPUs and comprehensive
+live resize/close verification remain for step 2b. These need later
+implementation or testing on the target hardware.
 
 ### macOS Deployment Target
 

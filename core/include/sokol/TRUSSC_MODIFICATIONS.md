@@ -69,6 +69,38 @@ follow the settled event boundary. R1/R2/R4 rollback slices and iOS BC removal
 are canceled. V3D has only the conditional future removal stated below.
 Each implementation slice must fit 1–2 days; stop if it needs a new engine.
 
+## Linux Vulkan host (step 2a, 2026-11-17)
+
+`sokol_app_tc.h` ports the Vulkan device, Xlib surface, swapchain, depth/MSAA,
+acquire and present code from upstream `93aa187b`. The existing Vulkan gfx
+backend submits rendering; `sapp_get_environment()` and `sapp_acquire_swapchain()`
+provide its real device, images, views and semaphores through sokol glue.
+
+TrussC shares its X11 window/event loop and native metadata with GL. Vulkan
+surface operations replace only the GL context/drawable operations; the Runtime
+uses glue for the launch window. Acquisition is cached within a frame, and
+resize/out-of-date/suboptimal results recreate the swapchain. Shutdown waits
+for the device before releasing swapchain resources. Bound images are destroyed
+before their memory is freed. Validation layers and debug labels are deferred.
+
+Limits: one native window. The production Runtime smoke now links and passes
+16 frames on lavapipe/Xvfb at 1 sample and 4x MSAA, including second-window
+refusal; emptyExample presents for three seconds and exits cleanly on a
+scripted close.
+The Linux X11 adapter and class metadata guards include Vulkan, with matching
+adapter/stub selection. GL readback includes remain selected only for GL/GLES.
+
+Not supported on Vulkan yet (2b or later): StorageBuffer readback, byte/float
+Fbo readback and screenshot/window capture, including dependent MCP capture,
+recording and image analysis. No API enables these features yet. StorageBuffer
+retains its synchronous failure and deferred asynchronous failure. Linux Fbo
+readback and window capture warn on every call and return false; recording
+stops at the first readback failure. Default GL/GLES paths are retained.
+
+The existing #1543 guard refuses additional windows. Validation layers, real
+GPUs/displays, multiwindow, stencil reference and comprehensive live resize/close
+verification remain for step 2b.
+
 ## Files and platform scope
 
 | File | Ownership |
