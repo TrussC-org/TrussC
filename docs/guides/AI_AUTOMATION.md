@@ -245,6 +245,17 @@ reacts to injection just like it does to the keyboard. `tc_key_press` /
 `tc_key_release` reply with the resulting `heldKeys`, which is the quickest way
 to see the state an app is actually looking at.
 
+Character input is separate from key presses: `events().charInput` and
+`App::charInput(const CharEventArgs&)` receive one Unicode scalar per event.
+The MCP key tools do not send text, and there is no MCP character-input tool.
+A windowed tcApp can send a character directly:
+
+```cpp
+void tcApp::setup() {
+    getWindow()->injectInput(InputEvent::charInput(U'é'), "test");
+}
+```
+
 The modifier flags are shorthand for pressing that modifier's **own key**
 (`shift` → keycode 340, `ctrl` → 341, `alt` → 342, `super` → 343), the way a
 real keyboard does it — pair the same flag on press and release. To hold a

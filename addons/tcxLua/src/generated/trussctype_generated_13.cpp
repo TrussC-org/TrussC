@@ -104,16 +104,19 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::usertype<trussc::InputEvent> t = lua->new_usertype<trussc::InputEvent>("InputEvent");
-        t["keyPressed"] = sol::overload([](int key) { return trussc::InputEvent::keyPressed(key); }, [](int key, trussc::InputModifiers mods) { return trussc::InputEvent::keyPressed(key, mods); }, [](int key, trussc::InputModifiers mods, bool repeat) { return trussc::InputEvent::keyPressed(key, mods, repeat); }, [](const trussc::KeyEventArgs & event) { return trussc::InputEvent::keyPressed(event); });
-        t["keyReleased"] = sol::overload([](int key) { return trussc::InputEvent::keyReleased(key); }, [](int key, trussc::InputModifiers mods) { return trussc::InputEvent::keyReleased(key, mods); }, [](const trussc::KeyEventArgs & event) { return trussc::InputEvent::keyReleased(event); });
-        t["mouseMoved"] = sol::overload([](trussc::Vec2 pos) { return trussc::InputEvent::mouseMoved(pos); }, [](trussc::Vec2 pos, trussc::InputModifiers mods) { return trussc::InputEvent::mouseMoved(pos, mods); });
-        t["mousePressed"] = sol::overload([](trussc::Vec2 pos, trussc::MouseButton button) { return trussc::InputEvent::mousePressed(pos, button); }, [](trussc::Vec2 pos, trussc::MouseButton button, trussc::InputModifiers mods) { return trussc::InputEvent::mousePressed(pos, button, mods); }, [](const trussc::MouseEventArgs & event) { return trussc::InputEvent::mousePressed(event); });
-        t["mouseReleased"] = sol::overload([](trussc::Vec2 pos, trussc::MouseButton button) { return trussc::InputEvent::mouseReleased(pos, button); }, [](trussc::Vec2 pos, trussc::MouseButton button, trussc::InputModifiers mods) { return trussc::InputEvent::mouseReleased(pos, button, mods); }, [](const trussc::MouseEventArgs & event) { return trussc::InputEvent::mouseReleased(event); });
-        t["mouseScrolled"] = sol::overload([](trussc::Vec2 scroll) { return trussc::InputEvent::mouseScrolled(scroll); }, [](trussc::Vec2 scroll, trussc::InputModifiers mods) { return trussc::InputEvent::mouseScrolled(scroll, mods); });
-        t["touchMoved"] = &trussc::InputEvent::touchMoved;
-        t["touchPressed"] = &trussc::InputEvent::touchPressed;
-        t["touchReleased"] = &trussc::InputEvent::touchReleased;
+        auto constructors = tcxLuaConstructors<trussc::FullscreenShader
+            , trussc::FullscreenShader()
+        >();
+        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader", constructors, sol::call_constructor, constructors);
+        t["begin"] = &trussc::FullscreenShader::begin;
+        t["clear"] = &trussc::FullscreenShader::clear;
+        t["draw"] = &trussc::FullscreenShader::draw;
+        t["drawVertices"] = sol::overload([](trussc::FullscreenShader& self, int vertexCount) { return self.drawVertices(vertexCount); }, [](trussc::FullscreenShader& self, int vertexCount, int instanceCount) { return self.drawVertices(vertexCount, instanceCount); });
+        t["end"] = &trussc::FullscreenShader::end;
+        t["isLoaded"] = &trussc::FullscreenShader::isLoaded;
+        t["load"] = &trussc::FullscreenShader::load;
+        t["setTexture"] = sol::overload([](trussc::FullscreenShader& self, int slot, sg_image image, sg_sampler sampler) { return self.setTexture(slot, image, sampler); }, [](trussc::FullscreenShader& self, int slot, sg_view view, sg_sampler sampler) { return self.setTexture(slot, view, sampler); });
+        t["setUniform"] = sol::overload([](trussc::FullscreenShader& self, int slot, float value) { return self.setUniform(slot, value); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec2 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec3 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec4 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Color & c) { return self.setUniform(slot, c); }, [](trussc::FullscreenShader& self, int slot, const std::vector<float> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec2> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec3> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec4> & v) { return self.setUniform(slot, v); });
     }
     {
         sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
@@ -158,49 +161,51 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         "notify", sol::var(trussc::Beep::notify),
         "sweep", sol::var(trussc::Beep::sweep));
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["view"] = &trussc::CameraContext::view;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["backend"] = &trussc::AudioSettings::backend;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["device"] = &trussc::AudioSettings::device;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
     }
     {
-        sol::usertype<trussc::BlendDesc> t = lua->new_usertype<trussc::BlendDesc>("BlendDesc");
-        t["alpha"] = &trussc::BlendDesc::alpha;
-        t["premultiplySource"] = &trussc::BlendDesc::premultiplySource;
-        t["rgb"] = &trussc::BlendDesc::rgb;
-        t["addKeepAlpha"] = &trussc::BlendDesc::addKeepAlpha;
-        t["premultipliedAdd"] = &trussc::BlendDesc::premultipliedAdd;
-        t["screenKeepAlpha"] = &trussc::BlendDesc::screenKeepAlpha;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["backend"] = &trussc::AudioDeviceInfo::backend;
+        t["channels"] = &trussc::AudioDeviceInfo::channels;
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+        t["sampleRates"] = &trussc::AudioDeviceInfo::sampleRates;
+        t["uniqueId"] = &trussc::AudioDeviceInfo::uniqueId;
+    }
+    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
+        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
+        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
+        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
+    {
+        sol::usertype<trussc::InputModifiers> t = lua->new_usertype<trussc::InputModifiers>("InputModifiers");
+        t["alt"] = &trussc::InputModifiers::alt;
+        t["ctrl"] = &trussc::InputModifiers::ctrl;
+        t["shift"] = &trussc::InputModifiers::shift;
+        t["super"] = &trussc::InputModifiers::super;
     }
     {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
-    }
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
-    {
-        sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
-        t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
-        t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
+        sol::usertype<trussc::BlendDesc::Component> t = lua->new_usertype<trussc::BlendDesc::Component>("BlendDescComponent");
+        t["dst"] = &trussc::BlendDesc::Component::dst;
+        t["op"] = &trussc::BlendDesc::Component::op;
+        t["src"] = &trussc::BlendDesc::Component::src;
     }
     {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+        t["format"] = &trussc::AudioRecordSettings::format;
     }
     {
-        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
-        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["args"] = &trussc::ConsoleEventArgs::args;
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
     }
 }
 #ifdef _MSC_VER

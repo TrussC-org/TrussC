@@ -600,9 +600,11 @@ bool onMouseEnter() override;
 bool onMouseLeave() override;
 ```
 
-App-level events:
+App-level input events on the receiving Window:
 ```cpp
 void keyPressed(int key) override;
+void charInput(const CharEventArgs& e) override;
+void filesDropped(const DragDropEventArgs& e) override;
 void mousePressed(Vec2 pos, int button) override;
 void mouseDragged(Vec2 pos, int button) override;
 ```
@@ -2095,6 +2097,7 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 - Save/restore settings: JSON + reflection (`TC_REFLECT`)
 - HTTP request: addon **tcxCurl** / OSC: addon **tcxOsc** / serial: `Serial`
 - File picker dialog: `loadDialog()` / `saveDialog()` (→ `FileDialogResult`)
+- Receive typed characters: `events().charInput` / `App::charInput` (`CharEventArgs`, one Unicode scalar per event)
 - Receive dropped files: `events().filesDropped` (`DragDropEventArgs`)
 - Clipboard: `setClipboardString(text)` (paste arrives via the `clipboardPasted` event)
 - Number → string: `toString(value[, precision])` (oF `ofToString`; reverse: `toInt` / `toFloat` / `toBool`)
@@ -2958,8 +2961,9 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ```cpp
 void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native capture thread for every microphone block.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
+void App::charInput(const CharEventArgs & e)  // Called for one typed character in this Window.
 void App::exit()  // Called once when the App ends, right before cleanup().
-void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
+void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped paths and position in this Window, while preserving path-only overrides.
 Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const ⚠️deprecated  // Returns whether the deprecated requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
@@ -3083,6 +3087,11 @@ int BuildInfo::year()  // Returns the year when the build was configured.
 ```cpp
 Ray CameraContext::screenPointToRay(float screenX, float screenY) const  // Converts a screen point into a world-space ray.
 Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Projects a world position into screen coordinates.
+```
+
+### CharEventArgs — One typed Unicode scalar, with repeat, modifier, and injection information.
+
+```cpp
 ```
 
 ### ChipSoundBundle — Combines timed chiptune notes into a single sound.
@@ -3610,6 +3619,8 @@ void Image::update()  // Uploads pending CPU pixel changes to the texture.
 ### InputEvent — Copies input to send to a Window with Window::injectInput.
 
 ```cpp
+InputEvent InputEvent::charInput(uint32_t codepoint, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds one character input from a Unicode scalar or received CharEventArgs.
+InputEvent InputEvent::filesDropped(std::vector<std::string> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
 InputEvent InputEvent::keyPressed(int key, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds a keyPressed input from values or received arguments.
 InputEvent InputEvent::keyReleased(int key, InputModifiers mods = {}) [+1]  // Builds a keyReleased input from values or received arguments.
 InputEvent InputEvent::mouseMoved(Vec2 pos, InputModifiers mods = {}) [+1]  // Builds a mouseMoved input from values or received arguments.
