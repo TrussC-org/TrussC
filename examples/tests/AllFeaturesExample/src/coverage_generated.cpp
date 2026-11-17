@@ -836,12 +836,14 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().cancelAsyncTimer(af::val<uint64_t>());
 #endif
         (void)af::val<App>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<App>().charInput(af::val<const CharEventArgs>());
         (void)af::val<App>().cleanup();
         (void)af::val<App>().destroy();
         (void)af::val<App>().disableEvents();
         (void)af::val<App>().draw();
         (void)af::val<App>().enableEvents();
         (void)af::val<App>().exit();
+        (void)af::val<App>().filesDropped(af::val<const DragDropEventArgs>());
         (void)af::val<App>().filesDropped(af::val<const std::vector<std::string>>());
         (void)af::val<App>().findByInstanceId(af::val<uint64_t>());
         (void)af::val<App>().findHitNode(af::val<const Ray>());
@@ -1150,6 +1152,21 @@ struct Cover_CameraContext : af::Scope<CameraContext> {
     }
 };
 
+struct Cover_CharEventArgs : af::Scope<CharEventArgs> {
+    ~Cover_CharEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<CharEventArgs>().alt;
+        (void)af::val<CharEventArgs>().codepoint;
+        (void)af::val<CharEventArgs>().consumed;
+        (void)af::val<CharEventArgs>().ctrl;
+        (void)af::val<CharEventArgs>().injected;
+        (void)af::val<CharEventArgs>().isRepeat;
+        (void)af::val<CharEventArgs>().shift;
+        (void)af::val<CharEventArgs>().sourceTag;
+        (void)af::val<CharEventArgs>().super;
+    }
+};
+
 struct Cover_ChipSoundBundle : af::Scope<ChipSoundBundle> {
     ~Cover_ChipSoundBundle(); // Never instantiated.
     static void run() {
@@ -1360,6 +1377,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
     static void run() {
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().backPressed;
+        (void)af::val<CoreEvents>().charInput;
         (void)af::val<CoreEvents>().clipboardPasted;
         (void)af::val<CoreEvents>().closeRequested;
         (void)af::val<CoreEvents>().deviceLost;
@@ -1931,6 +1949,10 @@ struct Cover_Image : af::Scope<Image> {
 struct Cover_InputEvent : af::Scope<InputEvent> {
     ~Cover_InputEvent(); // Never instantiated.
     static void run() {
+        (void)af::val<InputEvent>().charInput(af::val<uint32_t>(), af::val<InputModifiers>(), af::val<bool>());
+        (void)af::val<InputEvent>().charInput(af::val<const CharEventArgs>());
+        (void)af::val<InputEvent>().filesDropped(af::val<std::vector<std::string>>(), af::val<Vec2>());
+        (void)af::val<InputEvent>().filesDropped(af::val<const DragDropEventArgs>());
         (void)af::val<InputEvent>().keyPressed(af::val<int>(), af::val<InputModifiers>(), af::val<bool>());
         (void)af::val<InputEvent>().keyPressed(af::val<const KeyEventArgs>());
         (void)af::val<InputEvent>().keyReleased(af::val<int>(), af::val<InputModifiers>());
@@ -5381,6 +5403,7 @@ void af::coverGenerated() {
     af_generated::Cover_BlendDesc__Component::run();
     af_generated::Cover_BuildInfo::run();
     af_generated::Cover_CameraContext::run();
+    af_generated::Cover_CharEventArgs::run();
     af_generated::Cover_ChipSoundBundle::run();
     af_generated::Cover_ChipSoundBundle__Entry::run();
     af_generated::Cover_ChipSoundNote::run();

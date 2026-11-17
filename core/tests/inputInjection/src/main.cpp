@@ -24,6 +24,83 @@ struct Observer {
         : app(internal::makeConstructedAppAt<App>(&internal::WindowRequestAccess::context(w))),
           owner(internal::appOwner(*app)) {}
 };
+struct TextApp : App {
+    std::vector<int>* order = nullptr;
+    CharEventArgs character;
+    DragDropEventArgs drop;
+    int legacyCalls = 0;
+    void charInput(const CharEventArgs& e) override { character = e; order->push_back(2); }
+    void filesDropped(const DragDropEventArgs& e) override {
+        drop = e;
+        App::filesDropped(e);
+    }
+    void filesDropped(const std::vector<std::string>& files) override {
+        check("legacy callback receives listener edits", files == std::vector<std::string>{"edited"});
+        ++legacyCalls;
+    }
+};
+void textAndDrop(bool pixels, float dpi) {
+    tcCoreTest::WindowFixture fixture(711), peerFixture(712);
+    auto& w = *fixture.window;
+    tcCoreTest::InjectedWindow device(w, 711), peerDevice(*peerFixture.window, 712);
+    device.metadata.dpi_scale = dpi;
+    internal::pixelPerfectMode() = pixels;
+    auto app = internal::makeConstructedAppAt<TextApp>(&internal::WindowRequestAccess::context(w));
+    internal::attachCandidate(w, app);
+    internal::applyPendingAppForTests(w);
+    internal::AppOwnerScope owner(internal::appOwner(*app));
+    std::vector<int> order;
+    app->order = &order;
+    CharEventArgs received;
+    int peerChars = 0;
+    auto peerChar = peerFixture.window->events().charInput.listen([&](CharEventArgs&) { ++peerChars; });
+    auto before = w.events().charInput.listen([&](CharEventArgs& e) { order.push_back(1); received = e; });
+    auto after = w.events().charInput.listen([&](CharEventArgs&) { order.push_back(3); }, EventPriority::AfterApp);
+    check("character accepted", w.injectInput(InputEvent::charInput(U'é', {true, true, true, true}, true), "text"));
+    check("character order and target", order == std::vector<int>{1, 2, 3} && peerChars == 0);
+    check("character payload", received.codepoint == U'é' && received.isRepeat && received.shift && received.ctrl && received.alt && received.super);
+    provenance(app->character, "text");
+    received.consumed = true;
+    order.clear();
+    check("received character accepted", w.injectInput(InputEvent::charInput(received), "relay"));
+    check("character resend reset and fresh tag", !app->character.consumed && app->character.sourceTag == "relay" && order.size() == 3);
+    auto consume = w.events().charInput.listen([](CharEventArgs& e) { e.consumed = true; }, -20);
+    order.clear();
+    check("consumed character accepted", w.injectInput(InputEvent::charInput('A')));
+    check("consumed before app", order.empty());
+    consume.disconnect();
+    sapp_event event{};
+    event.type = SAPP_EVENTTYPE_CHAR;
+    event.char_code = U'日';
+    event.key_repeat = true;
+    event.modifiers = SAPP_MODIFIER_SHIFT;
+    check("device character accepted", device.send(event));
+    check("device character metadata", !app->character.injected && app->character.sourceTag.empty() && app->character.isRepeat && app->character.shift);
+    check("invalid scalar rejected", !w.injectInput(InputEvent::charInput(0xd800)) && !w.injectInput(InputEvent::charInput(0x110000)));
+    int rawDrops = 0, peerDrops = 0;
+    auto raw = w.events().rawEvent.listen([&](const sapp_event& e) { if (e.type == SAPP_EVENTTYPE_FILES_DROPPED) ++rawDrops; });
+    auto peer = peerFixture.window->events().filesDropped.listen([&](DragDropEventArgs&) { ++peerDrops; });
+    auto dropped = w.events().filesDropped.listen([&](DragDropEventArgs& e) {
+        check("owned drop and exact position", e.files == std::vector<std::string>{"image.png"} && e.x == 20.25f && e.y == 30.5f);
+        e.files = {"edited"};
+        e.x = 42;
+    });
+    DragDropEventArgs args;
+    args.files = {"image.png"}; args.x = 20.25f; args.y = 30.5f;
+    auto owned = InputEvent::filesDropped(args);
+    args.files.clear();
+    auto& ctx = internal::WindowRequestAccess::context(w);
+    check("drop starts with nonzero cursor", w.injectInput(InputEvent::mouseMoved({7, 9})) &&
+          Vec2(ctx.mouseX, ctx.mouseY) == Vec2(7, 9));
+    const auto cursor = Vec2(ctx.mouseX, ctx.mouseY);
+    check("owned drop accepted", w.injectInput(owned, "unexposed"));
+    check("rich and legacy callbacks reached", app->legacyCalls == 1 && app->drop.x == 42);
+    check("drop target and no raw event", rawDrops == 0 && peerDrops == 0);
+    check("drop leaves cursor unchanged", cursor == Vec2(ctx.mouseX, ctx.mouseY));
+    check("paths builder accepted", w.injectInput(InputEvent::filesDropped({"image.png"}, {20.25f, 30.5f})));
+    check("invalid drop position rejected", !w.injectInput(InputEvent::filesDropped({}, {std::numeric_limits<float>::quiet_NaN(), 0})));
+    internal::pixelPerfectMode() = false;
+}
 void exercise(bool pixels, float dpi) {
     tcCoreTest::WindowFixture fixture(701), peerFixture(702);
     auto& w = *fixture.window;
@@ -183,7 +260,7 @@ void exercise(bool pixels, float dpi) {
 }
 } // namespace
 TC_CORE_TEST_MAIN() {
-    for (bool pixels : {false, true}) for (float dpi : {1.0f, 2.0f}) exercise(pixels, dpi);
+    for (bool pixels : {false, true}) for (float dpi : {1.0f, 2.0f}) { exercise(pixels, dpi); textAndDrop(pixels, dpi); }
     Window unbound;
     check("unbound window rejected", !unbound.injectInput(InputEvent::keyPressed('A')));
     std::printf("inputInjection: %d checks, %d failures\n", checks, failures);
