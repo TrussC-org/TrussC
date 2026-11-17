@@ -10,8 +10,8 @@ struct InputModifiers {
     bool super = false;
 };
 
-// A copied input payload in destination App coordinates. Window::injectInput
-// supplies provenance and delivers fresh arguments through the Runtime gate.
+// A copied input payload in destination App coordinates. Each injection starts
+// fresh delivery state; file drops carry paths and position only.
 class InputEvent {
 public:
     static InputEvent keyPressed(int key, InputModifiers mods = {}, bool repeat = false) {
@@ -32,6 +32,26 @@ public:
     }
     static InputEvent keyReleased(const KeyEventArgs& event) {
         return keyReleased(event.key, modifiers(event));
+    }
+    static InputEvent charInput(uint32_t codepoint, InputModifiers mods = {}, bool repeat = false) {
+        InputEvent e(Kind::CharInput);
+        e.codepoint_ = codepoint;
+        e.mods_ = mods;
+        e.repeat_ = repeat;
+        return e;
+    }
+    static InputEvent charInput(const CharEventArgs& event) {
+        return charInput(event.codepoint, modifiers(event), event.isRepeat);
+    }
+    static InputEvent filesDropped(std::vector<std::string> paths, Vec2 pos) {
+        InputEvent e(Kind::FilesDropped);
+        e.drop_.files = std::move(paths);
+        e.drop_.x = pos.x;
+        e.drop_.y = pos.y;
+        return e;
+    }
+    static InputEvent filesDropped(const DragDropEventArgs& event) {
+        return filesDropped(event.files, {event.x, event.y});
     }
     static InputEvent mousePressed(Vec2 pos, MouseButton button, InputModifiers mods = {}) {
         InputEvent e(Kind::MousePressed);
@@ -86,7 +106,7 @@ public:
     }
 private:
     friend class Window;
-    enum class Kind { KeyPressed, KeyReleased, MousePressed, MouseReleased,
+    enum class Kind { KeyPressed, KeyReleased, CharInput, FilesDropped, MousePressed, MouseReleased,
                       MouseMoved, MouseScrolled, TouchPressed, TouchMoved, TouchReleased };
     explicit InputEvent(Kind kind) : kind_(kind) {}
     InputEvent(Kind kind, const TouchEventArgs& event) : kind_(kind) {
@@ -105,6 +125,8 @@ private:
     Kind kind_;
     InputModifiers mods_;
     int key_ = 0;
+    uint32_t codepoint_ = 0;
+    DragDropEventArgs drop_;
     bool repeat_ = false;
     Vec2 pos_;
     Vec2 scroll_;

@@ -227,44 +227,41 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         "NotEqual", sol::var(trussc::StencilTest::NotEqual),
         "GreaterEqual", sol::var(trussc::StencilTest::GreaterEqual));
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["endGroup"] = &trussc::Reflector::endGroup;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
     {
-        auto constructors = tcxLuaConstructors<trussc::LogStream
-            , trussc::LogStream(trussc::LogLevel)
-            , trussc::LogStream(trussc::LogLevel, const std::string &)
-        >();
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
-    }
-    {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-    }
-    {
-        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
-        t["mode"] = &trussc::CurveStyle::mode;
-        t["resolution"] = &trussc::CurveStyle::resolution;
-        t["tolerance"] = &trussc::CurveStyle::tolerance;
-    }
-    {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
+        sol::usertype<trussc::BackPressedEventArgs> t = lua->new_usertype<trussc::BackPressedEventArgs>("BackPressedEventArgs");
+        t["cancel"] = &trussc::BackPressedEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

@@ -146,6 +146,7 @@ public:
 
     // Rich form (canonical): carries modifiers + isRepeat. The simple int form
     // is a convenience that the default rich impl forwards to — override either.
+    virtual void charInput(const CharEventArgs& e) { (void)e; }
     virtual void keyPressed(const KeyEventArgs& e) { keyPressed(e.key); }
     virtual void keyPressed(int key) { (void)key; }
 
@@ -203,6 +204,7 @@ public:
     // Drag & drop events
     // -------------------------------------------------------------------------
 
+    virtual void filesDropped(const DragDropEventArgs& e) { filesDropped(e.files); }
     virtual void filesDropped(const std::vector<std::string>& files) {
         (void)files;
     }

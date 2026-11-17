@@ -108,7 +108,8 @@ private:
 };
 bool sendNativeWindowEvent(sapp_tc_window, sapp_event*);
 bool injectWindowEvent(Window&, const sapp_event*, bool heldButtonSnapshot = false,
-                       const std::string& tag = {}, const TouchEventArgs* touch = nullptr);
+                       const std::string& tag = {}, const TouchEventArgs* touch = nullptr,
+                       const DragDropEventArgs* drop = nullptr);
 void windowEvent(const sapp_event*, sapp_tc_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
 // Frozen at native entry before any App or raw callback. Routing stays in the binding.
@@ -121,6 +122,8 @@ struct WindowEventContext {
     std::string sourceTag;
     // Synchronous copied public payload: sapp_touchpoint has no pressure field.
     const TouchEventArgs* touch = nullptr;
+    // Synchronous owned drop payload, already in destination App coordinates.
+    const DragDropEventArgs* drop = nullptr;
 };
 void enterWindowEvent(const sapp_event*, sapp_tc_window, void*, const WindowEventContext* = nullptr) noexcept;
 void convertWindowEvent(const sapp_event*, Window&, const WindowEventContext&);

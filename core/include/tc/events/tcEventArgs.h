@@ -28,8 +28,20 @@ enum class MouseButton {
 };
 
 // ---------------------------------------------------------------------------
-// Key event arguments
+// Keyboard event arguments
 // ---------------------------------------------------------------------------
+struct CharEventArgs {
+    uint32_t codepoint = 0;
+    bool isRepeat = false;
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+    bool super = false;
+    bool consumed = false;
+    bool injected = false;
+    std::string sourceTag;
+};
+
 struct KeyEventArgs {
     int key = 0;              // Key code (SAPP_KEYCODE_*)
     bool isRepeat = false;    // Whether this is a repeat input

@@ -56,6 +56,7 @@
 // =============================================================================
 
 #include "imguiHarness.h"
+#include "../../../../core/tests/common/tcDisplayTest.h"
 #include <tcxNodeInspector.h>
 
 #include <algorithm>
@@ -1455,7 +1456,92 @@ static void testPendingValueIndex() {
     d::finishPendingValues(cs, h.context()->FrameCount, true);
 }
 
-int main() {
+// Runs separately from the CPU harness with --input-injection and a display.
+namespace {
+int injectionFailures = 0;
+bool injectionFinished = false;
+void injectionCheck(const char* name, bool ok) {
+    check(name, ok);
+    if (!ok) ++injectionFailures;
+}
+struct InjectionApp : tc::App {
+    char text[64]{};
+    int frame = 0, appChars = 0, beforeChars = 0;
+    tc::EventListener before;
+    void setup() override {
+        tcx::imguiSetup();
+        ImGui::GetIO().IniFilename = nullptr;
+        before = getWindow()->events().charInput.listen([this](tc::CharEventArgs&) { ++beforeChars; });
+    }
+    void charInput(const tc::CharEventArgs&) override { ++appChars; }
+    void draw() override {
+        if (!tcx::imguiBegin()) {
+            injectionCheck("ImGui frame begins", false);
+            tc::exitApp();
+            return;
+        }
+        ImGui::SetNextWindowPos({10, 10});
+        ImGui::SetNextWindowSize({400, 200});
+        ImGui::Begin("Input injection");
+        if (frame == 0) ImGui::SetKeyboardFocusHere();
+        ImGui::InputText("Text", text, sizeof(text));
+        ImGui::End();
+        tcx::imguiEnd();
+        auto* context = ImGui::GetCurrentContext();
+        auto send = [&](uint32_t codepoint, tc::InputModifiers mods = {}) {
+            injectionCheck("live character accepted", getWindow()->injectInput(tc::InputEvent::charInput(codepoint, mods), "widget"));
+        };
+        if (frame == 0) {
+            send(1);
+            injectionCheck("uncaptured typed character reaches App", appChars == 1 && beforeChars == 1);
+            appChars = 0;
+            beforeChars = 0;
+        }
+        if (frame == 2) {
+            injectionCheck("InputText captures keyboard", ImGui::GetIO().WantCaptureKeyboard);
+            send('A');
+            send(U'é');
+            std::vector<unsigned int> queued;
+            for (const auto& e : context->InputEventsQueue)
+                if (e.Type == ImGuiInputEventType_Text) queued.push_back(e.Text.Char);
+            injectionCheck("text queue once and in order", queued == std::vector<unsigned int>{'A', U'é'});
+            injectionCheck("captured typed char stops before App", appChars == 0 && beforeChars == 0);
+        }
+        if (frame == 3) {
+            injectionCheck("widget gets ASCII and non-ASCII in order", std::strcmp(text, "Aé") == 0);
+            injectionCheck("key press accepted", getWindow()->injectInput(tc::InputEvent::keyPressed('B')));
+            getWindow()->injectInput(tc::InputEvent::keyReleased('B'));
+            send(1);
+            send(127);
+            send('C', {.ctrl = true});
+            send('D', {.alt = true});
+            send('E', {.super = true});
+            int queuedText = 0;
+            for (const auto& e : context->InputEventsQueue) queuedText += e.Type == ImGuiInputEventType_Text;
+            injectionCheck("key and filtered characters queue no text", queuedText == 0);
+        }
+        if (frame == 5) {
+            injectionCheck("text arrives only once and filtering is unchanged", std::strcmp(text, "Aé") == 0);
+            injectionCheck("capture still stops all typed characters", appChars == 0 && beforeChars == 0);
+            injectionFinished = true;
+            tc::exitApp();
+        }
+        ++frame;
+    }
+};
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1], "--input-injection") == 0) {
+        tc::WindowSettings settings;
+        settings.setSize(480, 320);
+        settings.setHighDpi(false);
+        settings.setSwapInterval(0);
+        return tcCoreTest::runDisplayTest<InjectionApp>(settings, injectionFailures, [] {
+            injectionCheck("input injection frame checkpoints completed", injectionFinished);
+        });
+    }
+
     tcCoreTest::WindowFixture receiver;
     testToolLevels();
     tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
