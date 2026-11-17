@@ -860,7 +860,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     empty.add(U'A', Color(1)); empty.add(U'A', Mat4::identity(), Color(1));
     empty.add("A"); empty.add("A", Color(1));
     empty.add(std::string("A")); empty.add(std::string("A"), Color(1));
-    empty.add("abc", {1}, {2});
+    empty.add("abc", 1, 2);
     empty.add("abc", Color{1, 0.5f});
     empty.add('A', Color{1, 0.5f});
     empty.add("abc", 1, 2, {1, 0.5f, 0.25f, 1});
