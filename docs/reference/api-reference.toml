@@ -41472,20 +41472,20 @@ details.ko = '''
 ["VideoPlayerBase::getResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Returns the hard resynchronization threshold."
-description.ja = "強制的な同期補正の閾値を返す。"
-description.ko = "강제 동기화 보정 임계값을 반환한다."
+description.en = "Returns the playback catch-up threshold in seconds."
+description.ja = "再生の遅れを補正し始める閾値を秒単位で返します。"
+description.ko = "재생 지연 보정을 시작할 임계값을 초 단위로 반환합니다."
 details.en = '''
-- Returns the stored threshold in seconds; the default is `0.5`, and values of `0` or less disable hard resynchronization.
+- Returns the stored threshold in seconds; the default is `0.5`, and values of `0` or less disable automatic Linux keyframe jumps and HapPlayer hard resynchronization.
 - See `VideoPlayerBase::setResyncThreshold` for the affected players and synchronization behavior.
 '''
 details.ja = '''
-- 保存されている閾値を秒単位で返します。既定値は `0.5` で、`0` 以下は強制的な同期補正を無効にします。
+- 保存されている閾値を秒単位で返します。既定値は `0.5` で、`0` 以下は Linux の自動キーフレームジャンプと HapPlayer の強制同期補正を無効にします。
 - 対象のプレイヤーと同期の動作は `VideoPlayerBase::setResyncThreshold` を参照してください。
 '''
 details.ko = '''
-- 저장된 임계값을 초 단위로 반환합니다. 기본값은 `0.5`이며 `0` 이하는 강제 동기화 보정을 비활성화합니다.
-- 적용되는 플레이어와 동기화 동작은 `VideoPlayerBase::setResyncThreshold`를 참조하세요.
+- 저장된 임계값을 초 단위로 반환합니다. 기본값은 `0.5`이며 `0` 이하는 Linux의 자동 키프레임 점프와 HapPlayer의 강제 동기화 보정을 비활성화합니다.
+- 적용되는 플레이어와 동기화 동작은 `VideoPlayerBase::setResyncThreshold`를 참조합니다.
 '''
 related = ["VideoPlayerBase::setResyncThreshold"]
 
@@ -41882,29 +41882,104 @@ details.ko = '''
 ["VideoPlayerBase::setResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Sets the threshold for hard playback resynchronization."
-description.ja = "再生位置を強制的に同期補正する閾値を設定する。"
-description.ko = "재생 위치를 강제로 동기화 보정하는 임계값을 설정한다."
+description.en = "Sets the Linux playback lag threshold for trying to catch up (default 0.5 seconds), not a maximum lag; keyframe spacing and decoding speed determine the lag. HapPlayer uses it for hard audio resynchronization."
+description.ja = "Linux の再生の遅れを補正し始める閾値（既定値0.5秒）を設定します。遅れの上限ではなく、実際の遅れはキーフレーム間隔とデコード速度で決まります。HapPlayer では音声への強制同期補正に使います。"
+description.ko = "Linux 재생 지연 보정을 시작할 임계값(기본값 0.5초)을 설정합니다. 지연의 상한이 아니며 실제 지연은 키프레임 간격과 디코딩 속도에 따라 달라집니다. HapPlayer는 오디오 강제 동기화 보정에 사용합니다."
 details.en = '''
-- Stores a threshold in seconds without clamping; the default is `0.5`, and `0` or negative values disable hard resynchronization.
-- Linux `VideoPlayer` seeks when the difference between the current video position and its target clock exceeds the threshold; the target follows playing audio, or wall-clock time when audio is not playing.
-- HapPlayer advances by wall-clock elapsed time multiplied by speed and, while audio is playing at positive speed, gradually corrects toward the audio position with a `0.25`-second time constant.
-- HapPlayer jumps directly to the audio position when the difference exceeds a positive threshold; gradual correction remains enabled when hard resynchronization is disabled.
-- Other `VideoPlayer` platforms do not use this threshold and leave synchronization to their native player.
+- Linux `VideoPlayer` starts trying to catch up after this many seconds of lag (default `0.5`); this is not a maximum lag. Keyframe spacing and decoding speed determine the lag. `0` or less disables automatic catch-up jumps and HapPlayer hard resynchronization.
+
+```cpp
+void tcApp::setup() {
+    player.setResyncThreshold(0.5f);
+}
+```
+
+When decoding cannot keep up, lag is bounded by the keyframe interval and by how far decoding falls behind; under heavy load it can reach a few times the interval. Encoding with shorter keyframe intervals keeps lag smaller:
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+Forward catch-up jumps use the container's seek index. A file without one (for example some Matroska files) is only decoded forward, without jumps. Remux it to MP4 without re-encoding:
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
+When recording with `VideoWriter`, set `VideoRecordSettings::keyframeInterval` in `tcApp::setup()` before passing the settings to `open()` (in frames; `30` is one second at 30 fps):
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```
+
+- Linux playback shows the newest available picture for the playback time, skipping older pictures. It follows playing audio, or elapsed time when audio is not playing.
+- HapPlayer uses this value for hard audio resynchronization; gradual correction remains enabled even when hard resynchronization is disabled.
+- Other `VideoPlayer` platforms leave synchronization to their native player. No equivalent threshold API exists on those backends.
 '''
 details.ja = '''
-- 秒単位の閾値を制限せずに保存します。既定値は `0.5` で、`0` 以下にすると強制的な同期補正を無効にします。
-- Linux の `VideoPlayer` は、現在の映像位置と基準となる時間の差が閾値を超えるとシークします。基準には再生中の音声位置を使い、音声が再生されていない場合は実時間を使います。
-- HapPlayer は実時間の経過に再生速度を掛けて進み、正の速度で音声が再生されている間は、時定数 `0.25` 秒で音声位置へ徐々に補正します。
-- HapPlayer は位置の差が正の閾値を超えると音声位置へ直接移動します。強制的な同期補正を無効にしても、徐々に行う補正は有効です。
-- その他の `VideoPlayer` プラットフォームではこの閾値を使わず、ネイティブプレイヤーに同期を任せます。
+- Linux の `VideoPlayer` は遅れがこの秒数（既定値 `0.5`）を超えると補正を試みます。遅れの上限ではなく、実際の遅れはキーフレーム間隔とデコード速度で決まります。`0` 以下では自動ジャンプと HapPlayer の強制同期補正を無効にします。
+
+```cpp
+void tcApp::setup() {
+    player.setResyncThreshold(0.5f);
+}
+```
+
+デコードが再生に追いつかない場合、遅れの上限はキーフレーム間隔とデコードがどれだけ遅れるかで決まります。高負荷時には間隔の数倍に達することがあります。キーフレーム間隔を短くしてエンコードすると、遅れを小さくできます。
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+先へのジャンプはコンテナのシーク用インデックスを使います。インデックスのないファイル（一部の Matroska など）ではジャンプせず、先へデコードするだけになります。再エンコードせずに MP4 へ入れ替えてください。
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
+`VideoWriter` で録画する場合は、`tcApp::setup()` で `open()` に設定を渡す前に `VideoRecordSettings::keyframeInterval` を指定します。単位はフレームで、30 fps の場合、`30` は1秒です。
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```
+
+- Linux では、再生時刻に合う最新の準備済み映像を表示し、古い映像を飛ばします。音声の再生中は音声時刻に、それ以外は経過時間に従います。
+- HapPlayer では音声への強制同期補正に使います。強制補正を無効にしても、徐々に行う補正は有効です。
+- その他の `VideoPlayer` プラットフォームではネイティブプレイヤーに同期を任せます。対応する閾値 API はありません。
 '''
 details.ko = '''
-- 초 단위 임계값을 제한 없이 저장합니다. 기본값은 `0.5`이며 `0` 또는 음수로 설정하면 강제 동기화 보정을 비활성화합니다.
-- Linux의 `VideoPlayer`는 현재 영상 위치와 기준 시간의 차이가 임계값을 초과하면 탐색합니다. 기준은 재생 중인 오디오 위치를 따르며 오디오가 재생 중이 아니면 실제 경과 시간을 따릅니다.
-- HapPlayer는 실제 경과 시간에 재생 속도를 곱하여 진행하고, 양의 속도에서 오디오가 재생되는 동안 시정수 `0.25`초로 오디오 위치를 향해 점진적으로 보정합니다.
-- HapPlayer는 위치 차이가 양의 임계값을 초과하면 오디오 위치로 직접 이동합니다. 강제 동기화 보정을 비활성화해도 점진적인 보정은 유지합니다.
-- 다른 `VideoPlayer` 플랫폼은 이 임계값을 사용하지 않고 네이티브 플레이어에 동기화를 맡깁니다.
+- Linux의 `VideoPlayer`는 지연이 이 초 수(기본값 `0.5`)를 초과하면 보정을 시도합니다. 지연의 상한이 아니며 실제 지연은 키프레임 간격과 디코딩 속도에 따라 달라집니다. `0` 이하는 자동 점프와 HapPlayer의 강제 동기화 보정을 비활성화합니다.
+
+```cpp
+void tcApp::setup() {
+    player.setResyncThreshold(0.5f);
+}
+```
+
+디코딩이 재생을 따라가지 못하면 지연의 상한은 키프레임 간격과 디코딩이 뒤처진 정도에 따라 결정됩니다. 부하가 높으면 간격의 몇 배에 이를 수 있습니다. 키프레임 간격을 짧게 인코딩하면 지연을 줄일 수 있습니다.
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+앞으로의 점프는 컨테이너의 탐색 인덱스를 사용합니다. 인덱스가 없는 파일(일부 Matroska 등)에서는 점프하지 않고 앞으로 디코딩만 합니다. 재인코딩 없이 MP4로 바꿉니다.
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
+`VideoWriter`로 녹화할 때는 `tcApp::setup()`에서 `open()`에 설정을 전달하기 전에 `VideoRecordSettings::keyframeInterval`을 지정합니다. 단위는 프레임이며 30 fps에서 `30`은 1초입니다.
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```
+
+- Linux에서는 재생 시각에 맞는 최신 준비된 영상을 표시하고 오래된 영상은 건너뜁니다. 오디오가 재생 중이면 오디오 시각을 따르고 그 외에는 경과 시간을 따릅니다.
+- HapPlayer에서는 오디오 강제 동기화 보정에 사용합니다. 강제 보정을 비활성화해도 점진적인 보정은 유지합니다.
+- 다른 `VideoPlayer` 플랫폼은 네이티브 플레이어에 동기화를 맡깁니다. 해당 임계값 API는 없습니다.
 '''
 related = ["VideoPlayerBase::getResyncThreshold"]
 
