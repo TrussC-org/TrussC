@@ -2,7 +2,9 @@
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcWindowTest.h"
 #include "../../common/tcInjectedWindowTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
+#include <cstring>
 #include <limits>
 using namespace tc;
 namespace {
@@ -258,8 +260,68 @@ void exercise(bool pixels, float dpi) {
     check("closed window rejected", !w.injectInput(InputEvent::keyPressed('D')));
     internal::pixelPerfectMode() = false;
 }
+// Optional real-host check: desktop and sole-surface platforms must deliver
+// synchronously inside setup(), entered on the first update before update().
+bool nativeCompleted = false;
+struct SetupInjectionApp : App {
+    int presses = 0, mcpEvents = 0;
+    std::shared_ptr<Window> target;
+    EventListener mouse, key, moved, released, scrolled;
+    void setup() override {
+        target = internal::WindowRequestAccess::retainHostOwner(*getWindow());
+        mouse = getWindow()->events().mousePressed.listen([&](MouseEventArgs& e) {
+            check("native host injection provenance", e.injected && (e.sourceTag == "tuio" || e.sourceTag == "mcp"));
+            if (e.sourceTag == "tuio") ++presses;
+            else ++mcpEvents;
+        });
+        check("native setup injection accepted", getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio"));
+        check("native setup injection delivered synchronously", presses == 1);
+        getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "tuio");
+        std::printf("inputInjection setup: %d press, %d failures\n", presses, failures);
+    }
+    void update() override {
+        check("native first update injection accepted", getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio"));
+        check("native setup and update each deliver once", presses == 2);
+        getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "tuio");
+        auto onMcp = [&](auto& e) { provenance(e, "mcp"); ++mcpEvents; };
+        key = getWindow()->events().keyPressed.listen(onMcp);
+        moved = getWindow()->events().mouseMoved.listen(onMcp);
+        released = getWindow()->events().mouseReleased.listen(onMcp);
+        scrolled = getWindow()->events().mouseScrolled.listen(onMcp);
+        mcp::setToolLevel(mcp::ToolLevel::Control);
+        auto tool = [&](const char* name, json args) {
+            auto reply = json::parse(mcp::internal::Server::instance().processMessage(json{
+                {"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
+                {"params", {{"name", name}, {"arguments", args}}}}.dump()));
+            check("native MCP accepted", reply.contains("result") && !reply["result"].value("isError", false));
+        };
+        tool("tc_key_press", {{"key", 'C'}});
+        tool("tc_key_release", {{"key", 'C'}});
+        tool("tc_mouse_move", {{"x", 40}, {"y", 50}});
+        tool("tc_mouse_press", {{"x", 40}, {"y", 50}, {"button", 0}});
+        tool("tc_mouse_release", {{"x", 40}, {"y", 50}, {"button", 0}});
+        tool("tc_mouse_scroll", {{"dx", 0}, {"dy", 1}});
+        check("native MCP key and mouse callbacks delivered", mcpEvents == 5);
+        nativeCompleted = true;
+        exitApp();
+    }
+    void cleanup() override {
+        // App::getWindow() is detached before cleanup; keep the target for
+        // checking rejection on the retained Window during teardown.
+        check("native cleanup injection rejected", !target->injectInput(InputEvent::keyPressed('D')));
+        target.reset();
+    }
+};
 } // namespace
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--native-check") == 0) {
+        WindowSettings settings;
+        settings.setSize(160, 100).setHighDpi(false).setSampleCount(1).setSwapInterval(0);
+        return tcCoreTest::runDisplayTest<SetupInjectionApp>(settings, failures, [] {
+            check("native input check completed", nativeCompleted);
+            std::printf("inputInjection native: %d checks, %d failures\n", checks, failures);
+        });
+    }
     for (bool pixels : {false, true}) for (float dpi : {1.0f, 2.0f}) { exercise(pixels, dpi); textAndDrop(pixels, dpi); }
     Window unbound;
     check("unbound window rejected", !unbound.injectInput(InputEvent::keyPressed('A')));

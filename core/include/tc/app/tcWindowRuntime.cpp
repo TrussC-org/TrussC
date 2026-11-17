@@ -2229,7 +2229,13 @@ thread_local InjectedWindowEvent* injectedWindowEvent = nullptr;
 }
 bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonSnapshot, const std::string& tag, const TouchEventArgs* touch, const DragDropEventArgs* drop) {
     const auto& binding = WindowRequestAccess::binding(window);
-    if (!input || !binding.operations || !binding.operations->sendEvent) return false;
+    // Sole surfaces retain their legacy window controls without an operations
+    // table. Route only injection through the same production native adapter.
+    const auto send = binding.operations ? binding.operations->sendEvent
+        : (!supportsSecondaryWindows() ? sendEvent : nullptr);
+    if (!window.isOpen() || runtimeEnding() || !input || !send) return false;
+    // The sole-surface bridge resolves its destination from the current owner.
+    if (!binding.operations && !supportsSecondaryWindows() && resolveWindow() != &window) return false;
     if (drop) {
         // Bound (numeric): reject nonfinite drop positions before delivery.
         if (input->type != SAPP_EVENTTYPE_FILES_DROPPED ||
@@ -2242,7 +2248,7 @@ bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonS
         ~Scope() { injectedWindowEvent = previous; }
     } scope;
     injectedWindowEvent = &injection;
-    return binding.operations->sendEvent(binding.handle, binding.user, &event);
+    return send(binding.handle, binding.user, &event);
 }
 void dispatchWindowEventForTests(const sapp_event* input, Window& window) {
     if (!input) return;
