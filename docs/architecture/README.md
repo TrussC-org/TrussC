@@ -787,7 +787,15 @@ Every Window keeps stable App event slots installed before construction. BeforeA
 
 App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
-Guest retirement cancels registered callbacks and releases their captures. Queued main-thread copies check owner liveness at execution and retain captures until the queue destroys them. Every successfully loaded module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
+App retirement cancels registered Event callbacks, including callbacks in outstanding synchronous snapshots and queued Main deliveries. Their captures remain alive until every retaining snapshot and queue item is released. Cancellation therefore does not imply immediate capture destruction. Release resources explicitly in the App's `cleanup()` instead of relying on a callback capture's destructor at retirement. For an App with a `Texture texture` member:
+
+```cpp
+void cleanup() override {
+    texture.clear();
+}
+```
+
+Queued Main deliveries check App liveness again before execution. Every successfully loaded guest module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
 
 Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
 
