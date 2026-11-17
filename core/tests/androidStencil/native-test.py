@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[3]
-header = (root / 'core/include/sokol/sokol_app_tc.h').read_text()
+header = (root / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
 android = header[header.index('#elif defined(__ANDROID__)\n\n//'):]
 
 
@@ -124,7 +124,7 @@ int main() {
 with tempfile.TemporaryDirectory(prefix='android-stencil-', dir=root / '.build') as scratch:
     source = Path(scratch) / 'main.cpp'
     binary = Path(scratch) / 'test'
-    source.write_text(code)
+    source.write_text(code, encoding='utf-8')
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
                     str(source), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
