@@ -4271,6 +4271,9 @@ void ScreenRecorder::State::onAfterFrame() {
     if (source_ == Source::Fbo && fbo_) {
         if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
             writer_.addFrameAt(*fbo_, t);
+#if defined(SOKOL_VULKAN)
+        if (!writer_.result_) stop();
+#endif
         return;
     }
 #if TC_ASYNC_SCREEN_CAPTURE
@@ -4308,6 +4311,9 @@ void ScreenRecorder::State::onAfterFrame() {
     Pixels px;
     if (!captureWindow(px) || !px.isAllocated()) {
         writer_.rejectFrameLayout();
+#if defined(SOKOL_VULKAN)
+        stop();
+#endif
     } else if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight())) {
         writer_.addFrameAt(px, t);
     }

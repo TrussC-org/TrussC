@@ -240,8 +240,14 @@ public:
         if (internal::hasPublicFboActivation())
             return callFailed("fbo readPixels requires fbo.end() first");
         if (!fbo.readPixelsPlatform(scratch_.data(), false)) {
+#if defined(SOKOL_VULKAN)
+            result_ = internal::saveFailure(path_, "fbo readPixels failed");
+            logWarning("VideoWriter") << "Fbo readback failed; recording stopped";
+            return result_;
+#else
             rejectFrameLayout();
             return internal::saveFailure(path_, "fbo readPixels failed");
+#endif
         }
         return appendRGBA(scratch_.data(), timeSec);
     }

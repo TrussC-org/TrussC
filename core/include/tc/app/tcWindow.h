@@ -632,7 +632,7 @@ inline void App::setSize(float w, float h) {
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
-#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)))
+#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN)))
 namespace internal {
 // Keep the capability check and the single-window stubs under one platform rule.
 inline constexpr bool supportsSecondaryWindows() { return false; }

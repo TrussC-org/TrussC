@@ -15,7 +15,7 @@
 
 #include "TrussC.h"
 
-#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN))
 #include "tcWindowGeometryX11.h"
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 #include <unistd.h>
