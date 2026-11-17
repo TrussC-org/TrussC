@@ -592,6 +592,17 @@ void testDrag() {
     node.reset(); // old-world Mod must not clear the new world's drag
     check("stale Mod destruction leaves replacement-world drag intact", b2Body_GetJointCount(second->id()) == 1);
     world.endDrag();
+    {
+        World flat; flat.setGravity({0, 0}); flat.setup();
+        auto flatNode = liveNode();
+        flatNode->setPos(120, 180);
+        auto* flatBody = flatNode->addMod<RigidBody2D>(flat, b2_dynamicBody);
+        flatBody->addBox(60, 30);
+        flat.startDrag(flatBody, {120, 180});
+        flat.updateDrag({240, 180});
+        for (int i = 0; i < 120; ++i) flat.update();
+        check("drag moves the body in a zero-gravity world", std::abs(b2Body_GetPosition(flatBody->id()).x * 30 - 240) < 2);
+    }
     for (int action = 0; action < 4; ++action) {
         auto ownedWorld = std::make_unique<World>(); ownedWorld->setup();
         auto owner = liveNode();

@@ -1,4 +1,5 @@
 #include "tcxBox2dMod.h"
+#include <algorithm>
 #include <cmath>
 
 namespace tcx::box2d {
@@ -172,7 +173,9 @@ void World::startDrag(RigidBody2D* body, tc::Vec2 position) {
     joint.linearHertz = 7.5f;
     joint.linearDampingRatio = 1.0f;
     const auto mass = b2Body_GetMassData(body->id());
-    const float mg = mass.mass * b2Length(b2World_GetGravity(worldId_));
+    // The sample scales by gravity; keep at least the default 10 m/s^2 so
+    // zero-gravity worlds (top-down scenes) still drag.
+    const float mg = mass.mass * std::max(b2Length(b2World_GetGravity(worldId_)), 10.0f);
     joint.maxSpringForce = 100.0f * mg;
     if (mass.mass > 0.0f)
         joint.maxVelocityTorque = 0.25f * std::sqrt(mass.rotationalInertia / mass.mass) * mg;
