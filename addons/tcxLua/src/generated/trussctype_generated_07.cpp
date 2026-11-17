@@ -139,113 +139,121 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::FullscreenShader
-            , trussc::FullscreenShader()
-        >();
-        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader", constructors, sol::call_constructor, constructors);
-        t["begin"] = &trussc::FullscreenShader::begin;
-        t["clear"] = &trussc::FullscreenShader::clear;
-        t["draw"] = &trussc::FullscreenShader::draw;
-        t["drawVertices"] = sol::overload([](trussc::FullscreenShader& self, int vertexCount) { return self.drawVertices(vertexCount); }, [](trussc::FullscreenShader& self, int vertexCount, int instanceCount) { return self.drawVertices(vertexCount, instanceCount); });
-        t["end"] = &trussc::FullscreenShader::end;
-        t["isLoaded"] = &trussc::FullscreenShader::isLoaded;
-        t["load"] = &trussc::FullscreenShader::load;
-        t["setTexture"] = sol::overload([](trussc::FullscreenShader& self, int slot, sg_image image, sg_sampler sampler) { return self.setTexture(slot, image, sampler); }, [](trussc::FullscreenShader& self, int slot, sg_view view, sg_sampler sampler) { return self.setTexture(slot, view, sampler); });
-        t["setUniform"] = sol::overload([](trussc::FullscreenShader& self, int slot, float value) { return self.setUniform(slot, value); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec2 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec3 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec4 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Color & c) { return self.setUniform(slot, c); }, [](trussc::FullscreenShader& self, int slot, const std::vector<float> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec2> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec3> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec4> & v) { return self.setUniform(slot, v); });
+        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
+        t["decorated"] = &trussc::WindowSettings::decorated;
+        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
+        t["height"] = &trussc::WindowSettings::height;
+        t["highDpi"] = &trussc::WindowSettings::highDpi;
+        t["maxFrameLatency"] = &trussc::WindowSettings::maxFrameLatency;
+        t["pipelinePoolSize"] = &trussc::WindowSettings::pipelinePoolSize;
+        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
+        t["quitOnClose"] = &trussc::WindowSettings::quitOnClose;
+        t["resourcePoolSize"] = &trussc::WindowSettings::resourcePoolSize;
+        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
+        t["shaderPoolSize"] = &trussc::WindowSettings::shaderPoolSize;
+        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
+        t["title"] = &trussc::WindowSettings::title;
+        t["visible"] = &trussc::WindowSettings::visible;
+        t["width"] = &trussc::WindowSettings::width;
+        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
+        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
+        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
+        t["setMaxFrameLatency"] = &trussc::WindowSettings::setMaxFrameLatency;
+        t["setParentWindow"] = sol::overload([](trussc::WindowSettings& self, const std::shared_ptr<trussc::Window> & parent) -> decltype(auto) { return self.setParentWindow(parent); }, [](trussc::WindowSettings& self, trussc::Window & parent) -> decltype(auto) { return self.setParentWindow(parent); });
+        t["setPipelinePoolSize"] = &trussc::WindowSettings::setPipelinePoolSize;
+        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
+        t["setQuitOnClose"] = &trussc::WindowSettings::setQuitOnClose;
+        t["setResourcePoolSize"] = &trussc::WindowSettings::setResourcePoolSize;
+        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
+        t["setShaderPoolSize"] = &trussc::WindowSettings::setShaderPoolSize;
+        t["setSize"] = &trussc::WindowSettings::setSize;
+        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
+        t["setTitle"] = &trussc::WindowSettings::setTitle;
+        t["setVisible"] = &trussc::WindowSettings::setVisible;
     }
     {
-        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
-        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
-        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
-        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
-        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
-        t["getWrapU"] = &trussc::HasTexture::getWrapU;
-        t["getWrapV"] = &trussc::HasTexture::getWrapV;
-        t["hasTexture"] = &trussc::HasTexture::hasTexture;
-        t["save"] = &trussc::HasTexture::save;
-        t["setFilter"] = &trussc::HasTexture::setFilter;
-        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
-        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
-        t["setWrap"] = &trussc::HasTexture::setWrap;
-        t["setWrapU"] = &trussc::HasTexture::setWrapU;
-        t["setWrapV"] = &trussc::HasTexture::setWrapV;
-    }
-    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
-        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
-        "Default", sol::var(trussc::AudioBackend::Default),
-        "Null", sol::var(trussc::AudioBackend::Null),
-        "WASAPI", sol::var(trussc::AudioBackend::WASAPI),
-        "DirectSound", sol::var(trussc::AudioBackend::DirectSound),
-        "WinMM", sol::var(trussc::AudioBackend::WinMM),
-        "CoreAudio", sol::var(trussc::AudioBackend::CoreAudio),
-        "PulseAudio", sol::var(trussc::AudioBackend::PulseAudio),
-        "ALSA", sol::var(trussc::AudioBackend::ALSA),
-        "JACK", sol::var(trussc::AudioBackend::JACK),
-        "AAudio", sol::var(trussc::AudioBackend::AAudio),
-        "OpenSLES", sol::var(trussc::AudioBackend::OpenSLES),
-        "WebAudio", sol::var(trussc::AudioBackend::WebAudio));
-    {
-        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
-        t["alt"] = &trussc::MouseEventArgs::alt;
-        t["button"] = &trussc::MouseEventArgs::button;
-        t["consumed"] = &trussc::MouseEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
-        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
-        t["pos"] = &trussc::MouseEventArgs::pos;
-        t["shift"] = &trussc::MouseEventArgs::shift;
-        t["super"] = &trussc::MouseEventArgs::super;
-        t["x"] = &trussc::MouseEventArgs::x;
-        t["y"] = &trussc::MouseEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
+        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
+        t["alt"] = &trussc::MouseDragEventArgs::alt;
+        t["button"] = &trussc::MouseDragEventArgs::button;
+        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
+        t["delta"] = &trussc::MouseDragEventArgs::delta;
+        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
+        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
+        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
+        t["injected"] = &trussc::MouseDragEventArgs::injected;
+        t["pos"] = &trussc::MouseDragEventArgs::pos;
+        t["shift"] = &trussc::MouseDragEventArgs::shift;
+        t["sourceTag"] = &trussc::MouseDragEventArgs::sourceTag;
+        t["super"] = &trussc::MouseDragEventArgs::super;
+        t["x"] = &trussc::MouseDragEventArgs::x;
+        t["y"] = &trussc::MouseDragEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["view"] = &trussc::CameraContext::view;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["build"] = &trussc::ChipSoundBundle::build;
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
+    }
+    {
+        sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
+        t["console"] = tcx_lua_detail::eventProperty<trussc::RuntimeEvents>(&trussc::RuntimeEvents::console);
+        t["deviceLost"] = tcx_lua_detail::eventProperty<trussc::RuntimeEvents>(&trussc::RuntimeEvents::deviceLost);
+        t["exitRequested"] = tcx_lua_detail::eventProperty<trussc::RuntimeEvents>(&trussc::RuntimeEvents::exitRequested);
+        t["filesOpened"] = tcx_lua_detail::eventProperty<trussc::RuntimeEvents>(&trussc::RuntimeEvents::filesOpened);
+        t["hotReloadUnload"] = tcx_lua_detail::eventProperty<trussc::RuntimeEvents>(&trussc::RuntimeEvents::hotReloadUnload);
     }
     {
         sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
         t["alt"] = &trussc::KeyEventArgs::alt;
         t["consumed"] = &trussc::KeyEventArgs::consumed;
         t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["injected"] = &trussc::KeyEventArgs::injected;
         t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
         t["key"] = &trussc::KeyEventArgs::key;
         t["shift"] = &trussc::KeyEventArgs::shift;
+        t["sourceTag"] = &trussc::KeyEventArgs::sourceTag;
         t["super"] = &trussc::KeyEventArgs::super;
     }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
     {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
+        t["data"] = &trussc::UdpReceiveEventArgs::data;
+        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
+        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
     }
-    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
-        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
-        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
-        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
+        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
+        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
     {
-        sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
-        t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
-        t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
     }
     {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
-    }
-    {
-        sol::usertype<trussc::BackPressedEventArgs> t = lua->new_usertype<trussc::BackPressedEventArgs>("BackPressedEventArgs");
-        t["cancel"] = &trussc::BackPressedEventArgs::cancel;
-    }
-    {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
 #ifdef _MSC_VER

@@ -600,9 +600,11 @@ bool onMouseEnter() override;
 bool onMouseLeave() override;
 ```
 
-App-level events:
+App-level input events on the receiving Window:
 ```cpp
 void keyPressed(int key) override;
+void charInput(const CharEventArgs& e) override;
+void filesDropped(const DragDropEventArgs& e) override;
 void mousePressed(Vec2 pos, int button) override;
 void mouseDragged(Vec2 pos, int button) override;
 ```
@@ -614,28 +616,33 @@ regardless of Shift). The defined `KEY_*` constants are `KEY_SPACE`, `KEY_ESCAPE
 `KEY_RIGHT_CONTROL`, `KEY_LEFT_ALT`, `KEY_RIGHT_ALT`, `KEY_LEFT_SUPER`,
 `KEY_RIGHT_SUPER`, and `KEY_F1` through `KEY_F12`.
 
-#### Rich form (dual API)
-Every mouse handler also has a rich overload that takes a per-kind args
-struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
+#### Rich mouse input arguments
+Rich mouse input callbacks in App and Node receive a per-kind args struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
 the default) **or** the rich form — the rich default just forwards to the
 simple one, so existing simple overrides keep working.
 ```cpp
-bool onMousePress (const MouseEventArgs& e) override;   // pressed / released
-bool onMouseMove  (const MouseMoveEventArgs& e) override;
-bool onMouseDrag  (const MouseDragEventArgs& e) override;
-bool onMouseScroll(const ScrollEventArgs& e) override;
-// App-level: mousePressed(const MouseEventArgs&), mouseMoved(const MouseMoveEventArgs&), etc.
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
 ```
 There is one struct per event kind so no field is ever meaningless. Fields:
-- `pos` — local position (in the receiving node's space). `globalPos` — screen space.
+- `pos` — local position (in the receiving node's space). `globalPos` — window content coordinates.
 - `delta` / `globalDelta` — movement since the last event (move/drag only).
 - `button` — `int`, compare with `MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (press/drag).
 - `scroll` — `Vec2` scroll amount (ScrollEventArgs).
 - `shift` / `ctrl` / `alt` / `super` — modifier keys, on every kind.
+- `injected` — true for `Window::injectInput` and MCP input, false for input from a device. Key and touch args also carry this field.
+- `sourceTag` — the supplied injection tag, `"mcp"` for MCP, or empty for input from a device. Key and touch args also carry this field.
 
 > Legacy scalar mirrors (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY`) are
 > kept for source compatibility and slated for removal at v1.0 — prefer the
 > Vec2 fields in new code.
+
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.pos.x << " " << e.pos.y;
+}
+```
 
 ### Timers
 Any Node (the App is one) can schedule callbacks. Two flavours:
@@ -2090,6 +2097,7 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 - Save/restore settings: JSON + reflection (`TC_REFLECT`)
 - HTTP request: addon **tcxCurl** / OSC: addon **tcxOsc** / serial: `Serial`
 - File picker dialog: `loadDialog()` / `saveDialog()` (→ `FileDialogResult`)
+- Receive typed characters: `events().charInput` / `App::charInput` (`CharEventArgs`, one Unicode scalar per event)
 - Receive dropped files: `events().filesDropped` (`DragDropEventArgs`)
 - Clipboard: `setClipboardString(text)` (paste arrives via the `clipboardPasted` event)
 - Number → string: `toString(value[, precision])` (oF `ofToString`; reverse: `toInt` / `toFloat` / `toBool`)
@@ -2953,8 +2961,9 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ```cpp
 void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native capture thread for every microphone block.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
+void App::charInput(const CharEventArgs & e)  // Called for one typed character in this Window.
 void App::exit()  // Called once when the App ends, right before cleanup().
-void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
+void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped paths and position in this Window, while preserving path-only overrides.
 Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const ⚠️deprecated  // Returns whether the deprecated requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
@@ -3078,6 +3087,11 @@ int BuildInfo::year()  // Returns the year when the build was configured.
 ```cpp
 Ray CameraContext::screenPointToRay(float screenX, float screenY) const  // Converts a screen point into a world-space ray.
 Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Projects a world position into screen coordinates.
+```
+
+### CharEventArgs — One typed Unicode scalar, with repeat, modifier, and injection information.
+
+```cpp
 ```
 
 ### ChipSoundBundle — Combines timed chiptune notes into a single sound.
@@ -3600,6 +3614,27 @@ void Image::setColor(int x, int y, const Color & c)  // Sets a CPU pixel color.
 void Image::setDebugName(const std::string & name)  // Sets the image name used for MCP inspection.
 void Image::setDirty()  // Marks the image as needing a texture update.
 void Image::update()  // Uploads pending CPU pixel changes to the texture.
+```
+
+### InputEvent — Copies input to send to a Window with Window::injectInput.
+
+```cpp
+InputEvent InputEvent::charInput(uint32_t codepoint, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds one character input from a Unicode scalar or received CharEventArgs.
+InputEvent InputEvent::filesDropped(std::vector<std::string> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
+InputEvent InputEvent::keyPressed(int key, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds a keyPressed input from values or received arguments.
+InputEvent InputEvent::keyReleased(int key, InputModifiers mods = {}) [+1]  // Builds a keyReleased input from values or received arguments.
+InputEvent InputEvent::mouseMoved(Vec2 pos, InputModifiers mods = {}) [+1]  // Builds a mouseMoved input from values or received arguments.
+InputEvent InputEvent::mousePressed(Vec2 pos, MouseButton button, InputModifiers mods = {}) [+1]  // Builds a mousePressed input from values or received arguments.
+InputEvent InputEvent::mouseReleased(Vec2 pos, MouseButton button, InputModifiers mods = {}) [+1]  // Builds a mouseReleased input from values or received arguments.
+InputEvent InputEvent::mouseScrolled(Vec2 scroll, InputModifiers mods = {}) [+1]  // Builds a mouseScrolled input from values or received arguments.
+InputEvent InputEvent::touchMoved(const TouchEventArgs & event)  // Builds a touchMoved input from received touch arguments.
+InputEvent InputEvent::touchPressed(const TouchEventArgs & event)  // Builds a touchPressed input from received touch arguments.
+InputEvent InputEvent::touchReleased(const TouchEventArgs & event)  // Builds a touchReleased input from received touch arguments.
+```
+
+### InputModifiers — Modifier flags copied into an injected key, mouse or scroll event.
+
+```cpp
 ```
 
 ### JsonReadReflector — Reads JSON values into reflected members.
@@ -5199,6 +5234,7 @@ int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
+bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values).
 bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
 bool Window::isFullscreen() const  // Returns this window's observed fullscreen state.
 bool Window::isOccluded() const  // Returns whether this window is explicitly hidden, minimized or fully occluded.

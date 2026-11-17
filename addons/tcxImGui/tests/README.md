@@ -1,8 +1,9 @@
 # tcxImGui tests
 
-Headless console test (no window, no GPU). It runs a real Dear ImGui context
+The default run is a headless console test (no window, no GPU). It runs a real Dear ImGui context
 with the bundled, patched imgui and the hooks from `src/tcImGuiHooksImpl.h`, and
-checks what the MCP tools would report.
+checks what the MCP tools would report. The separate `--input-injection` mode
+uses a live Window to test character delivery into an InputText widget.
 
 `src/imguiHarness.h` is the driver, meant to be shared by every tcxImGui test:
 
@@ -113,3 +114,11 @@ same ImGui symbol. `--include-dir` can overlay saved
 pre-fix public headers to reproduce the failure. The
 `hotReloadLifecycle` core test also includes `tcxImGui.h` from `tcApp.h`, so its
 host link covers that layout on MSVC.
+
+## Window input injection
+
+Run `bin/tests --input-injection` under a private Xvfb display to exercise the
+real ImGui manager with a live TrussC Window. The case focuses an InputText and
+checks character queue order, UTF-8 text, key/text separation, modifier/control
+filtering, and typed character capture before App delivery on explicit frames.
+The default console run continues to use the CPU harness.

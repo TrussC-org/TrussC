@@ -18,6 +18,7 @@
 
 #include "internal/tcWindowRuntime.h"
 #include "tcExit.h"
+#include "../events/tcInputEvent.h"
 
 namespace trussc {
 
@@ -73,8 +74,12 @@ public:
     void setQuitOnClose(bool enabled) { if (!exitDelivered_) quitOnClose_ = enabled; }
     std::shared_ptr<App> getApp() const { return app_; }
 
-    // This window's event stream (mousePressed / keyPressed / draw / ...).
+    // This window's event stream (mousePressed / keyPressed / charInput / draw / ...).
     CoreEvents& events() { return events_; }
+
+    // Positions use this App's content coordinates (logical points, or pixels
+    // in pixelPerfect mode). Returns true when accepted, even if consumed.
+    bool injectInput(const InputEvent& event, const std::string& tag = {});
 
     // Request closure at the next safe boundary. Pending replacement is
     // canceled. App ending and owner retirement precede native/GPU disposal.
@@ -534,7 +539,7 @@ inline void Window::applyPendingApp() {
 
 inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                                      const std::shared_ptr<AppEventState>& state) {
-    listeners.reserve(16);
+    listeners.reserve(17);
     auto bind = [&](auto& event, auto callback, bool exiting = false) {
         listeners.push_back(internal::FrameworkEventAccess::listen(event,
             [this, callback, state, exiting](auto&&... args) {
@@ -563,6 +568,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     bind(events_.draw, [this](App&) { drawTreeNow(); });
     bind(events_.exit, [](App& app) { internal::deliverAppExit(app); }, true);
 
+    bind(events_.charInput, [](App& app, auto& e) { app.charInput(e); });
     bind(events_.keyPressed, [](App& app, auto& e) { e.consumed = app.handleKeyPressed(e) || e.consumed; });
     bind(events_.keyReleased, [](App& app, auto& e) { e.consumed = app.handleKeyReleased(e) || e.consumed; });
     bind(events_.mousePressed, [](App& app, auto& e) { e.consumed = app.handleMousePressed(e) || e.consumed; });
@@ -575,7 +581,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     bind(events_.touchReleased, [](App& app, auto& e) { app.touchReleased(e); });
     bind(events_.windowResized, [](App& app, auto& e) { app.handleWindowResized(e.width, e.height); });
     bind(events_.focusChanged, [](App& app, auto& e) { app.windowFocusChanged(e.focused); });
-    bind(events_.filesDropped, [](App& app, auto& e) { app.filesDropped(e.files); });
+    bind(events_.filesDropped, [](App& app, auto& e) { app.filesDropped(e); });
 }
 
 inline void Window::endApp() noexcept {
