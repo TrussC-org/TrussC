@@ -40,6 +40,8 @@ public:
 private:
     friend class RigidBody2D;
     struct Owners {
+        bool updating = false;
+        uint64_t epoch = 0;
         b2WorldId worldId = b2_nullWorldId;
         std::unordered_set<RigidBody2D*> bodies;
     };
