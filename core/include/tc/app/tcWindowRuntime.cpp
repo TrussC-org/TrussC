@@ -41,10 +41,15 @@ bool Window::injectInput(const InputEvent& input, const std::string& tag) {
     // Keep invalid integer keys representable until the Runtime gate rejects them.
     event.key_code = input.key_ < 0 ? SAPP_KEYCODE_INVALID : static_cast<sapp_keycode>(input.key_);
     event.key_repeat = input.repeat_;
+    event.char_code = input.codepoint_;
     event.scroll_x = input.scroll_.x;
     event.scroll_y = input.scroll_.y;
     using Kind = InputEvent::Kind;
     switch (input.kind_) {
+        case Kind::FilesDropped:
+            event.type = SAPP_EVENTTYPE_FILES_DROPPED;
+            return internal::injectWindowEvent(*this, &event, false, tag, nullptr, &input.drop_);
+        case Kind::CharInput: event.type = SAPP_EVENTTYPE_CHAR; break;
         case Kind::KeyPressed: event.type = SAPP_EVENTTYPE_KEY_DOWN; break;
         case Kind::KeyReleased: event.type = SAPP_EVENTTYPE_KEY_UP; break;
         case Kind::MousePressed:
@@ -698,7 +703,7 @@ CoreEvents& unavailableWindowEvents() {
             auto disable = [](auto&... event) { (FrameworkEventAccess::disableSubscriptions(event), ...); };
             disable(events.update, events.draw, events.onRender, events.afterFrame,
                 events.exit, events.hotReloadUnload, events.exitRequested, events.backPressed, events.deviceLost,
-                events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
+                events.keyPressed, events.keyReleased, events.charInput, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,
                 events.occludedChanged, events.focusChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
                 events.touchPressed, events.touchMoved, events.touchReleased, events.rawEvent);
@@ -1593,6 +1598,7 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
         switch (ev->type) {
             case SAPP_EVENTTYPE_KEY_DOWN:          return "keyPressed()";
             case SAPP_EVENTTYPE_KEY_UP:            return "keyReleased()";
+            case SAPP_EVENTTYPE_CHAR:              return "charInput()";
             case SAPP_EVENTTYPE_MOUSE_DOWN:        return "mousePressed()";
             case SAPP_EVENTTYPE_MOUSE_UP:          return "mouseReleased()";
             case SAPP_EVENTTYPE_MOUSE_ENTER:
@@ -1611,7 +1617,6 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_ANDROID_BACK:      return "the backPressed event";
             case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
             case SAPP_EVENTTYPE_INVALID:
-            case SAPP_EVENTTYPE_CHAR:
             case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_MOUSE_LEAVE:
@@ -1785,7 +1790,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             return valid ? Vec2(x, y) - previous : Vec2(0, 0);
         };
         // Notify raw event listeners (used by addons like tcxImGui)
-        window.events().rawEvent.notify(*ev);
+        if (!delivery.drop) window.events().rawEvent.notify(*ev);
         if (visibilityChanged && currentVisibility()) {
             logNotice("Window") << (hidden ? "Window is hidden" : "Window is visible");
             OccludedEventArgs args; args.occluded = hidden;
@@ -2087,11 +2092,15 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             }
             case SAPP_EVENTTYPE_FILES_DROPPED: {
                 DragDropEventArgs args;
-                args.x = ctx.mouseX;  // Last mouse position
-                args.y = ctx.mouseY;
-                int numFiles = sapp_get_num_dropped_files();
-                for (int i = 0; i < numFiles; i++) {
-                    args.files.push_back(sapp_get_dropped_file_path(i));
+                if (delivery.drop) {
+                    args = *delivery.drop;
+                } else {
+                    args.x = ctx.mouseX;  // Last mouse position
+                    args.y = ctx.mouseY;
+                    int numFiles = sapp_get_num_dropped_files();
+                    for (int i = 0; i < numFiles; i++) {
+                        args.files.push_back(sapp_get_dropped_file_path(i));
+                    }
                 }
                 window.events().filesDropped.notify(args);
                 break;
@@ -2125,9 +2134,21 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_QUIT_REQUESTED:
                 if (!dispatchExitRequested()) sapp_cancel_quit();
                 break;
+            case SAPP_EVENTTYPE_CHAR: {
+                CharEventArgs args;
+                args.codepoint = ev->char_code;
+                args.isRepeat = ev->key_repeat;
+                args.shift = hasModShift;
+                args.ctrl = hasModCtrl;
+                args.alt = hasModAlt;
+                args.super = hasModSuper;
+                args.injected = delivery.injected;
+                args.sourceTag = delivery.sourceTag;
+                window.events().charInput.notify(args);
+                break;
+            }
             // These events have no typed TrussC input counterpart.
             case SAPP_EVENTTYPE_INVALID:
-            case SAPP_EVENTTYPE_CHAR:
             case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_ICONIFIED:
@@ -2201,15 +2222,21 @@ struct InjectedWindowEvent {
     bool heldButtonSnapshot;
     std::string sourceTag;
     const TouchEventArgs* touch;
+    const DragDropEventArgs* drop;
     bool pending = true;
 };
 thread_local InjectedWindowEvent* injectedWindowEvent = nullptr;
 }
-bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonSnapshot, const std::string& tag, const TouchEventArgs* touch) {
+bool injectWindowEvent(Window& window, const sapp_event* input, bool heldButtonSnapshot, const std::string& tag, const TouchEventArgs* touch, const DragDropEventArgs* drop) {
     const auto& binding = WindowRequestAccess::binding(window);
-    if (!input || !validInjectedWindowEvent(*input) || !binding.operations || !binding.operations->sendEvent) return false;
+    if (!input || !binding.operations || !binding.operations->sendEvent) return false;
+    if (drop) {
+        // Bound (numeric): reject nonfinite drop positions before delivery.
+        if (input->type != SAPP_EVENTTYPE_FILES_DROPPED ||
+            !std::isfinite(drop->x) || !std::isfinite(drop->y)) return false;
+    } else if (!validInjectedWindowEvent(*input)) return false;
     sapp_event event = *input;
-    InjectedWindowEvent injection{&window, heldButtonSnapshot, tag, touch};
+    InjectedWindowEvent injection{&window, heldButtonSnapshot, tag, touch, drop};
     struct Scope {
         InjectedWindowEvent* previous = injectedWindowEvent;
         ~Scope() { injectedWindowEvent = previous; }
@@ -2284,6 +2311,7 @@ void enterWindowEvent(const sapp_event* event, sapp_tc_window handle, void* user
             delivery.heldButtonSnapshot = injectedWindowEvent->heldButtonSnapshot;
             delivery.sourceTag = injectedWindowEvent->sourceTag;
             delivery.touch = injectedWindowEvent->touch;
+            delivery.drop = injectedWindowEvent->drop;
         }
         WindowEntryScope entry(*window, false, false, false);
         if (!entry) return;
