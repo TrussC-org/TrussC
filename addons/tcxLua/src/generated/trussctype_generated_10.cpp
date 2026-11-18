@@ -228,6 +228,10 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["height"] = &trussc::ResizeEventArgs::height;
         t["width"] = &trussc::ResizeEventArgs::width;
     }
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)
