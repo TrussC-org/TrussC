@@ -8,13 +8,26 @@ Follow-up validation: all 28 share tests and 3 help tests pass with the rebuilt 
 
 ## Try the branch on a Mac
 
-Build this branch's trusscli with the normal Mac tools build procedure. Use a separate, public GitHub app repository with a GitHub origin, Emscripten already installed, and GitHub CLI authentication:
+Check out this branch next to your usual TrussC checkout and build its trusscli there. Do not use `build_mac.command`: it rewrites `/usr/local/bin` and `.zshrc`, which would replace your everyday trusscli.
+
+```sh
+git -C ~/TrussC worktree add ../TrussC-share exp/trusscli-share
+cd ../TrussC-share
+cmake -S tools -B tools/build
+cmake --build tools/build
+```
+
+Call the result by its full path, `../TrussC-share/tools/bin/trusscli.app/Contents/MacOS/trusscli`, rather than putting it on PATH. trusscli takes its TrussC root from its own location, so `trusscli info | grep "TrussC root"` should print the `TrussC-share` path.
+
+That same rule means `update` (which share also runs) points the app's CMakePresets.json at this branch's core. Try it on a throwaway app, or on a copy of one, never on a project you keep working on. Running your usual `trusscli update` afterwards points the app back.
+
+The app needs a public GitHub repository as its origin, Emscripten installed, and GitHub CLI authentication:
 
 ```sh
 gh auth status
-cd path/to/myApp
-trusscli update --web
-trusscli share
+cd path/to/testApp
+<full path>/trusscli update --web
+<full path>/trusscli share
 ```
 
 Run these publish commands only when the owner starts the online trial. The command lists all outgoing files and asks before pushing. Answer `n` at that prompt to try the build and screenshot preview without publishing. Native auto-capture temporarily builds with MCP development tools, launches with `TRUSSC_MCP=1`, calls the existing localhost HTTP MCP screenshot tool, and quits the app. Check the OS viewer, fade-ins, retake, and skip; camera/microphone permission dialogs may require skip. No TrussC API grants those OS permissions. An accepted capture becomes `screenshot.png` in the project root.
