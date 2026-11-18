@@ -14,17 +14,23 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Cache month
+    - name: Cache month and runner image
       id: month
       shell: bash
-      run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      # ImageOS/ImageVersion: a new runner image ships new package versions,
+      # so cached .debs from the old image no longer match and apt downloads
+      # everything again. Keying on the image saves a fresh cache.
+      run: |
+        echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt archives
       uses: actions/cache@v5
       with:
         path: ~/.apt-archives
-        key: apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.value }}
+        key: apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.image }}-${{ steps.month.outputs.value }}
         restore-keys: |
+          apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.image }}-
           apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-
 
     - name: Install dependencies

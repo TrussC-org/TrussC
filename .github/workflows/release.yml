@@ -596,16 +596,21 @@ jobs:
 
       # This reusable workflow checks out the caller and an arbitrary TrussC
       # ref (including old tags), so it cannot require the new local action.
-      - name: Apt cache month
+      - name: Apt cache month and runner image
         id: apt_month
-        run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+        # A new runner image ships new package versions; key on it so the
+        # cache is saved again instead of re-downloading every run.
+        run: |
+          echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt archives
         uses: actions/cache@v5
         with:
           path: ~/.apt-archives
-          key: apt-${{ runner.os }}-release-${{ hashFiles('TrussC/tools/install_dependencies_linux.sh') }}-${{ steps.apt_month.outputs.value }}
+          key: apt-${{ runner.os }}-release-${{ hashFiles('TrussC/tools/install_dependencies_linux.sh') }}-${{ steps.apt_month.outputs.image }}-${{ steps.apt_month.outputs.value }}
           restore-keys: |
+            apt-${{ runner.os }}-release-${{ hashFiles('TrussC/tools/install_dependencies_linux.sh') }}-${{ steps.apt_month.outputs.image }}-
             apt-${{ runner.os }}-release-${{ hashFiles('TrussC/tools/install_dependencies_linux.sh') }}-
 
       - name: Install dependencies
