@@ -2247,7 +2247,7 @@ void endStroke(bool close = false)  // Finish drawing the current stroke.
 float getBitmapFontHeight()  // Get the bitmap font's fixed cell height in pixels.
 float getBitmapLineHeight()  // Get the current line spacing used for newlines in bitmap text.
 Rect getBitmapStringBBox(const std::string & text)  // Get the text's bounding box as a Rect.
-void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get a bitmap string's width and height through output parameters.
+void getBitmapStringBounds(const std::string & text, float & width, float & height) ⚠️deprecated  // Deprecated: use getBitmapStringBBox() for bitmap text size; removed in v1.0.0.
 float getBitmapStringHeight(const std::string & text)  // Get the text's rendered height in pixels.
 float getBitmapStringWidth(const std::string & text)  // Get the text's rendered width in pixels.
 Direction getTextAlignH()  // Get the current horizontal text alignment.

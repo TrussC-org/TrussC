@@ -48258,23 +48258,44 @@ details.ja = '''
 details.ko = '''
 - `width`/`height`가 `getBitmapStringWidth()` / `getBitmapStringHeight()`와 같은 값인 `Rect`를 반환합니다. `x`와 `y`는 항상 0입니다. 이는 텍스트 자신의 좌상단을 기준으로 한 로컬 사각형이며, 현재 `setTextAlign()`의 기준점에 맞춰 이동하지 않습니다.
 '''
-related = ["getBitmapStringWidth", "getBitmapStringHeight", "getBitmapStringBounds"]
+related = ["getBitmapStringWidth", "getBitmapStringHeight"]
 
 ["getBitmapStringBounds"]
 category = "graphics_shapes"
-keywords = ["text size", "bounding box", "measure", "extent"]
-description.en = "Get a bitmap string's width and height through output parameters."
-description.ja = "ビットマップ文字列の幅と高さを出力引数で取得する。"
-description.ko = "비트맵 문자열의 너비와 높이를 출력 매개변수로 얻는다."
+keywords = ["text size", "bounding box", "measure", "extent", "deprecated"]
+description.en = "Deprecated: use getBitmapStringBBox() for bitmap text size; removed in v1.0.0."
+description.ja = "非推奨。ビットマップ文字列のサイズには getBitmapStringBBox() を使用。v1.0.0 で削除予定。"
+description.ko = "사용 중단 예정: 비트맵 텍스트 크기는 getBitmapStringBBox()를 사용. v1.0.0에서 제거 예정."
 details.en = '''
+- Use `getBitmapStringBBox()` instead; this compatibility API is scheduled for removal in v1.0.0.
+```cpp
+void tcApp::setup() {
+    Rect box = getBitmapStringBBox("hello");
+    float w = box.width;
+}
+```
 - Writes the measured width and height of `text` into the `width`/`height` reference arguments (UTF-8 and full-width character aware), the same measurement `getBitmapStringWidth()` uses for width.
 - The height is the same as `getBitmapStringHeight()`: `getBitmapFontHeight()` for one line, plus `getBitmapLineHeight()` for each additional line, so it reflects a custom line height set with `setBitmapLineHeight()`.
 '''
 details.ja = '''
+- 代わりに `getBitmapStringBBox()` を使用してください。この互換 API は v1.0.0 で削除予定です。
+```cpp
+void tcApp::setup() {
+    Rect box = getBitmapStringBBox("hello");
+    float w = box.width;
+}
+```
 - `text` の幅と高さを測定し、`width`/`height` の参照引数に書き込みます（UTF-8 と全角文字に対応しており、幅の測定方法は `getBitmapStringWidth()` と同じです）。
 - 高さは `getBitmapStringHeight()` と同じ値です。1行目の高さは `getBitmapFontHeight()` で、2行目以降はその行数分だけ `getBitmapLineHeight()` が加算されます。そのため `setBitmapLineHeight()` で設定した行間が反映されます。
 '''
 details.ko = '''
+- 대신 `getBitmapStringBBox()`를 사용하세요. 이 호환 API는 v1.0.0에서 제거될 예정입니다.
+```cpp
+void tcApp::setup() {
+    Rect box = getBitmapStringBBox("hello");
+    float w = box.width;
+}
+```
 - `text`의 너비와 높이를 측정해 `width`/`height` 참조 인자에 기록합니다(UTF-8과 전각 문자를 인식하며, 너비 측정 방식은 `getBitmapStringWidth()`와 같습니다).
 - 높이는 `getBitmapStringHeight()`와 같은 값입니다. 첫 줄의 높이는 `getBitmapFontHeight()`이고, 둘째 줄부터는 그 줄 수만큼 `getBitmapLineHeight()`가 더해집니다. 따라서 `setBitmapLineHeight()`로 설정한 줄 간격이 반영됩니다.
 '''
@@ -54219,15 +54240,15 @@ description.en = "Set the line spacing used for newlines in bitmap text."
 description.ja = "ビットマップテキストの改行で使う行間を設定する。"
 description.ko = "비트맵 텍스트의 줄바꿈에 사용할 줄 간격을 설정한다."
 details.en = '''
-- Changes the pixel distance between lines for every `\n` in `drawBitmapString` from then on, and for the height returned by `getBitmapStringHeight()`. `getBitmapStringBounds()` and `getBitmapStringBBox()` follow it too, as does the `Center` and `Bottom` vertical alignment of `setTextAlign()`.
+- Changes the pixel distance between lines for every `\n` in `drawBitmapString` from then on, and for the height returned by `getBitmapStringHeight()`. `getBitmapStringBBox()` follows it too, as does the `Center` and `Bottom` vertical alignment of `setTextAlign()`.
 - Takes effect immediately and stays in effect until changed again or restored by `popStyle()` (it is saved and restored together with color and other style state by `pushStyle()`/`popStyle()`).
 '''
 details.ja = '''
-- それ以降の `drawBitmapString` の `\n` による行間（ピクセル単位）と、`getBitmapStringHeight()` が返す高さを変更します。`getBitmapStringBounds()` と `getBitmapStringBBox()` の高さ、`setTextAlign()` の垂直方向の `Center` と `Bottom` の基準にも反映されます。
+- それ以降の `drawBitmapString` の `\n` による行間（ピクセル単位）と、`getBitmapStringHeight()` が返す高さを変更します。`getBitmapStringBBox()` の高さ、`setTextAlign()` の垂直方向の `Center` と `Bottom` の基準にも反映されます。
 - 設定はすぐに反映され、再度変更するか `popStyle()` で復元されるまで有効です（色など他のスタイル状態と合わせて `pushStyle()` / `popStyle()` で保存・復元されます）。
 '''
 details.ko = '''
-- 이후의 `drawBitmapString`에서 `\n`에 의한 줄 간격(픽셀 단위)과 `getBitmapStringHeight()`가 반환하는 높이를 변경합니다. `getBitmapStringBounds()`와 `getBitmapStringBBox()`의 높이, `setTextAlign()`의 수직 `Center`와 `Bottom` 기준에도 반영됩니다.
+- 이후의 `drawBitmapString`에서 `\n`에 의한 줄 간격(픽셀 단위)과 `getBitmapStringHeight()`가 반환하는 높이를 변경합니다. `getBitmapStringBBox()`의 높이, `setTextAlign()`의 수직 `Center`와 `Bottom` 기준에도 반영됩니다.
 - 설정은 즉시 적용되며, 다시 변경하거나 `popStyle()`로 복원될 때까지 유지됩니다(색상 등 다른 스타일 상태와 함께 `pushStyle()` / `popStyle()`로 저장·복원됩니다).
 '''
 related = ["getBitmapLineHeight"]
@@ -55644,7 +55665,7 @@ details.ko = '''
 - `Baseline`을 지정하면 (x, y)가 첫 줄의 베이스라인(높이 13픽셀 글리프의 하단이며, 그 아래에 셀 여백 3픽셀이 이어짐)에 맞춰집니다. 줄 수나 `setBitmapLineHeight()`의 영향을 받지 않습니다. 이는 대부분의 텍스트 편집기나 다른 폰트 API의 베이스라인 개념과 같습니다.
 - 이 값은 드로잉 스타일의 일부로 저장되므로, `pushStyle()` / `popStyle()`로 저장·복원됩니다.
 '''
-related = ["drawBitmapString", "getBitmapStringBounds"]
+related = ["drawBitmapString", "getBitmapStringBBox"]
 snippet = '''
 void tcApp::draw() {
     setTextAlign(Center, Center);

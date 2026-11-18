@@ -240,7 +240,6 @@ static void cover_graphics_shapes() {
     (void)getBitmapFontHeight();
     (void)getBitmapLineHeight();
     (void)getBitmapStringBBox(af::val<const std::string>());
-    (void)getBitmapStringBounds(af::val<const std::string>(), af::val<float>(), af::val<float>());
     (void)getBitmapStringHeight(af::val<const std::string>());
     (void)getBitmapStringWidth(af::val<const std::string>());
     (void)getTextAlignH();
