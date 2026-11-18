@@ -93,6 +93,25 @@ inline void endShape(bool close = false) {
     wctx.shapeStarted = false;
 }
 
+class ShapeScope;
+TC_LUA_SKIP [[nodiscard]] inline ShapeScope scopedShape(bool close = false);
+
+class [[nodiscard]] TC_LUA_SKIP ShapeScope {
+public:
+    ~ShapeScope() { if (!internal::frameworkShutdown()) endShape(close_); }
+    ShapeScope(const ShapeScope&) = delete;
+    ShapeScope& operator=(const ShapeScope&) = delete;
+    ShapeScope(ShapeScope&&) = delete;
+    ShapeScope& operator=(ShapeScope&&) = delete;
+
+private:
+    explicit ShapeScope(bool close) : close_(close) { beginShape(); }
+    friend ShapeScope scopedShape(bool close);
+    bool close_;
+};
+
+TC_LUA_SKIP [[nodiscard]] inline ShapeScope scopedShape(bool close) { return ShapeScope(close); }
+
 // ===========================================================================
 // Lines drawing (independent line segments, pairs of vertices)
 // ===========================================================================

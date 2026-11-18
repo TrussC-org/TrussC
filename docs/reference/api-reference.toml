@@ -9117,6 +9117,12 @@ description.en = "Begins rendering into the framebuffer."
 description.ja = "フレームバッファへの描画を開始する。"
 description.ko = "프레임버퍼로 렌더링을 시작한다."
 details.en = '''
+- Use `Fbo::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - Draw between `begin()` and the matching `end()`. `begin()` preserves existing color with LOAD, while `begin(r, g, b, a = 1.0f)` clears color to the supplied components, conventionally 0–1. Both forms clear depth to 1 at the start of a new activation.
 - Every activation starts with an identity model matrix, empty matrix/camera/scissor stacks, no scissor, a viewport covering the whole attachment, and a perspective camera with a `TAU / 8` field of view. Coordinates use attachment pixels with the origin at the top left.
 - Inherits the parent's logical blend mode and depth-test flag. On `end()`, these flags pass back to the parent, and the returned blend mode takes effect immediately.
@@ -9128,6 +9134,12 @@ details.en = '''
 - Does nothing when unallocated or in headless mode.
 '''
 details.ja = '''
+- `Fbo::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - `begin()` と対応する `end()` の間で描画します。`begin()` は LOAD で既存の色を保持し、`begin(r, g, b, a = 1.0f)` は指定した成分で色をクリアします。色成分は通常 0〜1 で指定します。どちらも新しい描画開始時に深度を 1 にクリアします。
 - 毎回、モデル行列は単位行列、行列・カメラ・シザースタックは空、シザーは無効、ビューポートは添付画像全体、透視投影カメラの視野角は `TAU / 8` で開始します。座標は添付画像のピクセル単位で、左上が原点です。
 - 親の論理ブレンドモードと深度テストの有効状態を引き継ぎます。`end()` ではこれらの状態を親へ渡し、戻されたブレンドモードは直ちに描画へ反映されます。
@@ -9139,6 +9151,12 @@ details.ja = '''
 - 未確保の場合やヘッドレスモードでは何もしません。
 '''
 details.ko = '''
+- `Fbo::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - `begin()`과 대응하는 `end()` 사이에서 그립니다. `begin()`은 LOAD로 기존 색상을 유지하며 `begin(r, g, b, a = 1.0f)`는 지정한 성분으로 색상을 지웁니다. 색상 성분은 일반적으로 0–1로 지정합니다. 두 형태 모두 새 활성화가 시작될 때 깊이를 1로 지웁니다.
 - 매번 모델 행렬은 단위 행렬, 행렬·카메라·시저 스택은 빈 상태, 시저는 비활성 상태, 뷰포트는 전체 첨부 이미지, 원근 카메라의 시야각은 `TAU / 8`로 시작합니다. 좌표는 첨부 이미지 픽셀 단위이며 왼쪽 위가 원점입니다.
 - 부모의 논리 블렌드 모드와 깊이 테스트 활성 상태를 상속합니다. `end()`에서 이 상태를 부모에 전달하며 반환된 블렌드 모드는 즉시 그리기에 적용됩니다.
@@ -9385,16 +9403,34 @@ description.en = "Finishes framebuffer rendering and returns to the parent targe
 description.ja = "フレームバッファへの描画を終了して親の描画先へ戻る。"
 description.ko = "프레임버퍼 렌더링을 끝내고 부모 타깃으로 돌아간다."
 details.en = '''
+- Use `Fbo::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - Flushes pending drawing, ends the pass, resolves MSAA when enabled, and refreshes mipmaps when requested at allocation.
 - Returns to the parent target and immediately applies the returned logical blend mode. See `Fbo::begin` for nesting, state, and scope-balancing rules.
 - Does nothing when inactive. An active Fbo must be ended in reverse nesting order in its originating window; invalid calls log a warning and leave the activation unchanged.
 '''
 details.ja = '''
+- `Fbo::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - 保留中の描画を実行してパスを終了し、MSAA が有効なら解決処理を行い、確保時に指定していればミップマップを更新します。
 - 親の描画先へ戻り、戻された論理ブレンドモードを直ちに適用します。入れ子、描画状態、スコープの対応に関する規則は `Fbo::begin` を参照してください。
 - 非アクティブな場合は何もしません。アクティブな Fbo は開始したウィンドウで入れ子の逆順に終了する必要があり、不正な呼び出しは警告を記録してアクティブ状態を維持します。
 '''
 details.ko = '''
+- `Fbo::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - 대기 중인 그리기를 실행하고 패스를 종료하며 MSAA가 활성화되어 있으면 리졸브하고 할당 시 요청했다면 밉맵을 갱신합니다.
 - 부모 타깃으로 돌아가 반환된 논리 블렌드 모드를 즉시 적용합니다. 중첩, 그리기 상태, 스코프 대응 규칙은 `Fbo::begin`을 참조하세요.
 - 비활성 상태이면 아무 작업도 하지 않습니다. 활성 Fbo는 시작한 윈도우에서 중첩의 역순으로 종료해야 하며 잘못된 호출은 경고를 기록하고 활성 상태를 유지합니다.
@@ -29094,18 +29130,36 @@ description.en = "Starts a scope for drawing with this shader."
 description.ja = "このシェーダーで描画するスコープを開始する。"
 description.ko = "이 셰이더로 그리는 범위를 시작한다."
 details.en = '''
+- Use `Shader::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - Pushes this shader onto the current window's shader stack so drawing functions that use the shader vertex writer submit through it; this does not immediately bind a GPU pipeline.
 - Pair every `begin()` with `end()` in reverse nesting order, within the same window and render-target activation. Switching to another target temporarily suspends the scope until the original activation is restored.
 - Calls the protected `onBegin()` hook after pushing the shader; an unloaded shader is ignored.
 - End the scope before clearing, moving, or destroying the shader, because the active stack stores its address. Resource lifetime after submission is described in `Shader::clear`.
 '''
 details.ja = '''
+- `Shader::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 現在のウィンドウのシェーダースタックにこのシェーダーを追加し、シェーダー用の頂点出力を使う描画関数の送信先にします。この時点では GPU パイプラインをバインドしません。
 - `begin()` ごとに、入れ子の逆順で `end()` を呼んでください。同じウィンドウと同じ描画ターゲットの有効化区間内で対応させます。別のターゲットに切り替えると、元の有効化区間に戻るまでスコープは一時的に使われなくなります。
 - スタックへの追加後に protected の `onBegin()` フックを呼びます。未ロードの場合は何もしません。
 - 有効なスタックにはシェーダーのアドレスが保存されるため、クリア・ムーブ・破棄の前にスコープを終了してください。送信後のリソースの寿命は `Shader::clear` を参照してください。
 '''
 details.ko = '''
+- `Shader::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 이 셰이더를 현재 창의 셰이더 스택에 추가하여 셰이더용 정점 출력을 사용하는 그리기 함수가 이 셰이더로 제출되도록 합니다. 이 시점에는 GPU 파이프라인을 바인딩하지 않습니다.
 - 모든 `begin()`마다 중첩의 역순으로 `end()`를 호출하세요. 같은 창과 같은 렌더 타깃 활성화 구간 안에서 짝을 맞춰야 합니다. 다른 타깃으로 전환하면 원래 활성화 구간으로 돌아올 때까지 범위가 일시적으로 사용되지 않습니다.
 - 스택에 추가한 뒤 protected 훅인 `onBegin()`을 호출합니다. 로드되지 않았으면 아무 작업도 하지 않습니다.
@@ -29126,16 +29180,34 @@ description.en = "Ends this shader's active drawing scope."
 description.ja = "このシェーダーの有効な描画スコープを終了する。"
 description.ko = "이 셰이더의 활성 그리기 범위를 종료한다."
 details.en = '''
+- Use `Shader::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - Calls `onEnd()` before removing this shader from the current window's stack, restoring the previous shader; removing the last shader resets the sokol GPU state cache.
 - Does nothing when unloaded or when the stack is empty. If another shader is on top, or the current target activation differs from the one recorded by `begin()`, logs a warning and leaves the scope open.
 - Pair every `begin()` with `end()`; see `Shader::begin` for scope and object lifetime rules. This call does not flush deferred draws.
 '''
 details.ja = '''
+- `Shader::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 現在のウィンドウのスタックからこのシェーダーを取り除く前に `onEnd()` を呼び、前のシェーダーに戻します。最後のシェーダーを取り除くと、sokol の GPU 状態キャッシュをリセットします。
 - 未ロードの場合やスタックが空の場合は何もしません。別のシェーダーが先頭にある場合や、現在のターゲットの有効化区間が `begin()` 時と異なる場合は、警告をログに出してスコープを開いたままにします。
 - `begin()` ごとに `end()` を呼んでください。スコープの対応とオブジェクトの寿命は `Shader::begin` を参照してください。この呼び出しでは遅延描画を実行しません。
 '''
 details.ko = '''
+- `Shader::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 현재 창의 스택에서 이 셰이더를 제거하기 전에 `onEnd()`를 호출하고 이전 셰이더로 돌아갑니다. 마지막 셰이더를 제거하면 sokol의 GPU 상태 캐시를 초기화합니다.
 - 로드되지 않았거나 스택이 비어 있으면 아무 작업도 하지 않습니다. 다른 셰이더가 맨 위에 있거나 현재 타깃의 활성화 구간이 `begin()` 시점과 다르면 경고를 기록하고 범위를 열린 상태로 유지합니다.
 - 모든 `begin()`마다 `end()`를 호출하세요. 범위의 짝과 객체 수명 규칙은 `Shader::begin`을 참조하세요. 이 호출은 지연된 그리기를 실행하지 않습니다.
@@ -45179,6 +45251,12 @@ description.ja = "自作ポリゴン用の頂点バッファを開く。endShape
 description.ko = "직접 만드는 폴리곤용 정점 버퍼를 연다. endShape()로 닫는다."
 related = ["vertex", "endShape", "fill", "noFill", "beginLines", "beginStroke"]
 details.en = '''
+- Use `scopedShape` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - Use it to draw your own polygon. Call `beginShape()`, add points with `vertex()`, and finish with `endShape()`. `endShape()` draws the polygon and empties the buffer.
 - Coordinates and units are the same as for `drawRect`.
 - You can add any number of points. You can also add curved parts with `appendArc` and `appendCurve`.
@@ -45194,6 +45272,12 @@ endShape(true);   // true closes the outline back to the first vertex
 - Shapes cannot be nested. If you call `beginShape()` again before `endShape()`, the points added so far are discarded.
 '''
 details.ja = '''
+- `scopedShape` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - 自分で形を決めたポリゴンを描くときに使います。`beginShape()` を呼び、`vertex()` で点を追加し、`endShape()` で終わります。`endShape()` がポリゴンを描画し、バッファを空にします。
 - 座標と単位の考え方は `drawRect` と同じです。
 - 点はいくつでも追加できます。`appendArc` や `appendCurve` で曲線の部分を追加することもできます。
@@ -45209,6 +45293,12 @@ endShape(true);   // true closes the outline back to the first vertex
 - 入れ子にはできません。`endShape()` の前にもう一度 `beginShape()` を呼ぶと、それまでに追加した点は破棄されます。
 '''
 details.ko = '''
+- `scopedShape`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - 직접 모양을 정한 폴리곤을 그릴 때 사용합니다. `beginShape()`를 호출하고 `vertex()`로 점을 추가한 뒤 `endShape()`로 마칩니다. `endShape()`가 폴리곤을 그리고 버퍼를 비웁니다.
 - 좌표와 단위 개념은 `drawRect`와 같습니다.
 - 점은 몇 개든 추가할 수 있습니다. `appendArc`나 `appendCurve`로 곡선 부분을 추가할 수도 있습니다.
@@ -45232,6 +45322,12 @@ description.ja = "ストローク描画を開始する。"
 description.ko = "stroke 그리기를 시작한다."
 related = ["endStroke", "vertex", "beginShape", "setStrokeWeight", "setStrokeCap", "setStrokeJoin"]
 details.en = '''
+- Use `scopedStroke` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Draws a connected line with **width, end caps and corner joins**. The outline of `beginShape` is always a thin 1px line, but this one follows the stroke settings.
 - Set the look with `setStrokeWeight`, `setStrokeCap` and `setStrokeJoin`, add points with `vertex()`, and finish with `endStroke()`.
@@ -45252,6 +45348,12 @@ endStroke();        // open line; pass true to close it into a loop
 - Internally it builds a `StrokeMesh`.
 '''
 details.ja = '''
+- `scopedStroke` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - **太さ・端の cap・角の join** を持つ、つながった線を描きます。`beginShape` の輪郭は常に細い 1px の線ですが、こちらは線の設定に従います。
 - 見た目を `setStrokeWeight`、`setStrokeCap`、`setStrokeJoin` で設定し、`vertex()` で点を追加して、`endStroke()` で終わります。
@@ -45272,6 +45374,12 @@ endStroke();        // open line; pass true to close it into a loop
 - 内部では `StrokeMesh` を作って描画します。
 '''
 details.ko = '''
+- `scopedStroke`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - **두께, 끝의 cap, 모서리의 join**을 가진 이어진 선을 그립니다. `beginShape`의 윤곽은 항상 가는 1px 선이지만, 이 함수는 선 설정을 따릅니다.
 - 모양을 `setStrokeWeight`, `setStrokeCap`, `setStrokeJoin`으로 설정하고, `vertex()`로 점을 추가한 뒤 `endStroke()`로 마칩니다.
@@ -47514,6 +47622,12 @@ description.ja = "現在の図形の描画を終了する。"
 description.ko = "현재 도형 그리기를 종료한다."
 related = ["beginShape", "fill", "noFill"]
 details.en = '''
+- Use `scopedShape` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - Draws the points added since `beginShape()` and then empties the buffer. See `beginShape` for the full pattern and a code example.
 - `endShape(true)` closes the outline by connecting the last point back to the first. The default is `false`, which leaves the outline open.
 - With `fill()` (the default), the shape is filled when it has 3 or more points. The `close` argument does not affect the fill.
@@ -47522,6 +47636,12 @@ details.en = '''
 - The fill is made of triangles that all start from the first point. It is correct only for **convex** shapes. A concave polygon may be filled incorrectly.
 '''
 details.ja = '''
+- `scopedShape` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - `beginShape()` 以降に追加した点を描画し、バッファを空にします。全体の書き方とコード例は `beginShape` を参照してください。
 - `endShape(true)` にすると、最後の点を最初の点につないで輪郭を閉じます。省略時は `false` で、輪郭は開いたままです。
 - `fill()`（初期状態）のときは、点が 3 個以上あれば塗りつぶします。`close` の値は塗りつぶしには影響しません。
@@ -47530,6 +47650,12 @@ details.ja = '''
 - 塗りつぶしは、最初の点を共有する三角形を並べて作ります。そのため正しく塗れるのは**凸形**だけで、凹形のポリゴンでは塗りつぶしが崩れることがあります。
 '''
 details.ko = '''
+- `scopedShape`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - `beginShape()` 이후에 추가한 점을 그리고 버퍼를 비웁니다. 전체 작성법과 코드 예시는 `beginShape`를 참고하세요.
 - `endShape(true)`로 하면 마지막 점을 첫 점에 이어 윤곽을 닫습니다. 생략하면 `false`이며 윤곽은 열린 상태로 남습니다.
 - `fill()`(초기 상태)일 때는 점이 3개 이상이면 채워서 그립니다. `close` 값은 채우기에 영향을 주지 않습니다.
@@ -47546,6 +47672,12 @@ description.ja = "現在のストローク描画を終了する。"
 description.ko = "현재 stroke 그리기를 종료한다."
 related = ["beginStroke"]
 details.en = '''
+- Use `scopedStroke` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Joints and caps use their vertex's stored color; segments blend between endpoint colors. A closed stroke also blends from the last vertex's color back to the first vertex's color.
 - Draws the points added since `beginStroke()` as a thick line with the stroke width, caps and joins, and then empties the buffer. At least 2 points are needed. See `beginStroke` for the full pattern and a code example.
@@ -47553,6 +47685,12 @@ details.en = '''
 - When you close the loop, a last point placed at the same position as the first point is removed automatically. This prevents a small spike at the closing corner.
 '''
 details.ja = '''
+- `scopedStroke` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - 接合部とキャップには、その頂点に記録した色を使い、線分では両端の色を補間します。閉じたストロークでは、最後の頂点から最初の頂点への線分でも色を補間します。
 - `beginStroke()` 以降に追加した点を、線の太さ・cap・join を使った太い線として描画し、バッファを空にします。最低 2 点が必要です。全体の書き方とコード例は `beginStroke` を参照してください。
@@ -47560,6 +47698,12 @@ details.ja = '''
 - ループを閉じるとき、最後の点が最初の点と同じ位置にあれば、その点は自動的に取り除かれます。これにより、閉じた角に小さなとげが出ることを防ぎます。
 '''
 details.ko = '''
+- `scopedStroke`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - 조인과 캡에는 해당 정점에 기록된 색상을 사용하고 선분에서는 양 끝의 색상을 보간합니다. 닫힌 스트로크에서는 마지막 정점에서 첫 정점으로 이어지는 선분의 색상도 보간합니다.
 - `beginStroke()` 이후에 추가한 점을 선 두께, cap, join을 적용한 굵은 선으로 그리고 버퍼를 비웁니다. 최소 2개의 점이 필요합니다. 전체 작성법과 코드 예시는 `beginStroke`를 참고하세요.
@@ -70450,4 +70594,277 @@ void charInput(const CharEventArgs& e) override {
     logNotice() << e.sourceTag;
 }
 ```
+'''
+
+["FboScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["ShaderScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["ShapeScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["StrokeScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["Fbo::scoped"]
+category = "graphics_fbo"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return."
+description.ja = "`Fbo::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Fbo::end()` を呼びます。"
+description.ko = "`Fbo::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Fbo::end()`를 호출합니다."
+related = ["Fbo::begin", "Fbo::end"]
+details.en = '''
+- Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    Fbo fbo;
+    void setup() override { fbo.allocate(256, 256); }
+    void draw() override {
+        {
+            auto f = fbo.scoped(0, 0, 0);
+            drawCircle(100, 100, 50);
+        }   // fbo.end()
+        fbo.draw(0, 0);
+    }
+};
+```
+
+- An early return still calls end(). scoped() keeps previous content. scoped(r, g, b, a = 1.0f) clears at begin.
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `Fbo::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Fbo::end()` を呼びます。
+
+```cpp
+struct tcApp : App {
+    Fbo fbo;
+    void setup() override { fbo.allocate(256, 256); }
+    void draw() override {
+        {
+            auto f = fbo.scoped(0, 0, 0);
+            drawCircle(100, 100, 50);
+        }   // fbo.end()
+        fbo.draw(0, 0);
+    }
+};
+```
+
+- 早期 return でも end() を呼び出します。scoped() は既存の内容を保持します。scoped(r, g, b, a = 1.0f) は開始時にクリアします。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `Fbo::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Fbo::end()`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    Fbo fbo;
+    void setup() override { fbo.allocate(256, 256); }
+    void draw() override {
+        {
+            auto f = fbo.scoped(0, 0, 0);
+            drawCircle(100, 100, 50);
+        }   // fbo.end()
+        fbo.draw(0, 0);
+    }
+};
+```
+
+- 조기 return에서도 end()를 호출합니다. scoped()는 기존 내용을 유지합니다. scoped(r, g, b, a = 1.0f)는 시작할 때 지웁니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["Shader::scoped"]
+category = "graphics_shader"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return."
+description.ja = "`Shader::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Shader::end()` を呼びます。"
+description.ko = "`Shader::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Shader::end()`를 호출합니다."
+related = ["Shader::begin", "Shader::end"]
+details.en = '''
+- Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    Shader shader;
+    void draw() override {
+        {
+            auto s = shader.scoped();
+            drawRect(0, 0, 200, 200);
+        }   // shader.end()
+    }
+};
+```
+
+- An early return still calls end().
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `Shader::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Shader::end()` を呼びます。
+
+```cpp
+struct tcApp : App {
+    Shader shader;
+    void draw() override {
+        {
+            auto s = shader.scoped();
+            drawRect(0, 0, 200, 200);
+        }   // shader.end()
+    }
+};
+```
+
+- 早期 return でも end() を呼び出します。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `Shader::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Shader::end()`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    Shader shader;
+    void draw() override {
+        {
+            auto s = shader.scoped();
+            drawRect(0, 0, 200, 200);
+        }   // shader.end()
+    }
+};
+```
+
+- 조기 return에서도 end()를 호출합니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["scopedShape"]
+category = "graphics_shapes"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return."
+description.ja = "`beginShape()` を呼び、早期 return の場合もスコープを抜けると自動で `endShape(close)` を呼びます。"
+description.ko = "`beginShape()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endShape(close)`를 호출합니다."
+related = ["beginShape", "endShape"]
+details.en = '''
+- Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedShape(true);
+            vertex(0, 0);
+            vertex(100, 0);
+            vertex(50, 80);
+        }   // endShape(true)
+    }
+};
+```
+
+- An early return ends the pair with the vertices added so far. The close argument defaults to false; true connects the last vertex to the first.
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `beginShape()` を呼び、早期 return の場合もスコープを抜けると自動で `endShape(close)` を呼びます。
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedShape(true);
+            vertex(0, 0);
+            vertex(100, 0);
+            vertex(50, 80);
+        }   // endShape(true)
+    }
+};
+```
+
+- 早期 return でも、それまでに追加した頂点でペアを終了します。close の既定値は false で、true は最後の頂点を最初の頂点につなぎます。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `beginShape()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endShape(close)`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedShape(true);
+            vertex(0, 0);
+            vertex(100, 0);
+            vertex(50, 80);
+        }   // endShape(true)
+    }
+};
+```
+
+- 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["scopedStroke"]
+category = "graphics_shapes"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return."
+description.ja = "`beginStroke()` を呼び、早期 return の場合もスコープを抜けると自動で `endStroke(close)` を呼びます。"
+description.ko = "`beginStroke()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endStroke(close)`를 호출합니다."
+related = ["beginStroke", "endStroke"]
+details.en = '''
+- Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedStroke();
+            vertex(0, 0);
+            vertex(100, 50);
+        }   // endStroke()
+    }
+};
+```
+
+- An early return ends the pair with the vertices added so far. The close argument defaults to false; true connects the last vertex to the first.
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `beginStroke()` を呼び、早期 return の場合もスコープを抜けると自動で `endStroke(close)` を呼びます。
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedStroke();
+            vertex(0, 0);
+            vertex(100, 50);
+        }   // endStroke()
+    }
+};
+```
+
+- 早期 return でも、それまでに追加した頂点でペアを終了します。close の既定値は false で、true は最後の頂点を最初の頂点につなぎます。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `beginStroke()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endStroke(close)`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedStroke();
+            vertex(0, 0);
+            vertex(100, 50);
+        }   // endStroke()
+    }
+};
+```
+
+- 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
 '''

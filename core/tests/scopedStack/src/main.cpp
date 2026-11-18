@@ -28,6 +28,9 @@
 
 #include <cstdio>
 #include <stdexcept>
+#include <type_traits>
+#include <cstring>
+#include "../../common/tcDisplayTest.h"
 
 using namespace std;
 using namespace tc;
@@ -189,14 +192,170 @@ static void testException() {
     check("exception: matrix after is identity", isIdentity(getMatrix()));
 }
 
+template<class T> constexpr bool scopeTraits =
+    !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T> &&
+    !std::is_move_constructible_v<T> && !std::is_move_assignable_v<T>;
+static_assert(scopeTraits<FboScope>);
+static_assert(scopeTraits<ShaderScope>);
+static_assert(scopeTraits<ShapeScope>);
+static_assert(scopeTraits<StrokeScope>);
+
+void points() {
+    vertex(8, 8);
+    vertex(24, 8);
+    vertex(24, 24);
+}
+void earlyFbo(Fbo& fbo) {
+    auto f = fbo.scoped(0, 0, 1);
+    setColor(1, 0, 0);
+    drawRect(8, 8, 16, 16);
+    return;
+}
+void earlyShader(Shader& shader) {
+    auto s = shader.scoped();
+    return;
+}
+void earlyShape() {
+    auto s = scopedShape(true);
+    points();
+    return;
+}
+void earlyStroke() {
+    auto s = scopedStroke(true);
+    points();
+    return;
+}
+bool gpuCompleted = false;
+class PairApp : public App {
+public:
+    void draw() override {
+        Fbo fbo;
+        fbo.allocate(32, 32);
+        earlyFbo(fbo);
+        check("Fbo early return ends activation", !fbo.isActive());
+        Pixels pixels;
+        pixels.allocate(32, 32, 4);
+        check("Fbo scoped clear/draw readback", fbo.readPixels(pixels.getData()));
+        auto clearColor = pixels.getColor(2, 2);
+        auto drawnColor = pixels.getColor(16, 16);
+        check("Fbo scoped RGB clears with default alpha", clearColor.b > 0.99f &&
+              clearColor.r < 0.01f && clearColor.a > 0.99f);
+        check("Fbo scoped draws into attachment", drawnColor.r > 0.99f && drawnColor.b < 0.01f);
+        {
+            auto f = fbo.scoped();
+        }
+        check("Fbo no-clear scope readback", fbo.readPixels(pixels.getData()));
+        check("Fbo scoped() preserves content", pixels.getColor(16, 16).r > 0.99f);
+
+        Shader shader, other;
+        check("load shader A", shader.load(tc_fbomip_downsample_shader_desc));
+        check("load shader B", other.load(tc_fbomip_downsample_shader_desc));
+        auto& window = internal::currentWindowContext();
+        const auto depth = window.shaderStack.size();
+        earlyShader(shader);
+        check("Shader early return restores stack", window.shaderStack.size() == depth);
+
+        int warnings = 0;
+        std::string warning;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Warning) { ++warnings; warning = e.message; }
+        });
+        {
+            auto f = fbo.scoped();
+            fbo.end();
+            check("manual Fbo end clears activation", !fbo.isActive());
+        }
+        check("Fbo guard after manual end stays inactive", !fbo.isActive());
+        {
+            auto s = shader.scoped();
+            shader.end();
+        }
+        check("Shader guard after manual end keeps stack", window.shaderStack.size() == depth);
+
+        // Compare the emitted geometry to the unchanged explicit close=true pair.
+        noFill();
+        setStrokeWeight(2);
+        beginShape();
+        points();
+        int start = sgl_num_vertices();
+        endShape(true);
+        const int closedShapeCount = sgl_num_vertices() - start;
+        start = sgl_num_vertices();
+        earlyShape();
+        check("Shape early return ends and forwards close=true", !window.shapeStarted &&
+              closedShapeCount > 0 && sgl_num_vertices() - start == closedShapeCount);
+        beginStroke();
+        points();
+        start = sgl_num_vertices();
+        endStroke(true);
+        const int closedStrokeCount = sgl_num_vertices() - start;
+        start = sgl_num_vertices();
+        earlyStroke();
+        check("Stroke early return ends and forwards close=true", !window.strokeStarted &&
+              closedStrokeCount > 0 && sgl_num_vertices() - start == closedStrokeCount);
+        int afterManual = 0;
+        {
+            auto s = scopedShape();
+            points();
+            start = sgl_num_vertices();
+            endShape();
+            afterManual = sgl_num_vertices();
+            check("manual Shape end emits geometry", afterManual > start);
+        }
+        check("Shape guard after manual end emits nothing", !window.shapeStarted &&
+              sgl_num_vertices() == afterManual);
+        {
+            auto s = scopedStroke();
+            points();
+            start = sgl_num_vertices();
+            endStroke();
+            afterManual = sgl_num_vertices();
+            check("manual Stroke end emits geometry", afterManual > start);
+        }
+        check("Stroke guard after manual end emits nothing", !window.strokeStarted &&
+              sgl_num_vertices() == afterManual);
+        check("all four manual ends produce no warnings", warnings == 0);
+        {
+            auto s = shader.scoped();
+            shader.end();
+            other.begin();
+        }
+        check("EXPECTED: A guard warns once and leaves B open", warnings == 1 &&
+              warning.find("end() called on wrong shader") != std::string::npos &&
+              window.shaderStack.size() == depth + 1 && window.shaderStack.back() == &other);
+        other.end();
+        check("B can end normally after EXPECTED warning", window.shaderStack.size() == depth);
+        fill();
+        gpuCompleted = true;
+        exitApp();
+    }
+};
+
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--gpu") == 0) {
+        WindowSettings settings;
+        settings.width = 64;
+        settings.height = 64;
+        return tcCoreTest::runDisplayTest<PairApp>(settings, g_fail, [] {
+            check("scoped pair GPU checks completed", gpuCompleted);
+        });
+    }
+
     tcCoreTest::WindowFixture fixture;
 #ifndef NDEBUG
     std::printf("SKIP: needs a release build (sokol_gl asserts it is set up on pushMatrix())\n");
     return 0;
 #else
+    {
+        Fbo unallocated;
+        Shader unloaded;
+        auto f = unallocated.scoped();
+        auto shader = unloaded.scoped();
+        check("unallocated Fbo follows begin/end", !unallocated.isActive());
+        check("unloaded Shader follows begin/end", internal::currentWindowContext().shaderStack.empty());
+    }
     testBasic();
     testEarlyReturn();
     testNesting();

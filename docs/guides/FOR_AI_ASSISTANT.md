@@ -2252,6 +2252,8 @@ float getBitmapStringHeight(const std::string & text)  // Get the text's rendere
 float getBitmapStringWidth(const std::string & text)  // Get the text's rendered width in pixels.
 Direction getTextAlignH()  // Get the current horizontal text alignment.
 Direction getTextAlignV()  // Get the current vertical text alignment.
+ShapeScope scopedShape(bool close = false)  // Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return.
+StrokeScope scopedStroke(bool close = false)  // Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return.
 void setBitmapLineHeight(float h)  // Set the line spacing used for newlines in bitmap text.
 void setFps(float fps)  // Set the target frame rate that update and draw run at together.
 void setTextAlign(Direction h, Direction v)  // Set the anchor point used when drawing bitmap text.
@@ -3363,6 +3365,7 @@ bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,andr
 bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
 bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
+FboScope Fbo::scoped() [+1]  // Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return.
 void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
 
@@ -4532,6 +4535,7 @@ bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a shad
 void Shader::onBegin()  // Runs when this shader's drawing scope begins.
 void Shader::onEnd()  // Runs when this shader's drawing scope ends.
 sg_pipeline Shader::pipelineForCurrentTarget()  // Returns a shader pipeline compatible with the current render target.
+ShaderScope Shader::scoped()  // Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return.
 bool Shader::setStorageBuffer(int slot, const StorageBuffer & buffer)  // Binds read-only storage for deferred graphics drawing (C++ only).
 void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Stores a texture binding for a shader slot.
 void Shader::setUniform(int slot, float value) [+9]  // Stores uniform-block data for a shader slot.
