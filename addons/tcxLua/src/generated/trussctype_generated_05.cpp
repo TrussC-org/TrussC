@@ -140,65 +140,57 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::RectNodeButton::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Vec4
-            , trussc::Vec4()
-            , trussc::Vec4(float, float, float, float)
-            , trussc::Vec4(float)
-            , trussc::Vec4(const trussc::Vec3 &)
-            , trussc::Vec4(const trussc::Vec3 &, float)
-            , trussc::Vec4(const trussc::Vec2 &)
-            , trussc::Vec4(const trussc::Vec2 &, float)
-            , trussc::Vec4(const trussc::Vec2 &, float, float)
+        auto constructors = tcxLuaConstructors<trussc::GlyphBatch
+            , trussc::GlyphBatch()
         >();
-        sol::usertype<trussc::Vec4> t = lua->new_usertype<trussc::Vec4>("Vec4", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = sol::overload([](const trussc::Vec4& a, const trussc::Vec4 & b){ return a * b; }, [](const trussc::Vec4& a, float b){ return a * b; });
-        t[sol::meta_function::addition] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::Vec4& a){ return -a; };
-        t[sol::meta_function::division] = sol::overload([](const trussc::Vec4& a, const trussc::Vec4 & b){ return a / b; }, [](const trussc::Vec4& a, float b){ return a / b; });
-        t[sol::meta_function::equal_to] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a == b; };
-        t[sol::meta_function::index] = [](const trussc::Vec4& a, int b){ return a[b]; };
-        t["w"] = &trussc::Vec4::w;
-        t["x"] = &trussc::Vec4::x;
-        t["y"] = &trussc::Vec4::y;
-        t["z"] = &trussc::Vec4::z;
-        t["dot"] = &trussc::Vec4::dot;
-        t["length"] = &trussc::Vec4::length;
-        t["lengthSquared"] = &trussc::Vec4::lengthSquared;
-        t["lerp"] = &trussc::Vec4::lerp;
-        t["normalize"] = &trussc::Vec4::normalize;
-        t["normalized"] = &trussc::Vec4::normalized;
-        t["set"] = sol::overload([](trussc::Vec4& self, float x_, float y_, float z_, float w_) -> decltype(auto) { return self.set(x_, y_, z_, w_); }, [](trussc::Vec4& self, const trussc::Vec4 & v) -> decltype(auto) { return self.set(v); });
-        t["xy"] = &trussc::Vec4::xy;
-        t["xyz"] = &trussc::Vec4::xyz;
+        sol::usertype<trussc::GlyphBatch> t = lua->new_usertype<trussc::GlyphBatch>("GlyphBatch", constructors, sol::call_constructor, constructors);
+        t["add"] = sol::overload([](trussc::GlyphBatch& self, uint32_t codepoint) { return self.add(codepoint); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix) { return self.add(codepoint, matrix); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Color & color) { return self.add(codepoint, color); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix, const trussc::Color & color) { return self.add(codepoint, matrix, color); }, [](trussc::GlyphBatch& self, const std::string & text) { return self.add(text); }, [](trussc::GlyphBatch& self, const std::string & text, const trussc::Color & color) { return self.add(text, color); }, [](trussc::GlyphBatch& self, const std::string & text, float x, float y) { return self.add(text, x, y); }, [](trussc::GlyphBatch& self, const std::string & text, float x, float y, const trussc::Color & color) { return self.add(text, x, y, color); }, [](trussc::GlyphBatch& self, const std::string & text, const trussc::Mat4 & matrix, const trussc::Color & color) { return self.add(text, matrix, color); });
+        t["clear"] = &trussc::GlyphBatch::clear;
+        t["draw"] = sol::overload([](trussc::GlyphBatch& self) { return self.draw(); }, [](trussc::GlyphBatch& self, const trussc::Mat4 & transform) { return self.draw(transform); });
+        t["getColor"] = &trussc::GlyphBatch::getColor;
+        t["getTransform"] = &trussc::GlyphBatch::getTransform;
+        t["resetColor"] = &trussc::GlyphBatch::resetColor;
+        t["resetTransform"] = &trussc::GlyphBatch::resetTransform;
+        t["setAlign"] = &trussc::GlyphBatch::setAlign;
+        t["setAlignToInk"] = &trussc::GlyphBatch::setAlignToInk;
+        t["setColor"] = &trussc::GlyphBatch::setColor;
+        t["setFont"] = &trussc::GlyphBatch::setFont;
+        t["setTransform"] = &trussc::GlyphBatch::setTransform;
+        t["setWritingMode"] = &trussc::GlyphBatch::setWritingMode;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::FileWriter
-            , trussc::FileWriter()
-        >();
-        sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter", constructors, sol::call_constructor, constructors);
-        t["close"] = &trussc::FileWriter::close;
-        t["flush"] = &trussc::FileWriter::flush;
-        t["isOpen"] = &trussc::FileWriter::isOpen;
-        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
-        t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
-        t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
+        sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
+        t["clippedSamples"] = &trussc::AudioStats::clippedSamples;
+        t["cpuUsage"] = &trussc::AudioStats::cpuUsage;
+        t["cpuUsagePeak"] = &trussc::AudioStats::cpuUsagePeak;
+        t["droppedDecoderError"] = &trussc::AudioStats::droppedDecoderError;
+        t["droppedNotRunning"] = &trussc::AudioStats::droppedNotRunning;
+        t["droppedPlays"] = &trussc::AudioStats::droppedPlays;
+        t["droppedPolyphonyLimit"] = &trussc::AudioStats::droppedPolyphonyLimit;
+        t["droppedStreamLimit"] = &trussc::AudioStats::droppedStreamLimit;
+        t["initFailure"] = &trussc::AudioStats::initFailure;
+        t["initFailureResult"] = &trussc::AudioStats::initFailureResult;
+        t["peak"] = &trussc::AudioStats::peak;
+        t["rms"] = &trussc::AudioStats::rms;
+        t["stalled"] = &trussc::AudioStats::stalled;
+        t["underrunFrames"] = &trussc::AudioStats::underrunFrames;
+        t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
     }
     {
-        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
-        t["alt"] = &trussc::MouseEventArgs::alt;
-        t["button"] = &trussc::MouseEventArgs::button;
-        t["consumed"] = &trussc::MouseEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
-        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
-        t["injected"] = &trussc::MouseEventArgs::injected;
-        t["pos"] = &trussc::MouseEventArgs::pos;
-        t["shift"] = &trussc::MouseEventArgs::shift;
-        t["sourceTag"] = &trussc::MouseEventArgs::sourceTag;
-        t["super"] = &trussc::MouseEventArgs::super;
-        t["x"] = &trussc::MouseEventArgs::x;
-        t["y"] = &trussc::MouseEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
+        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
+        t["alt"] = &trussc::ScrollEventArgs::alt;
+        t["consumed"] = &trussc::ScrollEventArgs::consumed;
+        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
+        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
+        t["injected"] = &trussc::ScrollEventArgs::injected;
+        t["pos"] = &trussc::ScrollEventArgs::pos;
+        t["scroll"] = &trussc::ScrollEventArgs::scroll;
+        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
+        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
+        t["shift"] = &trussc::ScrollEventArgs::shift;
+        t["sourceTag"] = &trussc::ScrollEventArgs::sourceTag;
+        t["super"] = &trussc::ScrollEventArgs::super;
+        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
     }
     lua->new_usertype<trussc::Orientation>("Orientation",
         sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
@@ -237,20 +229,18 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
         "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
         "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
-    {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
-    }
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
         sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
         t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpErrorEventArgs::message;
     }
     {
-        sol::usertype<trussc::FilesOpenedEventArgs> t = lua->new_usertype<trussc::FilesOpenedEventArgs>("FilesOpenedEventArgs");
-        t["files"] = &trussc::FilesOpenedEventArgs::files;
+        sol::usertype<trussc::BackPressedEventArgs> t = lua->new_usertype<trussc::BackPressedEventArgs>("BackPressedEventArgs");
+        t["cancel"] = &trussc::BackPressedEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

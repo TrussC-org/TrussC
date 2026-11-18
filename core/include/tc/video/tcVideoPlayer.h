@@ -758,7 +758,11 @@ private:
     // -------------------------------------------------------------------------
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
+#if defined(__linux__) && !defined(__ANDROID__)
+    bool loadPlatform(const fs::path& path, bool createShader = true);
+#else
     bool loadPlatform(const fs::path& path);
+#endif
 #ifdef __APPLE__
     static void prepareAsyncPlatform(const std::shared_ptr<AsyncState>& state);
     bool loadPreparedPlatform(const fs::path& path, void* asset);
@@ -944,9 +948,9 @@ public:
 #if defined(__linux__) && !defined(__ANDROID__)
     // Exercise the real Linux decoder/clock in headless regression tests,
     // without creating textures or uploading frames to a GPU.
-    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
-        player.setUseHwAccel(false);
-        if (!player.loadPlatform(path)) {
+    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path, bool useHwAccel = false) {
+        player.setUseHwAccel(useHwAccel);
+        if (!player.loadPlatform(path, false)) {
             if (player.decodeStatus_) player.decodeStatus_->warn();
             return false;
         }
@@ -962,6 +966,7 @@ public:
         player.dispatchPlaybackError();
         player.done_ = !player.hasError() && player.isFinishedPlatform();
     }
+    static void decodedBackendForTests(VideoPlayer& player, int format, bool framesContext, bool newLoad);
     static int decodeThreadsForTests(const VideoPlayer& player);
     struct PlaybackSnapshot {
         double presentedPts, decodedPts, seekTarget, clockPts;

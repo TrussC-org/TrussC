@@ -44,6 +44,8 @@
 
 namespace trussc {
 
+class ShaderScope;
+
 namespace internal {
 int vertexStorageBufferLimit();
 }
@@ -232,6 +234,8 @@ public:
             sg_reset_state_cache();
         }
     }
+
+    TC_LUA_SKIP [[nodiscard]] ShaderScope scoped();
 
     // -------------------------------------------------------------------------
     // Uniform setters
@@ -661,6 +665,23 @@ private:
         other.loaded = false;
     }
 };
+
+// Scope-bound form of begin()/end(); the explicit pair remains the main form.
+class [[nodiscard]] TC_LUA_SKIP ShaderScope {
+public:
+    ~ShaderScope() { if (!internal::frameworkShutdown()) owner_.end(); }
+    ShaderScope(const ShaderScope&) = delete;
+    ShaderScope& operator=(const ShaderScope&) = delete;
+    ShaderScope(ShaderScope&&) = delete;
+    ShaderScope& operator=(ShaderScope&&) = delete;
+
+private:
+    explicit ShaderScope(Shader& owner) : owner_(owner) { owner_.begin(); }
+    friend ShaderScope Shader::scoped();
+    Shader& owner_;
+};
+
+TC_LUA_SKIP [[nodiscard]] inline ShaderScope Shader::scoped() { return ShaderScope(*this); }
 
 // ---------------------------------------------------------------------------
 // ShaderWriter::end() implementation (needs Shader class)

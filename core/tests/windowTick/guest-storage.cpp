@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
         check("guest enable_shared_from_this initializes and its object expires", weak.expired());
         check("live retained worker runs under its owner", reply() == "retained guest worker");
         // Retain guest-created queued callback storage independently of the
-        // COW snapshots, then retire while every allocation is rejected.
+        // event snapshots, then retire while every allocation is rejected.
         std::thread worker([&] { int value = 1; zero.notify(); typed.notify(value); });
         worker.join();
         auto queueGuest = reinterpret_cast<void (*)()>(dlsym(handle, "storageQueue"));
@@ -112,7 +112,9 @@ int main(int argc, char** argv) {
         check("ending detaches every published App", !window->getApp() && !siblingWindow->getApp() && !youngestWindow->getApp());
         check("only Runtime shutdown retires the Window backings", window->isOpen() == !runtimeStop &&
               siblingWindow->isOpen() == !runtimeStop && youngestWindow->isOpen() == !runtimeStop);
-        check("retirement releases captures before any queue drain", storageDrops == 3 && storageCalls == 0);
+        // Queued Main deliveries retain all three Apps' Event captures until
+        // queue release, even after retirement invalidates their listeners.
+        check("retirement preserves queued Event captures before any queue drain", storageDrops == 0 && storageCalls == 0);
         check("module remains mapped through retained App destruction", mapped());
         app.reset(); sibling.reset(); youngest.reset();
         ticket.owner.reset(); ticket.runToken.reset();
@@ -128,7 +130,7 @@ int main(int argc, char** argv) {
         check("retired worker refuses execution inside JSON-RPC while the module remains mapped",
             retiredReply.value("jsonrpc", "") == "2.0" && retiredReply["id"] == 239 && retiredReply["result"].value("isError", false));
         reply = {};
-        check("single-argument queued guest capture remains pinned after every other storage release", mapped() && storageDrops == 3);
+        check("queued Event and single-argument guest captures remain pinned after other storage releases", mapped() && storageDrops == 0);
         internal::drainMainThreadQueue();
         check("retired queued guest never runs and capture destruction finishes while pinned", storageCalls == 0 && storageDrops == 4 && mapped());
         check("retired module stays pinned after final storage release", mapped());

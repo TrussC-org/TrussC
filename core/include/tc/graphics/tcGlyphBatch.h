@@ -68,11 +68,17 @@ public:
     // String layout follows Font; ink pivot selection applies to independent glyphs.
     void add(const std::string& text) { add(text, color_); }
     void add(const std::string& text, const Color& color) {
+        add(text, 0, 0, color);
+    }
+    // Like drawString: lay out at (x, y), then apply current × batch transform.
+    void add(const std::string& text, float x, float y) { add(text, x, y, color_); }
+    void add(const std::string& text, float x, float y, const Color& color) {
         if (!font_.atlasManager_) return;
-        const Mat4 matrix = getMatrix() * transform_;
-        font_.forEachGlyphWithMatrix(text, 0, 0, alignH_, alignV_, [&](const Font::PlacedGlyph& placed) {
-            append(placed, matrix, color);
-        }, matrix);
+        appendString(text, x, y, getMatrix() * transform_, color);
+    }
+    // An explicit matrix replaces both the current and batch transforms.
+    void add(const std::string& text, const Mat4& matrix, const Color& color) {
+        appendString(text, 0, 0, matrix, color);
     }
 
     void draw() { draw(Mat4::identity()); }
@@ -152,6 +158,13 @@ public:
     }
 
 private:
+    void appendString(const std::string& text, float x, float y,
+                      const Mat4& matrix, const Color& color) {
+        if (!font_.atlasManager_) return;
+        font_.forEachGlyphWithMatrix(text, x, y, alignH_, alignV_, [&](const Font::PlacedGlyph& placed) {
+            append(placed, matrix, color);
+        }, matrix);
+    }
     friend struct internal::FontAtlasCompactionTestAccess;
     struct Vertex { Vec4 position; Vec2 texcoord; Color color; };
     struct Buffers {

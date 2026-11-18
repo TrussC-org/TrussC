@@ -35,6 +35,8 @@
 #  pragma GCC diagnostic pop
 #endif
 
+#include "tc/utils/tcLog.h"
+
 // ---------------------------------------------------------------------------
 // Android entry point bridge
 // ---------------------------------------------------------------------------
@@ -48,11 +50,17 @@
 // This lets existing main.cpp work unchanged on Android.
 // ---------------------------------------------------------------------------
 extern int main();
-namespace trussc { namespace internal { extern sapp_desc g_androidDesc; } }
+namespace trussc { namespace internal { sapp_desc g_androidDesc = {}; } }
 
 sapp_desc sokol_main(int argc, char* argv[]) {
     (void)argc; (void)argv;
     main();  // Populates trussc::internal::g_androidDesc via runApp()
+    if (!trussc::internal::g_androidDesc.init_userdata_cb) {
+        trussc::logError("Android") << "runApp() was never called; finishing the Activity.";
+        sapp_desc desc = {};
+        desc.init_cb = [] { sapp_quit(); };
+        return desc;
+    }
     return trussc::internal::g_androidDesc;
 }
 

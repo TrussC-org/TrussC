@@ -2251,11 +2251,13 @@ void endStroke(bool close = false)  // Finish drawing the current stroke.
 float getBitmapFontHeight()  // Get the bitmap font's fixed cell height in pixels.
 float getBitmapLineHeight()  // Get the current line spacing used for newlines in bitmap text.
 Rect getBitmapStringBBox(const std::string & text)  // Get the text's bounding box as a Rect.
-void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get a bitmap string's width and height through output parameters.
+void getBitmapStringBounds(const std::string & text, float & width, float & height) ⚠️deprecated  // Deprecated: use getBitmapStringBBox() for bitmap text size; removed in v1.0.0.
 float getBitmapStringHeight(const std::string & text)  // Get the text's rendered height in pixels.
 float getBitmapStringWidth(const std::string & text)  // Get the text's rendered width in pixels.
 Direction getTextAlignH()  // Get the current horizontal text alignment.
 Direction getTextAlignV()  // Get the current vertical text alignment.
+ShapeScope scopedShape(bool close = false)  // Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return.
+StrokeScope scopedStroke(bool close = false)  // Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return.
 void setBitmapLineHeight(float h)  // Set the line spacing used for newlines in bitmap text.
 void setFps(float fps)  // Set the target frame rate that update and draw run at together.
 void setTextAlign(Direction h, Direction v)  // Set the anchor point used when drawing bitmap text.
@@ -2558,7 +2560,7 @@ int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
 bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
-IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
+IVec2 getWindowPosition() [macos,windows,linux]  // Returns the current window’s position in OS screen coordinates; returns (-1, -1) when unavailable.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
 bool isFullscreen()  // Returns this window's observed fullscreen state.
 bool isRecording()  // Returns whether the global screen recorder is capturing.
@@ -2609,7 +2611,7 @@ LogStream logNotice(const std::string & module = std::string(""))  // Logs a mes
 LogStream logVerbose(const std::string & module = std::string(""))  // Creates a stream for verbose-level log messages.
 LogStream logWarning(const std::string & module = std::string(""))  // Creates a stream for warning-level logging.
 Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serializes a node and its subtree to JSON.
-Json parseJson(const std::string & str)  // Parses a JSON string into a Json value.
+Json parseJson(const std::string & str) [+1]  // Parses JSON text; use the LoadResult overload to distinguish failure from valid null.
 Xml parseXml(const std::string & str)  // Parses an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Applies JSON values to an object's reflected members.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Returns an object's reflected members as JSON.
@@ -2675,7 +2677,7 @@ fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Return a path
 std::string joinPath(const fs::path & dir, const fs::path & file)  // Joins two filesystem paths.
 std::vector<std::string> listDirectory(const fs::path & path)  // Lists the immediate files and directories in a directory.
 const char * loadErrorName(LoadError e)  // Returns the short name of a load error.
-Json loadJson(const fs::path & path)  // Loads a JSON value from a file.
+Json loadJson(const fs::path & path) [+1]  // Loads a JSON file; use the LoadResult overload to distinguish failure from valid null.
 std::string loadTextFile(const fs::path & path)  // Loads an entire file into a string.
 Xml loadXml(const fs::path & path)  // Loads an XML file into an Xml object.
 std::string pathToUtf8(const fs::path & p)  // Converts a filesystem path to a UTF-8 string.
@@ -3365,10 +3367,11 @@ int Fbo::getWidth() const  // Returns the framebuffer width.
 bool Fbo::isActive() const  // Reports whether the framebuffer has an active rendering scope.
 bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeeded.
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a top-first CPU RGBA8 buffer.
-bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
+bool Fbo::readPixels(unsigned char * pixels) const [+1] [macos,windows,linux,ios,android,web]  // Reads an ended Fbo as RGBA8 into Pixels with automatic sizing or a byte buffer allocated by the caller.
+bool Fbo::readPixelsFloat(float * pixels) const [+1] [macos,ios,windows,linux,android,web]  // Reads an ended Fbo as F32 into Pixels with automatic sizing or a float buffer allocated by the caller, using the source channel count.
 bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
+FboScope Fbo::scoped() [+1]  // Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return.
 void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
 
@@ -3506,7 +3509,7 @@ void FullscreenShader::setParams(const T & params)  // Sets the uniform paramete
 ### GlyphBatch — Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused.
 
 ```cpp
-void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
+void GlyphBatch::add(uint32_t codepoint) [+8]  // Appends retained text at a position or with a matrix, avoiding per-string matrix-stack changes.
 void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
 void GlyphBatch::draw() [+1]  // Draws the retained glyphs with the current camera, target and blend mode; draw(transform) places the whole batch.
 const Color & GlyphBatch::getColor() const  // Returns the current batch color.
@@ -4538,6 +4541,7 @@ bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a shad
 void Shader::onBegin()  // Runs when this shader's drawing scope begins.
 void Shader::onEnd()  // Runs when this shader's drawing scope ends.
 sg_pipeline Shader::pipelineForCurrentTarget()  // Returns a shader pipeline compatible with the current render target.
+ShaderScope Shader::scoped()  // Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return.
 bool Shader::setStorageBuffer(int slot, const StorageBuffer & buffer)  // Binds read-only storage for deferred graphics drawing (C++ only).
 void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Stores a texture binding for a shader slot.
 void Shader::setUniform(int slot, float value) [+9]  // Stores uniform-block data for a shader slot.
@@ -5245,7 +5249,7 @@ CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
 float Window::getFps() const  // Returns this window's measured update rate.
 int Window::getHeight() const  // Returns this window's content height.
-IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
+IVec2 Window::getPosition() const [macos,windows,linux]  // Reads this window’s position in OS screen coordinates; use it on desktop when you need the decorated frame location. Returns (-1, -1) when unavailable.
 float Window::getTargetFps() const  // Returns this window's target drawing rate.
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.

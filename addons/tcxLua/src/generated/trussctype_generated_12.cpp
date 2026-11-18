@@ -132,55 +132,64 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["fromOKLab"] = sol::overload([](float L, float a_lab, float b_lab) { return trussc::Color::fromOKLab(L, a_lab, b_lab); }, [](float L, float a_lab, float b_lab, float alpha) { return trussc::Color::fromOKLab(L, a_lab, b_lab, alpha); });
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::GlyphBatch
-            , trussc::GlyphBatch()
+        auto constructors = tcxLuaConstructors<trussc::LayoutMod
+            , trussc::LayoutMod()
+            , trussc::LayoutMod(trussc::LayoutDirection)
+            , trussc::LayoutMod(trussc::LayoutDirection, float)
         >();
-        sol::usertype<trussc::GlyphBatch> t = lua->new_usertype<trussc::GlyphBatch>("GlyphBatch", constructors, sol::call_constructor, constructors);
-        t["add"] = sol::overload([](trussc::GlyphBatch& self, uint32_t codepoint) { return self.add(codepoint); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix) { return self.add(codepoint, matrix); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Color & color) { return self.add(codepoint, color); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix, const trussc::Color & color) { return self.add(codepoint, matrix, color); }, [](trussc::GlyphBatch& self, const std::string & text) { return self.add(text); }, [](trussc::GlyphBatch& self, const std::string & text, const trussc::Color & color) { return self.add(text, color); });
-        t["clear"] = &trussc::GlyphBatch::clear;
-        t["draw"] = sol::overload([](trussc::GlyphBatch& self) { return self.draw(); }, [](trussc::GlyphBatch& self, const trussc::Mat4 & transform) { return self.draw(transform); });
-        t["getColor"] = &trussc::GlyphBatch::getColor;
-        t["getTransform"] = &trussc::GlyphBatch::getTransform;
-        t["resetColor"] = &trussc::GlyphBatch::resetColor;
-        t["resetTransform"] = &trussc::GlyphBatch::resetTransform;
-        t["setAlign"] = &trussc::GlyphBatch::setAlign;
-        t["setAlignToInk"] = &trussc::GlyphBatch::setAlignToInk;
-        t["setColor"] = &trussc::GlyphBatch::setColor;
-        t["setFont"] = &trussc::GlyphBatch::setFont;
-        t["setTransform"] = &trussc::GlyphBatch::setTransform;
-        t["setWritingMode"] = &trussc::GlyphBatch::setWritingMode;
+        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod", constructors, sol::call_constructor, constructors);
+        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
+        t["getDirection"] = &trussc::LayoutMod::getDirection;
+        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
+        t["getOwner"] = [](trussc::LayoutMod& self) { return self.getOwner(); };
+        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
+        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
+        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
+        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
+        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
+        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
+        t["setDirection"] = &trussc::LayoutMod::setDirection;
+        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
+        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
+        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
+        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
+        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
+        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
+        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
+        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Logger
-            , trussc::Logger()
-        >();
-        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
-        t["onLog"] = tcx_lua_detail::eventProperty<trussc::Logger>(&trussc::Logger::onLog);
-        t["closeFile"] = &trussc::Logger::closeFile;
-        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
-        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
-        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
-        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
-        t["isFileOpen"] = &trussc::Logger::isFileOpen;
-        t["log"] = &trussc::Logger::log;
-        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
-        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
-        t["setLogFile"] = &trussc::Logger::setLogFile;
-        t["setLogLevel"] = &trussc::Logger::setLogLevel;
-        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
+        sol::usertype<trussc::MouseMoveEventArgs> t = lua->new_usertype<trussc::MouseMoveEventArgs>("MouseMoveEventArgs");
+        t["alt"] = &trussc::MouseMoveEventArgs::alt;
+        t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseMoveEventArgs::ctrl;
+        t["delta"] = &trussc::MouseMoveEventArgs::delta;
+        t["deltaX"] = &trussc::MouseMoveEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseMoveEventArgs::deltaY;
+        t["globalDelta"] = &trussc::MouseMoveEventArgs::globalDelta;
+        t["globalPos"] = &trussc::MouseMoveEventArgs::globalPos;
+        t["injected"] = &trussc::MouseMoveEventArgs::injected;
+        t["pos"] = &trussc::MouseMoveEventArgs::pos;
+        t["shift"] = &trussc::MouseMoveEventArgs::shift;
+        t["sourceTag"] = &trussc::MouseMoveEventArgs::sourceTag;
+        t["super"] = &trussc::MouseMoveEventArgs::super;
+        t["x"] = &trussc::MouseMoveEventArgs::x;
+        t["y"] = &trussc::MouseMoveEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
     }
-    lua->new_usertype<trussc::BlendFactor>("BlendFactor",
-        sol::meta_function::equal_to, [](trussc::BlendFactor a, trussc::BlendFactor b){ return a == b; },
-        "Zero", sol::var(trussc::BlendFactor::Zero),
-        "One", sol::var(trussc::BlendFactor::One),
-        "SrcColor", sol::var(trussc::BlendFactor::SrcColor),
-        "OneMinusSrcColor", sol::var(trussc::BlendFactor::OneMinusSrcColor),
-        "SrcAlpha", sol::var(trussc::BlendFactor::SrcAlpha),
-        "OneMinusSrcAlpha", sol::var(trussc::BlendFactor::OneMinusSrcAlpha),
-        "DstColor", sol::var(trussc::BlendFactor::DstColor),
-        "OneMinusDstColor", sol::var(trussc::BlendFactor::OneMinusDstColor),
-        "DstAlpha", sol::var(trussc::BlendFactor::DstAlpha),
-        "OneMinusDstAlpha", sol::var(trussc::BlendFactor::OneMinusDstAlpha));
+    {
+        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
+        t["derived"] = &trussc::JsonWriteReflector::derived;
+        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
+        t["members"] = &trussc::JsonWriteReflector::members;
+        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
+        t["isDerived"] = &trussc::JsonWriteReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonWriteReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonWriteReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonWriteReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonWriteReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
+    }
     lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
         sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
         "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
@@ -191,12 +200,13 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
         "Points", sol::var(trussc::PrimitiveMode::Points));
     {
-        sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
-        t["error"] = &trussc::SaveResult::error;
-        t["message"] = &trussc::SaveResult::message;
-        t["ok"] = &trussc::SaveResult::ok;
-        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
-        t["success"] = &trussc::SaveResult::success;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
     lua->new_usertype<trussc::BlendOp>("BlendOp",
         sol::meta_function::equal_to, [](trussc::BlendOp a, trussc::BlendOp b){ return a == b; },
@@ -205,31 +215,29 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         "ReverseSubtract", sol::var(trussc::BlendOp::ReverseSubtract),
         "Minimum", sol::var(trussc::BlendOp::Minimum),
         "Maximum", sol::var(trussc::BlendOp::Maximum));
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
+        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
+        t["distance"] = &trussc::Node::HitResult::distance;
+        t["localPoint"] = &trussc::Node::HitResult::localPoint;
+        t["node"] = &trussc::Node::HitResult::node;
+        t["hit"] = &trussc::Node::HitResult::hit;
+    }
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    {
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::DeviceDisconnectEventArgs> t = lua->new_usertype<trussc::DeviceDisconnectEventArgs>("DeviceDisconnectEventArgs");
+        t["reason"] = &trussc::DeviceDisconnectEventArgs::reason;
     }
     {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
-    }
-    {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::FilesOpenedEventArgs> t = lua->new_usertype<trussc::FilesOpenedEventArgs>("FilesOpenedEventArgs");
+        t["files"] = &trussc::FilesOpenedEventArgs::files;
     }
 }
 #ifdef _MSC_VER

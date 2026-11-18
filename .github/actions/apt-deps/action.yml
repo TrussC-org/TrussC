@@ -14,17 +14,23 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Cache month
+    - name: Cache month and runner image
       id: month
       shell: bash
-      run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      # ImageOS/ImageVersion: a new runner image ships new package versions,
+      # so cached .debs from the old image no longer match and apt downloads
+      # everything again. Keying on the image saves a fresh cache.
+      run: |
+        echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt archives
       uses: actions/cache@v5
       with:
         path: ~/.apt-archives
-        key: apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.value }}
+        key: apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.image }}-${{ steps.month.outputs.value }}
         restore-keys: |
+          apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.image }}-
           apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-
 
     - name: Install dependencies
@@ -55,6 +61,20 @@ runs:
         Acquire::https::Timeout "30";
         Acquire::ftp::Timeout "30";
         APT_CONFIG
+        # The runner image's Microsoft source (packages.microsoft.com) is
+        # rate-limited at times (HTTP 429), and with Error-Mode=any its failure
+        # failed every update. No package here comes from it: move it aside, keep
+        # Error-Mode=any so a broken Ubuntu mirror still fails loudly.
+        apt_sources=${APT_SOURCES_DIR:-/etc/apt/sources.list.d}
+        mapfile -t microsoft_sources < <(grep -l -s 'packages\.microsoft\.com' \
+          "$apt_sources"/*.list "$apt_sources"/*.sources || true)
+        if (( ${#microsoft_sources[@]} > 0 )); then
+          sudo mkdir -p "$apt_sources.disabled"
+          for source in "${microsoft_sources[@]}"; do
+            echo "Disabling apt source $source (packages.microsoft.com)"
+            sudo mv "$source" "$apt_sources.disabled/"
+          done
+        fi
         # Total apt bound: 3 * (60 + 5 kill grace) + 2 * 5 + (300 + 5)
         # = 510 seconds, leaving 90 seconds of the 10-minute caller step.
         for attempt in 1 2 3; do
