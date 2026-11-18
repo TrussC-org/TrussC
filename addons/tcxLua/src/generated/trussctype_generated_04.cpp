@@ -266,10 +266,6 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::MicStartResult::message;
         t["success"] = &trussc::MicStartResult::success;
     }
-    {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
-    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

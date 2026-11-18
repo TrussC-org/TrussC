@@ -206,6 +206,10 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["events"] = &trussc::Runtime::events;
         t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)
