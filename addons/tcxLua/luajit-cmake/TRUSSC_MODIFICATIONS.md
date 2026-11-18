@@ -1,7 +1,7 @@
 # TrussC modifications
 
 Vendored from [zhaozg/luajit-cmake](https://github.com/zhaozg/luajit-cmake)
-at commit `94444a6c9bde77a768822f5cd00139161c9de412`.
+at commit `f0f1650127ba9d6c0efdea49b38c21d3902030d0`.
 The existing vendored file set is retained; upstream's Makefile, AGENT.md and
 Spanish README are not included.
 
@@ -14,3 +14,11 @@ Spanish README are not included.
 - All vendored upstream files now match the recorded `94444a6` import after
   undoing the documented minimum/policy change. No independent upstream copy
   was available offline. The MIT license is unchanged.
+
+## Update to f0f1650 (2026-11-18)
+
+- Updated only `Utils/zig.toolchain.cmake`: upstream recognizes Zig 0.17
+  and adds `-Wno-unused-function` while splitting existing flag assignments.
+- Every vendored upstream file matches this commit byte for byte. No vendor
+  patches were added; the parent integration and all historical notes above
+  are retained. The MIT license is unchanged.
