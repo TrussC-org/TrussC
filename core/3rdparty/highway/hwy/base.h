@@ -21,13 +21,22 @@
 // IWYU pragma: begin_exports
 #include <stddef.h>
 #include <stdint.h>
+#if defined(HWY_HEADER_ONLY)
+#include <stdarg.h>
+#include <stdio.h>
+#endif
+
+#if !defined(HWY_NO_LIBCXX)
+#include <ostream>
+#endif
 
 #include "hwy/detect_compiler_arch.h"
 #include "hwy/highway_export.h"
 
-// API version (https://semver.org/); keep in sync with CMakeLists.txt.
+// API version (https://semver.org/); keep in sync with CMakeLists.txt and
+// meson.build.
 #define HWY_MAJOR 1
-#define HWY_MINOR 2
+#define HWY_MINOR 4
 #define HWY_PATCH 0
 
 // True if the Highway version >= major.minor.0. Added in 1.2.0.
@@ -47,11 +56,11 @@
 #include <inttypes.h>
 #endif
 
-#if (HWY_ARCH_X86 && !defined(HWY_NO_LIBCXX)) || HWY_COMPILER_MSVC
+#endif  // !HWY_IDE
+
+#if !defined(HWY_NO_LIBCXX) || HWY_COMPILER_MSVC
 #include <atomic>
 #endif
-
-#endif  // !HWY_IDE
 
 #ifndef HWY_HAVE_COMPARE_HEADER  // allow override
 #define HWY_HAVE_COMPARE_HEADER 0
@@ -97,6 +106,7 @@
 #define HWY_NORETURN __declspec(noreturn)
 #define HWY_LIKELY(expr) (expr)
 #define HWY_UNLIKELY(expr) (expr)
+#define HWY_UNREACHABLE __assume(false)
 #define HWY_PRAGMA(tokens) __pragma(tokens)
 #define HWY_DIAGNOSTICS(tokens) HWY_PRAGMA(warning(tokens))
 #define HWY_DIAGNOSTICS_OFF(msc, gcc) HWY_DIAGNOSTICS(msc)
@@ -124,6 +134,11 @@
 #define HWY_NORETURN __attribute__((noreturn))
 #define HWY_LIKELY(expr) __builtin_expect(!!(expr), 1)
 #define HWY_UNLIKELY(expr) __builtin_expect(!!(expr), 0)
+#if HWY_COMPILER_GCC || HWY_HAS_BUILTIN(__builtin_unreachable)
+#define HWY_UNREACHABLE __builtin_unreachable()
+#else
+#define HWY_UNREACHABLE
+#endif
 #define HWY_PRAGMA(tokens) _Pragma(#tokens)
 #define HWY_DIAGNOSTICS(tokens) HWY_PRAGMA(GCC diagnostic tokens)
 #define HWY_DIAGNOSTICS_OFF(msc, gcc) HWY_DIAGNOSTICS(gcc)
@@ -133,6 +148,21 @@
 #define HWY_MUST_USE_RESULT __attribute__((warn_unused_result))
 
 #endif  // !HWY_COMPILER_MSVC
+
+#if (HWY_COMPILER_GCC_ACTUAL && HWY_COMPILER_GCC_ACTUAL < 1200) || \
+    (HWY_COMPILER_ICC && !HWY_COMPILER_ICX)
+// The use of __attribute__((unused)) in private class member variables triggers
+// a compiler warning with GCC 11 and earlier and ICC
+
+// GCC 11 and earlier and ICC also do not emit -Wunused-private-field warnings
+// for unused private class member variables
+#define HWY_MEMBER_VAR_MAYBE_UNUSED
+#else
+// Clang and ICX need __attribute__((unused)) in unused private class member
+// variables to suppress -Wunused-private-field warnings unless this warning is
+// ignored by using HWY_DIAGNOSTICS_OFF
+#define HWY_MEMBER_VAR_MAYBE_UNUSED HWY_MAYBE_UNUSED
+#endif
 
 //------------------------------------------------------------------------------
 // Builtin/attributes (no more #include after this point due to namespace!)
@@ -161,7 +191,8 @@ namespace hwy {
 // Returns a pointer whose type is `type` (T*), while allowing the compiler to
 // assume that the untyped pointer `ptr` is aligned to a multiple of sizeof(T).
 #define HWY_RCAST_ALIGNED(type, ptr) \
-  reinterpret_cast<type>(HWY_ASSUME_ALIGNED((ptr), alignof(RemovePtr<type>)))
+  reinterpret_cast<type>(            \
+      HWY_ASSUME_ALIGNED((ptr), alignof(hwy::RemovePtr<type>)))
 
 // Clang and GCC require attributes on each function into which SIMD intrinsics
 // are inlined. Support both per-function annotation (HWY_ATTR) for lambdas and
@@ -187,7 +218,9 @@ namespace hwy {
 //------------------------------------------------------------------------------
 // Macros
 
-#define HWY_API static HWY_INLINE HWY_FLATTEN HWY_MAYBE_UNUSED
+// Note: it is safe to remove `static` for users who want to use modules, but
+// that might be a breaking change for some users, hence we do not by default.
+#define HWY_API static HWY_INLINE HWY_FLATTEN
 
 #define HWY_CONCAT_IMPL(a, b) a##b
 #define HWY_CONCAT(a, b) HWY_CONCAT_IMPL(a, b)
@@ -217,7 +250,7 @@ namespace hwy {
 // Better:
 //   HWY_ASSUME(x == 2);
 //   HWY_ASSUME(y == 3);
-#if HWY_HAS_CPP_ATTRIBUTE(assume)
+#if (HWY_CXX_LANG >= 202302L) && HWY_HAS_CPP_ATTRIBUTE(assume)
 #define HWY_ASSUME(expr) [[assume(expr)]]
 #elif HWY_COMPILER_MSVC || HWY_COMPILER_ICC
 #define HWY_ASSUME(expr) __assume(expr)
@@ -233,82 +266,121 @@ namespace hwy {
 #define HWY_ASSUME(expr) static_cast<void>(0)
 #endif
 
-// Compile-time fence to prevent undesirable code reordering. On Clang x86, the
-// typical asm volatile("" : : : "memory") has no effect, whereas atomic fence
-// does, without generating code.
-#if HWY_ARCH_X86 && !defined(HWY_NO_LIBCXX)
-#define HWY_FENCE std::atomic_thread_fence(std::memory_order_acq_rel)
+// Compile-time fence to prevent undesirable code reordering. On Clang, the
+// typical `asm volatile("" : : : "memory")` seems to be ignored. Note that
+// `std::atomic_thread_fence` affects other threads, hence might generate a
+// barrier instruction, but this does not.
+#if !defined(HWY_NO_LIBCXX)
+#define HWY_FENCE std::atomic_signal_fence(std::memory_order_seq_cst)
+#elif HWY_COMPILER_GCC
+#define HWY_FENCE asm volatile("" : : : "memory")
 #else
-// TODO(janwas): investigate alternatives. On Arm, the above generates barriers.
 #define HWY_FENCE
 #endif
 
 // 4 instances of a given literal value, useful as input to LoadDup128.
 #define HWY_REP4(literal) literal, literal, literal, literal
 
+//------------------------------------------------------------------------------
+// Abort / Warn
+
+#if defined(HWY_HEADER_ONLY)
+HWY_DLLEXPORT inline void HWY_FORMAT(3, 4)
+    Warn(const char* file, int line, const char* format, ...) {
+  char buf[800];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buf, sizeof(buf), format, args);
+  va_end(args);
+
+  fprintf(stderr, "Warn at %s:%d: %s\n", file, line, buf);
+}
+
+HWY_DLLEXPORT HWY_NORETURN inline void HWY_FORMAT(3, 4)
+    Abort(const char* file, int line, const char* format, ...) {
+  char buf[800];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buf, sizeof(buf), format, args);
+  va_end(args);
+
+  fprintf(stderr, "Abort at %s:%d: %s\n", file, line, buf);
+
+  fflush(stderr);
+
+// Now terminate the program:
+#if HWY_ARCH_RISCV
+  exit(1);  // trap/abort just freeze Spike.
+#else
+  abort();  // Compile error without this due to HWY_NORETURN.
+#endif
+}
+#else  // !HWY_HEADER_ONLY
+// Interfaces for custom Warn/Abort handlers.
+typedef void (*WarnFunc)(const char* file, int line, const char* message);
+
+typedef void (*AbortFunc)(const char* file, int line, const char* message);
+
+// Returns current Warn() handler, or nullptr if no handler was yet registered,
+// indicating Highway should print to stderr.
+// DEPRECATED because this is thread-hostile and prone to misuse (modifying the
+// underlying pointer through the reference).
+HWY_DLLEXPORT WarnFunc& GetWarnFunc();
+
+// Returns current Abort() handler, or nullptr if no handler was yet registered,
+// indicating Highway should print to stderr and abort.
+// DEPRECATED because this is thread-hostile and prone to misuse (modifying the
+// underlying pointer through the reference).
+HWY_DLLEXPORT AbortFunc& GetAbortFunc();
+
+// Sets a new Warn() handler and returns the previous handler, which is nullptr
+// if no previous handler was registered, and should otherwise be called from
+// the new handler. Thread-safe.
+HWY_DLLEXPORT WarnFunc SetWarnFunc(WarnFunc func);
+
+// Sets a new Abort() handler and returns the previous handler, which is nullptr
+// if no previous handler was registered, and should otherwise be called from
+// the new handler. If all handlers return, then Highway will terminate the app.
+// Thread-safe.
+HWY_DLLEXPORT AbortFunc SetAbortFunc(AbortFunc func);
+
+HWY_DLLEXPORT void HWY_FORMAT(3, 4)
+    Warn(const char* file, int line, const char* format, ...);
+
 HWY_DLLEXPORT HWY_NORETURN void HWY_FORMAT(3, 4)
     Abort(const char* file, int line, const char* format, ...);
+
+#endif  // HWY_HEADER_ONLY
+
+#define HWY_WARN(format, ...) \
+  ::hwy::Warn(__FILE__, __LINE__, format, ##__VA_ARGS__)
 
 #define HWY_ABORT(format, ...) \
   ::hwy::Abort(__FILE__, __LINE__, format, ##__VA_ARGS__)
 
 // Always enabled.
-#define HWY_ASSERT(condition)             \
-  do {                                    \
-    if (!(condition)) {                   \
-      HWY_ABORT("Assert %s", #condition); \
-    }                                     \
+#define HWY_ASSERT_M(condition, msg)               \
+  do {                                             \
+    if (!(condition)) {                            \
+      HWY_ABORT("Assert %s: %s", #condition, msg); \
+    }                                              \
   } while (0)
-
-#if HWY_HAS_FEATURE(memory_sanitizer) || defined(MEMORY_SANITIZER) || \
-    defined(__SANITIZE_MEMORY__)
-#define HWY_IS_MSAN 1
-#else
-#define HWY_IS_MSAN 0
-#endif
-
-#if HWY_HAS_FEATURE(address_sanitizer) || defined(ADDRESS_SANITIZER) || \
-    defined(__SANITIZE_ADDRESS__)
-#define HWY_IS_ASAN 1
-#else
-#define HWY_IS_ASAN 0
-#endif
-
-#if HWY_HAS_FEATURE(hwaddress_sanitizer) || defined(HWADDRESS_SANITIZER) || \
-    defined(__SANITIZE_HWADDRESS__)
-#define HWY_IS_HWASAN 1
-#else
-#define HWY_IS_HWASAN 0
-#endif
-
-#if HWY_HAS_FEATURE(thread_sanitizer) || defined(THREAD_SANITIZER) || \
-    defined(__SANITIZE_THREAD__)
-#define HWY_IS_TSAN 1
-#else
-#define HWY_IS_TSAN 0
-#endif
-
-#if HWY_HAS_FEATURE(undefined_behavior_sanitizer) || \
-    defined(UNDEFINED_BEHAVIOR_SANITIZER)
-#define HWY_IS_UBSAN 1
-#else
-#define HWY_IS_UBSAN 0
-#endif
-
-// MSAN may cause lengthy build times or false positives e.g. in AVX3 DemoteTo.
-// You can disable MSAN by adding this attribute to the function that fails.
-#if HWY_IS_MSAN
-#define HWY_ATTR_NO_MSAN __attribute__((no_sanitize_memory))
-#else
-#define HWY_ATTR_NO_MSAN
-#endif
+#define HWY_ASSERT(condition) HWY_ASSERT_M(condition, "")
 
 // For enabling HWY_DASSERT and shortening tests in slower debug builds
+//
+// Note: `HWY_IS_UBSAN` is specifically excluded from engaging debug
+// builds. This is in service of Chromium's `-fsanitize=array-bounds` by
+// default, where we don't want Highway to unconditionally build in
+// debug mode.
+//
+// See also:
+// https://docs.google.com/document/d/1eCtY4AZF-SiFHxhIYWzEytdIx3C24de7ccD6Y5Gn2H8/edit?tab=t.9zkn85hr82ms#heading=h.efcshvfql42c
 #if !defined(HWY_IS_DEBUG_BUILD)
 // Clang does not define NDEBUG, but it and GCC define __OPTIMIZE__, and recent
 // MSVC defines NDEBUG (if not, could instead check _DEBUG).
-#if (!defined(__OPTIMIZE__) && !defined(NDEBUG)) || HWY_IS_ASAN || \
-    HWY_IS_HWASAN || HWY_IS_MSAN || HWY_IS_TSAN || HWY_IS_UBSAN || \
+#if (!defined(__OPTIMIZE__) && !defined(NDEBUG)) ||         \
+    (HWY_IS_ASAN || (HWY_IS_SANITIZER && !HWY_IS_UBSAN)) || \
     defined(__clang_analyzer__)
 #define HWY_IS_DEBUG_BUILD 1
 #else
@@ -317,8 +389,12 @@ HWY_DLLEXPORT HWY_NORETURN void HWY_FORMAT(3, 4)
 #endif  // HWY_IS_DEBUG_BUILD
 
 #if HWY_IS_DEBUG_BUILD
-#define HWY_DASSERT(condition) HWY_ASSERT(condition)
+#define HWY_DASSERT_M(condition, msg) HWY_ASSERT_M(condition, msg)
+#define HWY_DASSERT(condition) HWY_ASSERT_M(condition, "")
 #else
+#define HWY_DASSERT_M(condition, msg) \
+  do {                                \
+  } while (0)
 #define HWY_DASSERT(condition) \
   do {                         \
   } while (0)
@@ -357,21 +433,22 @@ HWY_API void CopySameSize(const From* HWY_RESTRICT from, To* HWY_RESTRICT to) {
   CopyBytes<sizeof(From)>(from, to);
 }
 
-template <size_t kBytes, typename To>
-HWY_API void ZeroBytes(To* to) {
+// Sets each byte to `byte_value`, which must be between 0 and 255.
+HWY_API void FillBytes(void* to, int byte_value, size_t num_bytes) {
 #if HWY_COMPILER_MSVC
-  memset(to, 0, kBytes);
+  memset(to, byte_value, num_bytes);
 #else
-  __builtin_memset(to, 0, kBytes);
+  __builtin_memset(to, byte_value, num_bytes);
 #endif
 }
 
 HWY_API void ZeroBytes(void* to, size_t num_bytes) {
-#if HWY_COMPILER_MSVC
-  memset(to, 0, num_bytes);
-#else
-  __builtin_memset(to, 0, num_bytes);
-#endif
+  FillBytes(to, 0, num_bytes);
+}
+
+template <size_t kBytes, typename To>
+HWY_API void ZeroBytes(To* to) {
+  ZeroBytes(to, kBytes);
 }
 
 //------------------------------------------------------------------------------
@@ -453,6 +530,13 @@ static inline HWY_MAYBE_UNUSED bool operator==(const uint128_t& a,
   return a.lo == b.lo && a.hi == b.hi;
 }
 
+#if !defined(HWY_NO_LIBCXX)
+static inline HWY_MAYBE_UNUSED std::ostream& operator<<(std::ostream& os,
+                                                        const uint128_t& n) {
+  return os << "[hi=" << n.hi << ",lo=" << n.lo << "]";
+}
+#endif
+
 static inline HWY_MAYBE_UNUSED bool operator<(const K64V64& a,
                                               const K64V64& b) {
   return a.key < b.key;
@@ -467,6 +551,13 @@ static inline HWY_MAYBE_UNUSED bool operator==(const K64V64& a,
   return a.key == b.key;
 }
 
+#if !defined(HWY_NO_LIBCXX)
+static inline HWY_MAYBE_UNUSED std::ostream& operator<<(std::ostream& os,
+                                                        const K64V64& n) {
+  return os << "[k=" << n.key << ",v=" << n.value << "]";
+}
+#endif
+
 static inline HWY_MAYBE_UNUSED bool operator<(const K32V32& a,
                                               const K32V32& b) {
   return a.key < b.key;
@@ -480,6 +571,13 @@ static inline HWY_MAYBE_UNUSED bool operator==(const K32V32& a,
                                                const K32V32& b) {
   return a.key == b.key;
 }
+
+#if !defined(HWY_NO_LIBCXX)
+static inline HWY_MAYBE_UNUSED std::ostream& operator<<(std::ostream& os,
+                                                        const K32V32& n) {
+  return os << "[k=" << n.key << ",v=" << n.value << "]";
+}
+#endif
 
 //------------------------------------------------------------------------------
 // Controlling overload resolution (SFINAE)
@@ -882,76 +980,85 @@ HWY_INLINE constexpr bool IsIntegerLaneType<uint64_t>() {
   return true;
 }
 
+namespace detail {
+
 template <class T>
-HWY_API constexpr bool IsInteger() {
-  // NOTE: Do not add a IsInteger<wchar_t>() specialization below as it is
+static HWY_INLINE constexpr bool IsNonCvInteger() {
+  // NOTE: Do not add a IsNonCvInteger<wchar_t>() specialization below as it is
   // possible for IsSame<wchar_t, uint16_t>() to be true when compiled with MSVC
   // with the /Zc:wchar_t- option.
-  return IsIntegerLaneType<T>() || IsSame<RemoveCvRef<T>, wchar_t>() ||
-         IsSameEither<RemoveCvRef<T>, size_t, ptrdiff_t>() ||
-         IsSameEither<RemoveCvRef<T>, intptr_t, uintptr_t>();
+  return IsIntegerLaneType<T>() || IsSame<T, wchar_t>() ||
+         IsSameEither<T, size_t, ptrdiff_t>() ||
+         IsSameEither<T, intptr_t, uintptr_t>();
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<bool>() {
+HWY_INLINE constexpr bool IsNonCvInteger<bool>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<char>() {
+HWY_INLINE constexpr bool IsNonCvInteger<char>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<signed char>() {
+HWY_INLINE constexpr bool IsNonCvInteger<signed char>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<unsigned char>() {
+HWY_INLINE constexpr bool IsNonCvInteger<unsigned char>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<short>() {  // NOLINT
+HWY_INLINE constexpr bool IsNonCvInteger<short>() {  // NOLINT
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<unsigned short>() {  // NOLINT
+HWY_INLINE constexpr bool IsNonCvInteger<unsigned short>() {  // NOLINT
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<int>() {
+HWY_INLINE constexpr bool IsNonCvInteger<int>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<unsigned>() {
+HWY_INLINE constexpr bool IsNonCvInteger<unsigned>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<long>() {  // NOLINT
+HWY_INLINE constexpr bool IsNonCvInteger<long>() {  // NOLINT
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<unsigned long>() {  // NOLINT
+HWY_INLINE constexpr bool IsNonCvInteger<unsigned long>() {  // NOLINT
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<long long>() {  // NOLINT
+HWY_INLINE constexpr bool IsNonCvInteger<long long>() {  // NOLINT
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<unsigned long long>() {  // NOLINT
+HWY_INLINE constexpr bool IsNonCvInteger<unsigned long long>() {  // NOLINT
   return true;
 }
 #if defined(__cpp_char8_t) && __cpp_char8_t >= 201811L
 template <>
-HWY_INLINE constexpr bool IsInteger<char8_t>() {
+HWY_INLINE constexpr bool IsNonCvInteger<char8_t>() {
   return true;
 }
 #endif
 template <>
-HWY_INLINE constexpr bool IsInteger<char16_t>() {
+HWY_INLINE constexpr bool IsNonCvInteger<char16_t>() {
   return true;
 }
 template <>
-HWY_INLINE constexpr bool IsInteger<char32_t>() {
+HWY_INLINE constexpr bool IsNonCvInteger<char32_t>() {
   return true;
+}
+
+}  // namespace detail
+
+template <class T>
+HWY_API constexpr bool IsInteger() {
+  return detail::IsNonCvInteger<RemoveCvRef<T>>();
 }
 
 // -----------------------------------------------------------------------------
@@ -1042,6 +1149,7 @@ HWY_API HWY_BITCASTSCALAR_CONSTEXPR To BitCastScalar(const From& val) {
 
 #pragma pack(push, 1)
 
+#ifndef HWY_NEON_HAVE_F16C  // allow override
 // Compiler supports __fp16 and load/store/conversion NEON intrinsics, which are
 // included in Armv8 and VFPv4 (except with MSVC). On Armv7 Clang requires
 // __ARM_FP & 2 whereas Armv7 GCC requires -mfp16-format=ieee.
@@ -1052,6 +1160,7 @@ HWY_API HWY_BITCASTSCALAR_CONSTEXPR To BitCastScalar(const From& val) {
 #else
 #define HWY_NEON_HAVE_F16C 0
 #endif
+#endif  // HWY_NEON_HAVE_F16C
 
 // RVV with f16 extension supports _Float16 and f16 vector ops. If set, implies
 // HWY_HAVE_FLOAT16.
@@ -1071,9 +1180,10 @@ HWY_API HWY_BITCASTSCALAR_CONSTEXPR To BitCastScalar(const From& val) {
 #define HWY_SSE2_HAVE_F16_TYPE 0
 #endif
 
-#ifndef HWY_HAVE_SCALAR_F16_TYPE
+#ifndef HWY_HAVE_SCALAR_F16_TYPE  // allow override
 // Compiler supports _Float16, not necessarily with operators.
-#if HWY_NEON_HAVE_F16C || HWY_RVV_HAVE_F16_VEC || HWY_SSE2_HAVE_F16_TYPE
+#if HWY_NEON_HAVE_F16C || HWY_RVV_HAVE_F16_VEC || HWY_SSE2_HAVE_F16_TYPE || \
+    __SPIRV_DEVICE__
 #define HWY_HAVE_SCALAR_F16_TYPE 1
 #else
 #define HWY_HAVE_SCALAR_F16_TYPE 0
@@ -1125,17 +1235,19 @@ using NativeSpecialFloatToWrapper =
 // are generated regardless of F16 support; see #1684.
 struct alignas(2) float16_t {
 #if HWY_HAVE_SCALAR_F16_TYPE
-#if HWY_RVV_HAVE_F16_VEC || HWY_SSE2_HAVE_F16_TYPE
+#if HWY_RVV_HAVE_F16_VEC || HWY_SSE2_HAVE_F16_TYPE || __SPIRV_DEVICE__
   using Native = _Float16;
 #elif HWY_NEON_HAVE_F16C
   using Native = __fp16;
 #else
 #error "Logic error: condition should be 'all but NEON_HAVE_F16C'"
 #endif
+#elif HWY_IDE
+  using Native = uint16_t;
 #endif  // HWY_HAVE_SCALAR_F16_TYPE
 
   union {
-#if HWY_HAVE_SCALAR_F16_TYPE
+#if HWY_HAVE_SCALAR_F16_TYPE || HWY_IDE
     // Accessed via NativeLaneType, and used directly if
     // HWY_HAVE_SCALAR_F16_OPERATORS.
     Native native;
@@ -1566,24 +1678,14 @@ HWY_F16_CONSTEXPR inline std::partial_ordering operator<=>(
 //------------------------------------------------------------------------------
 // BF16 lane type
 
-// Compiler supports ACLE __bf16, not necessarily with operators.
-
-// Disable the __bf16 type on AArch64 with GCC 13 or earlier as there is a bug
-// in GCC 13 and earlier that sometimes causes BF16 constant values to be
-// incorrectly loaded on AArch64, and this GCC bug on AArch64 is
-// described at https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111867.
-
-#if HWY_ARCH_ARM_A64 && \
-    (HWY_COMPILER_CLANG >= 1700 || HWY_COMPILER_GCC_ACTUAL >= 1400)
-#define HWY_ARM_HAVE_SCALAR_BF16_TYPE 1
-#else
-#define HWY_ARM_HAVE_SCALAR_BF16_TYPE 0
-#endif
-
 // x86 compiler supports __bf16, not necessarily with operators.
+// Disable in debug builds due to clang miscompiles as of 2025-07-22: casting
+// bf16 <-> f32 in convert_test results in 0x2525 for 1.0 instead of 0x3f80.
+// Reported at https://github.com/llvm/llvm-project/issues/151692.
 #ifndef HWY_SSE2_HAVE_SCALAR_BF16_TYPE
-#if HWY_ARCH_X86 && defined(__SSE2__) &&                      \
-    ((HWY_COMPILER_CLANG >= 1700 && !HWY_COMPILER_CLANGCL) || \
+#if HWY_ARCH_X86 && defined(__SSE2__) &&                         \
+    ((HWY_COMPILER_CLANG >= 1700 && !HWY_COMPILER_CLANGCL &&     \
+      (!HWY_IS_DEBUG_BUILD || HWY_COMPILER3_CLANG >= 220101)) || \
      HWY_COMPILER_GCC_ACTUAL >= 1300)
 #define HWY_SSE2_HAVE_SCALAR_BF16_TYPE 1
 #else
@@ -1601,7 +1703,11 @@ HWY_F16_CONSTEXPR inline std::partial_ordering operator<=>(
 #ifndef HWY_HAVE_SCALAR_BF16_OPERATORS
 // Recent enough compiler also has operators. aarch64 clang 18 hits internal
 // compiler errors on bf16 ToString, hence only enable on GCC for now.
-#if HWY_HAVE_SCALAR_BF16_TYPE && (HWY_COMPILER_GCC_ACTUAL >= 1300)
+// GCC >= 13 will insert a function call to the __extendbfsf2 helper function
+// for scalar conversions from __bf16 to float. This is prohibitively expensive,
+// so refrain from using scalar BF16 operators on these compiler versions.
+// See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=121853
+#if HWY_HAVE_SCALAR_BF16_TYPE && (HWY_COMPILER_GCC_ACTUAL >= 1700)
 #define HWY_HAVE_SCALAR_BF16_OPERATORS 1
 #else
 #define HWY_HAVE_SCALAR_BF16_OPERATORS 0
@@ -1617,10 +1723,12 @@ HWY_F16_CONSTEXPR inline std::partial_ordering operator<=>(
 struct alignas(2) bfloat16_t {
 #if HWY_HAVE_SCALAR_BF16_TYPE
   using Native = __bf16;
+#elif HWY_IDE
+  using Native = uint16_t;
 #endif
 
   union {
-#if HWY_HAVE_SCALAR_BF16_TYPE
+#if HWY_HAVE_SCALAR_BF16_TYPE || HWY_IDE
     // Accessed via NativeLaneType, and used directly if
     // HWY_HAVE_SCALAR_BF16_OPERATORS.
     Native native;
@@ -1637,7 +1745,7 @@ struct alignas(2) bfloat16_t {
   bfloat16_t& operator=(const bfloat16_t& arg) noexcept = default;
 
 // Only enable implicit conversions if we have a native type.
-#if HWY_HAVE_SCALAR_BF16_TYPE
+#if HWY_HAVE_SCALAR_BF16_TYPE || HWY_IDE
   constexpr bfloat16_t(Native arg) noexcept : native(arg) {}
   constexpr operator Native() const noexcept { return native; }
 #endif
@@ -1818,38 +1926,33 @@ static HWY_INLINE HWY_MAYBE_UNUSED constexpr uint32_t F32BitsToBF16RoundIncr(
                                    : 0u);
 }
 
+// If f32_bits is the bit representation of a NaN F32 value, make sure that
+// bit 6 of the BF16 result is set to convert SNaN F32 values to QNaN BF16
+// values and to prevent NaN F32 values from being converted to an infinite
+// BF16 value
+static HWY_INLINE constexpr uint32_t BF16BitsIfSNAN(uint32_t f32_bits) {
+  return ((f32_bits & 0x7FFFFFFFu) > 0x7F800000u) ? (uint32_t{1} << 6) : 0;
+}
+
 // Converts f32_bits (which is the bits of a F32 value) to BF16 bits,
 // rounded to the nearest F16 value
 static HWY_INLINE HWY_MAYBE_UNUSED constexpr uint16_t F32BitsToBF16Bits(
     const uint32_t f32_bits) {
-  // Round f32_bits to the nearest BF16 by first adding
-  // F32BitsToBF16RoundIncr(f32_bits) to f32_bits and then right shifting
-  // f32_bits + F32BitsToBF16RoundIncr(f32_bits) by 16
-
-  // If f32_bits is the bit representation of a NaN F32 value, make sure that
-  // bit 6 of the BF16 result is set to convert SNaN F32 values to QNaN BF16
-  // values and to prevent NaN F32 values from being converted to an infinite
-  // BF16 value
   return static_cast<uint16_t>(
-      ((f32_bits + F32BitsToBF16RoundIncr(f32_bits)) >> 16) |
-      (static_cast<uint32_t>((f32_bits & 0x7FFFFFFFu) > 0x7F800000u) << 6));
+      BF16BitsIfSNAN(f32_bits) |
+      ((f32_bits + F32BitsToBF16RoundIncr(f32_bits)) >> 16));
 }
 
 }  // namespace detail
 
 HWY_API HWY_BF16_CONSTEXPR bfloat16_t BF16FromF32(float f) {
-#if HWY_HAVE_SCALAR_BF16_OPERATORS
-  return static_cast<bfloat16_t>(f);
-#else
+  // The rounding mode is not specified in the C++ standard, so ignore
+  // `HWY_HAVE_SCALAR_BF16_OPERATORS` and only use our round to nearest.
   return bfloat16_t::FromBits(
       detail::F32BitsToBF16Bits(BitCastScalar<uint32_t>(f)));
-#endif
 }
 
 HWY_API HWY_BF16_CONSTEXPR bfloat16_t BF16FromF64(double f64) {
-#if HWY_HAVE_SCALAR_BF16_OPERATORS
-  return static_cast<bfloat16_t>(f64);
-#else
   // The mantissa bits of f64 are first rounded using round-to-odd rounding
   // to the nearest f64 value that has the lower 38 bits zeroed out to
   // ensure that the result is correctly rounded to a BF16.
@@ -1885,7 +1988,6 @@ HWY_API HWY_BF16_CONSTEXPR bfloat16_t BF16FromF64(double f64) {
           (BitCastScalar<uint64_t>(f64) & 0xFFFFFFC000000000ULL) |
           ((BitCastScalar<uint64_t>(f64) + 0x0000003FFFFFFFFFULL) &
            0x0000004000000000ULL)))));
-#endif
 }
 
 // More convenient to define outside bfloat16_t because these may use
@@ -2178,6 +2280,11 @@ constexpr bool IsSigned<hwy::K32V32>() {
   return false;
 }
 
+template <typename T>
+HWY_API constexpr bool IsUnsigned() {
+  return IsInteger<T>() && !IsSigned<T>();
+}
+
 template <typename T, bool = IsInteger<T>() && !IsIntegerLaneType<T>()>
 struct MakeLaneTypeIfIntegerT {
   using type = T;
@@ -2364,6 +2471,45 @@ constexpr MakeSigned<T> MaxExponentField() {
   return (MakeSigned<T>{1} << ExponentBits<T>()) - 1;
 }
 
+namespace detail {
+
+template <typename T>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BITCASTSCALAR_CONSTEXPR T
+NegativeInfOrLowestValue(hwy::FloatTag /* tag */) {
+  return BitCastScalar<T>(
+      static_cast<MakeUnsigned<T>>(SignMask<T>() | ExponentMask<T>()));
+}
+
+template <typename T>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BITCASTSCALAR_CONSTEXPR T
+NegativeInfOrLowestValue(hwy::NonFloatTag /* tag */) {
+  return LowestValue<T>();
+}
+
+template <typename T>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BITCASTSCALAR_CONSTEXPR T
+PositiveInfOrHighestValue(hwy::FloatTag /* tag */) {
+  return BitCastScalar<T>(ExponentMask<T>());
+}
+
+template <typename T>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BITCASTSCALAR_CONSTEXPR T
+PositiveInfOrHighestValue(hwy::NonFloatTag /* tag */) {
+  return HighestValue<T>();
+}
+
+}  // namespace detail
+
+template <typename T>
+HWY_API HWY_BITCASTSCALAR_CONSTEXPR T NegativeInfOrLowestValue() {
+  return detail::NegativeInfOrLowestValue<T>(IsFloatTag<T>());
+}
+
+template <typename T>
+HWY_API HWY_BITCASTSCALAR_CONSTEXPR T PositiveInfOrHighestValue() {
+  return detail::PositiveInfOrHighestValue<T>(IsFloatTag<T>());
+}
+
 //------------------------------------------------------------------------------
 // Additional F16/BF16 operators
 
@@ -2379,6 +2525,17 @@ constexpr MakeSigned<T> MaxExponentField() {
       HWY_IF_CASTABLE(RawResultT, ResultT)>                                   \
   static HWY_INLINE constexpr ResultT op_func(T1 a, T2 b) noexcept {          \
     return static_cast<ResultT>(a op b.native);                               \
+  }
+
+#define HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(op, assign_op, T2)                 \
+  template <typename T1,                                                   \
+            hwy::EnableIf<hwy::IsInteger<RemoveCvRef<T1>>() ||             \
+                          hwy::IsFloat3264<RemoveCvRef<T1>>()>* = nullptr, \
+            typename ResultT =                                             \
+                decltype(DeclVal<T1&>() assign_op DeclVal<T2::Native>())>  \
+  static HWY_INLINE constexpr ResultT operator assign_op(T1& a,            \
+                                                         T2 b) noexcept {  \
+    return (a assign_op b.native);                                         \
   }
 
 #define HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(op, op_func, T1)         \
@@ -2399,6 +2556,10 @@ HWY_RHS_SPECIAL_FLOAT_ARITH_OP(+, operator+, float16_t)
 HWY_RHS_SPECIAL_FLOAT_ARITH_OP(-, operator-, float16_t)
 HWY_RHS_SPECIAL_FLOAT_ARITH_OP(*, operator*, float16_t)
 HWY_RHS_SPECIAL_FLOAT_ARITH_OP(/, operator/, float16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(+, +=, float16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(-, -=, float16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(*, *=, float16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(/, /=, float16_t)
 HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(==, operator==, float16_t)
 HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(!=, operator!=, float16_t)
 HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(<, operator<, float16_t)
@@ -2415,6 +2576,10 @@ HWY_RHS_SPECIAL_FLOAT_ARITH_OP(+, operator+, bfloat16_t)
 HWY_RHS_SPECIAL_FLOAT_ARITH_OP(-, operator-, bfloat16_t)
 HWY_RHS_SPECIAL_FLOAT_ARITH_OP(*, operator*, bfloat16_t)
 HWY_RHS_SPECIAL_FLOAT_ARITH_OP(/, operator/, bfloat16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(+, +=, bfloat16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(-, -=, bfloat16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(*, *=, bfloat16_t)
+HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP(/, /=, bfloat16_t)
 HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(==, operator==, bfloat16_t)
 HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(!=, operator!=, bfloat16_t)
 HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(<, operator<, bfloat16_t)
@@ -2427,6 +2592,7 @@ HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP(<=>, operator<=>, bfloat16_t)
 #endif  // HWY_HAVE_SCALAR_BF16_OPERATORS
 
 #undef HWY_RHS_SPECIAL_FLOAT_ARITH_OP
+#undef HWY_RHS_SPECIAL_FLOAT_ASSIGN_OP
 #undef HWY_SPECIAL_FLOAT_CMP_AGAINST_NON_SPECIAL_OP
 
 #endif  // HWY_HAVE_SCALAR_F16_OPERATORS || HWY_HAVE_SCALAR_BF16_OPERATORS
@@ -2452,53 +2618,83 @@ HWY_API float F32FromBF16Mem(const void* ptr) {
 #define HWY_BF16_TO_F16_CONSTEXPR HWY_F16_CONSTEXPR
 #endif
 
-// For casting from TFrom to TTo
-template <typename TTo, typename TFrom, HWY_IF_NOT_SPECIAL_FLOAT(TTo),
-          HWY_IF_NOT_SPECIAL_FLOAT(TFrom), HWY_IF_NOT_SAME(TTo, TFrom)>
-HWY_API constexpr TTo ConvertScalarTo(const TFrom in) {
-  return static_cast<TTo>(in);
+namespace detail {
+
+template <class TTo, class TFrom>
+static HWY_INLINE HWY_MAYBE_UNUSED constexpr TTo ConvertScalarToResult(
+    hwy::SizeTag<0> /*conv_to_tag*/, TFrom in) {
+  return static_cast<TTo>(static_cast<TFrom>(in));
 }
-template <typename TTo, typename TFrom, HWY_IF_F16(TTo),
-          HWY_IF_NOT_SPECIAL_FLOAT(TFrom), HWY_IF_NOT_SAME(TFrom, double)>
-HWY_API constexpr TTo ConvertScalarTo(const TFrom in) {
-  return F16FromF32(static_cast<float>(in));
+
+template <class TTo>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_F16_CONSTEXPR TTo
+ConvertScalarToResult(hwy::FloatTag /*conv_to_tag*/, float in) {
+  return F16FromF32(in);
 }
-template <typename TTo, HWY_IF_F16(TTo)>
-HWY_API HWY_BF16_TO_F16_CONSTEXPR TTo
-ConvertScalarTo(const hwy::bfloat16_t in) {
-  return F16FromF32(F32FromBF16(in));
-}
-template <typename TTo, HWY_IF_F16(TTo)>
-HWY_API HWY_F16_CONSTEXPR TTo ConvertScalarTo(const double in) {
+
+template <class TTo>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_F16_CONSTEXPR TTo
+ConvertScalarToResult(hwy::FloatTag /*conv_to_tag*/, double in) {
   return F16FromF64(in);
 }
-template <typename TTo, typename TFrom, HWY_IF_BF16(TTo),
-          HWY_IF_NOT_SPECIAL_FLOAT(TFrom), HWY_IF_NOT_SAME(TFrom, double)>
-HWY_API HWY_BF16_CONSTEXPR TTo ConvertScalarTo(const TFrom in) {
-  return BF16FromF32(static_cast<float>(in));
+
+template <class TTo>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BF16_CONSTEXPR TTo
+ConvertScalarToResult(hwy::SpecialTag /*conv_to_tag*/, float in) {
+  return BF16FromF32(in);
 }
-template <typename TTo, HWY_IF_BF16(TTo)>
-HWY_API HWY_BF16_TO_F16_CONSTEXPR TTo ConvertScalarTo(const hwy::float16_t in) {
-  return BF16FromF32(F32FromF16(in));
-}
-template <typename TTo, HWY_IF_BF16(TTo)>
-HWY_API HWY_BF16_CONSTEXPR TTo ConvertScalarTo(const double in) {
+
+template <class TTo>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BF16_CONSTEXPR TTo
+ConvertScalarToResult(hwy::SpecialTag /*conv_to_tag*/, double in) {
   return BF16FromF64(in);
 }
-template <typename TTo, typename TFrom, HWY_IF_F16(TFrom),
-          HWY_IF_NOT_SPECIAL_FLOAT(TTo)>
-HWY_API HWY_F16_CONSTEXPR TTo ConvertScalarTo(const TFrom in) {
-  return static_cast<TTo>(F32FromF16(in));
+
+template <class TFrom, HWY_IF_BF16(TFrom)>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_BF16_CONSTEXPR float
+ConvertScalarSpecialFloatToF32(hwy::SpecialTag /*conv_from_tag*/, TFrom in) {
+  return F32FromBF16(in);
 }
-template <typename TTo, typename TFrom, HWY_IF_BF16(TFrom),
-          HWY_IF_NOT_SPECIAL_FLOAT(TTo)>
-HWY_API HWY_BF16_CONSTEXPR TTo ConvertScalarTo(TFrom in) {
-  return static_cast<TTo>(F32FromBF16(in));
+
+template <class TFrom, HWY_IF_F16(TFrom)>
+static HWY_INLINE HWY_MAYBE_UNUSED HWY_F16_CONSTEXPR float
+ConvertScalarSpecialFloatToF32(hwy::SpecialTag /*conv_from_tag*/, TFrom in) {
+  return F32FromF16(in);
 }
-// Same: return unchanged
-template <typename TTo>
-HWY_API constexpr TTo ConvertScalarTo(TTo in) {
-  return in;
+
+template <class TFrom>
+static HWY_INLINE HWY_MAYBE_UNUSED constexpr auto
+ConvertScalarSpecialFloatToF32(hwy::FloatTag /*conv_from_tag*/, TFrom in)
+    -> hwy::If<hwy::IsSame<hwy::RemoveCvRef<TFrom>, double>(), double, float> {
+  return static_cast<
+      hwy::If<hwy::IsSame<hwy::RemoveCvRef<TFrom>, double>(), double, float>>(
+      in);
+}
+
+template <class TFrom>
+static HWY_INLINE HWY_MAYBE_UNUSED constexpr TFrom
+ConvertScalarSpecialFloatToF32(hwy::SizeTag<0> /*conv_from_tag*/, TFrom in) {
+  return static_cast<TFrom>(in);
+}
+
+}  // namespace detail
+
+template <typename TTo, typename TFrom>
+HWY_API constexpr TTo ConvertScalarTo(TFrom in) {
+  return detail::ConvertScalarToResult<TTo>(
+      hwy::SizeTag<
+          (!hwy::IsSame<hwy::RemoveCvRef<TFrom>, hwy::RemoveCvRef<TTo>>() &&
+           hwy::IsSpecialFloat<TTo>())
+              ? (hwy::IsSame<RemoveCvRef<TTo>, hwy::bfloat16_t>() ? 0x300
+                                                                  : 0x200)
+              : 0>(),
+      detail::ConvertScalarSpecialFloatToF32(
+          hwy::SizeTag<
+              (!hwy::IsSame<hwy::RemoveCvRef<TFrom>, hwy::RemoveCvRef<TTo>>() &&
+               (hwy::IsSpecialFloat<TFrom>() || hwy::IsSpecialFloat<TTo>()))
+                  ? (hwy::IsSpecialFloat<TFrom>() ? 0x300 : 0x200)
+                  : 0>(),
+          static_cast<TFrom&&>(in)));
 }
 
 //------------------------------------------------------------------------------
@@ -2506,10 +2702,13 @@ HWY_API constexpr TTo ConvertScalarTo(TTo in) {
 
 template <typename T1, typename T2>
 constexpr inline T1 DivCeil(T1 a, T2 b) {
+#if HWY_CXX_LANG >= 201703L
+  HWY_DASSERT(b != T2{0});
+#endif
   return (a + b - 1) / b;
 }
 
-// Works for any `align`; if a power of two, compiler emits ADD+AND.
+// Works for any non-zero `align`; if a power of two, compiler emits ADD+AND.
 constexpr inline size_t RoundUpTo(size_t what, size_t align) {
   return DivCeil(what, align) * align;
 }
@@ -2727,9 +2926,10 @@ HWY_INLINE constexpr T AddWithWraparound(T t, T2 n) {
 // 64 x 64 = 128 bit multiplication
 HWY_API uint64_t Mul128(uint64_t a, uint64_t b, uint64_t* HWY_RESTRICT upper) {
 #if defined(__SIZEOF_INT128__)
-  __uint128_t product = (__uint128_t)a * (__uint128_t)b;
-  *upper = (uint64_t)(product >> 64);
-  return (uint64_t)(product & 0xFFFFFFFFFFFFFFFFULL);
+  __uint128_t product =
+      static_cast<__uint128_t>(a) * static_cast<__uint128_t>(b);
+  *upper = static_cast<uint64_t>(product >> 64);
+  return static_cast<uint64_t>(product & 0xFFFFFFFFFFFFFFFFULL);
 #elif HWY_COMPILER_MSVC && HWY_ARCH_X86_64
   return _umul128(a, b, upper);
 #else
@@ -2746,9 +2946,9 @@ HWY_API uint64_t Mul128(uint64_t a, uint64_t b, uint64_t* HWY_RESTRICT upper) {
 
 HWY_API int64_t Mul128(int64_t a, int64_t b, int64_t* HWY_RESTRICT upper) {
 #if defined(__SIZEOF_INT128__)
-  __int128_t product = (__int128_t)a * (__int128_t)b;
-  *upper = (int64_t)(product >> 64);
-  return (int64_t)(product & 0xFFFFFFFFFFFFFFFFULL);
+  __int128_t product = static_cast<__int128_t>(a) * static_cast<__int128_t>(b);
+  *upper = static_cast<int64_t>(product >> 64);
+  return static_cast<int64_t>(product & 0xFFFFFFFFFFFFFFFFULL);
 #elif HWY_COMPILER_MSVC && HWY_ARCH_X86_64
   return _mul128(a, b, upper);
 #else
@@ -2802,6 +3002,97 @@ class Divisor {
   uint32_t shift1_ = 0;
   uint32_t shift2_ = 0;
 };
+
+#ifndef HWY_HAVE_DIV128  // allow override
+// Exclude clang-cl because it calls __divti3 from clang_rt.builtins-x86_64,
+// which is not linked in.
+#if (HWY_COMPILER_MSVC >= 1920 && HWY_ARCH_X86_64) || \
+    (defined(__SIZEOF_INT128__) && !HWY_COMPILER_CLANGCL)
+#define HWY_HAVE_DIV128 1
+#else
+#define HWY_HAVE_DIV128 0
+#endif
+#endif  // HWY_HAVE_DIV128
+
+// Divisor64 can precompute the multiplicative inverse.
+#if HWY_HAVE_DIV128
+
+#if HWY_COMPILER_MSVC >= 1920 && HWY_ARCH_X86_64
+#pragma intrinsic(_udiv128)
+#pragma intrinsic(__umulh)
+#endif
+
+// As above, but for 64-bit divisors: more expensive to compute and initialize.
+class Divisor64 {
+ public:
+  explicit Divisor64(uint64_t divisor) : divisor_(divisor) {
+    if (divisor <= 1) return;
+
+    const uint64_t len =
+        static_cast<uint64_t>(63 - Num0BitsAboveMS1Bit_Nonzero64(divisor - 1));
+    const uint64_t u_hi = (2ULL << len) - divisor;
+    const uint64_t q = Div128(u_hi, divisor);
+
+    mul_ = q + 1;
+    shift1_ = 1;
+    shift2_ = len;
+  }
+
+  uint64_t GetDivisor() const { return divisor_; }
+
+  // Returns n / divisor_.
+  uint64_t Divide(uint64_t n) const {
+    const uint64_t t = MulHigh(mul_, n);
+    return (t + ((n - t) >> shift1_)) >> shift2_;
+  }
+
+  // Returns n % divisor_.
+  uint64_t Remainder(uint64_t n) const { return n - (Divide(n) * divisor_); }
+
+ private:
+  uint64_t divisor_;
+
+  static uint64_t Div128(uint64_t hi, uint64_t div) {
+#if HWY_COMPILER_MSVC >= 1920 && HWY_ARCH_X86_64
+    unsigned __int64 remainder;  // unused
+    return _udiv128(hi, uint64_t{0}, div, &remainder);
+#else
+    using u128 = unsigned __int128;
+    const u128 hi128 = static_cast<u128>(hi) << 64;
+    return static_cast<uint64_t>(hi128 / static_cast<u128>(div));
+#endif
+  }
+
+  static uint64_t MulHigh(uint64_t a, uint64_t b) {
+#if HWY_COMPILER_MSVC >= 1920 && HWY_ARCH_X86_64
+    return __umulh(a, b);
+#else
+    using u128 = unsigned __int128;
+    const u128 a128 = static_cast<u128>(a);
+    const u128 b128 = static_cast<u128>(b);
+    return static_cast<uint64_t>((a128 * b128) >> 64);
+#endif
+  }
+
+  uint64_t mul_ = 1;
+  uint64_t shift1_ = 0;
+  uint64_t shift2_ = 0;
+};
+#else
+// No Div128 available, use built-in 64-bit division on each call.
+class Divisor64 {
+ public:
+  explicit Divisor64(uint64_t divisor) : divisor_(divisor) {}
+
+  uint64_t GetDivisor() const { return divisor_; }
+
+  uint64_t Divide(uint64_t n) const { return n / divisor_; }
+  uint64_t Remainder(uint64_t n) const { return n % divisor_; }
+
+ private:
+  uint64_t divisor_;
+};
+#endif  // HWY_HAVE_DIV128
 
 namespace detail {
 

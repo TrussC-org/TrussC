@@ -72,10 +72,12 @@ struct Vec1 {
 
 // 0 or FF..FF, same size as Vec1.
 template <typename T>
-class Mask1 {
+struct Mask1 {
   using Raw = hwy::MakeUnsigned<T>;
 
- public:
+  using PrivateT = T;                     // only for DFromM
+  static constexpr size_t kPrivateN = 1;  // only for DFromM
+
   static HWY_INLINE Mask1<T> FromBool(bool b) {
     Mask1<T> mask;
     mask.bits = b ? static_cast<Raw>(~Raw{0}) : 0;
@@ -87,6 +89,9 @@ class Mask1 {
 
 template <class V>
 using DFromV = Simd<typename V::PrivateT, V::kPrivateN, 0>;
+
+template <class M>
+using DFromM = Simd<typename M::PrivateT, M::kPrivateN, 0>;
 
 template <class V>
 using TFromV = typename V::PrivateT;
@@ -248,13 +253,6 @@ HWY_API Vec1<T> operator^(const Vec1<T> a, const Vec1<T> b) {
   return Xor(a, b);
 }
 
-// ------------------------------ Xor3
-
-template <typename T>
-HWY_API Vec1<T> Xor3(Vec1<T> x1, Vec1<T> x2, Vec1<T> x3) {
-  return Xor(x1, Xor(x2, x3));
-}
-
 // ------------------------------ Or3
 
 template <typename T>
@@ -288,13 +286,6 @@ HWY_API Mask1<T> MaskFromVec(const Vec1<T> v) {
 template <class D>
 using MFromD = decltype(MaskFromVec(VFromD<D>()));
 
-template <typename T>
-Vec1<T> VecFromMask(const Mask1<T> mask) {
-  Vec1<T> v;
-  CopySameSize(&mask, &v);
-  return v;
-}
-
 template <class D, typename T = TFromD<D>>
 Vec1<T> VecFromMask(D /* tag */, const Mask1<T> mask) {
   Vec1<T> v;
@@ -302,9 +293,25 @@ Vec1<T> VecFromMask(D /* tag */, const Mask1<T> mask) {
   return v;
 }
 
+template <class D>
+uint64_t BitsFromMask(D, MFromD<D> mask) {
+  return mask.bits ? 1 : 0;
+}
+
 template <class D, HWY_IF_LANES_D(D, 1), typename T = TFromD<D>>
 HWY_API Mask1<T> FirstN(D /*tag*/, size_t n) {
   return Mask1<T>::FromBool(n != 0);
+}
+
+#ifdef HWY_NATIVE_SET_MASK
+#undef HWY_NATIVE_SET_MASK
+#else
+#define HWY_NATIVE_SET_MASK
+#endif
+
+template <class D>
+HWY_API MFromD<D> SetMask(D /*d*/, bool val) {
+  return MFromD<D>::FromBool(val);
 }
 
 // ------------------------------ IfVecThenElse
@@ -607,13 +614,23 @@ HWY_API Vec1<int16_t> SaturatedSub(const Vec1<int16_t> a,
 
 // Returns (a + b + 1) / 2
 
-HWY_API Vec1<uint8_t> AverageRound(const Vec1<uint8_t> a,
-                                   const Vec1<uint8_t> b) {
-  return Vec1<uint8_t>(static_cast<uint8_t>((a.raw + b.raw + 1) / 2));
-}
-HWY_API Vec1<uint16_t> AverageRound(const Vec1<uint16_t> a,
-                                    const Vec1<uint16_t> b) {
-  return Vec1<uint16_t>(static_cast<uint16_t>((a.raw + b.raw + 1) / 2));
+#ifdef HWY_NATIVE_AVERAGE_ROUND_UI32
+#undef HWY_NATIVE_AVERAGE_ROUND_UI32
+#else
+#define HWY_NATIVE_AVERAGE_ROUND_UI32
+#endif
+
+#ifdef HWY_NATIVE_AVERAGE_ROUND_UI64
+#undef HWY_NATIVE_AVERAGE_ROUND_UI64
+#else
+#define HWY_NATIVE_AVERAGE_ROUND_UI64
+#endif
+
+template <class T, HWY_IF_NOT_FLOAT_NOR_SPECIAL(T)>
+HWY_API Vec1<T> AverageRound(const Vec1<T> a, const Vec1<T> b) {
+  const T a_val = a.raw;
+  const T b_val = b.raw;
+  return Vec1<T>(static_cast<T>((a_val | b_val) - ScalarShr(a_val ^ b_val, 1)));
 }
 
 // ------------------------------ Absolute value
@@ -719,6 +736,11 @@ HWY_API Vec1<MakeWide<T>> MulEven(const Vec1<T> a, const Vec1<T> b) {
   using TW = MakeWide<T>;
   const TW a_wide = a.raw;
   return Vec1<TW>(static_cast<TW>(a_wide * b.raw));
+}
+
+template <class T>
+HWY_API Vec1<MakeWide<T>> MulOdd(const Vec1<T>, const Vec1<T>) {
+  static_assert(sizeof(T) == 0, "There are no odd lanes");
 }
 
 // Approximate reciprocal
@@ -831,9 +853,9 @@ HWY_API Vec1<T> Round(const Vec1<T> v) {
 }
 
 // Round-to-nearest even.
-HWY_API Vec1<int32_t> NearestInt(const Vec1<float> v) {
-  using T = float;
-  using TI = int32_t;
+template <class T, HWY_IF_FLOAT3264(T)>
+HWY_API Vec1<MakeSigned<T>> NearestInt(const Vec1<T> v) {
+  using TI = MakeSigned<T>;
 
   const T abs = Abs(v).raw;
   const bool is_sign = ScalarSignBit(v.raw);
@@ -843,12 +865,39 @@ HWY_API Vec1<int32_t> NearestInt(const Vec1<float> v) {
     if (!(abs <= ConvertScalarTo<T>(LimitsMax<TI>()))) {
       return Vec1<TI>(is_sign ? LimitsMin<TI>() : LimitsMax<TI>());
     }
-    return Vec1<int32_t>(ConvertScalarTo<TI>(v.raw));
+    return Vec1<TI>(ConvertScalarTo<TI>(v.raw));
   }
   const T bias =
       ConvertScalarTo<T>(v.raw < ConvertScalarTo<T>(0.0) ? -0.5 : 0.5);
   const TI rounded = ConvertScalarTo<TI>(v.raw + bias);
-  if (rounded == 0) return Vec1<int32_t>(0);
+  if (rounded == 0) return Vec1<TI>(0);
+  TI offset = 0;
+  // Round to even
+  if ((rounded & 1) && ScalarAbs(ConvertScalarTo<T>(rounded) - v.raw) ==
+                           ConvertScalarTo<T>(0.5)) {
+    offset = is_sign ? -1 : 1;
+  }
+  return Vec1<TI>(rounded - offset);
+}
+
+// Round-to-nearest even.
+template <class DI32, HWY_IF_I32_D(DI32)>
+HWY_API VFromD<DI32> DemoteToNearestInt(DI32 /*di32*/, const Vec1<double> v) {
+  using T = double;
+  using TI = int32_t;
+
+  const T abs = Abs(v).raw;
+  const bool is_sign = ScalarSignBit(v.raw);
+
+  // Check if too large to cast or NaN
+  if (!(abs <= ConvertScalarTo<T>(LimitsMax<TI>()))) {
+    return Vec1<TI>(is_sign ? LimitsMin<TI>() : LimitsMax<TI>());
+  }
+
+  const T bias =
+      ConvertScalarTo<T>(v.raw < ConvertScalarTo<T>(0.0) ? -0.5 : 0.5);
+  const TI rounded = ConvertScalarTo<TI>(v.raw + bias);
+  if (rounded == 0) return Vec1<TI>(0);
   TI offset = 0;
   // Round to even
   if ((rounded & 1) && ScalarAbs(ConvertScalarTo<T>(rounded) - v.raw) ==
@@ -1612,10 +1661,31 @@ HWY_API Vec1<T> OddEvenBlocks(Vec1<T> /* odd */, Vec1<T> even) {
 }
 
 // ------------------------------ SwapAdjacentBlocks
-
 template <typename T>
 HWY_API Vec1<T> SwapAdjacentBlocks(Vec1<T> v) {
   return v;
+}
+
+// ------------------------------ InterleaveEvenBlocks
+template <class D, class V = VFromD<D>>
+HWY_API V InterleaveEvenBlocks(D, V a, V /*b*/) {
+  return a;
+}
+// ------------------------------ InterleaveOddBlocks
+template <class D, class V = VFromD<D>>
+HWY_API V InterleaveOddBlocks(D, V a, V /*b*/) {
+  return a;
+}
+
+// ------------------------------ InterleaveLowerBlocks
+template <class D, class V = VFromD<D>>
+HWY_API V InterleaveLowerBlocks(D, V a, V /*b*/) {
+  return a;
+}
+// ------------------------------ InterleaveUpperBlocks
+template <class D, class V = VFromD<D>>
+HWY_API V InterleaveUpperBlocks(D, V a, V /*b*/) {
+  return a;
 }
 
 // ------------------------------ TableLookupLanes

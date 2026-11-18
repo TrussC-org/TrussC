@@ -59,7 +59,7 @@ This is the one list of third-party code in TrussC and the version the build use
 | **pugixml** | 1.16 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
 | **cpp-httplib** | 0.66.0 | `core/include/impl/httplib.h` ([upstream checksum](../core/include/impl/HTTPLIB_PATCHES.md)) | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.11.1 (see [PROVENANCE.md](../core/include/lz4/PROVENANCE.md)) | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
-| **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
+| **Highway** | 1.4.0, commit `2607d3b5b0113992fe84d3848859eae13b3b52c1` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
 | **earcut.hpp** | commit `365be263bfed498f9d3d3bf065bcb39b0d0e4ba6` (2026-04-30, "Remove use of infinity (#129)"; unmodified, untagged master: 16 commits after v2.2.4 and 16 before v3.2.3; no matching tag); used for Path fills in `tc/graphics/tcPath.h` | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
 | **Bitmap ASCII glyph data** | version/commit not recorded; see [bitmap notice](#bitmap-font-data) for source and local changes | `core/include/tcBitmapFont.h` | https://github.com/freeglut/freeglut | See bitmap notice below; exact import notice not recorded | freeglut / X11 contributors |
 
@@ -205,9 +205,9 @@ SOFTWARE.
 
 ### Apache-2.0 / BSD-3-Clause (Highway)
 
-Highway's upstream license files are retained in
-[LICENSE](../core/3rdparty/highway/LICENSE) and
-[LICENSE-BSD3](../core/3rdparty/highway/LICENSE-BSD3).
+Highway's upstream combined license file is retained in
+[LICENSE](../core/3rdparty/highway/LICENSE), including both Apache-2.0 and
+BSD-3-Clause texts for the vendored subset.
 See each source file's SPDX identifiers for the applicable license.
 
 ### Apache-2.0 / GPL-2.0-or-later (mbedTLS)
