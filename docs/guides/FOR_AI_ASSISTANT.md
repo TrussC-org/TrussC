@@ -5237,9 +5237,10 @@ void Window::close()  // Requests closure of this window.
 void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
 CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
-float Window::getFps() const  // Returns this window's target frame rate.
+float Window::getFps() const  // Returns this window's measured update rate.
 int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
+float Window::getTargetFps() const  // Returns this window's target drawing rate.
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values).

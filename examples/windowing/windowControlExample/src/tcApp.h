@@ -49,9 +49,9 @@ public:
         setColor(1.0f, 0.85f, 0.2f);
         drawCircle(x, y, 34);
 
-        // getFps() returns VSYNC (negative) for "free-run at vsync" — show that as "vsync"
+        // getTargetFps() returns VSYNC (negative) for "free-run at vsync" — show that as "vsync"
         // rather than a bare 0, which reads like a stall.
-        float fpsTarget = self ? self->getFps() : 0.0f;
+        float fpsTarget = self ? self->getTargetFps() : 0.0f;
         string fpsLabel = (fpsTarget > 0.0f) ? toString(fpsTarget) : string("vsync");
 
         setColor(1.0f);
