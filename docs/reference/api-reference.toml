@@ -9611,104 +9611,232 @@ details.ko = '''
 
 ["Fbo::readPixels"]
 category = "graphics_fbo"
-keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a top-first CPU RGBA8 buffer."
-description.ja = "フレームバッファの内容を、上の行から並ぶ CPU RGBA8 バッファに読み出します。"
-description.ko = "프레임버퍼 내용을 위쪽 행부터 배치한 CPU RGBA8 버퍼로 읽습니다."
+keywords = ["download", "cpu", "Pixels"]
+description.en = "Reads an ended Fbo as RGBA8 into Pixels with automatic sizing or a byte buffer allocated by the caller."
+description.ja = "end 後の Fbo を RGBA8 として、自動サイズ調整する Pixels または呼び出し側で確保したバイト配列に読み出します。"
+description.ko = "종료된 Fbo를 RGBA8로 자동 크기 조정 Pixels 또는 호출자가 할당한 바이트 버퍼에 읽습니다."
 details.en = '''
-- `readPixels(unsigned char* pixels)` requires space for `getWidth() * getHeight() * 4` bytes. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
+- Use the Pixels overload for CPU RGBA8 pixels without calculating buffer capacity. It returns bool, resizes on success and leaves the output unchanged on failure. Call after ending every active Fbo.
 
-Read the completed Fbo:
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- Call after `end()`, outside every Fbo rendering scope in the current window. Calling inside any such scope logs an error and returns `false`, even when reading a different Fbo.
-- Reads mip level 0 of the current color texture, using the resolved result for MSAA. Output is tightly packed RGBA with the top row first and pixels ordered left to right; native GL rows are reversed only where needed, so no additional vertical flip is needed.
-- Always converts to RGBA8 regardless of the attachment format: values are clamped to 0–1 and quantized to 8 bits, missing G/B components in R/RG formats become 0, and missing alpha becomes 1. BGRA is reordered to RGBA; see `TextureFormat` for source formats.
-- Conversion rounds to nearest. CPU conversion rounds halfway cases up, while native desktop GL conversion may differ by at most one byte value. Use `readPixelsFloat()` to avoid the RGBA8 conversion.
-- Readback is synchronous: GPU work must complete before CPU pixels are available, which can stall rendering and require staging memory. See `Texture` for main-thread GPU resource rules.
-- Window drawing can continue after readback; an open window pass resumes with its color and depth preserved.
-- WebGL2 supports synchronous readback. WebGPU does not support it and returns `false` with a warning.
+- Reads resolved mip level 0, tightly packed with the top row first. Readback synchronizes GPU work. Unallocated sources, active Fbo passes and backend failures return false.
+- Output is four-channel U8 RGBA regardless of source format: clamp to 0–1, quantize to 8 bits; missing G/B become 0 and alpha becomes 1. BGRA is reordered. Rounding is to nearest; CPU ties round up and native desktop GL can differ by one byte value.
+
+Use F32 to retain precision:
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- Window drawing can continue after readback; an open window pass resumes with color and depth preserved.
+
+The pointer overload remains supported without deprecation; allocate enough storage before calling it:
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
 '''
 details.ja = '''
-- `readPixels(unsigned char* pixels)` には `getWidth() * getHeight() * 4` バイト分の領域が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
+- バッファ容量を計算せず CPU の RGBA8 ピクセルを取得するには Pixels 版を使います。bool を返し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
 
-描画を終えた Fbo を読み出します。
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- `end()` のあと、現在のウィンドウのすべての Fbo 描画スコープの外で呼んでください。読み出し対象が別の Fbo でも、そのようなスコープ内ではエラーを記録して `false` を返します。
-- 現在のカラーテクスチャのミップレベル 0 を読み出し、MSAA では解決済みの結果を使います。出力は隙間のない RGBA 配列で、上の行から順に、各行は左から右へ並びます。ネイティブ GL の行は必要な場合だけ反転するため、追加の上下反転は不要です。
-- 添付画像の形式にかかわらず RGBA8 に変換します。値は 0〜1 にクランプして 8 ビットに量子化し、R/RG 形式で不足する G/B は 0、アルファは 1 にします。BGRA は RGBA 順に並べ替えます。元の形式は `TextureFormat` を参照してください。
-- 最も近い値に丸めます。CPU 変換では中間値を切り上げ、デスクトップ GL のネイティブ変換との差は最大で 1 バイト値です。RGBA8 への変換を避けるには `readPixelsFloat()` を使ってください。
-- 読み出しは同期処理です。CPU ピクセルが利用可能になる前に GPU 処理の完了を待つため、描画を停止させたり作業用メモリを必要としたりします。メインスレッドでの GPU リソースの扱いは `Texture` を参照してください。
-- 読み出し後もウィンドウへの描画を続けられます。開いていたウィンドウのパスは色と深度を保持して再開します。
-- WebGL2 は同期読み出しに対応しています。WebGPU は対応しておらず、警告を記録して `false` を返します。
+- 解決済みのミップレベル 0 を、上の行から隙間なく読み出します。GPU と同期します。未確保の描画元、アクティブな Fbo パス、バックエンドの失敗では false を返します。
+- 元の形式にかかわらず 4 チャンネル U8 RGBA です。0〜1 にクランプして 8 ビットに量子化し、不足する G/B は 0、アルファは 1 にします。BGRA は並べ替えます。最も近い値に丸め、CPU は中間値を切り上げます。デスクトップ GL との差は最大 1 バイト値です。
+
+精度を保つには F32 を使います。
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 読み出し後もウィンドウへ描画できます。開いていたウィンドウのパスは色と深度を保持して再開します。
+
+ポインター版も非推奨にせず維持します。呼ぶ前に十分な領域を確保します。
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
 '''
 details.ko = '''
-- `readPixels(unsigned char* pixels)`에는 `getWidth() * getHeight() * 4`바이트의 공간이 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
+- 버퍼 용량을 계산하지 않고 CPU RGBA8 픽셀을 얻으려면 Pixels 오버로드를 사용합니다. bool을 반환하며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
 
-그리기를 마친 Fbo를 읽습니다.
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- `end()` 이후 현재 윈도우의 모든 Fbo 렌더링 스코프 밖에서 호출해야 합니다. 다른 Fbo를 읽는 경우에도 이러한 스코프 안에서는 오류를 기록하고 `false`를 반환합니다.
-- 현재 컬러 텍스처의 밉 레벨 0을 읽으며 MSAA에서는 리졸브된 결과를 사용합니다. 출력은 빈틈없이 배치된 RGBA 배열이며 위쪽 행부터 각 행의 왼쪽에서 오른쪽 순서로 저장합니다. 네이티브 GL 행은 필요한 경우에만 뒤집으므로 추가 상하 반전이 필요하지 않습니다.
-- 첨부 이미지 형식과 관계없이 항상 RGBA8로 변환합니다. 값을 0–1로 제한하고 8비트로 양자화하며 R/RG 형식에 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 RGBA 순서로 재배열하며 원본 형식은 `TextureFormat`을 참조하십시오.
-- 가장 가까운 값으로 반올림합니다. CPU 변환은 중간값을 올림하며 데스크톱 GL의 네이티브 변환과는 최대 한 바이트 값만큼 차이가 날 수 있습니다. RGBA8 변환을 피하려면 `readPixelsFloat()`를 사용합니다.
-- 읽기는 동기식입니다. CPU 픽셀을 사용할 수 있으려면 GPU 작업이 완료되어야 하므로 렌더링을 멈추게 하거나 작업용 메모리가 필요할 수 있습니다. 메인 스레드의 GPU 리소스 규칙은 `Texture`를 참조하십시오.
-- 읽기 이후에도 윈도우에 계속 그릴 수 있으며 열려 있던 윈도우 패스는 색상과 깊이를 유지하여 재개합니다.
-- WebGL2는 동기 읽기를 지원합니다. WebGPU는 지원하지 않으며 경고를 기록하고 `false`를 반환합니다.
+- 리졸브된 밉 레벨 0을 위쪽 행부터 빈틈없이 읽습니다. GPU 작업과 동기화합니다. 미할당 소스, 활성 Fbo 패스 및 백엔드 실패는 false를 반환합니다.
+- 원본 형식과 관계없이 4채널 U8 RGBA입니다. 0–1로 제한하고 8비트로 양자화하며 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 재배열합니다. 가장 가까운 값으로 반올림하며 CPU는 중간값을 올리고 데스크톱 GL과 최대 한 바이트 값만큼 다를 수 있습니다.
+
+정밀도를 유지하려면 F32를 사용합니다.
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 읽기 후에도 윈도우에 그릴 수 있으며 열린 윈도우 패스는 색상과 깊이를 유지하며 재개합니다.
+
+포인터 오버로드도 사용 중단 없이 유지합니다. 호출 전에 충분한 공간을 할당합니다.
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
 category = "graphics_fbo"
-keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a CPU float buffer."
-description.ja = "フレームバッファの内容を CPU の float バッファに読み出す。"
-description.ko = "프레임버퍼 내용을 CPU float 버퍼로 읽는다."
+keywords = ["download", "cpu", "Pixels"]
+description.en = "Reads an ended Fbo as F32 into Pixels with automatic sizing or a float buffer allocated by the caller, using the source channel count."
+description.ja = "end 後の Fbo を元のチャンネル数の F32 として、自動サイズ調整する Pixels または呼び出し側で確保した float 配列に読み出します。"
+description.ko = "종료된 Fbo를 원본 채널 수의 F32로 자동 크기 조정 Pixels 또는 호출자가 할당한 float 버퍼에 읽습니다."
 details.en = '''
-- `readPixelsFloat(float* pixels)` requires `getWidth() * getHeight() * channelCount(getTextureFormat())` float elements. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
-- Outputs 32-bit floats using the source format's channel count without adding missing channels. Float formats retain their values without 0–1 clamping; half-floats are expanded to float, normalized integer formats become 0–1 values, and BGRA components are reordered to RGBA. See `TextureFormat` for format definitions.
-- On GL ES 3 and WebGL2, non-float formats pass through 8-bit readback, including `RGBA16`. Desktop GL, Metal, and D3D11 convert `RGBA16` using its 16-bit normalized values.
-- Call after `end()`, outside every Fbo scope in the current window; otherwise an error is logged and `false` is returned. See `Fbo::readPixels` for synchronous readback cost, top-left row order, MSAA resolution, continued window drawing, and WebGPU restrictions.
+- Use the Pixels overload for full-precision CPU readback without calculating buffer capacity. It produces F32 Pixels with the source channel count (RGBA for RGBA attachments), resizes on success and preserves output on failure. Call after ending every active Fbo.
+
+```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
+void tcApp::draw() {
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- Reads resolved mip level 0, tightly packed with the top row first. Readback synchronizes GPU work. Unallocated sources, active Fbo passes and backend failures return false.
+- F32 preserves float attachment values without clamping; half-floats expand to float and normalized integer formats become 0–1. Missing channels are not added; BGRA is reordered to RGBA.
+- GL ES 3 and WebGL2 read non-float formats (including RGBA16) through 8-bit data; desktop GL, Metal and D3D11 retain RGBA16 normalization precision. Allocate a float attachment to retain floating-point precision:
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+The pointer overload remains supported without deprecation; allocate enough storage before calling it:
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
 '''
 details.ja = '''
-- `readPixelsFloat(float* pixels)` には `getWidth() * getHeight() * channelCount(getTextureFormat())` 個の float 要素が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
-- 元の形式のチャンネル数で 32 ビット float を出力し、不足するチャンネルは追加しません。浮動小数点形式の値は 0〜1 にクランプせずに保持し、半精度浮動小数点は float に展開し、正規化整数形式は 0〜1 の値に変換し、BGRA 成分は RGBA 順に並べ替えます。形式の定義は `TextureFormat` を参照してください。
-- GL ES 3 と WebGL2 では、`RGBA16` を含む非浮動小数点形式は 8 ビットの読み出しを経由します。デスクトップ GL、Metal、D3D11 は `RGBA16` を 16 ビットの正規化値から変換します。
-- `end()` のあと、現在のウィンドウのすべての Fbo スコープの外で呼んでください。それ以外ではエラーを記録して `false` を返します。同期読み出しの負荷、左上からの行順、MSAA の解決処理、ウィンドウ描画の継続、WebGPU の制限は `Fbo::readPixels` を参照してください。
+- バッファ容量を計算せず精度を保って CPU に読み出すには Pixels 版を使います。元のチャンネル数（RGBA 添付画像では RGBA）の F32 Pixels を生成し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
+
+```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
+void tcApp::draw() {
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 解決済みのミップレベル 0 を、上の行から隙間なく読み出します。GPU と同期します。未確保の描画元、アクティブな Fbo パス、バックエンドの失敗では false を返します。
+- F32 は浮動小数点添付画像の値をクランプせず保持します。半精度は float に展開し、正規化整数形式は 0〜1 に変換します。不足するチャンネルは追加せず、BGRA は RGBA に並べ替えます。
+- GL ES 3 と WebGL2 は RGBA16 を含む非浮動小数点形式を 8 ビット経由で読み出します。デスクトップ GL、Metal、D3D11 は RGBA16 の正規化精度を保持します。浮動小数点の精度を保持するには浮動小数点添付画像を確保します。
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+ポインター版も非推奨にせず維持します。呼ぶ前に十分な領域を確保します。
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
 '''
 details.ko = '''
-- `readPixelsFloat(float* pixels)`에는 `getWidth() * getHeight() * channelCount(getTextureFormat())`개의 float 요소가 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
-- 원본 형식의 채널 수로 32비트 float를 출력하며 없는 채널을 추가하지 않습니다. 부동소수점 형식의 값은 0–1로 제한하지 않고 유지하며 반정밀도 값은 float로 확장하고 정규화 정수 형식은 0–1 값으로 변환하며 BGRA 성분은 RGBA 순서로 재배열합니다. 형식 정의는 `TextureFormat`을 참조하세요.
-- GL ES 3와 WebGL2에서 `RGBA16`을 포함한 비부동소수점 형식은 8비트 읽기를 거칩니다. 데스크톱 GL, Metal, D3D11은 `RGBA16`을 16비트 정규화 값으로 변환합니다.
-- `end()` 이후 현재 윈도우의 모든 Fbo 스코프 밖에서 호출해야 하며 그렇지 않으면 오류를 기록하고 `false`를 반환합니다. 동기 읽기 비용, 왼쪽 위부터의 행 순서, MSAA 리졸브, 윈도우 그리기 지속, WebGPU 제한은 `Fbo::readPixels`를 참조하세요.
-'''
-related = ["Fbo::readPixels"]
-snippet = '''
+- 버퍼 용량을 계산하지 않고 정밀도를 유지한 CPU 읽기에는 Pixels 오버로드를 사용합니다. 원본 채널 수(RGBA 어태치먼트는 RGBA)의 F32 Pixels를 만들며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
+
+```cpp
 // tcApp.h: Fbo fbo;
-void tcApp::setup() { fbo.allocate(64, 64, 1, TextureFormat::RGBA32F); }
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    fbo.begin(0.2f, 0.4f, 0.6f);
+    fbo.begin();
+    drawCircle(16, 16, 8);
     fbo.end();
-    vector<float> pixels(64 * 64 * channelCount(fbo.getTextureFormat()));
-    bool ok = fbo.readPixelsFloat(pixels.data());
+    fbo.readPixelsFloat(pixels);
 }
+```
+
+- 리졸브된 밉 레벨 0을 위쪽 행부터 빈틈없이 읽습니다. GPU 작업과 동기화합니다. 미할당 소스, 활성 Fbo 패스 및 백엔드 실패는 false를 반환합니다.
+- F32는 부동소수점 어태치먼트 값을 제한 없이 보존합니다. 반정밀도는 float로 확장하고 정규화 정수 형식은 0–1로 변환합니다. 없는 채널은 추가하지 않으며 BGRA는 RGBA로 재배열합니다.
+- GL ES 3와 WebGL2는 RGBA16을 포함한 비부동소수점 형식을 8비트 데이터로 읽습니다. 데스크톱 GL, Metal, D3D11은 RGBA16 정규화 정밀도를 유지합니다. 부동소수점 정밀도를 유지하려면 부동소수점 어태치먼트를 할당합니다.
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+포인터 오버로드도 사용 중단 없이 유지합니다. 호출 전에 충분한 공간을 할당합니다.
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
 '''
+related = ["Fbo::readPixels", "Pixels"]
 
 ["Fbo::save"]
 description.en = "Saves framebuffer contents to an image file."
