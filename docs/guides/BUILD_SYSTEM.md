@@ -669,3 +669,23 @@ On the next build, cmake reconfigures back to a single static binary. The `TC_RU
 - **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
 - **Build tool**: `trusscli build` handles hot reload state changes in one step. Raw `cmake --build` may require building twice when toggling `TC_HOT_RELOAD` on/off.
 - **Build errors**: If the code doesn't compile, the previous version keeps running. Fix the error and save again.
+
+## Publish a Web app with trusscli share (experimental)
+
+`trusscli share` builds a public GitHub project's Web target and publishes it to that project's GitHub Pages. This experiment is available on the share branch only. Run it from the project folder, or select a project with `-p`:
+
+```sh
+trusscli update --web
+trusscli share
+trusscli share --unshare
+```
+
+The command requires a GitHub `origin` and an authenticated GitHub CLI (`gh auth login`). It previews `screenshot.png` (or `screenshot.jpg`) from the project root. If neither exists, it builds and launches the native app with MCP, waits for opening animations, and captures its frame. Accept, retake, or skip the screenshot; accepted captures are saved as `screenshot.png` for the next run.
+
+Auto-capture builds its MCP development binary in a temporary build directory and removes it after sharing. It links to the project's `bin/data` for runtime assets. The project's normal native build directory, cache, and binary are preserved.
+
+The staged file list and total size appear before the publish confirmation, along with the `bin/data` inputs bundled into the Web data file, including symlink targets. Global Git ignore rules do not remove these approved files. An existing gh-pages branch is replaced only when its root contains `.trussc-share`. Every push requires the remote branch to match the inspected commit; if it changed, rerun `trusscli share`. Each publish replaces its history with one commit. A separate confirmation adds `trussc-share.json` and the `trussc-share` topic for the optional gallery at trussc.org/share.
+
+`trusscli share --unshare` removes the gallery metadata and topic while keeping the deployed app and ownership marker. It prints the manual commands for deleting Pages and the branch.
+
+GitHub Pages cannot set COOP/COEP headers, so share refuses Web output that uses pthreads or SharedArrayBuffer. The standard TrussC Web build does not enable pthreads. There is no TrussC API for configuring GitHub Pages response headers.

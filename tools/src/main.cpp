@@ -9,6 +9,7 @@
 #include "BuildOutputFilter.h"
 #include "ProcessCapture.h"
 #include "Dist.h"
+#include "Share.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -3895,6 +3896,102 @@ static int cmdBuild(const vector<string>& args) {
     return rc;
 }
 
+// Experimental branch-only GitHub Pages publishing.
+static int cmdShare(const vector<string>& args) {
+    string explicitPath;
+    bool unshare = false;
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& arg = args[i];
+        if (arg == "-h" || arg == "--help") {
+            cout << "Usage: trusscli share [options]\n\n"
+                 << "Experimental: publish a public GitHub project's Web build to Pages.\n"
+                 << "Asks before publishing and separately before listing on trussc.org/share.\n\n"
+                 << "Options:\n"
+                 << "      --unshare              Remove the gallery listing; keep Pages\n"
+                 << "  -p, --path <dir>            Project path (default: current project)\n"
+                 << "  -h, --help                  Show this help\n";
+            return 0;
+        }
+        if (arg == "--unshare") unshare = true;
+        else if ((arg == "-p" || arg == "--path") && i + 1 < args.size()) explicitPath = args[++i];
+        else { cerr << "Error: unknown or incomplete share option '" << arg << "'\n"; return 1; }
+    }
+    const string detected = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    if (detected.empty()) { cerr << "Error: not inside a TrussC project\n"; return 1; }
+    const fs::path project = fs::canonical(detected);
+    share::Services services;
+    services.command = [](const vector<string>& argv) {
+        share::Result result{0, ""};
+        result.code = runCaptured(argv, [&](const char* data, size_t size) { result.output.append(data, size); });
+        return result;
+    };
+    services.buildWeb = [&]() {
+        if (!readPresetState(project.string()).web) {
+            cerr << "Error: no Web target; enable it with trusscli update --web\n";
+            return 1;
+        }
+        return cmdBuild({"-p", project.string(), "--web"});
+    };
+    const string name = sanitizeProjectName(project.filename().string());
+    services.capture = [&](const fs::path& output, string& error) {
+        const fs::path build = output.parent_path() / "native-build";
+        const fs::path bin = build / "capture-bin";
+        fs::path executable = bin / name;
+#ifdef __APPLE__
+        executable = bin / (name + ".app") / "Contents" / "MacOS" / name;
+#elif defined(_WIN32)
+        executable += ".exe";
+#endif
+        if (!getenv("TRUSSC_INTERNAL_SHARE_NATIVE_BIN")) {
+            fs::create_directories(bin);
+            const fs::path hook = build / "capture-output.cmake";
+            // trussc_app sets target properties explicitly, overriding CMAKE_RUNTIME_OUTPUT_DIRECTORY.
+            // Apply the same properties after trussc_app finishes, only in this scratch configure.
+            ofstream script(hook);
+            script << R"(if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+function(trusscli_capture_output)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/capture-bin"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/capture-bin"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/capture-bin"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/capture-bin"
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/capture-bin")
+endfunction()
+cmake_language(DEFER CALL trusscli_capture_output)
+endif()
+)";
+            script.close();
+            if (!script) { error = "cannot write capture build configuration"; return false; }
+            const string cmake = findCMake();
+            vector<string> configure{cmake, "-S", project.string(), "-B", build.string()};
+            if (kNativePreset && fs::is_regular_file(project / "CMakePresets.json"))
+                configure.insert(configure.end(), {"--preset", kNativePreset});
+            configure.insert(configure.end(), {"-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DTRUSSC_MCP_DEV=ON",
+                "-DFETCHCONTENT_FULLY_DISCONNECTED=ON", "-DCMAKE_PROJECT_INCLUDE=" + hook.string()});
+            auto execute = [](const vector<string>& argv) {
+                return runCaptured(argv, [](const char* data, size_t size) { cout.write(data, size); });
+            };
+            if (execute(configure) != 0 ||
+                execute({cmake, "--build", build.string(), "--config", "RelWithDebInfo"}) != 0) {
+                error = "native capture build failed";
+                return false;
+            }
+            // getDataPath uses executable/data (../../../data in a macOS bundle).
+            // Point that existing layout at the project's assets without copying them.
+            if (fs::is_directory(project / "bin" / "data") && !fs::exists(bin / "data")) {
+                error_code ec;
+                fs::create_directory_symlink(project / "bin" / "data", bin / "data", ec);
+                if (ec) { error = "cannot link project data for capture: " + ec.message(); return false; }
+            }
+        }
+        return share::captureNative(project, executable, output, error);
+    };
+    services.view = share::viewScreenshot;
+    string version = queryTrussCVersion(autoDetectTcRoot());
+    if (version.empty()) version = TRUSSCLI_VERSION;
+    return share::run(project, name, version, unshare, services);
+}
+
 // =============================================================================
 // Subcommand: run
 // =============================================================================
@@ -5067,6 +5164,7 @@ _trusscli() {
         'build:Build the project'
         'run:Build and launch the project'
         'dist:Package the project to run on another machine'
+        'share:Experimental GitHub Pages publishing'
         'version:Show version (trusscli + current TrussC)'
         'completion:Generate shell completion script'
     )
@@ -5131,7 +5229,7 @@ _trusscli() {
             _describe 'option' cp_opts
             _files -/
             ;;
-        update|build|run|clean|dist)
+        update|build|run|clean|dist|share)
             case "$words[CURRENT-1]" in
                 -p|--path|--tc-root)
                     _files -/
@@ -5148,6 +5246,7 @@ _trusscli() {
             esac
             local -a opts
             case "$words[2]" in
+                share)  opts=('--unshare:Remove the gallery listing' '-p:Project path' '--path:Project path') ;;
                 dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--installer:Also build an installer (setup.exe, pacman package or .deb)' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
                 build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--dry-run:Print cmake commands only' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
@@ -5185,7 +5284,7 @@ _trusscli() {
     }
 
     if [[ $cword -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run dist version completion" -- "$cur"))
+        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run dist share version completion" -- "$cur"))
         return
     fi
 
@@ -5220,7 +5319,7 @@ _trusscli() {
                 COMPREPLY=($(compgen -d -- "$cur"))
             fi
             ;;
-        update|build|run|clean|dist)
+        update|build|run|clean|dist|share)
             case "$prev" in
                 -p|--path|--tc-root|-o|--output)
                     COMPREPLY=($(compgen -d -- "$cur"))
@@ -5240,6 +5339,7 @@ _trusscli() {
                 build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --dry-run --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
+                share)  COMPREPLY=($(compgen -W "--unshare -p --path" -- "$cur")) ;;
                 dist)   COMPREPLY=($(compgen -W "--release --archive --zip --installer --no-build --dry-run --init -o --output --app-name --app-version --app-author -j --jobs --verbose -p --path" -- "$cur")) ;;
             esac
             ;;
@@ -5307,6 +5407,7 @@ static void printTopHelp() {
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
          << "  dist                           Package the project to run on another machine\n"
+         << "  share                         Experimental GitHub Pages publishing\n"
          << "  version                       Show version (trusscli + current TrussC)\n"
          << "\n"
          << "Common options (per subcommand):\n"
@@ -5415,6 +5516,7 @@ int main(int argc, char* argv[]) try {
     if (first == "build")      return cmdBuild(subArgs);
     if (first == "run")        return cmdRun(subArgs);
     if (first == "dist")       return cmdDist(subArgs);
+    if (first == "share")      return cmdShare(subArgs);
     if (first == "completion") return cmdCompletion(subArgs);
 
     cerr << "Error: unknown command '" << first << "'\n"
