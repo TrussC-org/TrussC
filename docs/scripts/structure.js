@@ -443,7 +443,9 @@ for (const s of pub) {
         const p = parseSig(s.sig);                             // ret + const from qualType
         if (p) { const sig = { ret: p.ret, params: s.params !== undefined ? s.params : p.params, const: p.const, args: s.args,
                 tmpl: (s.flags || []).includes('template') || undefined,     // tmpl: needs explicit instantiation (e.g. typeName<T>()) — binders skip it
-                deprecated: s.deprecated };                     // C++ carries [[deprecated]] per DECLARATION, so it belongs on the overload
+                // Only the new JSON result overloads change the per-signature Lua surface.
+                deprecated: s.deprecated, lua_skip: !s.owner && !nsPrefix(s) &&
+                    ['loadJson', 'parseJson'].includes(s.name) && s.ann?.lua_skip || undefined };
             if (!e.signatures.some(x => x.params === sig.params && x.const === sig.const)) e.signatures.push(sig); }
     }
 }
