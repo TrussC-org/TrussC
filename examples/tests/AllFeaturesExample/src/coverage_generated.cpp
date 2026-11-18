@@ -4282,7 +4282,6 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
         (void)af::val<TouchEventArgs>().cancelled;
         (void)af::val<const TouchEventArgs>().id();
         (void)af::val<TouchEventArgs>().injected;
-        (void)af::val<TouchEventArgs>().numTouches;
         (void)af::val<TouchEventArgs>().sourceTag;
         (void)af::val<TouchEventArgs>().touches;
         (void)af::val<const TouchEventArgs>().x();

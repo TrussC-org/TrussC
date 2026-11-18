@@ -49,9 +49,9 @@ struct TouchMouseAction {
 
 class TouchMouseMapper {
 public:
-    TouchMouseAction update(TouchPhase phase, const TouchSample* touches, int numTouches) {
+    TouchMouseAction update(TouchPhase phase, const TouchSample* touches, int touchCount) {
         TouchMouseAction action;
-        if (numTouches <= 0 || touches == nullptr) {
+        if (touchCount <= 0 || touches == nullptr) {
             primaryId_.reset();
             return action;
         }
@@ -60,11 +60,11 @@ public:
             case TouchPhase::Began:
                 // A primary that is no longer down lost its end event; without
                 // this it would block every later press.
-                if (primaryId_ && !findPrimary(touches, numTouches)) {
+                if (primaryId_ && !findPrimary(touches, touchCount)) {
                     primaryId_.reset();
                 }
                 if (!primaryId_) {
-                    for (int i = 0; i < numTouches; i++) {
+                    for (int i = 0; i < touchCount; i++) {
                         if (touches[i].changed) {
                             primaryId_ = touches[i].id;
                             action.kind = TouchMouseAction::Kind::Press;
@@ -76,7 +76,7 @@ public:
                 }
                 break;
             case TouchPhase::Moved:
-                if (const TouchSample* p = findPrimary(touches, numTouches)) {
+                if (const TouchSample* p = findPrimary(touches, touchCount)) {
                     action.kind = TouchMouseAction::Kind::Drag;
                     action.x = p->x;
                     action.y = p->y;
@@ -84,7 +84,7 @@ public:
                 break;
             case TouchPhase::Ended:
             case TouchPhase::Cancelled:
-                if (const TouchSample* p = findPrimary(touches, numTouches); p && p->changed) {
+                if (const TouchSample* p = findPrimary(touches, touchCount); p && p->changed) {
                     action.kind = TouchMouseAction::Kind::Release;
                     action.x = p->x;
                     action.y = p->y;
@@ -99,9 +99,9 @@ public:
     void reset() { primaryId_.reset(); }
 
 private:
-    const TouchSample* findPrimary(const TouchSample* touches, int numTouches) const {
+    const TouchSample* findPrimary(const TouchSample* touches, int touchCount) const {
         if (!primaryId_) return nullptr;
-        for (int i = 0; i < numTouches; i++) {
+        for (int i = 0; i < touchCount; i++) {
             if (touches[i].id == *primaryId_) return &touches[i];
         }
         return nullptr;

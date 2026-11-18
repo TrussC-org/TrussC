@@ -207,16 +207,15 @@ void exercise(bool pixels, float dpi) {
     check("brace scroll delivered", scrolls == 2);
     auto touchCheck = [&](TouchEventArgs& e) {
         provenance(e, "touch");
-        check("touch canonical payload", e.numTouches == 1 && e.touches[0].id == 17 && e.touches[0].x == 25 &&
-              e.touches[0].y == 35 && e.touches[0].changed && e.touches[0].pressure == 0.5f);
+        check("touch canonical payload", e.touches.size() == 1 && e.touches.front().id == 17 && e.touches.front().x == 25 &&
+              e.touches.front().y == 35 && e.touches.front().changed && e.touches.front().pressure == 0.5f);
         ++touches;
     };
     auto touchDown = w.events().touchPressed.listen(touchCheck);
     auto touchMove = w.events().touchMoved.listen(touchCheck);
     auto touchUp = w.events().touchReleased.listen([&](TouchEventArgs& e) { touchCheck(e); check("touch cancellation", e.cancelled); });
     TouchEventArgs touch;
-    touch.numTouches = 1;
-    touch.touches[0] = {17, 25, 35, 0.5f, true};
+    touch.touches.push_back({17, 25, 35, 0.5f, true});
     check("touch press accepted", w.injectInput(InputEvent::touchPressed(touch), "touch"));
     check("touch move accepted", w.injectInput(InputEvent::touchMoved(touch), "touch"));
     touch.cancelled = true;
@@ -252,13 +251,69 @@ void exercise(bool pixels, float dpi) {
     check("invalid received button rejected", !w.injectInput(InputEvent::mousePressed(invalidButton)));
     check("invalid button rejected", !w.injectInput(InputEvent::mousePressed({0, 0}, MouseButton::None)));
     check("nonfinite coordinates rejected", !w.injectInput(InputEvent::mouseMoved({std::numeric_limits<float>::infinity(), 0})));
-    touch.numTouches = TouchEventArgs::MAX_TOUCHES + 1;
+    touch.touches.resize(TouchEventArgs::MAX_TOUCHES + 1);
     check("oversized touch rejected", !w.injectInput(InputEvent::touchPressed(touch)));
     native.ready = false;
     check("unready native target rejected", !w.injectInput(InputEvent::keyPressed('D')));
     internal::WindowRequestAccess::unbind(w);
     check("closed window rejected", !w.injectInput(InputEvent::keyPressed('D')));
     internal::pixelPerfectMode() = false;
+}
+// Exercise both injected input and the platform-neutral sokol translation.
+void activeTouches() {
+    tcCoreTest::WindowFixture fixture(721);
+    auto& w = *fixture.window;
+    tcCoreTest::InjectedWindow native(w, 721);
+    Observer observer(w);
+    setTouchAsMouse(false);
+    TouchEventArgs expected;
+    int delivered = 0;
+    auto inspect = [&](TouchEventArgs& e) {
+        ++delivered;
+        check("active touch count", e.touches.size() == expected.touches.size());
+        std::size_t index = 0;
+        for (const auto& point : e.touches) {
+            if (index >= expected.touches.size()) {
+                check("range-for excludes inactive slots", false);
+                break;
+            }
+            const auto& wanted = expected.touches.at(index++);
+            check("backend order and payload", point.id == wanted.id && point.x == wanted.x &&
+                  point.y == wanted.y && point.changed == wanted.changed && point.pressure == wanted.pressure);
+        }
+        check("range-for visits exactly active points", index == expected.touches.size());
+        check("front conveniences and empty defaults", e.x() == expected.x() && e.y() == expected.y() && e.id() == expected.id());
+        if (e.touches.empty()) check("empty conveniences are zero", e.x() == 0 && e.y() == 0 && e.id() == 0);
+        else {
+            const auto& first = expected.touches.front();
+            check("conveniences use first unchanged point", !first.changed && e.x() == first.x && e.y() == first.y && e.id() == first.id);
+        }
+    };
+    auto pressed = w.events().touchPressed.listen(inspect);
+    auto moved = w.events().touchMoved.listen(inspect);
+    auto released = w.events().touchReleased.listen(inspect);
+    for (int count : {0, 1, 3, TouchEventArgs::MAX_TOUCHES}) {
+        expected.touches.clear();
+        sapp_event packet{};
+        packet.type = SAPP_EVENTTYPE_TOUCHES_BEGAN;
+        packet.num_touches = count;
+        for (int i = 0; i < count; ++i) {
+            // Descending IDs make accidental sorting observable.
+            expected.touches.push_back({100 - i, 10.0f + i, 20.0f + i, 1.0f, i != 0});
+            packet.touches[i] = {static_cast<uintptr_t>(100 - i), 10.0f + i, 20.0f + i, SAPP_ANDROIDTOOLTYPE_FINGER, i != 0};
+        }
+        const int before = delivered;
+        // The builder owns its vector independently of subsequent source edits.
+        auto source = expected;
+        auto input = InputEvent::touchPressed(source);
+        source.touches.clear();
+        check("active touch press injected", w.injectInput(input));
+        check("active touch move injected", w.injectInput(InputEvent::touchMoved(expected)));
+        check("active touch release injected", w.injectInput(InputEvent::touchReleased(expected)));
+        check("backend touch translated", native.send(packet));
+        check("every touch event delivered", delivered == before + 4);
+    }
+    setTouchAsMouse(true);
 }
 // Optional real-host check: desktop and sole-surface platforms must deliver
 // synchronously inside setup(), entered on the first update before update().
@@ -323,6 +378,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
     }
     for (bool pixels : {false, true}) for (float dpi : {1.0f, 2.0f}) { exercise(pixels, dpi); textAndDrop(pixels, dpi); }
+    activeTouches();
     Window unbound;
     check("unbound window rejected", !unbound.injectInput(InputEvent::keyPressed('A')));
     std::printf("inputInjection: %d checks, %d failures\n", checks, failures);

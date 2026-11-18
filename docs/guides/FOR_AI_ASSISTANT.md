@@ -4854,7 +4854,7 @@ size_t ThreadChannel::size() const  // Returns the number of queued values.
 bool ThreadChannel::tryReceive(T & value) [+1]  // Attempts to receive one value, optionally with a timeout.
 ```
 
-### TouchEventArgs — Carries multitouch event data.
+### TouchEventArgs — Carries active multitouch points in backend order for range-for iteration.
 
 ```cpp
 int TouchEventArgs::id() const  // Returns the first touch point's identifier.

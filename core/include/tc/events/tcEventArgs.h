@@ -294,18 +294,17 @@ struct TouchPoint {
 // Touch event arguments (multi-touch)
 // ---------------------------------------------------------------------------
 struct TouchEventArgs {
-    // Bound (platform): the OS input backend exposes at most SAPP_MAX_TOUCHPOINTS touches per event. Overflow omits additional touches.
+    // Backend bound, not the vector size: at most SAPP_MAX_TOUCHPOINTS points per event.
     static constexpr int MAX_TOUCHES = 32;  // Matches SAPP_MAX_TOUCHPOINTS
-    TouchPoint touches[MAX_TOUCHES];
-    int numTouches = 0;
+    std::vector<TouchPoint> touches;
     bool cancelled = false;   // true when touchReleased is due to system cancellation
                               // (e.g. incoming call, system gesture). Released is still
                               // fired — check this flag for cancellation-specific handling.
 
     // Convenience: first touch
-    float x() const { return numTouches > 0 ? touches[0].x : 0.0f; }
-    float y() const { return numTouches > 0 ? touches[0].y : 0.0f; }
-    int id() const { return numTouches > 0 ? touches[0].id : 0; }
+    float x() const { return !touches.empty() ? touches.front().x : 0.0f; }
+    float y() const { return !touches.empty() ? touches.front().y : 0.0f; }
+    int id() const { return !touches.empty() ? touches.front().id : 0; }
     bool injected = false;
     std::string sourceTag;
 };

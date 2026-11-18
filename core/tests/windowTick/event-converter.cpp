@@ -872,7 +872,7 @@ void touchExtremes(Window& w, Native& n) {
     e.touches[0].pos_x=std::numeric_limits<float>::max();
     Vec2 rawPos,typedPos;
     auto boundaryRaw=w.events().rawEvent.listen([&](const sapp_event& packet){rawPos=Vec2(packet.touches[0].pos_x,packet.touches[0].pos_y);});
-    auto boundaryTyped=w.events().touchPressed.listen([&](TouchEventArgs& packet){typedPos=Vec2(packet.touches[0].x,packet.touches[0].y);});
+    auto boundaryTyped=w.events().touchPressed.listen([&](TouchEventArgs& packet){typedPos=Vec2(packet.touches.front().x,packet.touches.front().y);});
     n.send(e);
     check("FLT_MAX pixel touch at fractional DPI preserves raw typed and mouse input",raw==1&&touch==1&&mouse==1&&rawPos==Vec2(e.touches[0].pos_x,20)&&typedPos==rawPos&&pos==rawPos&&trussc::internal::WindowRequestAccess::context(w).lastPointerX==e.touches[0].pos_x&&trussc::internal::WindowRequestAccess::context(w).touchMapper.hasPrimary()&&trussc::internal::WindowRequestAccess::context(w).pressedMouseButtons==1);
     boundaryRaw.disconnect();boundaryTyped.disconnect();

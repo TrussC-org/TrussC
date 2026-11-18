@@ -78,10 +78,11 @@ bool Window::injectInput(const InputEvent& input, const std::string& tag) {
             else event.modifiers &= ~(SAPP_MODIFIER_LMB << button);
         }
     }
-    event.num_touches = input.touch_.numTouches;
-    // Bound (platform): copy at most MAX_TOUCHES array entries; the gate rejects the unchanged invalid count.
-    for (int i = 0; i < event.num_touches && i < TouchEventArgs::MAX_TOUCHES; ++i) {
-        const auto& touch = input.touch_.touches[i];
+    if (input.touch_.touches.size() > TouchEventArgs::MAX_TOUCHES) return false;
+    event.num_touches = static_cast<int>(input.touch_.touches.size());
+    auto point = input.touch_.touches.begin();
+    for (int i = 0; i < event.num_touches; ++i, ++point) {
+        const auto& touch = *point;
         event.touches[i].identifier = static_cast<uintptr_t>(touch.id);
         event.touches[i].pos_x = touch.x * factor;
         event.touches[i].pos_y = touch.y * factor;
@@ -2007,16 +2008,19 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 TouchEventArgs touchArgs;
                 touchArgs.injected = delivery.injected;
                 touchArgs.sourceTag = delivery.sourceTag;
-                touchArgs.numTouches = std::max(0, ev->num_touches);
-                // Bound (platform): OS touch events must fit the SDK-sized event array. Overflow clamps the delivered touch count.
-                if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
-                    touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
-                for (int i = 0; i < touchArgs.numTouches; i++) {
-                    touchArgs.touches[i].id = (int)ev->touches[i].identifier;
-                    touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
-                    touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
-                    touchArgs.touches[i].changed = ev->touches[i].changed;
-                    if (delivery.touch) touchArgs.touches[i].pressure = delivery.touch->touches[i].pressure;
+                // Bound (platform): only the backend's valid touch slots are delivered.
+                const int touchCount = std::clamp(ev->num_touches, 0, TouchEventArgs::MAX_TOUCHES);
+                touchArgs.touches.reserve(touchCount);
+                auto pressure = delivery.touch ? delivery.touch->touches.begin() : touchArgs.touches.end();
+                for (int i = 0; i < touchCount; ++i) {
+                    const auto& point = ev->touches[i];
+                    TouchPoint touch;
+                    touch.id = static_cast<int>(point.identifier);
+                    touch.x = point.pos_x * scale;
+                    touch.y = point.pos_y * scale;
+                    touch.changed = point.changed;
+                    if (delivery.touch) touch.pressure = (pressure++)->pressure;
+                    touchArgs.touches.push_back(touch);
                 }
 
                 if (phase == internal::TouchPhase::Began) window.events().touchPressed.notify(touchArgs);
