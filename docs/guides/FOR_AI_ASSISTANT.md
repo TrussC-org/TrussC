@@ -93,7 +93,7 @@ Runtime queue and maintenance work selects process context and progresses at saf
 
 `getWindowTitle()` returns the resolved Window's stored title (`Window::getTitle()`); `isWindowOccluded()` returns its native visibility snapshot (`Window::isOccluded()`). They use the same App-owner / sole-open-Window resolution as other Window helpers. Unowned callers with zero or multiple open Windows get an Error and an empty string or `false`, respectively. An App without a live Window gets those fallback values too.
 
-File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<string>&)` callback receive the paths.
+File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<fs::path>&)` callback receive the paths.
 
 `Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal, unavailable to public C++ and Lua callers. The framework drives the tree; App code overrides callbacks or listens through `events()`.
 
@@ -2971,7 +2971,7 @@ void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native cap
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
 void App::charInput(const CharEventArgs & e)  // Called for one typed character in this Window.
 void App::exit()  // Called once when the App ends, right before cleanup().
-void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped paths and position in this Window, while preserving path-only overrides.
+void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped filesystem paths and position in this Window; Web supplies file names.
 Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const ⚠️deprecated  // Returns whether the deprecated requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
@@ -3238,7 +3238,7 @@ void ComputeShader::setUniform(int slot, float value) [+9]  // Copies an entire 
 ```cpp
 ```
 
-### DragDropEventArgs — Carries information about dropped files.
+### DragDropEventArgs — Stores copied filesystem paths for dropped files; Web supplies browser file names.
 
 ```cpp
 ```
@@ -3628,7 +3628,7 @@ void Image::update()  // Uploads pending CPU pixel changes to the texture.
 
 ```cpp
 InputEvent InputEvent::charInput(uint32_t codepoint, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds one character input from a Unicode scalar or received CharEventArgs.
-InputEvent InputEvent::filesDropped(std::vector<std::string> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
+InputEvent InputEvent::filesDropped(std::vector<std::filesystem::path> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
 InputEvent InputEvent::keyPressed(int key, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds a keyPressed input from values or received arguments.
 InputEvent InputEvent::keyReleased(int key, InputModifiers mods = {}) [+1]  // Builds a keyReleased input from values or received arguments.
 InputEvent InputEvent::mouseMoved(Vec2 pos, InputModifiers mods = {}) [+1]  // Builds a mouseMoved input from values or received arguments.

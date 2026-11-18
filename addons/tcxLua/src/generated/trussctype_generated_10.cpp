@@ -108,7 +108,7 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::InputEvent> t = lua->new_usertype<trussc::InputEvent>("InputEvent");
         t["charInput"] = sol::overload([](uint32_t codepoint) { return trussc::InputEvent::charInput(codepoint); }, [](uint32_t codepoint, trussc::InputModifiers mods) { return trussc::InputEvent::charInput(codepoint, mods); }, [](uint32_t codepoint, trussc::InputModifiers mods, bool repeat) { return trussc::InputEvent::charInput(codepoint, mods, repeat); }, [](const trussc::CharEventArgs & event) { return trussc::InputEvent::charInput(event); });
-        t["filesDropped"] = sol::overload([](std::vector<std::string> paths, trussc::Vec2 pos) { return trussc::InputEvent::filesDropped(paths, pos); }, [](const trussc::DragDropEventArgs & event) { return trussc::InputEvent::filesDropped(event); });
+        t["filesDropped"] = sol::overload([](std::vector<std::filesystem::path> paths, trussc::Vec2 pos) { return trussc::InputEvent::filesDropped(paths, pos); }, [](const trussc::DragDropEventArgs & event) { return trussc::InputEvent::filesDropped(event); });
         t["keyPressed"] = sol::overload([](int key) { return trussc::InputEvent::keyPressed(key); }, [](int key, trussc::InputModifiers mods) { return trussc::InputEvent::keyPressed(key, mods); }, [](int key, trussc::InputModifiers mods, bool repeat) { return trussc::InputEvent::keyPressed(key, mods, repeat); }, [](const trussc::KeyEventArgs & event) { return trussc::InputEvent::keyPressed(event); });
         t["keyReleased"] = sol::overload([](int key) { return trussc::InputEvent::keyReleased(key); }, [](int key, trussc::InputModifiers mods) { return trussc::InputEvent::keyReleased(key, mods); }, [](const trussc::KeyEventArgs & event) { return trussc::InputEvent::keyReleased(event); });
         t["mouseMoved"] = sol::overload([](trussc::Vec2 pos) { return trussc::InputEvent::mouseMoved(pos); }, [](trussc::Vec2 pos, trussc::InputModifiers mods) { return trussc::InputEvent::mouseMoved(pos, mods); });
@@ -222,9 +222,12 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         "Color", sol::var(trussc::ImageType::Color),
         "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+    }
+    {
+        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
+        t["focused"] = &trussc::FocusEventArgs::focused;
     }
 }
 #ifdef _MSC_VER

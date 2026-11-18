@@ -81,12 +81,12 @@ void tcApp::keyPressed(int key) {
     }
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     for (auto& file : files) {
         // Find first .obj file
-        if (toLower(getFileExtension(utf8ToPath(file))) == "obj") {
+        if (toLower(getFileExtension(file)) == "obj") {
             loader_.clear();
-            if (loader_.load(utf8ToPath(file))) {  // dropped paths are UTF-8
+            if (loader_.load(file)) {
                 hasModel_ = true;
                 logNotice() << "Loaded: " << file << " (" << loader_.getNumGroups() << " groups)";
             }

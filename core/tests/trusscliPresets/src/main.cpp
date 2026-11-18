@@ -534,6 +534,11 @@ static void testGuiImportReadback() {
         })";
     }
 
+    const auto unicodeProject = project / fs::path(u8"日本語😀");
+    fs::create_directories(unicodeProject);
+    writeFile(unicodeProject / "CMakePresets.json", readFile(project / "CMakePresets.json"));
+    check("GUI import: Unicode filesystem path reads presets", readPresetState(unicodeProject).hasIde);
+
     // importProject starts with the GUI's current settings, then copies
     // these fields back to the IDE combo, target checkboxes and backend combo.
     ProjectSettings gui;

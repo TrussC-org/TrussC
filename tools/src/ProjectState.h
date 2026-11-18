@@ -29,6 +29,7 @@
 // (ProjectSettings::webKept etc.).
 
 #include "ProjectGenerator.h"
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -70,7 +71,7 @@ PresetState parsePresetState(const std::string& jsonText);
 // Read <projectPath>/CMakePresets.json. A missing file gives found == false
 // and no warning; an unreadable or unparsable one gives found == false and a
 // warning.
-PresetState readPresetState(const std::string& projectPath);
+PresetState readPresetState(const std::filesystem::path& projectPath);
 
 // Generation options given explicitly on the command line. An unset value
 // keeps what the project already has.

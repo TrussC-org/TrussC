@@ -425,46 +425,111 @@ void tcApp::cleanup() {
 ["App::filesDropped"]
 category = "events"
 keywords = ["drop", "drag and drop", "dnd", "file drop", "dropped files", "ofApp::dragEvent", "ofDragInfo"]
-description.en = "Receives dropped paths and position in this Window, while preserving path-only overrides."
-description.ja = "対象 Window のドロップのパスと位置を受け取り、パスだけの既存オーバーライドも保ちます。"
-description.ko = "대상 Window의 드롭 경로와 위치를 받으며 기존 경로 전용 재정의도 유지합니다."
+description.en = "Receives dropped filesystem paths and position in this Window; Web supplies file names."
+description.ja = "対象 Window のドロップの filesystem パスと位置を受け取ります。Web ではファイル名です。"
+description.ko = "대상 Window의 드롭 filesystem 경로와 위치를 받습니다. Web에서는 파일 이름입니다."
 details.en = '''
-Override the rich form to receive paths and position. Its default calls filesDropped(const vector<string>&), preserving existing overrides. BeforeApp listener edits reach either callback; AfterApp runs afterward. Device drops use the last known mouse position; injected drops preserve the supplied App coordinates. There is no API for a more precise device drop position. Drops are not passed to child nodes. Desktop device paths are absolute UTF-8 paths; injected paths are passed as supplied. In tcApp:
+The rich callback receives filesystem paths and App coordinates; its default calls filesDropped(const vector<fs::path>&). BeforeApp listener edits reach the App; AfterApp runs afterward. Device drops use the last known mouse position; injected drops preserve the supplied position. There is no API for a more precise device position, drop-source query or cancellation. Drops are not passed to child nodes.
 ```cpp
-void filesDropped(const DragDropEventArgs& e) override {
-    logNotice() << e.files.size() << e.x << e.y;
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+On Web, e.files contains browser file names, not desktop paths. Display the names as follows; TrussC has no helper to load their contents from these names.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 breaking change: files use vector<std::filesystem::path>, matching FilesOpenedEventArgs. Change path-only overrides to const vector<fs::path>&; old string-vector callbacks fail to compile even without override. Log path values directly for UTF-8 display on Windows.
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
 }
 ```
 '''
 details.ja = '''
-パスと位置は引数付きの形式で受け取ります。既定の実装は filesDropped(const vector<string>&) を呼び、既存のオーバーライドを保ちます。BeforeApp の編集はどちらにも届き、AfterApp はあとで呼ばれます。デバイスのドロップ位置は最後に分かっているマウス位置で、注入では指定した App 座標を保ちます。より正確なデバイスのドロップ位置を取得する API はありません。子ノードには通知しません。デスクトップのデバイス入力は絶対 UTF-8 パス、注入は指定どおりのパスです。tcApp で使います。
+引数付きコールバックは filesystem パスと App 座標を受け取り、既定では filesDropped(const vector<fs::path>&) を呼びます。BeforeApp の編集は App に届き、AfterApp はあとで呼ばれます。デバイスでは最後のマウス位置、注入では指定位置を使います。より正確なデバイス位置、送信元の照会、キャンセルの API はありません。子ノードには通知しません。
 ```cpp
-void filesDropped(const DragDropEventArgs& e) override {
-    logNotice() << e.files.size() << e.x << e.y;
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+Web の e.files はブラウザのファイル名であり、デスクトップのパスではありません。次のように名前を表示します。この名前から内容を読み込む TrussC のヘルパーはありません。
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 の互換性変更：files は FilesOpenedEventArgs と同じ vector<std::filesystem::path> です。パスだけのオーバーライドは const vector<fs::path>& に変更してください。古い文字列 vector のコールバックは override がなくてもコンパイルエラーになります。Windows の UTF-8 表示ではパスを直接ログに渡します。
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
 }
 ```
 '''
 details.ko = '''
-경로와 위치를 받으려면 인자 형식을 재정의합니다. 기본 구현은 filesDropped(const vector<string>&)를 호출하여 기존 재정의를 유지합니다. BeforeApp 변경은 두 형식 모두에 전달되고 AfterApp은 나중에 호출됩니다. 장치 드롭은 마지막 마우스 위치를 사용하며 주입은 지정 App 좌표를 유지합니다. 더 정확한 장치 드롭 위치 API는 없습니다. 자식 노드에는 전달하지 않습니다. 데스크톱 장치 경로는 절대 UTF-8 경로이며 주입 경로는 지정한 그대로입니다. tcApp에서 사용합니다.
+인자 콜백은 filesystem 경로와 App 좌표를 받으며 기본 구현은 filesDropped(const vector<fs::path>&)를 호출합니다. BeforeApp 변경은 App에 전달되고 AfterApp은 나중에 호출됩니다. 장치 드롭은 마지막 마우스 위치, 주입은 지정 위치를 사용합니다. 더 정확한 장치 위치, 출처 조회 또는 취소 API는 없습니다. 자식 노드에는 전달하지 않습니다.
 ```cpp
-void filesDropped(const DragDropEventArgs& e) override {
-    logNotice() << e.files.size() << e.x << e.y;
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+Web의 e.files에는 데스크톱 경로가 아닌 브라우저 파일 이름이 들어 있습니다. 다음과 같이 이름을 표시합니다. 이 이름으로 내용을 읽는 TrussC 도우미는 없습니다.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 호환성 변경: files는 FilesOpenedEventArgs와 같은 vector<std::filesystem::path>입니다. 경로 전용 재정의는 const vector<fs::path>&로 변경하세요. 이전 문자열 vector 콜백은 override가 없어도 컴파일 오류가 발생합니다. Windows에서 UTF-8로 표시하려면 경로를 로그에 직접 전달하세요.
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
 }
 ```
 '''
-related = ["CoreEvents::filesDropped", "DragDropEventArgs", "getFileName", "getFileExtension", "Image::load"]
-platform_note.en = "Drops from the OS arrive on Windows, macOS, Linux and Web only, never on iOS or Android. On Web those are the browser's file names, not paths that you can load, and TrussC has no helper for reading the contents of dropped files. A drop sent with injectInput arrives on every platform, with the paths exactly as given."
-platform_note.ja = "OS からのドロップが届くのは Windows / macOS / Linux / Web のみで、iOS / Android では届きません。Web で届くのはブラウザ上のファイル名であり、読み込めるパスではありません。また、ドロップされたファイルの中身を読む仕組みは TrussC にはありません。injectInput で送ったドロップはどのプラットフォームでも届き、パスは指定したとおりです。"
-platform_note.ko = "OS의 드롭은 Windows / macOS / Linux / Web에서만 전달되며 iOS / Android에서는 전달되지 않습니다. Web에서 전달되는 것은 브라우저의 파일 이름이므로 로드할 수 있는 경로가 아니며, 드롭된 파일 내용을 읽는 기능도 TrussC에는 없습니다. injectInput으로 보낸 드롭은 모든 플랫폼에서 전달되며 경로는 지정한 그대로입니다."
+related = ["CoreEvents::filesDropped", "DragDropEventArgs", "getFileName", "getFileExtension", "Image::load", "FilesOpenedEventArgs", "InputEvent::filesDropped"]
+platform_note.en = '''
+Drops from the OS arrive on Windows, macOS, Linux and Web only, never on iOS or Android. On Web those are the browser's file names, not paths that you can load, and TrussC has no helper for reading the contents of dropped files. A drop sent with injectInput arrives on every platform, with the paths exactly as given.
+
+```cpp
+void tcApp::setup() {
+    getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
+}
+```
+'''
+platform_note.ja = '''
+OS からのドロップが届くのは Windows / macOS / Linux / Web のみで、iOS / Android では届きません。Web で届くのはブラウザ上のファイル名であり、読み込めるパスではありません。また、ドロップされたファイルの中身を読む仕組みは TrussC にはありません。injectInput で送ったドロップはどのプラットフォームでも届き、パスは指定したとおりです。
+
+```cpp
+void tcApp::setup() {
+    getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
+}
+```
+'''
+platform_note.ko = '''
+OS의 드롭은 Windows / macOS / Linux / Web에서만 전달되며 iOS / Android에서는 전달되지 않습니다. Web에서 전달되는 것은 브라우저의 파일 이름이므로 로드할 수 있는 경로가 아니며, 드롭된 파일 내용을 읽는 기능도 TrussC에는 없습니다. injectInput으로 보낸 드롭은 모든 플랫폼에서 전달되며 경로는 지정한 그대로입니다.
+
+```cpp
+void tcApp::setup() {
+    getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
+}
+```
+'''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
-void filesDropped(const vector<string>& files) override;
-Image previewImage;
+void filesDropped(const DragDropEventArgs& e) override;
 
 // tcApp.cpp
-void tcApp::filesDropped(const vector<string>& files) {
-    for (const auto& path : files) {
-        if (toLower(getFileExtension(path)) == "png") previewImage.load(path);
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
     }
 }
 '''
@@ -7140,51 +7205,148 @@ value_desc.Baseline.en = "Text-specific: character baseline"
 
 ["DragDropEventArgs"]
 keywords = ["files", "dropped", "import"]
-description.en = "Carries information about dropped files."
-description.ja = "ドロップされたファイルの情報を保持する。"
-description.ko = "드롭된 파일 정보를 담는다."
+description.en = "Stores copied filesystem paths for dropped files; Web supplies browser file names."
+description.ja = "ドロップされた filesystem パスのコピーを保持します。Web ではブラウザのファイル名です。"
+description.ko = "드롭된 filesystem 경로의 복사본을 저장합니다. Web에서는 브라우저 파일 이름입니다."
 details.en = '''
-Paths and App coordinates delivered through events().filesDropped and App::filesDropped. Device drops use the last known mouse position; injected drops preserve the supplied position. There is no API for a more precise device drop position. No injected, sourceTag, or consumed fields are available, and there is no drop-source query or cancellation API. In tcApp:
+The rich callback receives filesystem paths and App coordinates; its default calls filesDropped(const vector<fs::path>&). BeforeApp listener edits reach the App; AfterApp runs afterward. Device drops use the last known mouse position; injected drops preserve the supplied position. There is no API for a more precise device position, drop-source query or cancellation. Drops are not passed to child nodes.
 ```cpp
-void filesDropped(const DragDropEventArgs& e) override {
-    logNotice() << e.files.size() << e.x << e.y;
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+On Web, e.files contains browser file names, not desktop paths. Display the names as follows; TrussC has no helper to load their contents from these names.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 breaking change: files use vector<std::filesystem::path>, matching FilesOpenedEventArgs. Change path-only overrides to const vector<fs::path>&; old string-vector callbacks fail to compile even without override. Log path values directly for UTF-8 display on Windows.
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
 }
 ```
 '''
 details.ja = '''
-events().filesDropped と App::filesDropped が渡すパスと App 座標です。デバイスでは最後に分かっているマウス位置、注入では指定位置です。より正確なデバイスのドロップ位置を得る API はありません。injected、sourceTag、consumed はなく、送信元の照会やキャンセルの API もありません。tcApp で受け取ります。
+引数付きコールバックは filesystem パスと App 座標を受け取り、既定では filesDropped(const vector<fs::path>&) を呼びます。BeforeApp の編集は App に届き、AfterApp はあとで呼ばれます。デバイスでは最後のマウス位置、注入では指定位置を使います。より正確なデバイス位置、送信元の照会、キャンセルの API はありません。子ノードには通知しません。
 ```cpp
-void filesDropped(const DragDropEventArgs& e) override {
-    logNotice() << e.files.size() << e.x << e.y;
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+Web の e.files はブラウザのファイル名であり、デスクトップのパスではありません。次のように名前を表示します。この名前から内容を読み込む TrussC のヘルパーはありません。
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 の互換性変更：files は FilesOpenedEventArgs と同じ vector<std::filesystem::path> です。パスだけのオーバーライドは const vector<fs::path>& に変更してください。古い文字列 vector のコールバックは override がなくてもコンパイルエラーになります。Windows の UTF-8 表示ではパスを直接ログに渡します。
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
 }
 ```
 '''
 details.ko = '''
-events().filesDropped와 App::filesDropped가 전달하는 경로 및 App 좌표입니다. 장치 드롭은 마지막 마우스 위치, 주입은 지정 위치를 사용합니다. 더 정확한 장치 드롭 위치 API는 없습니다. injected, sourceTag, consumed 필드와 출처 조회 및 취소 API는 없습니다. tcApp에서 받습니다.
+인자 콜백은 filesystem 경로와 App 좌표를 받으며 기본 구현은 filesDropped(const vector<fs::path>&)를 호출합니다. BeforeApp 변경은 App에 전달되고 AfterApp은 나중에 호출됩니다. 장치 드롭은 마지막 마우스 위치, 주입은 지정 위치를 사용합니다. 더 정확한 장치 위치, 출처 조회 또는 취소 API는 없습니다. 자식 노드에는 전달하지 않습니다.
 ```cpp
-void filesDropped(const DragDropEventArgs& e) override {
-    logNotice() << e.files.size() << e.x << e.y;
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+Web의 e.files에는 데스크톱 경로가 아닌 브라우저 파일 이름이 들어 있습니다. 다음과 같이 이름을 표시합니다. 이 이름으로 내용을 읽는 TrussC 도우미는 없습니다.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 호환성 변경: files는 FilesOpenedEventArgs와 같은 vector<std::filesystem::path>입니다. 경로 전용 재정의는 const vector<fs::path>&로 변경하세요. 이전 문자열 vector 콜백은 override가 없어도 컴파일 오류가 발생합니다. Windows에서 UTF-8로 표시하려면 경로를 로그에 직접 전달하세요.
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
 }
 ```
 '''
-related = ["ClipboardPastedEventArgs"]
+related = ["ClipboardPastedEventArgs", "FilesOpenedEventArgs", "CoreEvents::filesDropped", "InputEvent::filesDropped"]
 
 ["DragDropEventArgs::files"]
-description.en = "Stores desktop file paths or Web file names for dropped files."
-description.ja = "ドロップされたファイルのパス（デスクトップ）またはファイル名（Web）を保持する。"
-description.ko = "드롭된 파일의 경로(데스크톱) 또는 파일 이름(Web)을 저장한다."
+description.en = "Stores copied filesystem paths for dropped files; Web supplies browser file names."
+description.ja = "ドロップされた filesystem パスのコピーを保持します。Web ではブラウザのファイル名です。"
+description.ko = "드롭된 filesystem 경로의 복사본을 저장합니다. Web에서는 브라우저 파일 이름입니다."
 details.en = '''
-- A `vector<string>` containing copies of dropped paths, empty by default. Device drops use desktop file paths or Web file names; injected drops keep the supplied strings.
-- TrussC sets no limit on the number of files or on the length of each UTF-8 path (the file name on the web); memory is allocated to fit the drop. Only the limits of available memory and of the platform apply.
+Desktop device drops contain absolute filesystem paths; injection preserves the supplied paths. The vector is empty by default. No additional file-count or path-length limit is imposed beyond memory, container and platform limits.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+On Web, e.files contains browser file names, not desktop paths. Display the names as follows; TrussC has no helper to load their contents from these names.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 breaking change: files use vector<std::filesystem::path>, matching FilesOpenedEventArgs. Change path-only overrides to const vector<fs::path>&; old string-vector callbacks fail to compile even without override. Log path values directly for UTF-8 display on Windows.
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
+}
+```
 '''
 details.ja = '''
-- パスのコピーを格納する `vector<string>` で、既定では空です。デバイスのドロップではデスクトップのパスや Web のファイル名を、注入では指定された文字列を保ちます。
-- ファイルの数や、UTF-8 のパスの長さ（Web ではファイル名の長さ）に TrussC の上限はありません。ドロップの内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
+デスクトップのデバイス入力は絶対パス、注入は指定どおりのパスを保持します。vector の既定値は空です。ファイル数とパスの長さはメモリ、コンテナー、プラットフォームの制限に従います。
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+Web の e.files はブラウザのファイル名であり、デスクトップのパスではありません。次のように名前を表示します。この名前から内容を読み込む TrussC のヘルパーはありません。
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 の互換性変更：files は FilesOpenedEventArgs と同じ vector<std::filesystem::path> です。パスだけのオーバーライドは const vector<fs::path>& に変更してください。古い文字列 vector のコールバックは override がなくてもコンパイルエラーになります。Windows の UTF-8 表示ではパスを直接ログに渡します。
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
+}
+```
 '''
 details.ko = '''
-- 드롭 경로의 복사본을 담는 `vector<string>`이며 기본값은 비어 있습니다. 장치 드롭은 데스크톱 경로나 Web 파일 이름을 사용하고 주입 드롭은 지정 문자열을 유지합니다.
-- 파일 수나 UTF-8 경로 길이(웹에서는 파일 이름 길이)에 TrussC의 제한은 없습니다. 드롭 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
+데스크톱 장치 드롭은 절대 경로를 담고 주입은 지정 경로를 유지합니다. vector의 기본값은 비어 있습니다. 파일 수와 경로 길이는 메모리, 컨테이너 및 플랫폼 제한을 따릅니다.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) {
+        logNotice() << path.filename();
+    }
+}
+```
+Web의 e.files에는 데스크톱 경로가 아닌 브라우저 파일 이름이 들어 있습니다. 다음과 같이 이름을 표시합니다. 이 이름으로 내용을 읽는 TrussC 도우미는 없습니다.
+```cpp
+void tcApp::filesDropped(const DragDropEventArgs& e) {
+    for (const auto& path : e.files) logNotice() << path.filename();
+}
+```
+v0.9.0 호환성 변경: files는 FilesOpenedEventArgs와 같은 vector<std::filesystem::path>입니다. 경로 전용 재정의는 const vector<fs::path>&로 변경하세요. 이전 문자열 vector 콜백은 override가 없어도 컴파일 오류가 발생합니다. Windows에서 UTF-8로 표시하려면 경로를 로그에 직접 전달하세요.
+```cpp
+void tcApp::filesDropped(const vector<fs::path>& files) {
+    for (const auto& path : files) logNotice() << path.filename();
+}
+```
 '''
+related = ["FilesOpenedEventArgs", "CoreEvents::filesDropped", "InputEvent::filesDropped"]
 
 ["DragDropEventArgs::x"]
 description.en = "The drop x coordinate in App content space."
@@ -70158,7 +70320,7 @@ description.en = "Builds an owned file-path drop at a destination App position."
 description.ja = "宛先 App の指定位置に送るファイルパスを所有して保持します。"
 description.ko = "대상 App 위치로 보낼 파일 경로를 소유하여 보관합니다."
 details.en = '''
-Copies paths from DragDropEventArgs or takes a vector of paths and Vec2. Coordinates are logical points, or framebuffer pixels with pixelPerfect; the supplied position is preserved without moving the cursor. Delivery uses events().filesDropped and App callbacks only. Drops have no injected/sourceTag fields and no drop-source query API; replay tools manage their own recording state. Injection passes paths as data; it creates no files or browser file handles, and no API recreates those handles. In a live windowed tcApp:
+Copies paths from DragDropEventArgs or takes a vector<std::filesystem::path> and Vec2 (v0.9.0). Coordinates are logical points, or framebuffer pixels with pixelPerfect; the supplied position is preserved without moving the cursor. Delivery uses events().filesDropped and App callbacks only. Drops have no injected/sourceTag fields and no drop-source query API; replay tools manage their own recording state. Injection passes paths as data; it creates no files or browser file handles, and no API recreates those handles. In a live windowed tcApp:
 ```cpp
 void setup() override {
     getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
@@ -70166,7 +70328,7 @@ void setup() override {
 ```
 '''
 details.ja = '''
-DragDropEventArgs からパスをコピーするか、パスの vector と Vec2 を受け取ります。座標は論理ポイント、pixelPerfect ではフレームバッファのピクセルです。カーソルを動かさず指定位置を保ちます。events().filesDropped と App コールバックだけに通知します。ドロップに injected/sourceTag や送信元を調べる API はなく、再生ツールは記録状態を自分で管理します。パスはデータとして渡すだけでファイルやブラウザのファイルハンドルは作りません。ハンドルを再現する API はありません。Window のある tcApp で使います。
+DragDropEventArgs からパスをコピーするか、vector<std::filesystem::path> と Vec2（v0.9.0） を受け取ります。座標は論理ポイント、pixelPerfect ではフレームバッファのピクセルです。カーソルを動かさず指定位置を保ちます。events().filesDropped と App コールバックだけに通知します。ドロップに injected/sourceTag や送信元を調べる API はなく、再生ツールは記録状態を自分で管理します。パスはデータとして渡すだけでファイルやブラウザのファイルハンドルは作りません。ハンドルを再現する API はありません。Window のある tcApp で使います。
 ```cpp
 void setup() override {
     getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
@@ -70174,7 +70336,7 @@ void setup() override {
 ```
 '''
 details.ko = '''
-DragDropEventArgs의 경로를 복사하거나 경로 vector와 Vec2를 받습니다. 좌표는 논리 포인트이며 pixelPerfect에서는 프레임버퍼 픽셀입니다. 커서를 움직이지 않고 지정 위치를 유지합니다. events().filesDropped와 App 콜백에만 전달합니다. 드롭에는 injected/sourceTag나 출처 조회 API가 없으므로 재생 도구가 기록 상태를 관리합니다. 경로는 데이터로 전달되며 파일이나 브라우저 파일 핸들을 만들지 않습니다. 핸들을 재현하는 API는 없습니다. Window가 있는 tcApp에서 사용합니다.
+DragDropEventArgs의 경로를 복사하거나 vector<std::filesystem::path>와 Vec2(v0.9.0)를 받습니다. 좌표는 논리 포인트이며 pixelPerfect에서는 프레임버퍼 픽셀입니다. 커서를 움직이지 않고 지정 위치를 유지합니다. events().filesDropped와 App 콜백에만 전달합니다. 드롭에는 injected/sourceTag나 출처 조회 API가 없으므로 재생 도구가 기록 상태를 관리합니다. 경로는 데이터로 전달되며 파일이나 브라우저 파일 핸들을 만들지 않습니다. 핸들을 재현하는 API는 없습니다. Window가 있는 tcApp에서 사용합니다.
 ```cpp
 void setup() override {
     getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));

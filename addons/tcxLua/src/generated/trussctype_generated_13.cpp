@@ -203,9 +203,9 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["format"] = &trussc::AudioRecordSettings::format;
     }
     {
-        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
-        t["args"] = &trussc::ConsoleEventArgs::args;
-        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
+        t["message"] = &trussc::MicStartResult::message;
+        t["success"] = &trussc::MicStartResult::success;
     }
 }
 #ifdef _MSC_VER

@@ -122,7 +122,7 @@ void bootstrap() {
         // Exercise hidden startup updates explicitly for every Window fixture.
         trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = true;
         std::vector<sapp_event_type> delivered;
-        std::vector<std::vector<std::string>> drops;
+        std::vector<std::vector<std::filesystem::path>> drops;
         std::vector<int> keys;
         int exitRequests = 0; peerEvents = 0;
         auto listener = window.events().rawEvent.listen([&](const sapp_event& event) {
@@ -137,7 +137,7 @@ void bootstrap() {
         auto dropped = window.events().filesDropped.listen([&](DragDropEventArgs& args) { drops.push_back(args.files); });
         auto pressed = window.events().keyPressed.listen([&](KeyEventArgs& args) { keys.push_back(args.key); });
         auto released = window.events().keyReleased.listen([&](KeyEventArgs& args) { keys.push_back(-args.key); });
-        nativeDropPaths = {"/tmp/during-init.txt"}; native.metadata.occluded = true;
+        nativeDropPaths = {pathToUtf8(std::filesystem::path(u8"/tmp/日本語😀.txt"))}; native.metadata.occluded = true;
         std::vector<sapp_event_type> expected;
         run([&] {
             check("construction and queued-before-first-tick notifications are dropped", delivered.empty() && keys.empty());
@@ -163,7 +163,7 @@ void bootstrap() {
         });
         bootstrapReady = true;
         check("init notifications delivered once including size-seeding callback", delivered == expected);
-        check("during-init input and native drop paths delivered", keys == std::vector<int>{SAPP_KEYCODE_B, -SAPP_KEYCODE_B} && drops == std::vector<std::vector<std::string>>{{"/tmp/during-init.txt"}});
+        check("during-init input and native drop paths delivered", keys == std::vector<int>{SAPP_KEYCODE_B, -SAPP_KEYCODE_B} && drops == std::vector<std::vector<std::filesystem::path>>{{std::filesystem::path(u8"/tmp/日本語😀.txt")}});
         check("hidden seed leaves visibility pending for checkpoint 3", window.isOccluded() && trussc::internal::WindowRequestAccess::context(window).suspended && !internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
         check("visibility history belongs to each Window", !internal::WindowRequestAccess::binding(other).lastDeliveredHidden);
         check("initial App attached and size seeded before setup", window.getApp() == bootstrapApp && bootstrapApp->sizes == 1 && bootstrapApp->seeded && bootstrapApp->setups == 0);
@@ -175,7 +175,7 @@ void bootstrap() {
         for (const auto& paths : {std::vector<std::string>{"/tmp/A.txt", "/tmp/A2.txt"}, std::vector<std::string>{"/tmp/B.txt"}}) {
             nativeDropPaths = paths; expected.push_back(SAPP_EVENTTYPE_FILES_DROPPED); nativeSend(SAPP_EVENTTYPE_FILES_DROPPED);
         }
-        check("each post-init drop reads its own paths", drops == std::vector<std::vector<std::string>>{{"/tmp/during-init.txt"}, {"/tmp/A.txt", "/tmp/A2.txt"}, {"/tmp/B.txt"}});
+        check("each post-init drop reads its own paths", drops == std::vector<std::vector<std::filesystem::path>>{{std::filesystem::path(u8"/tmp/日本語😀.txt")}, {"/tmp/A.txt", "/tmp/A2.txt"}, {"/tmp/B.txt"}});
         check("startup input arrives exactly once without replay", delivered == expected && bootstrapCallbacks == int(expected.size()) && trussc::internal::WindowRequestAccess::context(window).keysPressed.empty());
         plainDraw(window); tick(window);
         check("setup ran with authoritative snapshot", bootstrapApp->setups == 1);

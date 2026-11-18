@@ -36,8 +36,8 @@ struct TextApp : App {
         drop = e;
         App::filesDropped(e);
     }
-    void filesDropped(const std::vector<std::string>& files) override {
-        check("legacy callback receives listener edits", files == std::vector<std::string>{"edited"});
+    void filesDropped(const std::vector<std::filesystem::path>& files) override {
+        check("legacy callback receives listener edits", files.size() == 1 && files[0].u8string() == u8"編集済み😀.png");
         ++legacyCalls;
     }
 };
@@ -83,12 +83,12 @@ void textAndDrop(bool pixels, float dpi) {
     auto raw = w.events().rawEvent.listen([&](const sapp_event& e) { if (e.type == SAPP_EVENTTYPE_FILES_DROPPED) ++rawDrops; });
     auto peer = peerFixture.window->events().filesDropped.listen([&](DragDropEventArgs&) { ++peerDrops; });
     auto dropped = w.events().filesDropped.listen([&](DragDropEventArgs& e) {
-        check("owned drop and exact position", e.files == std::vector<std::string>{"image.png"} && e.x == 20.25f && e.y == 30.5f);
-        e.files = {"edited"};
+        check("owned drop and exact position", e.files.size() == 2 && e.files[0].u8string() == u8"画像/日本語.png" && e.files[1].u8string() == u8"emoji/😀.png" && e.x == 20.25f && e.y == 30.5f);
+        e.files = {fs::path(u8"編集済み😀.png")};
         e.x = 42;
     });
     DragDropEventArgs args;
-    args.files = {"image.png"}; args.x = 20.25f; args.y = 30.5f;
+    args.files = {fs::path(u8"画像/日本語.png"), fs::path(u8"emoji/😀.png")}; args.x = 20.25f; args.y = 30.5f;
     auto owned = InputEvent::filesDropped(args);
     args.files.clear();
     auto& ctx = internal::WindowRequestAccess::context(w);
@@ -99,7 +99,7 @@ void textAndDrop(bool pixels, float dpi) {
     check("rich and legacy callbacks reached", app->legacyCalls == 1 && app->drop.x == 42);
     check("drop target and no raw event", rawDrops == 0 && peerDrops == 0);
     check("drop leaves cursor unchanged", cursor == Vec2(ctx.mouseX, ctx.mouseY));
-    check("paths builder accepted", w.injectInput(InputEvent::filesDropped({"image.png"}, {20.25f, 30.5f})));
+    check("paths builder accepted", w.injectInput(InputEvent::filesDropped({fs::path(u8"画像/日本語.png"), fs::path(u8"emoji/😀.png")}, {20.25f, 30.5f})));
     check("invalid drop position rejected", !w.injectInput(InputEvent::filesDropped({}, {std::numeric_limits<float>::quiet_NaN(), 0})));
     internal::pixelPerfectMode() = false;
 }

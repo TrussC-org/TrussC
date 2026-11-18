@@ -226,10 +226,11 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["note"] = &trussc::ChipSoundBundle::Entry::note;
         t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    {
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["args"] = &trussc::ConsoleEventArgs::args;
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

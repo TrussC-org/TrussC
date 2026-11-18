@@ -205,9 +205,12 @@ public:
     // -------------------------------------------------------------------------
 
     virtual void filesDropped(const DragDropEventArgs& e) { filesDropped(e.files); }
-    virtual void filesDropped(const std::vector<std::string>& files) {
+    virtual void filesDropped(const std::vector<std::filesystem::path>& files) {
         (void)files;
     }
+
+    // v0.9: reject old callbacks even when the user's declaration omits override.
+    TC_LUA_SKIP virtual void filesDropped(const std::vector<std::string>&) = delete;
 
     // -------------------------------------------------------------------------
     // Exit event

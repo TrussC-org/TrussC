@@ -113,5 +113,5 @@ void tcApp::mouseMoved(const MouseMoveEventArgs& e) {}
 void tcApp::mouseDragged(const MouseDragEventArgs& e) {}
 void tcApp::mouseScrolled(const ScrollEventArgs& e) {}
 void tcApp::windowResized(int width, int height) {}
-void tcApp::filesDropped(const vector<string>& files) {}
+void tcApp::filesDropped(const vector<fs::path>& files) {}
 void tcApp::exit() {}
