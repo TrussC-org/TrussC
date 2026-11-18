@@ -334,7 +334,7 @@ public:
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-    if (argc > 1 && std::strcmp(argv[1], "--gpu") == 0) {
+    if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
         WindowSettings settings;
         settings.width = 64;
         settings.height = 64;
