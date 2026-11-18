@@ -44,7 +44,7 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["draw"] = &trussc::App::draw;
         t["enableEvents"] = &trussc::App::enableEvents;
         t["exit"] = &trussc::App::exit;
-        t["filesDropped"] = sol::overload([](trussc::App& self, const trussc::DragDropEventArgs & e) { return self.filesDropped(e); }, [](trussc::App& self, const std::vector<std::string> & files) { return self.filesDropped(files); });
+        t["filesDropped"] = sol::overload([](trussc::App& self, const trussc::DragDropEventArgs & e) { return self.filesDropped(e); }, [](trussc::App& self, const std::vector<std::filesystem::path> & files) { return self.filesDropped(files); });
         t["findByInstanceId"] = &trussc::App::findByInstanceId;
         t["findHitNode"] = &trussc::App::findHitNode;
         t["findHitNodeFromScreen"] = &trussc::App::findHitNodeFromScreen;

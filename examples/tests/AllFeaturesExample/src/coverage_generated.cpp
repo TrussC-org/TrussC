@@ -844,7 +844,7 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().enableEvents();
         (void)af::val<App>().exit();
         (void)af::val<App>().filesDropped(af::val<const DragDropEventArgs>());
-        (void)af::val<App>().filesDropped(af::val<const std::vector<std::string>>());
+        (void)af::val<App>().filesDropped(af::val<const std::vector<std::filesystem::path>>());
         (void)af::val<App>().findByInstanceId(af::val<uint64_t>());
         (void)af::val<App>().findHitNode(af::val<const Ray>());
         (void)af::val<App>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
@@ -1951,7 +1951,7 @@ struct Cover_InputEvent : af::Scope<InputEvent> {
     static void run() {
         (void)af::val<InputEvent>().charInput(af::val<uint32_t>(), af::val<InputModifiers>(), af::val<bool>());
         (void)af::val<InputEvent>().charInput(af::val<const CharEventArgs>());
-        (void)af::val<InputEvent>().filesDropped(af::val<std::vector<std::string>>(), af::val<Vec2>());
+        (void)af::val<InputEvent>().filesDropped(af::val<std::vector<std::filesystem::path>>(), af::val<Vec2>());
         (void)af::val<InputEvent>().filesDropped(af::val<const DragDropEventArgs>());
         (void)af::val<InputEvent>().keyPressed(af::val<int>(), af::val<InputModifiers>(), af::val<bool>());
         (void)af::val<InputEvent>().keyPressed(af::val<const KeyEventArgs>());

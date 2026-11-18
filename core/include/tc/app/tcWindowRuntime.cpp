@@ -2099,7 +2099,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     args.y = ctx.mouseY;
                     int numFiles = sapp_get_num_dropped_files();
                     for (int i = 0; i < numFiles; i++) {
-                        args.files.push_back(sapp_get_dropped_file_path(i));
+                        args.files.push_back(utf8ToPath(sapp_get_dropped_file_path(i)));
                     }
                 }
                 window.events().filesDropped.notify(args);

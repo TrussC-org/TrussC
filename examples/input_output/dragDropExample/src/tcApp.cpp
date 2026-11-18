@@ -100,7 +100,7 @@ void tcApp::draw() {
     drawBitmapString("Drag and drop files onto this window", 20, h - 25);
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     // Clear list
     droppedFiles.clear();
     hasPreview = false;

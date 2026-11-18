@@ -143,7 +143,7 @@ struct DeliveryApp : App {
     void touchMoved(const TouchEventArgs&) override { ++touches; order["touchMoved"] += 'a'; }
     void touchReleased(const TouchEventArgs&) override { ++touches; order["touchReleased"] += 'a'; }
     void windowResized(int, int) override { order["windowResized"] += 'a'; }
-    void filesDropped(const std::vector<std::string>&) override { order["filesDropped"] += 'a'; }
+    void filesDropped(const std::vector<std::filesystem::path>&) override { order["filesDropped"] += 'a'; }
     using App::onMousePress;
     bool onMousePress(Vec2, int) override { return rootConsumes; }
     MouseMoveEventArgs lastMove;

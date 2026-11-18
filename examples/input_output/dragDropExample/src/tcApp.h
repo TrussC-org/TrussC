@@ -13,12 +13,12 @@ public:
     void setup() override;
     void draw() override;
 
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 
 private:
     // Dropped file information
     struct DroppedFile {
-        string path;
+        fs::path path;
         string name;
         string extension;
         bool isImage;
