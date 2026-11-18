@@ -68379,13 +68379,97 @@ related = ["GlyphBatch::setColor"]
 
 ["GlyphBatch::add"]
 category = "font"
-description.en = "Appends a glyph or UTF-8 string, using batch settings for omitted arguments."
-description.ja = "グリフまたは UTF-8 文字列を追加します。省略した引数にはバッチ設定を使います。"
-description.ko = "글리프 또는 UTF-8 문자열을 추가하며 생략한 인수에는 배치 설정을 사용합니다."
-details.en = "The codepoint overload adds one independent glyph without cursor advance or vertical substitution. add(cp), add(cp, color), add(text), and add(text, color) use current matrix × batch transform. add(cp, M) and add(cp, M, color) use only M. An omitted color uses the batch color; a supplied color replaces it for that add. The Mat4 overload replaces both current and batch matrices; the active camera view/projection is applied once at draw time. The UTF-8 string overload uses the retained Font's drawString layout, including wrapping, vertical forms, and TCY. Color floats are copied without clamping. Additions mark GPU geometry dirty; existing recorded draws retain their previous buffers. Empty ink emits no quad. Call on the main thread."
-details.ja = "コードポイント版は、カーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。add(cp)、add(cp, color)、add(text)、add(text, color) は現在の行列 × バッチ変換を使います。add(cp, M)、add(cp, M, color) は M だけを使います。色を省略するとバッチ色を使い、指定するとその追加だけ置き換えます。Mat4 版は現在とバッチの両行列を置き換えます。現在のカメラの view/projection は draw 時に一度適用します。UTF-8 文字列版は、保持した Font の drawString と同じ配置を使い、折り返し、縦書き字形、縦中横を反映します。色の float 値は制限せずにコピーします。追加後は GPU 形状を更新対象にしますが、記録済みの描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。メインスレッドで呼び出してください。"
-details.ko = "코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. add(cp), add(cp, color), add(text), add(text, color)는 현재 행렬 × 배치 변환을 사용합니다. add(cp, M), add(cp, M, color)는 M만 사용합니다. 색상을 생략하면 배치 색상을 사용하고 지정하면 해당 추가에서만 대체합니다. Mat4 버전은 현재 행렬과 배치 행렬을 모두 대체합니다. 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. UTF-8 문자열 버전은 유지한 Font의 drawString 배치를 사용하며 자동 줄바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다. 색상의 float 값은 제한 없이 복사합니다. 추가하면 GPU 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다. 메인 스레드에서 호출합니다."
-related = ["GlyphBatch::draw", "Font::forEachGlyph"]
+description.en = "Appends retained text at a position or with a matrix, avoiding per-string matrix-stack changes."
+details.en = """
+- Use positioned strings to build labels once and draw them repeatedly. Set the batch Font first; omitted colors use the batch color. String layout follows Font::drawString, including wrapping, vertical forms and TCY.
+
+With a GlyphBatch member named batch configured with setFont(), add positioned text on the main thread in tcApp::setup, then call batch.draw() from draw():
+```cpp
+void setup() {
+    batch.add("abc", 20, 40);
+}
+```
+
+- add(text, x, y) and add(text, x, y, color) lay out at (x, y), then apply current matrix × batch transform. Existing add(text) and add(text, color) use the same product at (0, 0). clear() preserves the batch transform and color.
+- An explicit matrix replaces both current and batch transforms. Supply the complete model matrix:
+```cpp
+void setup() {
+    batch.add("abc", Mat4::translate(20, 40, 0), Color(1));
+}
+```
+
+- add(cp) and add(cp, color) use current matrix × batch transform; add(cp, M) and add(cp, M, color) use only M. Codepoints add independent glyphs without cursor advance or vertical substitution. A supplied color replaces the batch color for that add; color floats are copied without clamping.
+Supply a color for a positioned string:
+
+```cpp
+void setup() {
+    batch.add("abc", 20, 40, Color(0.2f, 0.7f, 1));
+}
+```
+
+- The active camera view/projection applies once at draw time. Additions mark geometry dirty; recorded draws keep their previous buffers. Empty ink emits no quad.
+"""
+description.ja = "文字列ごとの行列スタック操作を省き、位置または行列を指定して保持するテキストを追加します。"
+details.ja = """
+- 位置付きの文字列でラベルを一度構築し、繰り返し描画します。先にバッチの Font を設定します。色を省略するとバッチ色を使います。文字列の配置は Font::drawString と同じで、折り返し、縦書き字形、縦中横を反映します。
+
+setFont() で設定済みの GlyphBatch メンバー batch を使い、メインスレッドの tcApp::setup で位置付きテキストを追加し、draw() で batch.draw() を呼びます。
+```cpp
+void setup() {
+    batch.add("abc", 20, 40);
+}
+```
+
+- add(text, x, y) と add(text, x, y, color) は (x, y) に配置し、現在の行列 × バッチ変換を適用します。既存の add(text) と add(text, color) は (0, 0) で同じ積を使います。clear() はバッチ変換と色を保持します。
+- 明示した行列は現在とバッチの両変換を置き換えます。必要なモデル行列全体を渡します。
+```cpp
+void setup() {
+    batch.add("abc", Mat4::translate(20, 40, 0), Color(1));
+}
+```
+
+- add(cp) と add(cp, color) は現在の行列 × バッチ変換を使い、add(cp, M) と add(cp, M, color) は M だけを使います。コードポイント版はカーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。指定した色はその追加だけバッチ色を置き換えます。色の float 値は制限せずにコピーします。
+位置付き文字列に色を指定します。
+
+```cpp
+void setup() {
+    batch.add("abc", 20, 40, Color(0.2f, 0.7f, 1));
+}
+```
+
+- 現在のカメラの view/projection は draw 時に一度適用します。追加後は形状を更新対象にしますが、記録済み描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。
+"""
+description.ko = "문자열마다 행렬 스택을 조작하지 않고 위치 또는 행렬을 지정하여 유지할 텍스트를 추가합니다."
+details.ko = """
+- 위치를 지정한 문자열로 레이블을 한 번 구성하고 반복해서 그립니다. 먼저 배치의 Font를 설정합니다. 색상을 생략하면 배치 색상을 사용합니다. 문자열 배치는 Font::drawString과 같으며 줄 바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다.
+
+setFont()로 설정한 GlyphBatch 멤버 batch를 사용하여 메인 스레드의 tcApp::setup에서 위치를 지정한 텍스트를 추가하고 draw()에서 batch.draw()를 호출합니다.
+```cpp
+void setup() {
+    batch.add("abc", 20, 40);
+}
+```
+
+- add(text, x, y)와 add(text, x, y, color)는 (x, y)에 배치한 후 현재 행렬 × 배치 변환을 적용합니다. 기존 add(text)와 add(text, color)는 (0, 0)에서 같은 곱을 사용합니다. clear()는 배치 변환과 색상을 유지합니다.
+- 명시한 행렬은 현재 변환과 배치 변환을 모두 대체합니다. 필요한 전체 모델 행렬을 전달합니다.
+```cpp
+void setup() {
+    batch.add("abc", Mat4::translate(20, 40, 0), Color(1));
+}
+```
+
+- add(cp)와 add(cp, color)는 현재 행렬 × 배치 변환을 사용하며 add(cp, M)과 add(cp, M, color)는 M만 사용합니다. 코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. 지정한 색상은 해당 추가에서만 배치 색상을 대체합니다. 색상의 float 값은 제한 없이 복사합니다.
+위치를 지정한 문자열에 색상을 지정합니다.
+
+```cpp
+void setup() {
+    batch.add("abc", 20, 40, Color(0.2f, 0.7f, 1));
+}
+```
+
+- 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. 추가하면 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다.
+"""
+related = ["GlyphBatch", "GlyphBatch::setFont", "GlyphBatch::setTransform", "GlyphBatch::draw", "Font::forEachGlyph"]
 
 ["GlyphBatch::draw"]
 category = "font"

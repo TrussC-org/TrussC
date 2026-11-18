@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <type_traits>
 #ifdef TC_GLYPH_EGL
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -13,6 +14,20 @@
 
 using namespace tc;
 namespace {
+// Literal categories cannot cross between the codepoint and string overloads.
+static_assert(std::is_convertible_v<decltype("abc"), std::string>);
+static_assert(!std::is_convertible_v<decltype("abc"), uint32_t>);
+static_assert(std::is_convertible_v<decltype('A'), uint32_t>);
+static_assert(!std::is_convertible_v<decltype('A'), std::string>);
+static_assert(std::is_same_v<decltype(static_cast<void (GlyphBatch::*)(const std::string&, float, float)>(&GlyphBatch::add)),
+                           void (GlyphBatch::*)(const std::string&, float, float)>);
+// Color's two-component constructor is explicit; bare {x, y} stays rejected.
+template<class Text>
+concept AcceptsTwoComponentBrace = requires(GlyphBatch& batch, Text text) {
+    batch.add(text, {1.0f, 0.5f});
+};
+static_assert(!AcceptsTwoComponentBrace<const char*>);
+static_assert(!AcceptsTwoComponentBrace<char>);
 int failures = 0;
 bool completed = false;
 bool onlyEasycam = false;
@@ -278,6 +293,47 @@ class GlyphApp : public App {
             });
             compare("4x/8x minification with mips", expected, got);
         }
+    }
+    void stringPositionChecks() {
+        const std::string text = "abc\nAg";
+        for (bool transformed : {false, true}) {
+            const Mat4 current = transformed ? Mat4::translate(20, 25, 0) * Mat4::scale(0.75f) : Mat4::identity();
+            const Mat4 transform = transformed ? Mat4::translate(5, 8, 0) * Mat4::scale(1.25f) : Mat4::identity();
+            for (auto mode : {WritingMode::Horizontal, WritingMode::VerticalRL}) {
+                font_.setWritingMode(mode);
+                for (int form = 0; form < 3; ++form) {
+                    const Mat4 matrix = current * transform;
+                    const auto expected = render(reference_, [&] {
+                        pushMatrix();
+                        setMatrix(matrix);
+                        font_.drawString(text, 31.25f, 27.5f);
+                        popMatrix();
+                    });
+                    const auto actual = render(actual_, [&] {
+                        GlyphBatch batch;
+                        batch.setFont(font_);
+                        batch.setColor(form == 0 ? tint : Color(0.1f, 0.9f, 0.3f, 0.5f));
+                        batch.setTransform(transform);
+                        batch.add("discard");
+                        batch.clear();
+                        check("clear preserves string transform", sameMatrix(batch.getTransform(), transform));
+                        pushMatrix();
+                        setMatrix(current);
+                        if (form == 0) batch.add(text, 31.25f, 27.5f);
+                        else if (form == 1) batch.add(text, 31.25f, 27.5f, tint);
+                        else {
+                            // Explicit strings ignore both ambient and batch transforms.
+                            setMatrix(Mat4::scale(4));
+                            batch.add(text, matrix * Mat4::translate(31.25f, 27.5f, 0), tint);
+                        }
+                        popMatrix();
+                        batch.draw();
+                    });
+                    compare("positioned string matches drawString", expected, actual);
+                }
+            }
+        }
+        font_.setWritingMode(WritingMode::Horizontal);
     }
     void batchSettingsChecks() {
         const Mat4 current = Mat4::translate(65, 60, 0) * Mat4::rotateZ(0.17f);
@@ -663,7 +719,7 @@ public:
     void runOffscreenChecks() {
         setup();
         if (onlyEasycam) { cameraCheck(); completed = true; return; }
-        scissorChecks(); pageOrderChecks(); layoutChecks(); batchSettingsChecks(); cameraCheck();
+        scissorChecks(); pageOrderChecks(); layoutChecks(); stringPositionChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
         for (int frame = 0; frame < 2; ++frame) {
@@ -682,7 +738,7 @@ public:
         if (mipBench) { mipBenchmark(); completed = true; exitApp(); return; }
         if (onlyEasycam) { cameraCheck(); completed = true; exitApp(); return; }
         if (frame_ == 0) {
-            scissorChecks(); pageOrderChecks(); layoutChecks(); batchSettingsChecks(); cameraCheck();
+            scissorChecks(); pageOrderChecks(); layoutChecks(); stringPositionChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
             reference_.allocate(extent, extent);
             retain(true);
@@ -804,6 +860,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     empty.add(U'A', Color(1)); empty.add(U'A', Mat4::identity(), Color(1));
     empty.add("A"); empty.add("A", Color(1));
     empty.add(std::string("A")); empty.add(std::string("A"), Color(1));
+    empty.add("abc", 1, 2);
+    empty.add("abc", Color{1, 0.5f});
+    empty.add('A', Color{1, 0.5f});
+    empty.add("abc", 1, 2, {1, 0.5f, 0.25f, 1});
+    empty.add("abc", Mat4::identity(), {1, 0.5f, 0.25f, 1});
+    empty.add("abc", {1, 0.5f, 0.25f, 1});
+    empty.add('A');
+    empty.add('A', {1, 0.5f, 0.25f, 1});
+    empty.add('A', Mat4::identity(), {1, 0.5f, 0.25f, 1});
     empty.clear(); empty.draw();
 #ifdef TC_GLYPH_EGL
     if (argc > 1 && std::strcmp(argv[1], "--egl-check") == 0) return runEglChecks();
