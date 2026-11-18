@@ -43,7 +43,7 @@ public:
     static InputEvent charInput(const CharEventArgs& event) {
         return charInput(event.codepoint, modifiers(event), event.isRepeat);
     }
-    static InputEvent filesDropped(std::vector<std::string> paths, Vec2 pos) {
+    static InputEvent filesDropped(std::vector<std::filesystem::path> paths, Vec2 pos) {
         InputEvent e(Kind::FilesDropped);
         e.drop_.files = std::move(paths);
         e.drop_.x = pos.x;

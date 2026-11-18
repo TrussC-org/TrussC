@@ -63,6 +63,18 @@ int runLuaEventTests(const std::filesystem::path& temp) {
         )"));
     }
     check("active touch listener disconnects", script(lua, "touchHandle:disconnect()"));
+    DragDropEventArgs dropped;
+    FilesOpenedEventArgs opened;
+    dropped.files = {std::filesystem::path(u8"日本語😀.png")};
+    opened.files = dropped.files;
+    lua["dropped"] = &dropped;
+    lua["opened"] = &opened;
+    lua["expectedPath"] = pathToUtf8(dropped.files[0]);
+    check("dropped and opened paths remain UTF-8 Lua strings", script(lua, R"(
+        assert(type(dropped.files[1]) == 'string')
+        assert(dropped.files[1] == expectedPath)
+        assert(opened.files[1] == expectedPath)
+    )"));
     Event<void> signal;
     lua["signal"] = &signal;
     lua.set_function("emit", [&] { signal.notify(); });

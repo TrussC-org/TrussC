@@ -781,7 +781,7 @@ Runtime queue and maintenance work selects process context and progresses at saf
 
 `getWindowTitle()` returns the resolved Window's stored title (`Window::getTitle()`); `isWindowOccluded()` returns its native visibility snapshot (`Window::isOccluded()`). They use the same App-owner / sole-open-Window resolution as other Window helpers. Unowned callers with zero or multiple open Windows get an Error and an empty string or `false`, respectively. An App without a live Window gets those fallback values too.
 
-File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<string>&)` callback receive the paths.
+File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<fs::path>&)` callback receive the paths.
 
 `Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal, unavailable to public C++ and Lua callers. The framework drives the tree; App code overrides callbacks or listens through `events()`.
 

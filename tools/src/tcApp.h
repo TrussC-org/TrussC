@@ -35,7 +35,7 @@ public:
     void keyReleased(int key) override;
 
     // Drag & drop
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 
 private:
     // Settings
@@ -94,7 +94,7 @@ private:
     void scanAddons();
     // Select an addon (by index) and auto-select its transitive dependencies.
     void selectAddonWithDeps(size_t index);
-    void importProject(const string& path);
+    void importProject(const fs::path& path);
     string getTemplatePath();
     void setStatus(const string& msg, bool isError = false);
     void resetToNewProject();

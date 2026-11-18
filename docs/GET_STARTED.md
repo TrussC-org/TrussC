@@ -264,7 +264,7 @@ public:
     void windowResized(int width, int height) override;
 
     // File drop
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 };
 ```
 

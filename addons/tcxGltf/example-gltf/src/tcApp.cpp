@@ -63,10 +63,10 @@ void tcApp::draw() {
     drawBitmapString(info, 20, 20);
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     for (const auto& f : files) {
-        // Accept .glb and .gltf files (any case). Dropped paths are UTF-8.
-        string ext = toLower(getFileExtension(utf8ToPath(f)));
+        // Accept .glb and .gltf files (any case).
+        string ext = toLower(getFileExtension(f));
         if (ext == "glb" || ext == "gltf") {
             loadModel(f);
             return;
@@ -74,11 +74,10 @@ void tcApp::filesDropped(const vector<string>& files) {
     }
 }
 
-void tcApp::loadModel(const string& path) {
-    if (model.load(utf8ToPath(path))) {  // dropped paths are UTF-8
+void tcApp::loadModel(const fs::path& path) {
+    if (model.load(path)) {
         // Extract filename for display
-        auto pos = path.find_last_of("/\\");
-        modelName = (pos != string::npos) ? path.substr(pos + 1) : path;
+        modelName = pathToUtf8(path.filename());
 
         // Auto-fit camera distance based on model bounds
         // Simple heuristic: scan all vertices for bounding sphere radius

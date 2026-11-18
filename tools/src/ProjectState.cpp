@@ -162,8 +162,8 @@ PresetState parsePresetState(const string& jsonText) {
     return state;
 }
 
-PresetState readPresetState(const string& projectPath) {
-    fs::path path = fs::path(projectPath) / "CMakePresets.json";
+PresetState readPresetState(const fs::path& projectPath) {
+    fs::path path = projectPath / "CMakePresets.json";
     error_code ec;
     if (!fs::exists(path, ec)) return PresetState();
     ifstream file;

@@ -24,7 +24,7 @@ public:
     void mouseScrolled(const ScrollEventArgs& e) override;
 
     void windowResized(int width, int height) override;
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
     void exit() override;
 
     void updateFbo();

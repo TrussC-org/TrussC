@@ -259,10 +259,10 @@ struct FocusEventArgs {
 };
 
 // ---------------------------------------------------------------------------
-// Drag & drop event arguments (for future use)
+// Drag & drop event arguments
 // ---------------------------------------------------------------------------
 struct DragDropEventArgs {
-    std::vector<std::string> files;  // Dropped file paths
+    std::vector<std::filesystem::path> files;  // Desktop paths; browser file names on Web
     float x = 0.0f;
     float y = 0.0f;
 };
