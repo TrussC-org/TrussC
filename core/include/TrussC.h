@@ -2783,7 +2783,7 @@ struct ConsoleCPCtrlGuard {
 //          runApp() just stores the descriptor for sokol_main() to retrieve.
 #ifdef __ANDROID__
 namespace internal {
-    inline sapp_desc g_androidDesc = {};  // Android only: no hot reload there
+    extern sapp_desc g_androidDesc;  // Defined by the Android entry point bridge
 }
 
 template<typename AppClass>
