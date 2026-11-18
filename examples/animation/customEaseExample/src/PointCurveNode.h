@@ -56,7 +56,8 @@ public:
              + (-2*u3 + 3*u2)    * y1 + (u3 - u2)       * m1;
     }
 
-    bool onMousePress(tc::Vec2 local, int button) override {
+    bool onMousePress(const tc::MouseEventArgs& e) override {
+        const tc::Vec2 local = e.pos;
         float w = getWidth(), h = getHeight();
         dragIndex_ = -1;
         for (int i = 0; i < (int)points.size(); i++) {
@@ -67,7 +68,8 @@ public:
         return dragIndex_ >= 0;
     }
 
-    bool onMouseDrag(tc::Vec2 local, int button) override {
+    bool onMouseDrag(const tc::MouseDragEventArgs& e) override {
+        const tc::Vec2 local = e.pos;
         using namespace tc;
         if (dragIndex_ < 0) return false;
         float w = getWidth(), h = getHeight();
@@ -84,7 +86,7 @@ public:
         return true;
     }
 
-    bool onMouseRelease(tc::Vec2 local, int button) override {
+    bool onMouseRelease(const tc::MouseEventArgs&) override {
         dragIndex_ = -1;
         return false;
     }

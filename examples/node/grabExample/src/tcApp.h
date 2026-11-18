@@ -52,7 +52,7 @@ protected:
     bool hasPendingDrag_ = false;
 
     bool onMousePress(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             isDragging_ = true;
             dragOffset_ = e.pos;
             hasPendingDrag_ = false;
@@ -62,7 +62,7 @@ protected:
     }
 
     bool onMouseRelease(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             isDragging_ = false;
             hasPendingDrag_ = false;
         }
@@ -156,7 +156,7 @@ protected:
     bool isDrawing_ = false;
 
     bool onMousePress(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             isDrawing_ = true;
             currentLine_.clear();
             pendingPoints_.clear();
@@ -167,7 +167,7 @@ protected:
     }
 
     bool onMouseRelease(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT && isDrawing_) {
+        if (e.button == MouseButton::Left && isDrawing_) {
             isDrawing_ = false;
             // Process any remaining pending points
             for (const auto& pt : pendingPoints_) {

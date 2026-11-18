@@ -48,12 +48,13 @@ void tcApp::keyPressed(int key) {
     if (key == 'C') dots_.clear();
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
-    last_ = pos;
-    mouseDragged(pos, button);
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    last_ = e.pos;
+    mouseDragged({.button = e.button, .pos = e.pos});
 }
 
-void tcApp::mouseDragged(Vec2 pos, int) {
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    const Vec2 pos = e.pos;
     // Dots every half radius since the last position, so a fast drag stays a line.
     const float radius = RADII[brush_->size];
     const int count = max(1, (int)((pos - last_).length() / (radius * 0.5f)));

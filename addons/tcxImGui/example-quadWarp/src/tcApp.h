@@ -14,14 +14,14 @@ public:
     void draw() override;
     void keyPressed(int key) override;
     void mouseMoved(Vec2 pos) override { pointerInput(pos, PointerAction::Hover); }
-    void mouseDragged(Vec2 pos, int button) override {
-        if (button == MOUSE_BUTTON_LEFT) pointerInput(pos, PointerAction::Drag);
+    void mouseDragged(const MouseDragEventArgs& e) override {
+        if (e.button == MouseButton::Left) pointerInput(e.pos, PointerAction::Drag);
     }
-    void mousePressed(Vec2 pos, int button) override {
-        if (button == MOUSE_BUTTON_LEFT) pointerInput(pos, PointerAction::Down);
+    void mousePressed(const MouseEventArgs& e) override {
+        if (e.button == MouseButton::Left) pointerInput(e.pos, PointerAction::Down);
     }
-    void mouseReleased(Vec2 pos, int button) override {
-        if (button == MOUSE_BUTTON_LEFT) pointerInput(pos, PointerAction::Up);
+    void mouseReleased(const MouseEventArgs& e) override {
+        if (e.button == MouseButton::Left) pointerInput(e.pos, PointerAction::Up);
     }
 
 private:

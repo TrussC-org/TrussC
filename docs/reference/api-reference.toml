@@ -734,7 +734,13 @@ description.en = "Called when the pointer moves while a mouse button is held."
 description.ja = "マウスのボタンを押したまま、ポインタが動いたときに呼ばれる。"
 description.ko = "마우스 버튼을 누른 채 포인터가 움직일 때 호출된다."
 details.en = '''
-- When you write a function with this name in tcApp, TrussC calls it when the pointer moves with a button held. Use the `mouseDragged(const MouseDragEventArgs& e)` form: `e` gives you the position (`e.pos`), the movement since the last event (`e.delta`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mouseDragged(Vec2 pos, int button)` is also available. Override only one of them.
+- Override `mouseDragged(const MouseDragEventArgs& e)` to handle this event with a typed `MouseButton` and position/modifier fields.
+- The `Vec2, int` short form is deprecated and removed in v1.0. The default rich form still forwards Left/Right/Middle as 0/1/2. An overridden short form logs once per callback kind per process. Use the rich form:
+```cpp
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - `e.button` is the button that was pressed most recently.
 - `e.delta` is how far the pointer has moved since the last recorded position, in the same units as `e.pos`. Here `e.globalDelta` has the same value.
 - While a button is held, moves come here instead of `mouseMoved`. Any release, whether real or sent by TrussC, ends the drag, even if another button is still held.
@@ -742,11 +748,27 @@ details.en = '''
 - The order of calls is: `events().mouseDragged` listeners → this function → the nodes of the scene graph (`Node::onMouseDrag`) → listeners registered with `EventPriority::AfterApp`.
 - If a listener sets `e.consumed = true`, this function, the nodes and the later listeners are all skipped. If a node handles the event (returns `true`), the later listeners are skipped too.
 - By default, the App's root node does not consume clicks on the empty background. To consume them, return `true` from the App's `onMousePress`.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - Nodes: the node that received the press receives `onMouseDrag` with that button. The move is also delivered as `onMouseMove`, starting from the node under the pointer and passed up to the parents in turn.
-- On touch devices, moving the first finger produces a left-button drag.
+- On touch devices, moving the first finger produces a left-button drag. To handle touch separately, disable touch-as-mouse.
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ja = '''
-- tcApp に同じ名前の関数を書くと、ボタンを押したままポインタが動いたときに TrussC が呼び出します。基本は `mouseDragged(const MouseDragEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、前回からの移動量（`e.delta`）、ボタン（`e.button`）、修飾キー（`e.shift` など）を取り出せます。`mouseDragged(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
+- `mouseDragged(const MouseDragEventArgs& e)` をオーバーライドすると、`MouseButton` と位置・修飾キーを使ってイベントを処理できます。
+- `Vec2, int` の短い形式は非推奨で v1.0 に削除します。既定の rich form は引き続き Left/Right/Middle を 0/1/2 として転送します。短い形式のオーバーライドにはプロセス内で種類ごとに 1 回警告します。rich form を使います。
+```cpp
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - `e.button` は、一番最後に押されたボタンです。
 - `e.delta` は前回記録した位置からポインタが動いた量で、単位は `e.pos` と同じです。ここでは `e.globalDelta` も同じ値になります。
 - ボタンを押している間の移動は、`mouseMoved` ではなくここに届きます。どのボタンを離しても（本物のリリースでも TrussC が代わりに送ったものでも）、ほかのボタンがまだ押されていてもドラッグは終わります。
@@ -754,11 +776,27 @@ details.ja = '''
 - 呼ばれる順番は、`events().mouseDragged` のリスナー → この関数 → シーングラフのノード（`Node::onMouseDrag`） → `EventPriority::AfterApp` で登録したリスナーです。
 - リスナーが `e.consumed = true` にすると、この関数、ノード、それ以降のリスナーはすべてスキップされます。ノードがイベントを処理した（`true` を返した）場合も、それ以降のリスナーはスキップされます。
 - 既定では、App のルートノードは何もない背景へのクリックを消費（consume）しません。消費したい場合は、App の `onMousePress` で `true` を返してください。
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - ノード: 押されたノードが、そのボタンで `onMouseDrag` を受け取ります。さらに、その移動は `onMouseMove` として、ポインタの下のノードから親へ順に渡っていきます。
-- タッチ端末では、1 本目の指を動かすと左ボタンのドラッグになります。
+- タッチ端末では、1 本目の指を動かすと左ボタンのドラッグになります。 タッチを別に処理する場合は、マウスへの変換を無効にします。
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ko = '''
-- tcApp에 같은 이름의 함수를 작성하면 버튼을 누른 채 포인터가 움직였을 때 TrussC가 호출합니다. 기본적으로 `mouseDragged(const MouseDragEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 이전 이벤트 이후의 이동량(`e.delta`), 버튼(`e.button`), 수식 키(`e.shift` 등)을 얻을 수 있습니다. `mouseDragged(Vec2 pos, int button)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요.
+- `mouseDragged(const MouseDragEventArgs& e)`를 재정의하면 `MouseButton`과 위치·보조 키로 이벤트를 처리합니다.
+- `Vec2, int`의 짧은 형식은 폐기 예정이며 v1.0에서 제거됩니다. 기본 rich form은 Left/Right/Middle을 계속 0/1/2로 전달합니다. 짧은 형식 재정의는 프로세스에서 종류별로 한 번 경고합니다. rich form을 사용하세요.
+```cpp
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - `e.button`은 가장 마지막에 눌린 버튼입니다.
 - `e.delta`는 이전에 기록된 위치에서 포인터가 움직인 양이며, 단위는 `e.pos`와 같습니다. 여기서는 `e.globalDelta`도 같은 값입니다.
 - 버튼을 누르고 있는 동안의 이동은 `mouseMoved`가 아니라 여기로 전달됩니다. 어느 버튼을 떼도(실제 릴리스든 TrussC가 대신 보낸 것이든) 다른 버튼이 아직 눌려 있어도 드래그는 끝납니다.
@@ -766,20 +804,23 @@ details.ko = '''
 - 호출 순서는 `events().mouseDragged` 리스너 → 이 함수 → 씬 그래프의 노드(`Node::onMouseDrag`) → `EventPriority::AfterApp`으로 등록한 리스너입니다.
 - 리스너가 `e.consumed = true`로 설정하면 이 함수, 노드, 이후 리스너를 모두 건너뜁니다. 노드가 이벤트를 처리한 경우(`true`를 반환한 경우)에도 이후 리스너는 건너뜁니다.
 - 기본적으로 App의 루트 노드는 빈 배경의 클릭을 소비(consume)하지 않습니다. 소비하려면 App의 `onMousePress`에서 `true`를 반환하세요.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - 노드: 눌린 노드가 그 버튼으로 `onMouseDrag`를 받습니다. 또한 그 이동은 `onMouseMove`로서 포인터 아래 노드부터 부모로 차례차례 넘어갑니다.
-- 터치 기기에서는 첫 번째 손가락을 움직이면 왼쪽 버튼 드래그가 됩니다.
+- 터치 기기에서는 첫 번째 손가락을 움직이면 왼쪽 버튼 드래그가 됩니다. 터치를 따로 처리하려면 마우스 변환을 끄세요.
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 related = ["isMousePressed", "App::mousePressed", "App::mouseReleased", "App::mouseMoved", "CoreEvents::mouseDragged", "MouseDragEventArgs", "MouseDragEventArgs::delta", "Node::onMouseDrag"]
 snippet = '''
-// tcApp.h (inside class tcApp : public App)
-void mouseDragged(const MouseDragEventArgs& e) override;
-Vec2 offset;
-vector<Vec2> trail;
-
-// tcApp.cpp
 void tcApp::mouseDragged(const MouseDragEventArgs& e) {
-    if (e.button == MOUSE_BUTTON_RIGHT) offset += e.delta;   // pan
-    else trail.push_back(e.pos);
+    if (e.button == MouseButton::Left) redraw();
 }
 '''
 
@@ -832,66 +873,111 @@ description.en = "Called when a mouse button is pressed."
 description.ja = "マウスのボタンが押されたときに呼ばれる。"
 description.ko = "마우스 버튼이 눌렸을 때 호출된다."
 details.en = '''
-- When you write a function with this name in tcApp (your class derived from App), TrussC calls it when a button is pressed (this is called an override). Use the `mousePressed(const MouseEventArgs& e)` form: `e` gives you the position (`e.pos`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mousePressed(Vec2 pos, int button)` is also available. Override only one of them (if you write both, only the MouseEventArgs version is called).
-- `button` is 0 for left, 1 for right and 2 for middle. You can also compare it with constants, as in `if (e.button == MOUSE_BUTTON_LEFT)`.
+- Override `mousePressed(const MouseEventArgs& e)` to handle this event with a typed `MouseButton` and position/modifier fields.
+- The `Vec2, int` short form is deprecated and removed in v1.0. The default rich form still forwards Left/Right/Middle as 0/1/2. An overridden short form logs once per callback kind per process. Use the rich form:
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - Coordinates start at (0, 0) in the top-left corner of the window. They are in logical pixels, the same units as the window size, and do not change on high-resolution screens such as Retina. Only when you enable pixelPerfect in `WindowSettings` are they real pixels.
 - Inside this function, `getMousePos()` returns the same value as `e.pos`, and `isMousePressed()` is true.
 - On phones and tablets, a touch with the first finger also arrives here as a left click. If you do not want this, call `setTouchAsMouse(false)`.
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - The order of calls is: `events().mousePressed` listeners → this function → the nodes of the scene graph (`Node::onMousePress`) → listeners registered with `EventPriority::AfterApp`.
 - If a listener sets `e.consumed = true`, this function, the nodes and the later listeners are all skipped. If a node handles the event (returns `true`), the later listeners are skipped too.
 - By default, the App's root node does not consume clicks on the empty background. To consume them, return `true` from the App's `onMousePress`.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - The argument of this function is const, so you cannot stop the press from reaching the nodes here. To stop it, register a listener with `EventPriority::BeforeApp` and mark the event as handled there.
 
 ```cpp
-clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
+void tcApp::setup() {
+    clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
+}
 ```
 
 - Nodes receive the press in local coordinates, starting with the front-most node under the pointer. It is passed up to the parents in turn until a node returns `true`. The node that received the press also receives the drags and the release until the button is let go.
 '''
 details.ja = '''
-- tcApp（App を継承した自分のクラス）に同じ名前の関数を書くと、ボタンが押されたときに TrussC が呼び出します（オーバーライド）。基本は `mousePressed(const MouseEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、ボタン（`e.button`）、Shift などの修飾キー（`e.shift` など）を取り出せます。`mousePressed(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください（両方書いた場合は MouseEventArgs 版だけが呼ばれます）。
-- `button` は 0 が左、1 が右、2 が中ボタンです。`if (e.button == MOUSE_BUTTON_LEFT)` のように定数でも比較できます。
+- `mousePressed(const MouseEventArgs& e)` をオーバーライドすると、`MouseButton` と位置・修飾キーを使ってイベントを処理できます。
+- `Vec2, int` の短い形式は非推奨で v1.0 に削除します。既定の rich form は引き続き Left/Right/Middle を 0/1/2 として転送します。短い形式のオーバーライドにはプロセス内で種類ごとに 1 回警告します。rich form を使います。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - 座標はウィンドウの左上が (0, 0) です。単位はウィンドウサイズと同じ論理ピクセルで、Retina のような高解像度の画面でも変わりません。`WindowSettings` で pixelPerfect にしたときだけ、実際のピクセルになります。
 - この関数の中では、`getMousePos()` は `e.pos` と同じ値を返し、`isMousePressed()` は true になっています。
 - スマートフォンやタブレットでは、1 本目の指のタッチも左クリックとしてここに届きます。不要な場合は `setTouchAsMouse(false)` にしてください。
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - 呼ばれる順番は、`events().mousePressed` のリスナー → この関数 → シーングラフのノード（`Node::onMousePress`） → `EventPriority::AfterApp` で登録したリスナーです。
 - リスナーが `e.consumed = true` にすると、この関数、ノード、それ以降のリスナーはすべてスキップされます。ノードがイベントを処理した（`true` を返した）場合も、それ以降のリスナーはスキップされます。
 - 既定では、App のルートノードは何もない背景へのクリックを消費（consume）しません。消費したい場合は、App の `onMousePress` で `true` を返してください。
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - この関数の引数は const なので、ここからノードへの伝達は止められません。止めたい場合は `EventPriority::BeforeApp` でリスナーを登録し、そこで処理済みにします。
 
 ```cpp
-clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
+void tcApp::setup() {
+    clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
+}
 ```
 
 - ノードには、一番手前にあるノードからローカル座標で届きます。そのノードが `true` を返すまで、親へ順に渡っていきます。押されたノードは、ボタンを離すまでのドラッグとリリースも受け取ります。
 '''
 details.ko = '''
-- tcApp(App을 상속한 자신의 클래스)에 같은 이름의 함수를 작성하면 버튼이 눌렸을 때 TrussC가 호출합니다(오버라이드). 기본적으로 `mousePressed(const MouseEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 버튼(`e.button`), Shift 같은 수식 키(`e.shift` 등)를 얻을 수 있습니다. `mousePressed(Vec2 pos, int button)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요(둘 다 작성하면 MouseEventArgs 버전만 호출됩니다).
-- `button`은 0이 왼쪽, 1이 오른쪽, 2가 가운데 버튼입니다. `if (e.button == MOUSE_BUTTON_LEFT)`처럼 상수로도 비교할 수 있습니다.
+- `mousePressed(const MouseEventArgs& e)`를 재정의하면 `MouseButton`과 위치·보조 키로 이벤트를 처리합니다.
+- `Vec2, int`의 짧은 형식은 폐기 예정이며 v1.0에서 제거됩니다. 기본 rich form은 Left/Right/Middle을 계속 0/1/2로 전달합니다. 짧은 형식 재정의는 프로세스에서 종류별로 한 번 경고합니다. rich form을 사용하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - 좌표는 창의 왼쪽 위가 (0, 0)입니다. 단위는 창 크기와 같은 논리 픽셀이며, Retina 같은 고해상도 화면에서도 바뀌지 않습니다. `WindowSettings`에서 pixelPerfect를 켰을 때만 실제 픽셀이 됩니다.
 - 이 함수 안에서 `getMousePos()`는 `e.pos`와 같은 값을 반환하고, `isMousePressed()`는 true입니다.
 - 스마트폰이나 태블릿에서는 첫 번째 손가락의 터치도 왼쪽 클릭으로 여기에 전달됩니다. 필요하지 않으면 `setTouchAsMouse(false)`로 설정하세요.
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - 호출 순서는 `events().mousePressed` 리스너 → 이 함수 → 씬 그래프의 노드(`Node::onMousePress`) → `EventPriority::AfterApp`으로 등록한 리스너입니다.
 - 리스너가 `e.consumed = true`로 설정하면 이 함수, 노드, 이후 리스너를 모두 건너뜁니다. 노드가 이벤트를 처리한 경우(`true`를 반환한 경우)에도 이후 리스너는 건너뜁니다.
 - 기본적으로 App의 루트 노드는 빈 배경의 클릭을 소비(consume)하지 않습니다. 소비하려면 App의 `onMousePress`에서 `true`를 반환하세요.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - 이 함수의 인자는 const이므로 여기서는 노드로의 전달을 막을 수 없습니다. 막으려면 `EventPriority::BeforeApp`으로 리스너를 등록하고 그곳에서 처리 완료로 표시합니다.
 
 ```cpp
-clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
+void tcApp::setup() {
+    clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
+}
 ```
 
 - 노드에는 포인터 아래 가장 앞쪽에 있는 노드부터 로컬 좌표로 전달됩니다. 그 노드가 `true`를 반환할 때까지 부모로 차례차례 넘어갑니다. 눌린 노드는 버튼을 뗄 때까지의 드래그와 릴리스도 받습니다.
 '''
 related = ["getMousePos", "getMouseButton", "isMousePressed", "App::mouseReleased", "App::mouseDragged", "App::mouseMoved", "App::mouseScrolled", "CoreEvents::mousePressed", "MouseEventArgs", "MouseEventArgs::consumed", "EventPriority::BeforeApp", "Node::onMousePress", "MOUSE_BUTTON_LEFT", "WindowSettings::pixelPerfect", "setTouchAsMouse", "isOverlayHovered"]
 snippet = '''
-// tcApp.h (inside class tcApp : public App)
-void mousePressed(const MouseEventArgs& e) override;
-vector<Vec2> points;
-
-// tcApp.cpp
 void tcApp::mousePressed(const MouseEventArgs& e) {
-    if (e.button == MOUSE_BUTTON_LEFT) points.push_back(e.pos);
-    else if (e.button == MOUSE_BUTTON_RIGHT && e.shift) points.clear();
+    if (e.button == MouseButton::Left) redraw();
 }
 '''
 
@@ -902,53 +988,96 @@ description.en = "Called when a mouse button is released, exactly once for each 
 description.ja = "マウスのボタンが離されたときに、1 回のプレスにつき必ず 1 回だけ呼ばれる。"
 description.ko = "마우스 버튼이 떼졌을 때, 프레스 1회당 반드시 1회만 호출된다."
 details.en = '''
-- When you write a function with this name in tcApp, TrussC calls it when a button is released. Use the `mouseReleased(const MouseEventArgs& e)` form: `e` gives you the position (`e.pos`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mouseReleased(Vec2 pos, int button)` is also available. Override only one of them.
+- Override `mouseReleased(const MouseEventArgs& e)` to handle this event with a typed `MouseButton` and position/modifier fields.
+- The `Vec2, int` short form is deprecated and removed in v1.0. The default rich form still forwards Left/Right/Middle as 0/1/2. An overridden short form logs once per callback kind per process. Use the rich form:
+```cpp
+void tcApp::mouseReleased(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - **You receive exactly one release for each press**, so this is a safe place to end a drag. TrussC records which of the left, right and middle buttons are held in each window, and ignores an OS release for a button it never saw pressed.
-- Inside this function the press has already been cleared: `isMousePressed()` is false and `getMouseButton()` is -1. `e.pos` is the position where the button was released.
+- Inside this function the press has already been cleared: `isMousePressed()` is false and `getMouseButton()` is `MouseButton::None`. `e.pos` is the position where the button was released.
 - Any release ends the drag. If you hold two buttons and release one, later moves go to `mouseMoved`. The other button still receives its own release later.
 - If the real release is lost, TrussC sends one on your behalf. When the window loses focus, every held button receives a release (on all platforms). On Windows, Web and Linux desktop, TrussC also sends one when a mouse move shows that a held button is no longer down (except while the pointer is locked on Web or on Linux without GLCORE). On macOS, only the focus-loss case applies.
 - A release sent by TrussC arrives before that move, and `e.pos` is the last real pointer position. If the real release arrives later, it is ignored.
 - The order of calls is: `events().mouseReleased` listeners → this function → the nodes of the scene graph (`Node::onMouseRelease`) → listeners registered with `EventPriority::AfterApp`.
 - If a listener sets `e.consumed = true`, this function, the nodes and the later listeners are all skipped. If a node handles the event (returns `true`), the later listeners are skipped too.
 - By default, the App's root node does not consume clicks on the empty background. To consume them, return `true` from the App's `onMousePress`.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - Nodes: the release goes to the node that received the press with the same button. If there is no such node, it starts from the node under the pointer and is passed up to the parents in turn. After this, that node no longer holds the press.
-- On touch devices, lifting or canceling the first finger sends a left-button release.
+- On touch devices, lifting or canceling the first finger sends a left-button release. To handle touch separately, disable touch-as-mouse.
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ja = '''
-- tcApp に同じ名前の関数を書くと、ボタンが離されたときに TrussC が呼び出します。基本は `mouseReleased(const MouseEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、ボタン（`e.button`）、修飾キー（`e.shift` など）を取り出せます。`mouseReleased(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
+- `mouseReleased(const MouseEventArgs& e)` をオーバーライドすると、`MouseButton` と位置・修飾キーを使ってイベントを処理できます。
+- `Vec2, int` の短い形式は非推奨で v1.0 に削除します。既定の rich form は引き続き Left/Right/Middle を 0/1/2 として転送します。短い形式のオーバーライドにはプロセス内で種類ごとに 1 回警告します。rich form を使います。
+```cpp
+void tcApp::mouseReleased(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - **1 回のプレスにつき、リリースは必ず 1 回だけ届きます。** そのため、ドラッグを終える処理はここに書くと確実です。TrussC はウィンドウごとに左・右・中ボタンのどれが押されているかを記録していて、押されたのを見ていないボタンの OS リリースは無視します。
-- この関数の中では、押された状態はすでに解除されています。`isMousePressed()` は false、`getMouseButton()` は -1 です。`e.pos` はボタンを離した位置です。
+- この関数の中では、押された状態はすでに解除されています。`isMousePressed()` は false、`getMouseButton()` は `MouseButton::None` です。`e.pos` はボタンを離した位置です。
 - どのボタンを離してもドラッグは終わります。2 つのボタンを押していて片方を離すと、そのあとの移動は `mouseMoved` に届きます。もう片方のボタンも、あとで自分のリリースを受け取ります。
 - 本物のリリースが届かなかった場合は、TrussC が代わりに送ります。ウィンドウがフォーカスを失ったときは、押されているすべてのボタンにリリースが届きます（全プラットフォーム）。Windows・Web・Linux デスクトップでは、マウスの移動によって押されていたボタンがもう押されていないと分かったときにも送ります（Web と、GLCORE 以外の Linux でポインタをロックしている間は除きます）。macOS ではフォーカスを失ったときだけです。
 - TrussC が送るリリースは、その移動より先に届きます。`e.pos` は最後の本物のポインタ位置です。あとから本物のリリースが来ても無視されます。
 - 呼ばれる順番は、`events().mouseReleased` のリスナー → この関数 → シーングラフのノード（`Node::onMouseRelease`） → `EventPriority::AfterApp` で登録したリスナーです。
 - リスナーが `e.consumed = true` にすると、この関数、ノード、それ以降のリスナーはすべてスキップされます。ノードがイベントを処理した（`true` を返した）場合も、それ以降のリスナーはスキップされます。
 - 既定では、App のルートノードは何もない背景へのクリックを消費（consume）しません。消費したい場合は、App の `onMousePress` で `true` を返してください。
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - ノード: 同じボタンで押されたノードにリリースが届きます。そのようなノードが無い場合は、ポインタの下のノードから親へ順に渡っていきます。このあと、そのノードは押された状態ではなくなります。
-- タッチ端末では、1 本目の指を離すか、タッチがキャンセルされると、左ボタンのリリースが届きます。
+- タッチ端末では、1 本目の指を離すか、タッチがキャンセルされると、左ボタンのリリースが届きます。 タッチを別に処理する場合は、マウスへの変換を無効にします。
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ko = '''
-- tcApp에 같은 이름의 함수를 작성하면 버튼이 떼졌을 때 TrussC가 호출합니다. 기본적으로 `mouseReleased(const MouseEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 버튼(`e.button`), 수식 키(`e.shift` 등)을 얻을 수 있습니다. `mouseReleased(Vec2 pos, int button)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요.
+- `mouseReleased(const MouseEventArgs& e)`를 재정의하면 `MouseButton`과 위치·보조 키로 이벤트를 처리합니다.
+- `Vec2, int`의 짧은 형식은 폐기 예정이며 v1.0에서 제거됩니다. 기본 rich form은 Left/Right/Middle을 계속 0/1/2로 전달합니다. 짧은 형식 재정의는 프로세스에서 종류별로 한 번 경고합니다. rich form을 사용하세요.
+```cpp
+void tcApp::mouseReleased(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 - **프레스 1회당 릴리스는 반드시 1회만 전달됩니다.** 따라서 드래그를 끝내는 처리는 여기에 작성하면 확실합니다. TrussC는 창마다 왼쪽·오른쪽·가운데 버튼 중 어느 것이 눌려 있는지 기록하고, 눌린 것을 보지 못한 버튼의 OS 릴리스는 무시합니다.
-- 이 함수 안에서는 눌린 상태가 이미 해제되어 있습니다. `isMousePressed()`는 false, `getMouseButton()`은 -1입니다. `e.pos`는 버튼을 뗀 위치입니다.
+- 이 함수 안에서는 눌린 상태가 이미 해제되어 있습니다. `isMousePressed()`는 false, `getMouseButton()`은 `MouseButton::None`입니다. `e.pos`는 버튼을 뗀 위치입니다.
 - 어느 버튼을 떼도 드래그는 끝납니다. 두 버튼을 누르고 있다가 하나를 떼면 그 뒤의 이동은 `mouseMoved`로 전달됩니다. 다른 버튼도 나중에 자신의 릴리스를 받습니다.
 - 실제 릴리스가 오지 않았을 때는 TrussC가 대신 보냅니다. 창이 포커스를 잃으면 눌려 있는 모든 버튼에 릴리스가 전달됩니다(모든 플랫폼). Windows·Web·Linux 데스크톱에서는 마우스 이동으로 눌려 있던 버튼이 더 이상 눌려 있지 않다는 것을 알았을 때도 보냅니다(Web과, GLCORE가 아닌 Linux에서 포인터를 잠근 동안은 제외). macOS에서는 포커스를 잃었을 때만 해당합니다.
 - TrussC가 보내는 릴리스는 그 이동보다 먼저 전달됩니다. `e.pos`는 마지막 실제 포인터 위치입니다. 나중에 실제 릴리스가 와도 무시됩니다.
 - 호출 순서는 `events().mouseReleased` 리스너 → 이 함수 → 씬 그래프의 노드(`Node::onMouseRelease`) → `EventPriority::AfterApp`으로 등록한 리스너입니다.
 - 리스너가 `e.consumed = true`로 설정하면 이 함수, 노드, 이후 리스너를 모두 건너뜁니다. 노드가 이벤트를 처리한 경우(`true`를 반환한 경우)에도 이후 리스너는 건너뜁니다.
 - 기본적으로 App의 루트 노드는 빈 배경의 클릭을 소비(consume)하지 않습니다. 소비하려면 App의 `onMousePress`에서 `true`를 반환하세요.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return true;
+}
+```
 - 노드: 같은 버튼으로 눌린 노드에 릴리스가 전달됩니다. 그런 노드가 없으면 포인터 아래 노드부터 부모로 차례차례 넘어갑니다. 이후 그 노드는 더 이상 눌린 상태가 아닙니다.
-- 터치 기기에서는 첫 번째 손가락을 떼거나 터치가 취소되면 왼쪽 버튼 릴리스가 전달됩니다.
+- 터치 기기에서는 첫 번째 손가락을 떼거나 터치가 취소되면 왼쪽 버튼 릴리스가 전달됩니다. 터치를 따로 처리하려면 마우스 변환을 끄세요.
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 related = ["getMouseButton", "App::mousePressed", "App::mouseDragged", "CoreEvents::mouseReleased", "MouseEventArgs", "Node::onMouseRelease", "isMousePressed", "setTouchAsMouse"]
 snippet = '''
-// tcApp.h (inside class tcApp : public App)
-void mouseReleased(const MouseEventArgs& e) override;
-bool isDragging = false;
-
-// tcApp.cpp
 void tcApp::mouseReleased(const MouseEventArgs& e) {
-    isDragging = false;   // called once per press, even if the window lost focus
+    if (e.button == MouseButton::Left) redraw();
 }
 '''
 
@@ -7975,15 +8104,35 @@ description.en = "Returns the mouse button assigned to orbit rotation."
 description.ja = "周回回転に割り当てられたマウスボタンを返す。"
 description.ko = "궤도 회전에 할당된 마우스 버튼을 반환한다."
 details.en = '''
-- Returns the configured button as an `int`, rather than its pressed state; see `EasyCam::enableMouseInput` for button values and control behavior.
+- Deprecated int getter, removed in v1.0. Read the typed binding with `getOrbitMouseButton()` instead:
+```cpp
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+```
 '''
 details.ja = '''
-- 押下状態ではなく、設定されたボタンを `int` で返します。ボタンの値と操作の動作は `EasyCam::enableMouseInput` を参照してください。
+- int を返す旧 getter は非推奨で v1.0 に削除します。型付きの `getOrbitMouseButton()` で割り当てを取得します。
+```cpp
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+```
 '''
 details.ko = '''
-- 누름 상태가 아니라 설정된 버튼을 `int`로 반환합니다. 버튼 값과 조작 동작은 `EasyCam::enableMouseInput`을 참조하세요.
+- int를 반환하는 이전 getter는 폐기 예정이며 v1.0에서 제거됩니다. `getOrbitMouseButton()`로 형식 있는 바인딩을 읽으세요.
+```cpp
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+```
 '''
 related = ["EasyCam::setOrbitButton", "EasyCam::enableMouseInput"]
+snippet = '''
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+'''
 
 ["EasyCam::getOrientation"]
 category = "graphics_camera"
@@ -8029,15 +8178,35 @@ description.en = "Returns the mouse button assigned to panning."
 description.ja = "パンに割り当てられたマウスボタンを返す。"
 description.ko = "패닝에 할당된 마우스 버튼을 반환한다."
 details.en = '''
-- Returns the configured button as an `int`, rather than its pressed state; see `EasyCam::enableMouseInput` for button values and control behavior.
+- Deprecated int getter, removed in v1.0. Read the typed binding with `getPanMouseButton()` instead:
+```cpp
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+```
 '''
 details.ja = '''
-- 押下状態ではなく、設定されたボタンを `int` で返します。ボタンの値と操作の動作は `EasyCam::enableMouseInput` を参照してください。
+- int を返す旧 getter は非推奨で v1.0 に削除します。型付きの `getPanMouseButton()` で割り当てを取得します。
+```cpp
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+```
 '''
 details.ko = '''
-- 누름 상태가 아니라 설정된 버튼을 `int`로 반환합니다. 버튼 값과 조작 동작은 `EasyCam::enableMouseInput`을 참조하세요.
+- int를 반환하는 이전 getter는 폐기 예정이며 v1.0에서 제거됩니다. `getPanMouseButton()`로 형식 있는 바인딩을 읽으세요.
+```cpp
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+```
 '''
 related = ["EasyCam::setPanButton", "EasyCam::enableMouseInput"]
+snippet = '''
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+'''
 
 ["EasyCam::getPosition"]
 category = "graphics_camera"
@@ -8443,21 +8612,56 @@ description.en = "Sets the mouse button used to orbit the camera."
 description.ja = "カメラの周回に使うマウスボタンを設定する。"
 description.ko = "카메라 궤도 회전에 사용할 마우스 버튼을 설정한다."
 details.en = '''
-- `setOrbitButton(int button)` stores a mouse button and returns `EasyCam&` for chaining. The default is `MOUSE_BUTTON_LEFT`.
-- If the orbit and pan buttons are the same, orbiting takes precedence when a drag starts.
-- See `EasyCam::enableMouseInput` for mouse controls and input handling rules.
+- Sets the orbit binding using `MouseButton` and returns `EasyCam&` for chaining. Default: `MouseButton::Left`.
+- The int overload is deprecated and removed in v1.0. Use the typed overload:
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left);
+}
+```
+- Orbit takes precedence when orbit and pan share a button. See `EasyCam::enableMouseInput` for event routing.
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left).setPanButton(MouseButton::Middle);
+}
+```
 '''
 details.ja = '''
-- `setOrbitButton(int button)` はマウスボタンを保存し、呼び出しを連結できるように `EasyCam&` を返します。初期値は `MOUSE_BUTTON_LEFT` です。
-- 周回とパンに同じボタンを指定した場合、ドラッグ開始時は周回を優先します。
-- マウス操作と入力処理の規則は `EasyCam::enableMouseInput` を参照してください。
+- `MouseButton` で割り当てを設定し、連結用の `EasyCam&` を返します。初期値は `MouseButton::Left` です。
+- int 版は非推奨で v1.0 に削除します。型付きの形式を使います。
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left);
+}
+```
+- 周回とパンに同じボタンを割り当てた場合は周回が優先します。イベントの経路は `EasyCam::enableMouseInput` を参照してください。
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left).setPanButton(MouseButton::Middle);
+}
+```
 '''
 details.ko = '''
-- `setOrbitButton(int button)`은 마우스 버튼을 저장하며 호출을 연결할 수 있도록 `EasyCam&`를 반환합니다. 초기값은 `MOUSE_BUTTON_LEFT`입니다.
-- 궤도 회전과 패닝에 같은 버튼을 지정하면 드래그를 시작할 때 궤도 회전을 우선합니다.
-- 마우스 조작과 입력 처리 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+- `MouseButton`으로 바인딩을 설정하고 연결을 위한 `EasyCam&`를 반환합니다. 기본값은 `MouseButton::Left`입니다.
+- int 형식은 폐기 예정이며 v1.0에서 제거됩니다. 형식 있는 오버로드를 사용하세요.
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left);
+}
+```
+- 궤도 회전과 패닝이 같은 버튼을 쓰면 궤도 회전이 우선합니다. 이벤트 경로는 `EasyCam::enableMouseInput`을 참고하세요.
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left).setPanButton(MouseButton::Middle);
+}
+```
 '''
 related = ["EasyCam::getOrbitButton", "EasyCam::setPanButton", "EasyCam::enableMouseInput"]
+snippet = '''
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left);
+}
+'''
 
 ["EasyCam::setOrientation"]
 category = "graphics_camera"
@@ -8509,21 +8713,56 @@ description.en = "Sets the mouse button used to pan the camera."
 description.ja = "カメラのパンに使うマウスボタンを設定する。"
 description.ko = "카메라 패닝에 사용할 마우스 버튼을 설정한다."
 details.en = '''
-- `setPanButton(int button)` stores a mouse button and returns `EasyCam&` for chaining. The default is `MOUSE_BUTTON_MIDDLE`.
-- If the pan and orbit buttons are the same, orbiting takes precedence when a drag starts.
-- See `EasyCam::enableMouseInput` for mouse controls and input handling rules.
+- Sets the pan binding using `MouseButton` and returns `EasyCam&` for chaining. Default: `MouseButton::Middle`.
+- The int overload is deprecated and removed in v1.0. Use the typed overload:
+```cpp
+void tcApp::setup() {
+    camera.setPanButton(MouseButton::Middle);
+}
+```
+- Orbit takes precedence when orbit and pan share a button. See `EasyCam::enableMouseInput` for event routing.
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left).setPanButton(MouseButton::Middle);
+}
+```
 '''
 details.ja = '''
-- `setPanButton(int button)` はマウスボタンを保存し、呼び出しを連結できるように `EasyCam&` を返します。初期値は `MOUSE_BUTTON_MIDDLE` です。
-- パンと周回に同じボタンを指定した場合、ドラッグ開始時は周回を優先します。
-- マウス操作と入力処理の規則は `EasyCam::enableMouseInput` を参照してください。
+- `MouseButton` で割り当てを設定し、連結用の `EasyCam&` を返します。初期値は `MouseButton::Middle` です。
+- int 版は非推奨で v1.0 に削除します。型付きの形式を使います。
+```cpp
+void tcApp::setup() {
+    camera.setPanButton(MouseButton::Middle);
+}
+```
+- 周回とパンに同じボタンを割り当てた場合は周回が優先します。イベントの経路は `EasyCam::enableMouseInput` を参照してください。
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left).setPanButton(MouseButton::Middle);
+}
+```
 '''
 details.ko = '''
-- `setPanButton(int button)`은 마우스 버튼을 저장하며 호출을 연결할 수 있도록 `EasyCam&`를 반환합니다. 초기값은 `MOUSE_BUTTON_MIDDLE`입니다.
-- 패닝과 궤도 회전에 같은 버튼을 지정하면 드래그를 시작할 때 궤도 회전을 우선합니다.
-- 마우스 조작과 입력 처리 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+- `MouseButton`으로 바인딩을 설정하고 연결을 위한 `EasyCam&`를 반환합니다. 기본값은 `MouseButton::Middle`입니다.
+- int 형식은 폐기 예정이며 v1.0에서 제거됩니다. 형식 있는 오버로드를 사용하세요.
+```cpp
+void tcApp::setup() {
+    camera.setPanButton(MouseButton::Middle);
+}
+```
+- 궤도 회전과 패닝이 같은 버튼을 쓰면 궤도 회전이 우선합니다. 이벤트 경로는 `EasyCam::enableMouseInput`을 참고하세요.
+```cpp
+void tcApp::setup() {
+    camera.setOrbitButton(MouseButton::Left).setPanButton(MouseButton::Middle);
+}
+```
 '''
 related = ["EasyCam::getPanButton", "EasyCam::setOrbitButton", "EasyCam::enableMouseInput"]
+snippet = '''
+void tcApp::setup() {
+    camera.setPanButton(MouseButton::Middle);
+}
+'''
 
 ["EasyCam::setPanSensitivity"]
 category = "graphics_camera"
@@ -16334,13 +16573,33 @@ description.en = "Identifies the left mouse button."
 description.ja = "左マウスボタンを表す。"
 description.ko = "왼쪽 마우스 버튼을 나타낸다."
 details.en = '''
-- This `constexpr int` equals `static_cast<int>(MouseButton::Left)`, which is `0`; compare it with a callback's `button` argument or `MouseEventArgs::button`.
+- Deprecated `constexpr MouseButton` alias for `MouseButton::Left`, retained until v1.0. Use the enum name in new code.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 details.ja = '''
-- `static_cast<int>(MouseButton::Left)` と同じ値 `0` の `constexpr int` です。コールバックの `button` 引数や `MouseEventArgs::button` と比較できます。
+- `MouseButton::Left` の非推奨の `constexpr MouseButton` 別名です。v1.0 まで残ります。新しいコードでは列挙値を使います。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 details.ko = '''
-- `static_cast<int>(MouseButton::Left)`와 같은 값 `0`의 `constexpr int`입니다. 콜백의 `button` 인수 또는 `MouseEventArgs::button`과 비교할 수 있습니다.
+- `MouseButton::Left`의 폐기 예정 `constexpr MouseButton` 별칭으로 v1.0까지 남습니다. 새 코드에서는 열거값을 사용하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+'''
+snippet = '''
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
 '''
 
 ["MOUSE_BUTTON_MIDDLE"]
@@ -16349,13 +16608,33 @@ description.en = "Identifies the middle mouse button."
 description.ja = "中央マウスボタンを表す。"
 description.ko = "가운데 마우스 버튼을 나타낸다."
 details.en = '''
-- This `constexpr int` equals `static_cast<int>(MouseButton::Middle)`, which is `2`; compare it with a callback's `button` argument or `MouseEventArgs::button`.
+- Deprecated `constexpr MouseButton` alias for `MouseButton::Middle`, retained until v1.0. Use the enum name in new code.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Middle) redraw();
+}
+```
 '''
 details.ja = '''
-- `static_cast<int>(MouseButton::Middle)` と同じ値 `2` の `constexpr int` です。コールバックの `button` 引数や `MouseEventArgs::button` と比較できます。
+- `MouseButton::Middle` の非推奨の `constexpr MouseButton` 別名です。v1.0 まで残ります。新しいコードでは列挙値を使います。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Middle) redraw();
+}
+```
 '''
 details.ko = '''
-- `static_cast<int>(MouseButton::Middle)`과 같은 값 `2`의 `constexpr int`입니다. 콜백의 `button` 인수 또는 `MouseEventArgs::button`과 비교할 수 있습니다.
+- `MouseButton::Middle`의 폐기 예정 `constexpr MouseButton` 별칭으로 v1.0까지 남습니다. 새 코드에서는 열거값을 사용하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Middle) redraw();
+}
+```
+'''
+snippet = '''
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Middle) redraw();
+}
 '''
 
 ["MOUSE_BUTTON_RIGHT"]
@@ -16364,13 +16643,33 @@ description.en = "Identifies the right mouse button."
 description.ja = "右マウスボタンを表す。"
 description.ko = "오른쪽 마우스 버튼을 나타낸다."
 details.en = '''
-- This `constexpr int` equals `static_cast<int>(MouseButton::Right)`, which is `1`; compare it with a callback's `button` argument or `MouseEventArgs::button`.
+- Deprecated `constexpr MouseButton` alias for `MouseButton::Right`, retained until v1.0. Use the enum name in new code.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Right) redraw();
+}
+```
 '''
 details.ja = '''
-- `static_cast<int>(MouseButton::Right)` と同じ値 `1` の `constexpr int` です。コールバックの `button` 引数や `MouseEventArgs::button` と比較できます。
+- `MouseButton::Right` の非推奨の `constexpr MouseButton` 別名です。v1.0 まで残ります。新しいコードでは列挙値を使います。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Right) redraw();
+}
+```
 '''
 details.ko = '''
-- `static_cast<int>(MouseButton::Right)`와 같은 값 `1`의 `constexpr int`입니다. 콜백의 `button` 인수 또는 `MouseEventArgs::button`과 비교할 수 있습니다.
+- `MouseButton::Right`의 폐기 예정 `constexpr MouseButton` 별칭으로 v1.0까지 남습니다. 새 코드에서는 열거값을 사용하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Right) redraw();
+}
+```
+'''
+snippet = '''
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Right) redraw();
+}
 '''
 
 ["Mat3"]
@@ -19785,7 +20084,7 @@ snippet = '''
 class Ball : public Mod {
 protected:
     bool onMouseDrag(const MouseDragEventArgs& e) override {
-        return e.button == MOUSE_BUTTON_LEFT;
+        return e.button == MouseButton::Left;
     }
 };
 '''
@@ -19871,19 +20170,19 @@ description.ja = "所有ノードに届いたマウスボタンの押下を処�
 description.ko = "소유 노드에 전달된 마우스 버튼 누름을 처리한다."
 details.en = '''
 - Override the protected virtual `bool onMousePress(const MouseEventArgs& e)` and return `true` to consume the event on behalf of the owner. The default returns `false`.
-- `e.pos` uses the owner's local coordinates, `e.globalPos` uses screen coordinates, and `e.button` is 0 for left, 1 for right, and 2 for middle; modifier keys are also available. See `Node::onMousePress` for coordinate conversion and units.
+- `e.pos` uses the owner's local coordinates, `e.globalPos` uses screen coordinates, and `e.button` uses `MouseButton::Left`, `Right`, or `Middle`; modifier keys are also available. See `Node::onMousePress` for coordinate conversion and units.
 - At each receiving node, its handler runs before all attached Mods; consumption does not skip the remaining Mods there. If the node or any Mod returns `true`, propagation to parents stops and the owner becomes the grab target for drag and matching-button release, including outside its shape.
 - See `Node::onMousePress` for shared input delivery rules and `Node::addMod` for Mod threading and iteration rules.
 '''
 details.ja = '''
 - protected の仮想関数 `bool onMousePress(const MouseEventArgs& e)` をオーバーライドし、所有ノードがイベントを処理済みにしたものとする場合は `true` を返します。標準実装は `false` を返します。
-- `e.pos` は所有ノードのローカル座標、`e.globalPos` は画面座標です。`e.button` は左が 0、右が 1、中ボタンが 2 で、修飾キーも取得できます。座標変換と単位は `Node::onMousePress` を参照してください。
+- `e.pos` は所有ノードのローカル座標、`e.globalPos` は画面座標です。`e.button` は `MouseButton::Left`、`Right`、`Middle` で、修飾キーも取得できます。座標変換と単位は `Node::onMousePress` を参照してください。
 - 各受信ノードでは、自身のハンドラを呼んでから付属するすべての Mod を呼びます。処理済みになっても、そのノードの残りの Mod は呼ばれます。ノードまたは Mod が `true` を返すと親への伝達を止め、所有ノードがポインタをつかみ、形状の外でもドラッグと同じボタンのリリースを受け取ります。
 - 入力共通の伝達規則は `Node::onMousePress`、Mod のスレッドと処理順の規則は `Node::addMod` を参照してください。
 '''
 details.ko = '''
 - protected 가상 함수 `bool onMousePress(const MouseEventArgs& e)`를 재정의하고 소유 노드가 이벤트를 처리한 것으로 표시하려면 `true`를 반환합니다. 기본 구현은 `false`를 반환합니다.
-- `e.pos`는 소유 노드의 로컬 좌표이고 `e.globalPos`는 화면 좌표입니다. `e.button`은 왼쪽이 0, 오른쪽이 1, 가운데가 2이며 보조 키도 제공합니다. 좌표 변환과 단위는 `Node::onMousePress`를 참조하세요.
+- `e.pos`는 소유 노드의 로컬 좌표이고 `e.globalPos`는 화면 좌표입니다. `e.button`은 `MouseButton::Left`, `Right`, `Middle`이며 보조 키도 제공합니다. 좌표 변환과 단위는 `Node::onMousePress`를 참조하세요.
 - 각 수신 노드에서는 자체 핸들러를 먼저 호출한 다음 연결된 모든 Mod를 호출합니다. 처리 완료 후에도 그 노드의 나머지 Mod는 호출합니다. 노드나 Mod가 `true`를 반환하면 부모로의 전달을 중단하고 소유 노드가 포인터를 잡아 영역 밖에서도 드래그와 같은 버튼의 해제를 받습니다.
 - 공통 입력 전달 규칙은 `Node::onMousePress`를, Mod 스레드 및 순회 규칙은 `Node::addMod`를 참조하세요.
 '''
@@ -19891,7 +20190,7 @@ snippet = '''
 class Ball : public Mod {
 protected:
     bool onMousePress(const MouseEventArgs& e) override {
-        return e.button == MOUSE_BUTTON_LEFT;
+        return e.button == MouseButton::Left;
     }
 };
 '''
@@ -19916,7 +20215,7 @@ snippet = '''
 class Ball : public Mod {
 protected:
     bool onMouseRelease(const MouseEventArgs& e) override {
-        return e.button == MOUSE_BUTTON_LEFT;
+        return e.button == MouseButton::Left;
     }
 };
 '''
@@ -20047,19 +20346,37 @@ description.en = "Defines typed identifiers for mouse buttons."
 description.ja = "マウスボタンを表す列挙型を定義する。"
 description.ko = "마우스 버튼을 나타내는 열거형을 정의한다."
 details.en = '''
-- The values match sokol: `Left = 0`, `Right = 1`, `Middle = 2`, and `None = 0x100`.
-- Callback button arguments and `MouseEventArgs::button` are integers; compare them with `MOUSE_BUTTON_LEFT`, `MOUSE_BUTTON_RIGHT`, or `MOUSE_BUTTON_MIDDLE`, or explicitly cast a `MouseButton` value.
-- `getMouseButton()` returns `-1` when no button is pressed, rather than the value of `MouseButton::None`.
+- Mouse press/release and drag events, `getMouseButton()`, and typed EasyCam bindings use `MouseButton`. Use `Left`, `Right`, `Middle`, or `None` for no recorded button.
+- Breaking in v0.9: integer comparisons such as `e.button == 0` no longer compile; use the enum.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+- Values match sokol: `Left = 0`, `Right = 1`, `Middle = 2`, `None = 0x100`. Deprecated typed `MOUSE_BUTTON_*` aliases remain until v1.0.
+- In Lua, compare `e.button == MouseButton.Left`.
 '''
 details.ja = '''
-- 値は sokol と一致し、`Left = 0`、`Right = 1`、`Middle = 2`、`None = 0x100` です。
-- コールバックのボタン引数と `MouseEventArgs::button` は整数です。`MOUSE_BUTTON_LEFT`、`MOUSE_BUTTON_RIGHT`、`MOUSE_BUTTON_MIDDLE` と比較するか、`MouseButton` の値を明示的にキャストしてください。
-- ボタンが押されていないときの `getMouseButton()` は、`MouseButton::None` の値ではなく `-1` を返します。
+- 押下・解放・ドラッグのイベント、`getMouseButton()`、EasyCam の型付き設定に使う列挙型です。`Left`、`Right`、`Middle`、記録なしの `None` を使います。
+- v0.9 の破壊的変更として `e.button == 0` のような整数比較はコンパイルできません。列挙値で比較します。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+- 値は sokol と一致し、`Left = 0`、`Right = 1`、`Middle = 2`、`None = 0x100` です。型付きの旧名 `MOUSE_BUTTON_*` は非推奨として v1.0 まで残ります。
+- Lua では `e.button == MouseButton.Left` と比較します。
 '''
 details.ko = '''
-- 값은 sokol과 일치하며 `Left = 0`, `Right = 1`, `Middle = 2`, `None = 0x100`입니다.
-- 콜백의 버튼 인수와 `MouseEventArgs::button`은 정수입니다. `MOUSE_BUTTON_LEFT`, `MOUSE_BUTTON_RIGHT`, `MOUSE_BUTTON_MIDDLE`과 비교하거나 `MouseButton` 값을 명시적으로 캐스팅하세요.
-- 버튼이 눌리지 않았을 때 `getMouseButton()`은 `MouseButton::None`의 값이 아니라 `-1`을 반환합니다.
+- 누름·해제·드래그 이벤트, `getMouseButton()`, EasyCam의 형식 있는 설정에 사용하는 열거형입니다. `Left`, `Right`, `Middle`, 기록 없음의 `None`을 사용합니다.
+- v0.9의 호환성 변경으로 `e.button == 0` 같은 정수 비교는 컴파일되지 않습니다. 열거값으로 비교하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+- 값은 sokol과 같으며 `Left = 0`, `Right = 1`, `Middle = 2`, `None = 0x100`입니다. 형식 있는 이전 이름 `MOUSE_BUTTON_*`는 폐기 예정으로 v1.0까지 남습니다.
+- Lua에서는 `e.button == MouseButton.Left`로 비교합니다.
 '''
 keywords = ["click", "left", "right", "middle"]
 related = ["getMouseButton", "MouseEventArgs"]
@@ -20067,6 +20384,11 @@ value_desc.Left.en = "SAPP_MOUSEBUTTON_LEFT"
 value_desc.Right.en = "SAPP_MOUSEBUTTON_RIGHT"
 value_desc.Middle.en = "SAPP_MOUSEBUTTON_MIDDLE"
 value_desc.None.en = "SAPP_MOUSEBUTTON_INVALID (no button; e.g. during a plain move)"
+snippet = '''
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+'''
 
 ["MouseDragEventArgs"]
 keywords = ["move", "cursor", "pointer"]
@@ -20109,18 +20431,38 @@ description.en = "Identifies the mouse button being dragged."
 description.ja = "ドラッグ中のマウスボタンを示す。"
 description.ko = "드래그 중인 마우스 버튼을 나타낸다."
 details.en = '''
-- This `int` uses `MOUSE_BUTTON_LEFT` (0), `MOUSE_BUTTON_RIGHT` (1), or `MOUSE_BUTTON_MIDDLE` (2) and defaults to 0.
-- Compare with a button constant, for example `e.button == MOUSE_BUTTON_LEFT`.
+- A `MouseButton` identifying the pressed, released, or dragged button; default construction uses `MouseButton::Left`.
+- Compare with an enum value. Integer comparisons no longer compile in v0.9.
+```cpp
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 details.ja = '''
-- `MOUSE_BUTTON_LEFT`（0）、`MOUSE_BUTTON_RIGHT`（1）、`MOUSE_BUTTON_MIDDLE`（2）を使う `int` です。初期値は 0 です。
-- `e.button == MOUSE_BUTTON_LEFT` のようにボタン定数と比較します。
+- 押下・解放・ドラッグされたボタンを表す `MouseButton` です。初期値は `MouseButton::Left` です。
+- 列挙値で比較します。v0.9 から整数比較はコンパイルできません。
+```cpp
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 details.ko = '''
-- `MOUSE_BUTTON_LEFT`(0), `MOUSE_BUTTON_RIGHT`(1), `MOUSE_BUTTON_MIDDLE`(2)를 사용하는 `int`입니다. 기본값은 0입니다.
-- `e.button == MOUSE_BUTTON_LEFT`처럼 버튼 상수와 비교합니다.
+- 누르거나 놓거나 드래그한 버튼을 나타내는 `MouseButton`입니다. 기본값은 `MouseButton::Left`입니다.
+- 열거값으로 비교합니다. v0.9부터 정수 비교는 컴파일되지 않습니다.
+```cpp
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 related = ["MOUSE_BUTTON_LEFT", "MOUSE_BUTTON_RIGHT", "MOUSE_BUTTON_MIDDLE"]
+snippet = '''
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+'''
 
 ["MouseDragEventArgs::consumed"]
 description.en = "Marks the event as handled."
@@ -20358,16 +20700,36 @@ description.en = "Identifies the mouse button pressed or released."
 description.ja = "押された、または離されたマウスボタンを表す。"
 description.ko = "누르거나 놓은 마우스 버튼을 나타낸다."
 details.en = '''
-- Values are 0 for left, 1 for right, and 2 for middle; compare with `MOUSE_BUTTON_LEFT`, `MOUSE_BUTTON_RIGHT`, or `MOUSE_BUTTON_MIDDLE`.
-- This field is an `int`, and its default value is 0.
+- A `MouseButton` identifying the pressed, released, or dragged button; default construction uses `MouseButton::Left`.
+- Compare with an enum value. Integer comparisons no longer compile in v0.9.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 details.ja = '''
-- 0 は左、1 は右、2 は中ボタンです。`MOUSE_BUTTON_LEFT`、`MOUSE_BUTTON_RIGHT`、`MOUSE_BUTTON_MIDDLE` と比較できます。
-- このフィールドの型は `int` で、初期値は 0 です。
+- 押下・解放・ドラッグされたボタンを表す `MouseButton` です。初期値は `MouseButton::Left` です。
+- 列挙値で比較します。v0.9 から整数比較はコンパイルできません。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
 '''
 details.ko = '''
-- 0은 왼쪽, 1은 오른쪽, 2는 가운데 버튼입니다. `MOUSE_BUTTON_LEFT`, `MOUSE_BUTTON_RIGHT`, `MOUSE_BUTTON_MIDDLE`과 비교할 수 있습니다.
-- 이 필드의 타입은 `int`이며 기본값은 0입니다.
+- 누르거나 놓거나 드래그한 버튼을 나타내는 `MouseButton`입니다. 기본값은 `MouseButton::Left`입니다.
+- 열거값으로 비교합니다. v0.9부터 정수 비교는 컴파일되지 않습니다.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+'''
+snippet = '''
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
 '''
 
 ["MouseEventArgs::consumed"]
@@ -43924,49 +44286,94 @@ description.ja = "このウィンドウを前面に出してフォーカスを�
 description.ko = "이 윈도우를 앞으로 올리고 포커스를 준다."
 details.en = '''
 - Does nothing while this window is explicitly hidden and logs a Notice on every call; call `setVisible(true)` first.
+```cpp
+void tcApp::setup() {
+    palette->setVisible(true);
+}
+```
 - Raises this window, whichever window's code calls it. For example, the main window's `mousePressed()` can bring a palette window back to the front.
 - A minimized window is restored first, so the user sees it.
 - The global `bringWindowToFront()` raises the window of the App that calls it. Use this method to raise a different window.
-- Whether focus moves away from another application is up to the OS and the window manager.
+- Whether focus moves away from another application is up to the OS and the window manager. No API can force that focus change.
 - The focus change it causes is reported through `focusChanged` and `App::windowFocusChanged`. On macOS and Linux X11 those events arrive later. On Windows they can arrive inside the `bringToFront()` call itself, before it returns: the window that loses focus gets `false` and this window gets `true`. It settles after one swap. See `CoreEvents::focusChanged`.
+```cpp
+void tcApp::windowFocusChanged(bool focused) {
+    if (focused) redraw();
+}
+```
 - Returns no success status. Does nothing on a closed window. For main-thread requirements, see `Window::setApp`.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs&) {
+    if (palette && palette->isOpen()) palette->bringToFront();
+}
+```
 '''
 details.ja = '''
 - 明示的に隠したウィンドウに対しては何もせず、呼び出しごとに Notice を記録します。先に `setVisible(true)` を呼びます。
+```cpp
+void tcApp::setup() {
+    palette->setVisible(true);
+}
+```
 - どのウィンドウのコードから呼んでも、このウィンドウを前面に出します。たとえば、メインウィンドウの `mousePressed()` から、パレットのウィンドウを前面に戻せます。
 - 最小化されているウィンドウは、まず元に戻してから前面に出します。
 - グローバルの `bringWindowToFront()` は、呼び出した App のウィンドウを前面に出します。別のウィンドウを前面に出すときは、このメソッドを使ってください。
-- ほかのアプリケーションからフォーカスを移すかどうかは、OS とウィンドウマネージャーが決めます。
+- ほかのアプリケーションからフォーカスを移すかどうかは、OS とウィンドウマネージャーが決めます。その変更を強制する API はありません。
 - これによるフォーカスの変化は `focusChanged` と `App::windowFocusChanged` で通知されます。macOS と Linux X11 では、そのイベントはあとで届きます。Windows では `bringToFront()` の呼び出しの中、戻る前に届くことがあります。フォーカスを失うウィンドウに `false`、このウィンドウに `true` が届き、入れ替わりは 1 回で落ち着きます。`CoreEvents::focusChanged` を参照してください。
+```cpp
+void tcApp::windowFocusChanged(bool focused) {
+    if (focused) redraw();
+}
+```
 - 成功状態は返しません。閉じたウィンドウに対しては何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs&) {
+    if (palette && palette->isOpen()) palette->bringToFront();
+}
+```
 '''
 details.ko = '''
 - 명시적으로 숨긴 윈도우에서는 아무 작업도 하지 않고 호출할 때마다 Notice를 기록합니다. 먼저 `setVisible(true)`를 호출합니다.
+```cpp
+void tcApp::setup() {
+    palette->setVisible(true);
+}
+```
 - 어느 창의 코드에서 호출하든 이 창을 앞으로 올립니다. 예를 들어 메인 창의 `mousePressed()`에서 팔레트 창을 다시 앞으로 가져올 수 있습니다.
 - 최소화된 창은 먼저 원래대로 복원한 뒤 앞으로 올립니다.
 - 전역 `bringWindowToFront()`는 호출한 App의 창을 앞으로 올립니다. 다른 창을 올릴 때는 이 메서드를 사용하세요.
-- 다른 애플리케이션에서 포커스를 옮길지는 OS와 윈도우 매니저가 정합니다.
+- 다른 애플리케이션에서 포커스를 옮길지는 OS와 윈도우 매니저가 정합니다. 이 변경을 강제하는 API는 없습니다.
 - 이로 인한 포커스 변화는 `focusChanged`와 `App::windowFocusChanged`로 알려 줍니다. macOS와 Linux X11에서는 그 이벤트가 나중에 도착합니다. Windows에서는 `bringToFront()` 호출 안에서, 돌아오기 전에 도착할 수 있습니다. 포커스를 잃는 창에 `false`, 이 창에 `true`가 도착하며 교체는 한 번으로 안정됩니다. `CoreEvents::focusChanged`를 참조하세요.
+```cpp
+void tcApp::windowFocusChanged(bool focused) {
+    if (focused) redraw();
+}
+```
 - 성공 여부를 반환하지 않습니다. 닫힌 창에서는 아무 동작도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs&) {
+    if (palette && palette->isOpen()) palette->bringToFront();
+}
+```
 '''
 platform_note.en = '''
-- Available on macOS, Windows and Linux X11; does nothing on iOS, Android, and Web.
+- Available on macOS, Windows and Linux X11; does nothing on iOS, Android, and Web. No API raises a native window on those platforms.
 - On Linux X11 with an EWMH window manager (GNOME, KDE and most others), the window manager is asked to activate the window and decides what happens. Without a window manager, the window is raised and focused directly.
-- On Windows, when another application has the user's input, Windows may only flash the taskbar button.
+- On Windows, when another application has the user's input, Windows may only flash the taskbar button. No API bypasses the OS focus policy.
 '''
 platform_note.ja = '''
-- macOS・Windows・Linux X11 で利用できます。iOS、Android、Web では何もしません。
+- macOS・Windows・Linux X11 で利用できます。iOS、Android、Web では何もしません。これらの環境でネイティブウィンドウを前面に出す API はありません。
 - Linux X11 で EWMH 対応のウィンドウマネージャー（GNOME、KDE など多くのもの）が動いている場合は、ウィンドウマネージャーにアクティブ化を依頼し、どうなるかはウィンドウマネージャーが決めます。ウィンドウマネージャーがない場合は、直接前面に出してフォーカスを与えます。
-- Windows では、ほかのアプリケーションがユーザーの入力を受けているとき、タスクバーのボタンが点滅するだけのことがあります。
+- Windows では、ほかのアプリケーションがユーザーの入力を受けているとき、タスクバーのボタンが点滅するだけのことがあります。OS のフォーカスポリシーを回避する API はありません。
 '''
 platform_note.ko = '''
-- macOS, Windows, Linux X11에서 사용할 수 있으며, iOS, Android, Web에서는 아무 작업도 하지 않습니다.
+- macOS, Windows, Linux X11에서 사용할 수 있으며, iOS, Android, Web에서는 아무 작업도 하지 않습니다. 해당 플랫폼에서 네이티브 창을 앞으로 올리는 API는 없습니다.
 - Linux X11에서 EWMH를 지원하는 윈도우 매니저(GNOME, KDE 등 대부분)가 실행 중이면 윈도우 매니저에 활성화를 요청하며, 결과는 윈도우 매니저가 정합니다. 윈도우 매니저가 없으면 창을 직접 앞으로 올리고 포커스를 줍니다.
-- Windows에서는 다른 애플리케이션이 사용자 입력을 받고 있으면 작업 표시줄 버튼만 깜박일 수 있습니다.
+- Windows에서는 다른 애플리케이션이 사용자 입력을 받고 있으면 작업 표시줄 버튼만 깜박일 수 있습니다. OS 포커스 정책을 우회하는 API는 없습니다.
 '''
 snippet = '''
 // tcApp.h: shared_ptr<Window> palette;   (opened with createWindow)
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs&) {
     if (palette && palette->isOpen()) palette->bringToFront();   // the palette, not this window
 }
 '''
@@ -50327,30 +50734,40 @@ description.en = "Returns the recorded mouse button."
 description.ja = "記録されているマウスボタンを返す。"
 description.ko = "기록된 마우스 버튼을 반환한다."
 details.en = '''
-- Returns an `int`: `0` for left, `1` for right, `2` for middle, or `-1` when no button is recorded.
-- A press replaces the recorded button, and any release resets it to `-1`, even if another button remains held.
-- See `isMousePressed` for mouse-state behavior and `isKeyPressed` for the shared window and thread rules.
-- In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and returns 0 (see `events`).
+- Returns the last pressed `MouseButton` for the App’s window; returns `MouseButton::None` after release or without a context.
+- A new press replaces the recorded button. Any release clears it, even if another button remains held; this query is not a set of held buttons. For actions on a particular press, use its event.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+- Uses the App’s own window in callbacks. Outside App code, the normal window-context resolution rules apply (see `events`).
 '''
 details.ja = '''
-- `int` 型で、左ボタンは `0`、右ボタンは `1`、中ボタンは `2`、記録されているボタンがない場合は `-1` を返します。
-- 押すたびに記録するボタンを置き換え、いずれかのボタンを離すと、別のボタンを押したままでも `-1` に戻します。
-- マウス状態の扱いは `isMousePressed`、共通のウィンドウとスレッドの扱いは `isKeyPressed` を参照してください。
-- App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して 0 を返します（`events` を参照）。
+- App のウィンドウで最後に押された `MouseButton` を返します。解放後やコンテキストがない場合は `MouseButton::None` です。
+- 新たな押下で記録を置き換え、別のボタンを押したままでも、いずれかを離すと記録を消します。押下中の全ボタンを表す集合ではありません。特定の押下への処理はイベントで行います。
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+- App のコールバックでは自身のウィンドウが対象です。App の外では通常のコンテキスト解決規則が適用されます（`events` を参照）。
 '''
 details.ko = '''
-- `int`형으로 왼쪽 버튼은 `0`, 오른쪽 버튼은 `1`, 가운데 버튼은 `2`, 기록된 버튼이 없으면 `-1`을 반환합니다.
-- 버튼을 누를 때마다 기록된 버튼을 바꾸며, 어느 버튼이든 놓으면 다른 버튼을 계속 누르고 있어도 `-1`로 초기화합니다.
-- 마우스 상태의 동작은 `isMousePressed`를, 공통 윈도우 및 스레드 규칙은 `isKeyPressed`를 참조하세요.
-- App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 0을 반환합니다(`events` 참조).
+- App 창에서 마지막으로 누른 `MouseButton`을 반환합니다. 해제 후 또는 컨텍스트가 없으면 `MouseButton::None`입니다.
+- 새 누름이 기록을 바꾸며 다른 버튼을 누르고 있어도 어느 버튼이든 놓으면 기록을 지웁니다. 누른 모든 버튼의 집합이 아닙니다. 특정 누름에 대한 처리는 이벤트를 사용하세요.
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+- App 콜백에서는 자신의 창을 사용합니다. App 밖에서는 일반 컨텍스트 해석 규칙이 적용됩니다(`events` 참고).
 '''
 related = ["isMousePressed", "getMousePos", "isKeyPressed"]
 
 snippet = '''
-void tcApp::draw() {
-    if (isMousePressed() && getMouseButton() == MOUSE_BUTTON_RIGHT) {
-        drawCircle(getMouseX(), getMouseY(), 20);
-    }
+void tcApp::update() {
+    if (getMouseButton() == MouseButton::Right) redraw();
 }
 '''
 
@@ -62263,10 +62680,15 @@ description.en = "Handles a mouse button press."
 description.ja = "マウスボタンの押下を処理する。"
 description.ko = "마우스 버튼 누름을 처리한다."
 details.en = '''
-- Override `bool onMousePress(const MouseEventArgs& e)` or `bool onMousePress(Vec2 local, int button)` in a Node subclass. The base event-argument overload calls the simpler overload, which returns `false`; overriding the event-argument overload replaces that forwarding.
+- Override `onMousePress(const MouseEventArgs& e)` to handle this event with a typed `MouseButton` and position/modifier fields.
+- The `Vec2, int` short form is deprecated and removed in v1.0. The default rich form still forwards Left/Right/Middle as 0/1/2. An overridden short form logs once per callback kind per process. Use the rich form:
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - Start with `enableEvents()` and a hit shape; see `Node::hitTest` for how the flag and shape are used.
 - The App callback runs before the node handlers.
-- `e.pos` and `local` are in the receiving node's coordinates, while `e.globalPos` remains in screen coordinates; `button` is 0 for left, 1 for right, and 2 for middle. The event-argument overload also provides modifier keys.
 - Mouse callback positions are calculated by transforming `(globalPos.x, globalPos.y, 0)` with the node's inverse global matrix; they are not the camera ray's intersection point.
 - Press, ungrabbed release, move, and scroll begin at the first hit node and pass to its parents until a handler returns `true`. Parents are called without rechecking their event flag, active state, or visibility.
 - At each node, its handler runs before its attached Mods, and all those Mods run even if the node returns `true`; a `true` result from either the node or a Mod stops propagation to parents.
@@ -62274,10 +62696,16 @@ details.en = '''
 - If an earlier event listener marks the event consumed, the node handlers are skipped.
 '''
 details.ja = '''
-- Node の派生クラスで `bool onMousePress(const MouseEventArgs& e)` または `bool onMousePress(Vec2 local, int button)` をオーバーライドします。基底実装のイベント引数版は簡易版を呼び、簡易版は `false` を返します。イベント引数版をオーバーライドすると、この転送は置き換わります。
+- `onMousePress(const MouseEventArgs& e)` をオーバーライドすると、`MouseButton` と位置・修飾キーを使ってイベントを処理できます。
+- `Vec2, int` の短い形式は非推奨で v1.0 に削除します。既定の rich form は引き続き Left/Right/Middle を 0/1/2 として転送します。短い形式のオーバーライドにはプロセス内で種類ごとに 1 回警告します。rich form を使います。
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - まず `enableEvents()` とヒット形状を用意します。フラグと形状の使われ方については `Node::hitTest` を参照してください。
 - ノードのハンドラより先に App のコールバックが呼ばれます。
-- `e.pos` と `local` は受け取るノードの座標、`e.globalPos` は画面座標です。`button` は左が 0、右が 1、中ボタンが 2 です。イベント引数版では修飾キーも取得できます。
+- `e.pos` と `local` は受け取るノードの座標、`e.globalPos` は画面座標です。`e.button` は `MouseButton::Left`、`Right`、`Middle` です。イベント引数版では修飾キーも取得できます。
 - マウスのコールバックの位置は、`(globalPos.x, globalPos.y, 0)` にノードのグローバル変換の逆行列を適用して求めます。カメラのレイと形状の交点ではありません。
 - 押下、つかみ状態でないリリース、移動、スクロールは、最初にヒットしたノードから始まり、ハンドラが `true` を返すまで親へ順に渡されます。親のイベントフラグ、アクティブ状態、表示状態は再確認しません。
 - 各ノードでは自身のハンドラ、付属する Mod の順に呼ばれます。ノードが `true` を返しても、その Mod はすべて呼ばれます。ノードまたは Mod が `true` を返すと、親への伝達を止めます。
@@ -62285,10 +62713,16 @@ details.ja = '''
 - それ以前のイベントリスナーがイベントを処理済みにした場合、ノードのハンドラは呼ばれません。
 '''
 details.ko = '''
-- Node 파생 클래스에서 `bool onMousePress(const MouseEventArgs& e)` 또는 `bool onMousePress(Vec2 local, int button)`을 재정의합니다. 기본 이벤트 인자 버전은 간단한 버전을 호출하며, 간단한 버전은 `false`를 반환합니다. 이벤트 인자 버전을 재정의하면 이 전달 동작을 대체합니다.
+- `onMousePress(const MouseEventArgs& e)`를 재정의하면 `MouseButton`과 위치·보조 키로 이벤트를 처리합니다.
+- `Vec2, int`의 짧은 형식은 폐기 예정이며 v1.0에서 제거됩니다. 기본 rich form은 Left/Right/Middle을 계속 0/1/2로 전달합니다. 짧은 형식 재정의는 프로세스에서 종류별로 한 번 경고합니다. rich form을 사용하세요.
+```cpp
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - 먼저 `enableEvents()`와 히트 영역을 준비합니다. 플래그와 영역의 사용 방식은 `Node::hitTest`를 참조하세요.
 - 노드 핸들러보다 App 콜백을 먼저 호출합니다.
-- `e.pos`와 `local`은 수신 노드의 좌표이며 `e.globalPos`는 화면 좌표를 유지합니다. `button`은 왼쪽이 0, 오른쪽이 1, 가운데가 2입니다. 이벤트 인자 버전은 보조 키 정보도 제공합니다.
+- `e.pos`와 `local`은 수신 노드의 좌표이며 `e.globalPos`는 화면 좌표를 유지합니다. `e.button`은 `MouseButton::Left`, `Right`, `Middle`입니다. 이벤트 인자 버전은 보조 키 정보도 제공합니다.
 - 마우스 콜백의 위치는 `(globalPos.x, globalPos.y, 0)`에 노드의 전역 변환 역행렬을 적용하여 계산합니다. 카메라 레이와 영역의 교점은 아닙니다.
 - 누름, 잡기 상태가 아닌 해제, 이동, 스크롤은 처음 히트한 노드에서 시작하여 핸들러가 `true`를 반환할 때까지 부모로 전달합니다. 부모의 이벤트 플래그, 활성 상태, 표시 상태는 다시 확인하지 않습니다.
 - 각 노드에서는 자체 핸들러를 먼저 호출한 다음 연결된 Mod를 호출합니다. 노드가 `true`를 반환해도 해당 Mod는 모두 호출합니다. 노드나 Mod가 `true`를 반환하면 부모로의 전달을 중단합니다.
@@ -62297,12 +62731,9 @@ details.ko = '''
 '''
 related = ["Node::hitTest", "Node::enableEvents", "Node::onMouseDrag", "Node::onMouseRelease", "MouseEventArgs"]
 snippet = '''
-class Ball : public Node {
-protected:
-    bool onMousePress(const MouseEventArgs& e) override {
-        return e.button == MOUSE_BUTTON_LEFT;
-    }
-};
+bool tcApp::onMousePress(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
 '''
 
 ["Node::onMouseRelease"]
@@ -62310,28 +62741,43 @@ description.en = "Handles a mouse button release."
 description.ja = "マウスボタンのリリースを処理する。"
 description.ko = "마우스 버튼 해제를 처리한다."
 details.en = '''
-- Override `bool onMouseRelease(const MouseEventArgs& e)` or `bool onMouseRelease(Vec2 local, int button)`; the base event-argument overload forwards to the simpler overload, which returns `false`. See `Node::onMousePress` for coordinates and propagation.
+- Override `onMouseRelease(const MouseEventArgs& e)` to handle this event with a typed `MouseButton` and position/modifier fields.
+- The `Vec2, int` short form is deprecated and removed in v1.0. The default rich form still forwards Left/Right/Middle as 0/1/2. An overridden short form logs once per callback kind per process. Use the rich form:
+```cpp
+bool tcApp::onMouseRelease(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - A release matching the grabbed button goes directly to the grabbed node, even outside its hit shape, and clears the grab. Its return value is ignored and the release does not pass to parents; the node's current event flag, active state, and visibility are not checked.
 - Without a live matching grab, the release starts at the current hit node and passes to parents until consumed. Releasing a different button leaves the existing grab intact.
 '''
 details.ja = '''
-- `bool onMouseRelease(const MouseEventArgs& e)` または `bool onMouseRelease(Vec2 local, int button)` をオーバーライドします。基底実装のイベント引数版は簡易版に転送し、簡易版は `false` を返します。座標と伝達の規則については `Node::onMousePress` を参照してください。
+- `onMouseRelease(const MouseEventArgs& e)` をオーバーライドすると、`MouseButton` と位置・修飾キーを使ってイベントを処理できます。
+- `Vec2, int` の短い形式は非推奨で v1.0 に削除します。既定の rich form は引き続き Left/Right/Middle を 0/1/2 として転送します。短い形式のオーバーライドにはプロセス内で種類ごとに 1 回警告します。rich form を使います。
+```cpp
+bool tcApp::onMouseRelease(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - つかんでいるボタンのリリースは、ヒット形状の外でも対象ノードに直接届き、つかみ状態を解除します。戻り値は無視され、親には渡されません。その時点のイベントフラグ、アクティブ状態、表示状態は確認しません。
 - 対応するつかみ先が存在しない場合は、現在ヒットするノードから始まり、処理済みになるまで親へ渡されます。別のボタンを離しても、既存のつかみ状態は維持されます。
 '''
 details.ko = '''
-- `bool onMouseRelease(const MouseEventArgs& e)` 또는 `bool onMouseRelease(Vec2 local, int button)`을 재정의합니다. 기본 이벤트 인자 버전은 간단한 버전으로 전달하며, 간단한 버전은 `false`를 반환합니다. 좌표와 전달 규칙은 `Node::onMousePress`를 참조하세요.
+- `onMouseRelease(const MouseEventArgs& e)`를 재정의하면 `MouseButton`과 위치·보조 키로 이벤트를 처리합니다.
+- `Vec2, int`의 짧은 형식은 폐기 예정이며 v1.0에서 제거됩니다. 기본 rich form은 Left/Right/Middle을 계속 0/1/2로 전달합니다. 짧은 형식 재정의는 프로세스에서 종류별로 한 번 경고합니다. rich form을 사용하세요.
+```cpp
+bool tcApp::onMouseRelease(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - 잡고 있는 버튼의 해제는 히트 영역 밖에서도 대상 노드에 직접 전달하고 잡기 상태를 해제합니다. 반환값은 무시하고 부모로 전달하지 않으며, 현재 이벤트 플래그, 활성 상태, 표시 상태를 확인하지 않습니다.
 - 일치하는 살아 있는 잡기 대상이 없으면 현재 히트한 노드에서 시작하여 처리될 때까지 부모로 전달합니다. 다른 버튼을 놓아도 기존 잡기 상태는 유지합니다.
 '''
 related = ["Node::onMousePress", "Node::onMouseDrag"]
 snippet = '''
-class Ball : public Node {
-protected:
-    bool onMouseRelease(const MouseEventArgs& e) override {
-        return e.button == MOUSE_BUTTON_LEFT;
-    }
-};
+bool tcApp::onMouseRelease(const MouseEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
 '''
 
 ["Node::onMouseMove"]
@@ -62368,29 +62814,43 @@ description.en = "Handles pointer movement while this node holds the pointer gra
 description.ja = "このノードがポインタをつかんでいる間の移動を処理する。"
 description.ko = "이 노드가 포인터를 잡고 있는 동안의 이동을 처리한다."
 details.en = '''
-- Override `bool onMouseDrag(const MouseDragEventArgs& e)` or `bool onMouseDrag(Vec2 local, int button)`; the base event-argument overload forwards to the simpler overload, which returns `false`. See `Node::onMousePress` for coordinates and how a press establishes the grab.
+- Override `onMouseDrag(const MouseDragEventArgs& e)` to handle this event with a typed `MouseButton` and position/modifier fields.
+- The `Vec2, int` short form is deprecated and removed in v1.0. The default rich form still forwards Left/Right/Middle as 0/1/2. An overridden short form logs once per callback kind per process. Use the rich form:
+```cpp
+bool tcApp::onMouseDrag(const MouseDragEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - `e.delta` is local movement since the previous event, `e.globalDelta` is screen-space movement, and `e.button` is the grabbed button; modifier keys are also provided.
 - Drag goes directly to the grabbed node, including outside its hit shape, without checking its current event flag, active state, or visibility. The return value is ignored, drag does not pass to parents, and a separate move event follows.
 '''
 details.ja = '''
-- `bool onMouseDrag(const MouseDragEventArgs& e)` または `bool onMouseDrag(Vec2 local, int button)` をオーバーライドします。基底実装のイベント引数版は簡易版に転送し、簡易版は `false` を返します。座標と、押下によるつかみ状態の開始については `Node::onMousePress` を参照してください。
+- `onMouseDrag(const MouseDragEventArgs& e)` をオーバーライドすると、`MouseButton` と位置・修飾キーを使ってイベントを処理できます。
+- `Vec2, int` の短い形式は非推奨で v1.0 に削除します。既定の rich form は引き続き Left/Right/Middle を 0/1/2 として転送します。短い形式のオーバーライドにはプロセス内で種類ごとに 1 回警告します。rich form を使います。
+```cpp
+bool tcApp::onMouseDrag(const MouseDragEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - `e.delta` は前のイベントからのローカル座標の移動量、`e.globalDelta` は画面座標の移動量、`e.button` はつかんでいるボタンです。修飾キーの情報も取得できます。
 - ドラッグはヒット形状の外でもつかみ先のノードへ直接届き、その時点のイベントフラグ、アクティブ状態、表示状態は確認しません。戻り値は無視され、親には渡されず、その後に別の移動イベントが届きます。
 '''
 details.ko = '''
-- `bool onMouseDrag(const MouseDragEventArgs& e)` 또는 `bool onMouseDrag(Vec2 local, int button)`을 재정의합니다. 기본 이벤트 인자 버전은 간단한 버전으로 전달하며, 간단한 버전은 `false`를 반환합니다. 좌표와 누름으로 잡기 상태를 시작하는 방법은 `Node::onMousePress`를 참조하세요.
+- `onMouseDrag(const MouseDragEventArgs& e)`를 재정의하면 `MouseButton`과 위치·보조 키로 이벤트를 처리합니다.
+- `Vec2, int`의 짧은 형식은 폐기 예정이며 v1.0에서 제거됩니다. 기본 rich form은 Left/Right/Middle을 계속 0/1/2로 전달합니다. 짧은 형식 재정의는 프로세스에서 종류별로 한 번 경고합니다. rich form을 사용하세요.
+```cpp
+bool tcApp::onMouseDrag(const MouseDragEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
+```
 - `e.delta`는 이전 이벤트 이후의 로컬 좌표 이동량이고, `e.globalDelta`는 화면 좌표 이동량이며, `e.button`은 잡고 있는 버튼입니다. 보조 키 정보도 제공합니다.
 - 드래그는 히트 영역 밖에서도 잡힌 노드에 직접 전달하며 현재 이벤트 플래그, 활성 상태, 표시 상태를 확인하지 않습니다. 반환값은 무시하고 부모로 전달하지 않으며, 이후 별도의 이동 이벤트를 전달합니다.
 '''
 related = ["Node::onMousePress", "Node::onMouseRelease", "Node::onMouseMove"]
 snippet = '''
-class Ball : public Node {
-protected:
-    bool onMouseDrag(const MouseDragEventArgs& e) override {
-        setRot(getRot() + e.delta.x * 0.01f);
-        return true;
-    }
-};
+bool tcApp::onMouseDrag(const MouseDragEventArgs& e) {
+    return e.button == MouseButton::Left;
+}
 '''
 
 ["Node::onMouseScroll"]
@@ -63317,17 +63777,17 @@ description.en = "Ends dragging when the left mouse button is released."
 description.ja = "左マウスボタンを離すとドラッグを終了する。"
 description.ko = "왼쪽 마우스 버튼을 놓으면 드래그를 종료한다."
 details.en = '''
-- This protected override accepts `const MouseEventArgs& e` and clears the drag state only when `e.button == MOUSE_BUTTON_LEFT`.
+- This protected override accepts `const MouseEventArgs& e` and clears the drag state only when `e.button == MouseButton::Left`.
 - Always returns `true`, including for other buttons, when not dragging, or with a null container.
 - See `Node::onMouseRelease` for release delivery and `ScrollBar::onMousePress` for inherited event behavior.
 '''
 details.ja = '''
-- この protected のオーバーライドは `const MouseEventArgs& e` を受け取り、`e.button == MOUSE_BUTTON_LEFT` の場合だけドラッグ状態を解除します。
+- この protected のオーバーライドは `const MouseEventArgs& e` を受け取り、`e.button == MouseButton::Left` の場合だけドラッグ状態を解除します。
 - ほかのボタンの場合、ドラッグ中でない場合、コンテナが null の場合も含め、常に `true` を返します。
 - リリースが届く規則は `Node::onMouseRelease`、継承したイベントの扱いは `ScrollBar::onMousePress` を参照してください。
 '''
 details.ko = '''
-- 이 protected 재정의는 `const MouseEventArgs& e`를 받으며, `e.button == MOUSE_BUTTON_LEFT`일 때만 드래그 상태를 해제합니다.
+- 이 protected 재정의는 `const MouseEventArgs& e`를 받으며, `e.button == MouseButton::Left`일 때만 드래그 상태를 해제합니다.
 - 다른 버튼인 경우, 드래그 중이 아닌 경우, 컨테이너가 null인 경우에도 항상 `true`를 반환합니다.
 - 해제 전달 규칙은 `Node::onMouseRelease`를, 상속한 이벤트의 동작은 `ScrollBar::onMousePress`를 참조하세요.
 '''
@@ -70874,4 +71334,83 @@ void charInput(const CharEventArgs& e) override {
     logNotice() << e.sourceTag;
 }
 ```
+'''
+
+["EasyCam::getOrbitMouseButton"]
+category = "graphics_camera"
+description.en = "Returns the orbit binding as MouseButton."
+description.ja = "カメラの周回に割り当てたボタンを MouseButton で返す。"
+description.ko = "카메라 궤도 회전에 할당된 버튼을 MouseButton으로 반환한다."
+details.en = '''
+- Returns the configured orbit button as `MouseButton`; this is a binding, not the current pressed state.
+- Use the typed getter:
+```cpp
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+```
+'''
+details.ja = '''
+- 設定されたボタンを `MouseButton` で返します。押下状態ではなく、操作への割り当てです。
+- 型付き getter を使います。
+```cpp
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+```
+'''
+details.ko = '''
+- 설정된 버튼을 `MouseButton`으로 반환합니다. 누름 상태가 아니라 조작 바인딩입니다.
+- 형식 있는 getter를 사용하세요.
+```cpp
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+```
+'''
+related = ["EasyCam::setOrbitButton"]
+snippet = '''
+void tcApp::update() {
+    if (camera.getOrbitMouseButton() == MouseButton::Left) redraw();
+}
+'''
+
+
+["EasyCam::getPanMouseButton"]
+category = "graphics_camera"
+description.en = "Returns the pan binding as MouseButton."
+description.ja = "カメラのパンに割り当てたボタンを MouseButton で返す。"
+description.ko = "카메라 패닝에 할당된 버튼을 MouseButton으로 반환한다."
+details.en = '''
+- Returns the configured pan button as `MouseButton`; this is a binding, not the current pressed state.
+- Use the typed getter:
+```cpp
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+```
+'''
+details.ja = '''
+- 設定されたボタンを `MouseButton` で返します。押下状態ではなく、操作への割り当てです。
+- 型付き getter を使います。
+```cpp
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+```
+'''
+details.ko = '''
+- 설정된 버튼을 `MouseButton`으로 반환합니다. 누름 상태가 아니라 조작 바인딩입니다.
+- 형식 있는 getter를 사용하세요.
+```cpp
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
+```
+'''
+related = ["EasyCam::setPanButton"]
+snippet = '''
+void tcApp::update() {
+    if (camera.getPanMouseButton() == MouseButton::Middle) redraw();
+}
 '''

@@ -1820,7 +1820,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             args.injected = delivery.injected;
             args.sourceTag = delivery.sourceTag;
             args.pos = args.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
-            args.button = button;
+            args.button = static_cast<MouseButton>(button);
             args.shift = hasModShift;
             args.ctrl = hasModCtrl;
             args.alt = hasModAlt;
@@ -1923,7 +1923,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 args.injected = delivery.injected;
                 args.sourceTag = delivery.sourceTag;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-                args.button = ev->mouse_button;
+                args.button = static_cast<MouseButton>(ev->mouse_button);
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
@@ -2058,7 +2058,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     margs.injected = delivery.injected;
                     margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.button = MouseButton::Left;
                     margs.syncLegacy();
                     window.events().mousePressed.notify(margs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
@@ -2069,7 +2069,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.delta = margs.globalDelta = delta;
-                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.button = static_cast<int>(MouseButton::Left);
                     MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
                     window.events().mouseDragged.notify(dragArgs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
@@ -2083,7 +2083,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     margs.injected = delivery.injected;
                     margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.button = MouseButton::Left;
                     margs.syncLegacy();
                     window.events().mouseReleased.notify(margs);
                 }

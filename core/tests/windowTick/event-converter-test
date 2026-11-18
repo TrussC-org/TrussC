@@ -122,7 +122,7 @@ if os.environ.get('TC_EVENT_CONVERTER_MUTATIONS'):
         mutated=sources[k].replace(old,new)
         variants.append((name,k,mutated))
     node=(ROOT/'core/include/tcNode.h').read_text(encoding='utf-8')
-    marker='const bool handled = current->fireMousePress(local);\n            if (!dispatch.current(e.button)) return nullptr;'
+    marker='const bool handled = current->fireMousePress(local);\n            if (!dispatch.current(static_cast<int>(e.button))) return nullptr;'
     assert node.count(marker)==1
     variants.append(('grab_write_without_epoch_check','node',node.replace(marker,'const bool handled = current->fireMousePress(local); /* unchecked grab continuation */')))
     # Remove the UP and recovery barriers together, restoring the obsolete
@@ -133,7 +133,7 @@ if os.environ.get('TC_EVENT_CONVERTER_MUTATIONS'):
     variants.append(('up_recovery_without_epoch_check','pair',(runtime,mcp)))
     variants.append(('spurious_release_at_admission','runtime',sources['runtime'].replace(
         '    ++mousePressGenerations[button];',
-        '    if (grabbedButton == button && !grabbedNode.expired()) { MouseEventArgs e; e.button=button; e.pos=e.globalPos=Vec2(mouseX,mouseY); e.syncLegacy(); hostWindow->events().mouseReleased.notify(e); }\n    ++mousePressGenerations[button];')))
+        '    if (grabbedButton == button && !grabbedNode.expired()) { MouseEventArgs e; e.button=static_cast<MouseButton>(button); e.pos=e.globalPos=Vec2(mouseX,mouseY); e.syncLegacy(); hostWindow->events().mouseReleased.notify(e); }\n    ++mousePressGenerations[button];')))
     variants.append(('saved_touch_mapper','runtime',sources['runtime'].replace(
         'auto candidate = mapper;\n                const internal::TouchMouseAction action = mappedTouch(candidate);',
         'auto candidate = touchCandidate;\n                const internal::TouchMouseAction action = touchAction;')))

@@ -118,7 +118,7 @@ void exercise(bool pixels, float dpi) {
         ++presses;
         provenance(e, "gesture");
         check("press coordinates and modifiers", e.pos == Vec2(20, 30) && e.globalPos == e.pos &&
-              e.x == 20 && e.y == 30 && e.button == MOUSE_BUTTON_LEFT && e.shift && e.ctrl && e.alt && e.super);
+              e.x == 20 && e.y == 30 && e.button == MouseButton::Left && e.shift && e.ctrl && e.alt && e.super);
         received = e;
         received.consumed = true;
         received.pos = Vec2(40, 50);
@@ -127,7 +127,7 @@ void exercise(bool pixels, float dpi) {
     auto drag = w.events().mouseDragged.listen([&](MouseDragEventArgs& e) {
         ++drags;
         provenance(e, "gesture");
-        check("held move becomes drag", e.pos == Vec2(80, 30) && e.delta == Vec2(60, 0) && e.button == MOUSE_BUTTON_LEFT && e.ctrl);
+        check("held move becomes drag", e.pos == Vec2(80, 30) && e.delta == Vec2(60, 0) && e.button == MouseButton::Left && e.ctrl);
         auto raw = internal::toRaw(e);
         provenance(internal::toDragArgs(raw), "gesture");
     });
@@ -247,7 +247,7 @@ void exercise(bool pixels, float dpi) {
     check("MCP input delivered", mcpCount == 2);
     check("invalid key rejected", !w.injectInput(InputEvent::keyPressed(-1)));
     MouseEventArgs invalidButton;
-    invalidButton.button = -1;
+    invalidButton.button = static_cast<MouseButton>(-1);
     check("invalid received button rejected", !w.injectInput(InputEvent::mousePressed(invalidButton)));
     check("invalid button rejected", !w.injectInput(InputEvent::mousePressed({0, 0}, MouseButton::None)));
     check("nonfinite coordinates rejected", !w.injectInput(InputEvent::mouseMoved({std::numeric_limits<float>::infinity(), 0})));

@@ -118,7 +118,7 @@ public:
     }
 
     void mousePressed(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             // Start dragging if body exists at point
             box2d::Body* body = world.getBodyAtPoint(e.pos.x, e.pos.y);
             if (body) {
@@ -128,10 +128,10 @@ public:
                 addCircle(e.pos.x, e.pos.y, random(15, 40));
             }
         }
-        else if (e.button == MOUSE_BUTTON_RIGHT) {
+        else if (e.button == MouseButton::Right) {
             addRect(e.pos.x, e.pos.y, random(30, 60), random(20, 40));
         }
-        else if (e.button == MOUSE_BUTTON_MIDDLE) {
+        else if (e.button == MouseButton::Middle) {
             // Middle click: add random polygon (3-8 sides)
             int sides = randomInt(3, 8);
             addPolygon(e.pos.x, e.pos.y, random(20, 40), sides);
@@ -139,13 +139,13 @@ public:
     }
 
     void mouseDragged(const MouseDragEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             world.updateDrag(e.pos.x, e.pos.y);
         }
     }
 
     void mouseReleased(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             world.endDrag();
         }
     }

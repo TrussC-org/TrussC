@@ -39,9 +39,9 @@ void tcApp::draw() {
             auto& p1 = dragTrail[i];
 
             // Change color by button
-            if (p1.button == MOUSE_BUTTON_LEFT) {
+            if (p1.button == MouseButton::Left) {
                 setColor(colors::red);
-            } else if (p1.button == MOUSE_BUTTON_MIDDLE) {
+            } else if (p1.button == MouseButton::Middle) {
                 setColor(colors::green);
             } else {
                 setColor(colors::blue);
@@ -52,9 +52,9 @@ void tcApp::draw() {
 
     // Draw click positions (with fade out)
     for (auto& cp : clickPoints) {
-        if (cp.button == MOUSE_BUTTON_LEFT) {
+        if (cp.button == MouseButton::Left) {
             setColor(1.0f, 0.4f, 0.4f, cp.alpha);
-        } else if (cp.button == MOUSE_BUTTON_MIDDLE) {
+        } else if (cp.button == MouseButton::Middle) {
             setColor(0.4f, 1.0f, 0.4f, cp.alpha);
         } else {
             setColor(0.4f, 0.4f, 1.0f, cp.alpha);
@@ -91,7 +91,7 @@ void tcApp::draw() {
     drawBitmapString(ss.str(), 20, 65);
 
     ss.str("");
-    ss << "Button: " << (isMousePressed() ? std::to_string(getMouseButton()) : "none");
+    ss << "Button: " << (isMousePressed() ? std::to_string(static_cast<int>(getMouseButton())) : "none");
     ss << "  Dragging: " << (isDragging ? "yes" : "no");
     drawBitmapString(ss.str(), 20, 80);
 
@@ -126,7 +126,7 @@ void tcApp::draw() {
 
 void tcApp::mousePressed(const MouseEventArgs& e) {
     isDragging = true;
-    currentButton = (int)e.button;
+    currentButton = e.button;
     dragTrail.clear();
     dragTrail.push_back({e.pos.x, e.pos.y, e.button});
 
@@ -136,7 +136,7 @@ void tcApp::mousePressed(const MouseEventArgs& e) {
 void tcApp::mouseReleased(const MouseEventArgs& e) {
     (void)e;
     isDragging = false;
-    currentButton = -1;
+    currentButton = MouseButton::None;
 }
 
 void tcApp::mouseMoved(const MouseMoveEventArgs& e) {

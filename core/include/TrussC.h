@@ -1798,10 +1798,10 @@ inline bool isMousePressed() {
     return ctx && ctx->mousePressed;
 }
 
-// Currently pressed mouse button (-1 = none)
-inline int getMouseButton() {
+// Last pressed mouse button; None when no button or context is active.
+inline MouseButton getMouseButton() {
     auto* ctx = internal::findWindowApiContext();
-    return ctx ? ctx->mouseButton : 0;
+    return ctx && ctx->mouseButton >= 0 ? static_cast<MouseButton>(ctx->mouseButton) : MouseButton::None;
 }
 
 // Is specific key currently pressed
@@ -2291,12 +2291,13 @@ constexpr int KEY_F10 = SAPP_KEYCODE_F10;
 constexpr int KEY_F11 = SAPP_KEYCODE_F11;
 constexpr int KEY_F12 = SAPP_KEYCODE_F12;
 
-// Mouse buttons (legacy int constants, for the simple App::mousePressed(Vec2, int)
-// form. Derived from the MouseButton enum so there is a single source of truth;
-// for the MouseEventArgs::button enum itself, use MouseButton::Left etc.)
-constexpr int MOUSE_BUTTON_LEFT = (int)MouseButton::Left;
-constexpr int MOUSE_BUTTON_RIGHT = (int)MouseButton::Right;
-constexpr int MOUSE_BUTTON_MIDDLE = (int)MouseButton::Middle;
+// Deprecated typed mouse button aliases (removed in v1.0).
+[[deprecated("Use MouseButton::Left. Will be removed in v1.0.")]]
+inline constexpr MouseButton MOUSE_BUTTON_LEFT = MouseButton::Left;
+[[deprecated("Use MouseButton::Right. Will be removed in v1.0.")]]
+inline constexpr MouseButton MOUSE_BUTTON_RIGHT = MouseButton::Right;
+[[deprecated("Use MouseButton::Middle. Will be removed in v1.0.")]]
+inline constexpr MouseButton MOUSE_BUTTON_MIDDLE = MouseButton::Middle;
 
 // ---------------------------------------------------------------------------
 // Window settings

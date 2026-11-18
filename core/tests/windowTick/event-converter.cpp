@@ -580,8 +580,8 @@ void crossButtonMatrix(Window& w, Native& n, bool printRecords=false) {
             std::function<void(const char*,const internal::MouseEventRaw&)> pointer;
             bool consume=true;
             CrossNode(){setSize(80,80);enableEvents();}
-            bool onMousePress(const MouseEventArgs& e)override{internal::MouseEventRaw r;r.button=e.button;r.globalPos=e.globalPos;pointer("press",r);return consume;}
-            bool onMouseRelease(const MouseEventArgs& e)override{internal::MouseEventRaw r;r.button=e.button;r.globalPos=e.globalPos;pointer("release",r);return false;}
+            bool onMousePress(const MouseEventArgs& e)override{internal::MouseEventRaw r;r.button=static_cast<int>(e.button);r.globalPos=e.globalPos;pointer("press",r);return consume;}
+            bool onMouseRelease(const MouseEventArgs& e)override{internal::MouseEventRaw r;r.button=static_cast<int>(e.button);r.globalPos=e.globalPos;pointer("release",r);return false;}
             bool onMouseMove(const MouseMoveEventArgs& e)override{pointer("move",internal::toRaw(e));return false;}
             bool onMouseDrag(const MouseDragEventArgs& e)override{pointer("drag",internal::toRaw(e));return false;}
         };

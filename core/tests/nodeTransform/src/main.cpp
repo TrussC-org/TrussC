@@ -65,7 +65,7 @@ public:
     void setRoot(const Node::Ptr& root) { trussc::internal::WindowRequestAccess::context(win_).rootNode = root; }
     void press(float x, float y) {
         MouseEventArgs e;
-        e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = 0;
+        e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = MouseButton::Left;
         e.syncLegacy();
         trussc::internal::WindowRequestAccess::dispatchMousePressToTree(win_, e);
         MouseEventArgs r = e;

@@ -255,11 +255,19 @@ public:
     // ---------------------------------------------------------------------------
 
     // Mouse button that orbits (default: left)
+    EasyCam& setOrbitButton(MouseButton button) { orbitButton_ = static_cast<int>(button); return *this; }
+    MouseButton getOrbitMouseButton() const { return static_cast<MouseButton>(orbitButton_); }
+    [[deprecated("Use setOrbitButton(MouseButton). Will be removed in v1.0.")]]
     EasyCam& setOrbitButton(int button) { orbitButton_ = button; return *this; }
+    [[deprecated("Use getOrbitMouseButton(). Will be removed in v1.0.")]]
     int getOrbitButton() const { return orbitButton_; }
 
     // Mouse button that pans (default: middle)
+    EasyCam& setPanButton(MouseButton button) { panButton_ = static_cast<int>(button); return *this; }
+    MouseButton getPanMouseButton() const { return static_cast<MouseButton>(panButton_); }
+    [[deprecated("Use setPanButton(MouseButton). Will be removed in v1.0.")]]
     EasyCam& setPanButton(int button) { panButton_ = button; return *this; }
+    [[deprecated("Use getPanMouseButton(). Will be removed in v1.0.")]]
     int getPanButton() const { return panButton_; }
 
     // Modifier key required for camera input (orbit / pan / zoom). Checked at
@@ -307,15 +315,15 @@ public:
         listenerPressed_ = events().mousePressed.listen([this](MouseEventArgs& e) {
             // Gestures are claimed at press time: no modifier, no camera.
             if (!modifierHeld(e.shift, e.ctrl, e.alt, e.super)) return;
-            if (onMousePressed(e.pos.x, e.pos.y, e.button)) e.consumed = true;
+            if (onMousePressed(e.pos.x, e.pos.y, static_cast<int>(e.button))) e.consumed = true;
         }, EventPriority::AfterApp);
         listenerReleased_ = events().mouseReleased.listen([this](MouseEventArgs& e) {
             // Never gated on the modifier — a release must always be able to
             // end an in-flight gesture (even if the modifier was let go).
-            if (onMouseReleased(e.pos.x, e.pos.y, e.button)) e.consumed = true;
+            if (onMouseReleased(e.pos.x, e.pos.y, static_cast<int>(e.button))) e.consumed = true;
         }, EventPriority::BeforeApp);
         listenerDragged_ = events().mouseDragged.listen([this](MouseDragEventArgs& e) {
-            if (onMouseDragged(e.pos.x, e.pos.y, e.button)) e.consumed = true;
+            if (onMouseDragged(e.pos.x, e.pos.y, static_cast<int>(e.button))) e.consumed = true;
         }, EventPriority::AfterApp);
         listenerScrolled_ = events().mouseScrolled.listen([this](ScrollEventArgs& e) {
             if (!modifierHeld(e.shift, e.ctrl, e.alt, e.super)) return;
@@ -532,8 +540,8 @@ private:
     float lastMouseY_;
 
     // Mouse bindings (see setOrbitButton / setPanButton / setDragModifier)
-    int orbitButton_ = (int)MOUSE_BUTTON_LEFT;
-    int panButton_ = (int)MOUSE_BUTTON_MIDDLE;
+    int orbitButton_ = static_cast<int>(MouseButton::Left);
+    int panButton_ = static_cast<int>(MouseButton::Middle);
     Modifier dragModifier_ = Modifier::None;
 
     float sensitivity_;       // Rotation sensitivity

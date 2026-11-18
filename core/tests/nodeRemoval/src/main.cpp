@@ -243,7 +243,7 @@ protected:
 private:
     static MouseEventArgs mouseArgs(Vec2 p) {
         MouseEventArgs e;
-        e.globalPos = p; e.pos = p; e.button = 0;
+        e.globalPos = p; e.pos = p; e.button = MouseButton::Left;
         e.syncLegacy();
         return e;
     }

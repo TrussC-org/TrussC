@@ -25,13 +25,13 @@ public:
         ++moveDeliveries_;
         tcApp::mouseMoved(pos);
     }
-    void mouseDragged(Vec2 pos, int button) override {
+    void mouseDragged(const MouseDragEventArgs& e) override {
         ++dragDeliveries_;
-        tcApp::mouseDragged(pos, button);
+        tcApp::mouseDragged(e);
     }
-    void mouseReleased(Vec2 pos, int button) override {
+    void mouseReleased(const MouseEventArgs& e) override {
         ++releaseDeliveries_;
-        tcApp::mouseReleased(pos, button);
+        tcApp::mouseReleased(e);
     }
     void update() override {
         // Establish the readback fixture after native window startup events.
@@ -85,7 +85,7 @@ public:
             check(!ImGui::GetIO().MouseDown[0], "release outside does not leave ImGui pressed");
             ImGui::SetCurrentContext(previous);
             checkCanceled("outside release invalidates mouse position");
-            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mousePressed({.button = MouseButton::Left, .pos = project(buttonCenter_)});
         } else if (frame_ == 6 || frame_ == 8) {
             check(uiContext_->IO.MouseDown[0] && mappedPoint_.x >= 0, "inside press reaches ImGui before cancellation");
             sapp_event event{};
@@ -95,7 +95,7 @@ public:
         } else if (frame_ == 7) {
             checkCanceled("window leave releases button, invalidates position and hides dot");
             check(clicks_ == 1, "window leave cancels the widget click");
-            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mousePressed({.button = MouseButton::Left, .pos = project(buttonCenter_)});
         } else if (frame_ == 9) {
             checkCanceled("focus loss releases button, invalidates position and hides dot");
             check(clicks_ == 1, "focus loss cancels the widget click");
@@ -169,21 +169,21 @@ public:
         } else if (frame_ == 26) {
             checkHover("hover position resumes one frame after canceled outside release", clicksAfterBurst_ + 2);
         } else if (frame_ == 27) {
-            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mousePressed({.button = MouseButton::Left, .pos = project(buttonCenter_)});
             keyPressed('w'); // Enabling handles also cancels an unforwarded UI press.
             mouseMoved(project(buttonCenter_));
-            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
-            mouseDragged(project(buttonCenter_ + Vec2(1, 0)), MOUSE_BUTTON_LEFT);
+            mousePressed({.button = MouseButton::Left, .pos = project(buttonCenter_)});
+            mouseDragged({.button = MouseButton::Left, .pos = project(buttonCenter_ + Vec2(1, 0))});
         } else if (frame_ == 28) {
             checkCanceled("warp handles block button press/drag and cancel the pending UI press");
             check(clicks_ == clicksAfterBurst_ + 2, "drag over button with warp handles causes no click");
-            mouseReleased(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mouseReleased({.button = MouseButton::Left, .pos = project(buttonCenter_)});
             keyPressed('w');
             mouseMoved(project(buttonCenter_));
-            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mousePressed({.button = MouseButton::Left, .pos = project(buttonCenter_)});
         } else if (frame_ == 29) {
             check(uiContext_->IO.MouseDown[0], "disabling warp handles restores ImGui presses");
-            mouseReleased(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mouseReleased({.button = MouseButton::Left, .pos = project(buttonCenter_)});
         } else if (frame_ == 30) {
             check(clicks_ == clicksAfterBurst_ + 3, "disabling warp handles restores button clicks");
         } else if (frame_ == 31) {

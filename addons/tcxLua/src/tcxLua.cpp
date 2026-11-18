@@ -614,10 +614,12 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     easycam_t["disableOrtho"] = &EasyCam::disableOrtho;
     easycam_t["setOrtho"] = &EasyCam::setOrtho;
     easycam_t["getOrtho"] = &EasyCam::getOrtho;
-    easycam_t["setOrbitButton"] = sol::policies(&EasyCam::setOrbitButton, sol::returns_self{});
-    easycam_t["getOrbitButton"] = &EasyCam::getOrbitButton;
-    easycam_t["setPanButton"] = sol::policies(&EasyCam::setPanButton, sol::returns_self{});
-    easycam_t["getPanButton"] = &EasyCam::getPanButton;
+    easycam_t["setOrbitButton"] = sol::policies(static_cast<EasyCam& (EasyCam::*)(MouseButton)>(&EasyCam::setOrbitButton), sol::returns_self{});
+    easycam_t["getOrbitMouseButton"] = &EasyCam::getOrbitMouseButton;
+    easycam_t["getOrbitButton"] = [](const EasyCam& cam) { return static_cast<int>(cam.getOrbitMouseButton()); };
+    easycam_t["setPanButton"] = sol::policies(static_cast<EasyCam& (EasyCam::*)(MouseButton)>(&EasyCam::setPanButton), sol::returns_self{});
+    easycam_t["getPanMouseButton"] = &EasyCam::getPanMouseButton;
+    easycam_t["getPanButton"] = [](const EasyCam& cam) { return static_cast<int>(cam.getPanMouseButton()); };
     easycam_t["setDragModifier"] = sol::policies(&EasyCam::setDragModifier, sol::returns_self{});
     easycam_t["getDragModifier"] = &EasyCam::getDragModifier;
     easycam_t["setOrientation"] = &EasyCam::setOrientation;

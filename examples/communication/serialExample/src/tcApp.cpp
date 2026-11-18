@@ -167,7 +167,7 @@ void tcApp::draw() {
 // mousePressed - click/tap sends a test message
 // (mainly for Android and other targets without a hardware keyboard)
 // =============================================================================
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs&) {
     messageToSend = "hello";
     bSendSerialMessage = true;
 }
