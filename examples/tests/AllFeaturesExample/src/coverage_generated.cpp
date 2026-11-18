@@ -5198,6 +5198,7 @@ struct Cover_Window : af::Scope<Window> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getPosition();
 #endif
+        (void)af::val<const Window>().getTargetFps();
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
         (void)af::val<Window>().injectInput(af::val<const InputEvent>(), af::val<const std::string>());

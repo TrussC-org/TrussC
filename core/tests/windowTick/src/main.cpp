@@ -219,9 +219,11 @@ void exercise(Window& window) {
     const int rateIndex = ctx.rateIndex;
     const double fps = getFrameRate();
     bool readOnly = true;
-    for (int i = 0; i < 100; ++i) readOnly &= getFrameRate() == fps && ctx.rateIndex == rateIndex;
+    for (int i = 0; i < 100; ++i) readOnly &= getFrameRate() == fps && window.getFps() == getFps() && ctx.rateIndex == rateIndex;
     check("FPS reads are read-only", readOnly);
     check("FPS measured from steps", std::abs(fps - 4) < 1e-6);
+    check("Window FPS matches current window measured FPS after frames",
+        window.getFps() == getFps() && std::abs(window.getFps() - 4) < 1e-6);
     redraw(3);
     for (int i = 5; i <= 9; ++i) tick(window, i * .25);
     check("N redraws give N real draws", getDrawCount() == 4 && app->draws == 4);
@@ -234,7 +236,9 @@ void exercise(Window& window) {
     window.setFps(2);
     const auto updates = getUpdateCount(), draws = getDrawCount();
     for (int i = 0; i < 8; ++i) tick(window, 3 + i * .25);
-    check("Window::setFps drives this scheduler", getUpdateCount() - updates == 4 && getDrawCount() - draws == 4 && window.getFps() == 2);
+    check("Window::setFps drives this scheduler", getUpdateCount() - updates == 4 && getDrawCount() - draws == 4 && window.getTargetFps() == 2);
+    window.setFps(VSYNC);
+    check("Window target preserves VSYNC", window.getTargetFps() == VSYNC);
     setIndependentFps(4, EVENT_DRIVEN);
     tick(window, 5);
     publishHidden(window, true);

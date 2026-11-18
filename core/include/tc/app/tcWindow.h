@@ -27,6 +27,7 @@ class Window;
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 inline constexpr bool supportsSecondaryWindows();
+double measuredWindowRate(const WindowContext& ctx);
 // One control entry for explicit handles and context-aware globals.
 enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery, BringToFront };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -171,7 +172,10 @@ public:
     // Set separate update/draw rates for this window from anywhere, including
     // another window's callbacks. Rate values follow trussc::setIndependentFps.
     void setIndependentFps(float updateFps, float drawFps);
-    float getFps() const { return ctx_.loop.drawTargetFps; }
+    // Measured update rate, matching global getFps() for this window.
+    float getFps() const { return static_cast<float>(internal::measuredWindowRate(ctx_)); }
+    // Configured draw target, including VSYNC and EVENT_DRIVEN.
+    float getTargetFps() const { return ctx_.loop.drawTargetFps; }
 
     // Keep drawing this window while minimized, covered or hidden (hidden frames
     // come at about the display's base rate). The last global or per-window call
