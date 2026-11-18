@@ -2011,7 +2011,6 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 // Bound (platform): only the backend's valid touch slots are delivered.
                 const int touchCount = std::clamp(ev->num_touches, 0, TouchEventArgs::MAX_TOUCHES);
                 touchArgs.touches.reserve(touchCount);
-                auto pressure = delivery.touch ? delivery.touch->touches.begin() : touchArgs.touches.end();
                 for (int i = 0; i < touchCount; ++i) {
                     const auto& point = ev->touches[i];
                     TouchPoint touch;
@@ -2019,7 +2018,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     touch.x = point.pos_x * scale;
                     touch.y = point.pos_y * scale;
                     touch.changed = point.changed;
-                    if (delivery.touch) touch.pressure = (pressure++)->pressure;
+                    if (delivery.touch && i < (int)delivery.touch->touches.size())
+                        touch.pressure = delivery.touch->touches[i].pressure;
                     touchArgs.touches.push_back(touch);
                 }
 

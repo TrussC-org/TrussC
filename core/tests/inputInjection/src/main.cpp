@@ -313,6 +313,21 @@ void activeTouches() {
         check("backend touch translated", native.send(packet));
         check("every touch event delivered", delivered == before + 4);
     }
+    sapp_event packet{};
+    packet.type = SAPP_EVENTTYPE_TOUCHES_BEGAN;
+    packet.num_touches = 3;
+    expected.touches.resize(3);
+    for (int i = 0; i < packet.num_touches; ++i) {
+        auto& point = expected.touches[i];
+        point.pressure = TouchPoint{}.pressure;
+        packet.touches[i] = {static_cast<uintptr_t>(point.id), point.x, point.y, SAPP_ANDROIDTOOLTYPE_FINGER, point.changed};
+    }
+    expected.touches[0].pressure = 0.375f;
+    TouchEventArgs pressureSource;
+    pressureSource.touches.push_back(expected.touches[0]);
+    const int before = delivered;
+    check("short pressure source accepted", internal::injectWindowEvent(w, &packet, false, "touch", &pressureSource, nullptr));
+    check("short pressure source delivers all native points", delivered == before + 1);
     setTouchAsMouse(true);
 }
 // Optional real-host check: desktop and sole-surface platforms must deliver
