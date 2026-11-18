@@ -120,7 +120,7 @@ void tcApp::draw() {
 }
 
 void tcApp::mousePressed(const MouseEventArgs& e) {
-    if (e.button == MOUSE_BUTTON_LEFT) {
+    if (e.button == MouseButton::Left) {
         box2d::Body* body = world.getBodyAtPoint(e.pos);
         if (body) {
             world.startDrag(body, e.pos);
@@ -131,13 +131,13 @@ void tcApp::mousePressed(const MouseEventArgs& e) {
 }
 
 void tcApp::mouseDragged(const MouseDragEventArgs& e) {
-    if (e.button == MOUSE_BUTTON_LEFT) {
+    if (e.button == MouseButton::Left) {
         world.updateDrag(e.pos);
     }
 }
 
 void tcApp::mouseReleased(const MouseEventArgs& e) {
-    if (e.button == MOUSE_BUTTON_LEFT) {
+    if (e.button == MouseButton::Left) {
         world.endDrag();
     }
 }

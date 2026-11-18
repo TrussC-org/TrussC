@@ -1063,7 +1063,7 @@ static int runReloadCheck() {
         press.x = x;
         press.y = y;
         press.pos = press.globalPos = Vec2(x, y);
-        press.button = MOUSE_BUTTON_LEFT;
+        press.button = MouseButton::Left;
         events().mousePressed.notify(press);
         MouseEventArgs release = press;
         events().mouseReleased.notify(release);

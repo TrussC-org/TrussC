@@ -95,7 +95,7 @@ public:
     }
 
     void mousePressed(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             // Start dragging if body exists at point
             box2d::Body* body = world.getBodyAtPoint(e.pos.x, e.pos.y);
             if (body) {
@@ -109,7 +109,7 @@ public:
                 addChild(circle);
             }
         }
-        else if (e.button == MOUSE_BUTTON_RIGHT) {
+        else if (e.button == MouseButton::Right) {
             // Right click: add rectangle
             auto rect = std::make_shared<box2d::RectBody>();
             rect->setup(world, e.pos.x, e.pos.y, random(30, 60), random(20, 40));
@@ -120,13 +120,13 @@ public:
     }
 
     void mouseDragged(const MouseDragEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             world.updateDrag(e.pos.x, e.pos.y);
         }
     }
 
     void mouseReleased(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT) {
+        if (e.button == MouseButton::Left) {
             world.endDrag();
         }
     }

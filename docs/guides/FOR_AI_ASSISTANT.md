@@ -565,7 +565,7 @@ setScale(s)
 Z-order is the child list order — `moveToFront/Back` reorder siblings
 in place. Typical use: bring a clicked card to the top of a stack:
 ```cpp
-bool onMousePress(Vec2 local, int button) override {
+bool onMousePress(const MouseEventArgs&) override {
     moveToFront();   // this node now draws above its siblings
     return true;
 }
@@ -599,9 +599,9 @@ nodes.clear();
 ### Node Events
 Override in Node subclass (return `true` to consume):
 ```cpp
-bool onMousePress(Vec2 local, int button) override;
-bool onMouseRelease(Vec2 local, int button) override;
-bool onMouseDrag(Vec2 local, int button) override;
+bool onMousePress(const MouseEventArgs& e) override;
+bool onMouseRelease(const MouseEventArgs& e) override;
+bool onMouseDrag(const MouseDragEventArgs& e) override;
 bool onMouseMove(Vec2 local) override;
 bool onMouseScroll(Vec2 local, Vec2 scroll) override;
 bool onMouseEnter() override;
@@ -613,8 +613,8 @@ App-level input events on the receiving Window:
 void keyPressed(int key) override;
 void charInput(const CharEventArgs& e) override;
 void filesDropped(const DragDropEventArgs& e) override;
-void mousePressed(Vec2 pos, int button) override;
-void mouseDragged(Vec2 pos, int button) override;
+void mousePressed(const MouseEventArgs& e) override;
+void mouseDragged(const MouseDragEventArgs& e) override;
 ```
 
 `keyPressed()` receives sokol key codes: letters are uppercase ASCII (`'S'`,
@@ -625,18 +625,16 @@ regardless of Shift). The defined `KEY_*` constants are `KEY_SPACE`, `KEY_ESCAPE
 `KEY_RIGHT_SUPER`, and `KEY_F1` through `KEY_F12`.
 
 #### Rich mouse input arguments
-Rich mouse input callbacks in App and Node receive a per-kind args struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
-the default) **or** the rich form — the rich default just forwards to the
-simple one, so existing simple overrides keep working.
+Rich mouse input callbacks in App and Node receive a per-kind args struct with a typed `MouseButton`. The short `(Vec2, int)` press/release/drag forms are deprecated and will be removed in v1.0. Their overrides still receive 0/1/2 through the rich default, and log once per callback kind per process. Use the rich form:
 ```cpp
-void mousePressed(const MouseEventArgs& e) override {
-    logNotice("input") << e.injected << " " << e.sourceTag;
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
 }
 ```
 There is one struct per event kind so no field is ever meaningless. Fields:
 - `pos` — local position (in the receiving node's space). `globalPos` — window content coordinates.
 - `delta` / `globalDelta` — movement since the last event (move/drag only).
-- `button` — `int`, compare with `MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (press/drag).
+- `button` — `MouseButton`, compare with `MouseButton::Left`, `Right`, or `Middle` (press/release/drag). `getMouseButton()` returns the last pressed button, or `MouseButton::None` after release or without a context.
 - `scroll` — `Vec2` scroll amount (ScrollEventArgs).
 - `shift` / `ctrl` / `alt` / `super` — modifier keys, on every kind.
 - `injected` — true for `Window::injectInput` and MCP input, false for input from a device. Key and touch args also carry this field.
@@ -1318,7 +1316,13 @@ Mostly "drop `of`, lowercase the first letter." Common ones:
 
 ### Are setup / update / draw the same as oF?
 
-The lifecycle is **the same** — `setup()` / `update()` / `draw()` (all `void`, no args, override). Input callbacks come in two forms: an **oF-compatible simple form `mousePressed(Vec2 pos, int button)`** and a **rich form `mousePressed(const MouseEventArgs& e)`** with modifiers — override either (the rich default forwards to the simple one). Mind only the 0–1 colors and radians, and drawing code ports over almost directly.
+The App lifecycle uses `setup()` / `update()` / `draw()` (all `void`, no args, override). For mouse input, use rich event arguments and compare `e.button` with `MouseButton`. The short `(Vec2, int)` press/release/drag overrides are deprecated until removal in v1.0:
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+Drawing code uses 0–1 colors and radians.
 
 ### Equivalents of ofParameter / ofxGui?
 
@@ -2340,7 +2344,7 @@ float getGlobalMouseX()  // Returns the current mouse X coordinate in the active
 float getGlobalMouseY()  // Returns the current mouse Y coordinate in the active window.
 float getGlobalPMouseX()  // Returns the saved previous mouse X coordinate.
 float getGlobalPMouseY()  // Returns the saved previous mouse Y coordinate.
-int getMouseButton()  // Returns the recorded mouse button.
+MouseButton getMouseButton()  // Returns the recorded mouse button.
 Vec2 getMousePos()  // Returns the mouse position in the current window.
 float getMouseX()  // Return the mouse X coordinate in window space.
 float getMouseY()  // Return the mouse Y coordinate in window space.
@@ -2941,9 +2945,9 @@ KEY_UP  // Identifies the Up Arrow key.
 Left  // Provides shorthand for `Direction::Left`.
 float log10(float x) [std]  // Returns the base-ten logarithm.
 float log2(float x) [std]  // Returns the base-two logarithm.
-MOUSE_BUTTON_LEFT  // Identifies the left mouse button.
-MOUSE_BUTTON_MIDDLE  // Identifies the middle mouse button.
-MOUSE_BUTTON_RIGHT  // Identifies the right mouse button.
+MOUSE_BUTTON_LEFT ⚠️deprecated  // Identifies the left mouse button.
+MOUSE_BUTTON_MIDDLE ⚠️deprecated  // Identifies the middle mouse button.
+MOUSE_BUTTON_RIGHT ⚠️deprecated  // Identifies the right mouse button.
 Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Returns the asynchronous screenshot completion event.
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to their operand types.
 PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
@@ -3258,10 +3262,12 @@ float EasyCam::getDistance() const  // Returns the camera's distance from its ta
 Modifier EasyCam::getDragModifier() const  // Returns the modifier selected for camera mouse input.
 float EasyCam::getElevation() const  // Returns the camera's orbit elevation.
 float EasyCam::getFov() const  // Returns the camera's field of view.
-int EasyCam::getOrbitButton() const  // Returns the mouse button assigned to orbit rotation.
+int EasyCam::getOrbitButton() const ⚠️deprecated  // Returns the mouse button assigned to orbit rotation.
+MouseButton EasyCam::getOrbitMouseButton() const  // Returns the orbit binding as MouseButton.
 Quaternion EasyCam::getOrientation() const  // Returns the camera's orientation quaternion.
 bool EasyCam::getOrtho() const  // Returns whether orthographic projection is selected.
-int EasyCam::getPanButton() const  // Returns the mouse button assigned to panning.
+int EasyCam::getPanButton() const ⚠️deprecated  // Returns the mouse button assigned to panning.
+MouseButton EasyCam::getPanMouseButton() const  // Returns the pan binding as MouseButton.
 Vec3 EasyCam::getPosition() const  // Returns the camera's position.
 Vec3 EasyCam::getTarget() const  // Returns the camera's look-at target.
 Vec3 EasyCam::getUpAxis() const  // Returns the camera's configured up axis.
@@ -3280,10 +3286,10 @@ void EasyCam::setFarClip(float farClip)  // Sets the camera's far clipping dista
 void EasyCam::setFov(float fov)  // Sets the camera's vertical field of view.
 void EasyCam::setFovDeg(float degrees)  // Sets the camera's vertical field of view in degrees.
 void EasyCam::setNearClip(float nearClip)  // Sets the camera's near clipping distance.
-EasyCam & EasyCam::setOrbitButton(int button)  // Sets the mouse button used to orbit the camera.
+EasyCam & EasyCam::setOrbitButton(MouseButton button) [+1]  // Sets the mouse button used to orbit the camera.
 void EasyCam::setOrientation(const Quaternion & q)  // Sets the camera's orientation quaternion.
 void EasyCam::setOrtho(bool ortho)  // Selects orthographic or perspective projection.
-EasyCam & EasyCam::setPanButton(int button)  // Sets the mouse button used to pan the camera.
+EasyCam & EasyCam::setPanButton(MouseButton button) [+1]  // Sets the mouse button used to pan the camera.
 void EasyCam::setPanSensitivity(float s)  // Sets the sensitivity of mouse panning.
 void EasyCam::setSensitivity(float s)  // Sets the sensitivity of mouse orbit rotation.
 void EasyCam::setTarget(float x, float y, float z) [+1]  // Sets the camera's look-at target.
@@ -5826,7 +5832,12 @@ Sound sfx = bundle.build();
     }
     ```
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
-19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
+19. **EasyCam button bindings use `MouseButton`.** Select the orbit button with the typed setter and read its binding with `getOrbitMouseButton()`.
+    ```cpp
+    void tcApp::setup() {
+        cam.setOrbitButton(MouseButton::Right);
+    }
+    ```
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth testing (LESS_EQUAL) for all subsequent draws. `Add`, `Screen`, `Multiply` and `Subtract` test without writing depth; `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing it. Translucent `Alpha` also writes depth, so draw opaque objects first and translucent ones back to front; TrussC does not sort draws. The setting persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
@@ -5845,7 +5856,7 @@ class tcApp : public App {
     Tween<Color> colorTween;
     void setup() override;
     void draw() override;
-    void mousePressed(Vec2 pos, int button) override;
+    void mousePressed(const MouseEventArgs& e) override;
 };
 
 // tcApp.cpp
@@ -5866,7 +5877,7 @@ void tcApp::draw() {
     drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, s);
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs&) {
     sizeTween.from(50.0f).to(200.0f).start();   // Restart on click
 }
 ```
@@ -5885,7 +5896,7 @@ class tcApp : public App {
     void setup() override;
     void draw() override;
     void mouseMoved(Vec2 pos) override;
-    void mousePressed(Vec2 pos, int button) override;
+    void mousePressed(const MouseEventArgs& e) override;
     void keyPressed(int key) override;
 
     vector<Vec2> history;
@@ -5922,7 +5933,7 @@ void tcApp::mouseMoved(Vec2 pos) {
     if (history.size() > maxHistory) history.erase(history.begin());
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) { useStroke = !useStroke; }
+void tcApp::mousePressed(const MouseEventArgs&) { useStroke = !useStroke; }
 void tcApp::keyPressed(int key) { if (key == ' ') styleIndex = (styleIndex + 1) % 3; }
 ```
 
@@ -5964,8 +5975,8 @@ void tcApp::draw() {
     drawBitmapString("Click to shoot", 10, 20);
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
-    auto bullet = make_shared<Bullet>(pos.x, pos.y, Vec2(300, -400));
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    auto bullet = make_shared<Bullet>(e.pos.x, e.pos.y, Vec2(300, -400));
     addChild(bullet);   // Add to scene graph — update/draw are automatic
 }
 ```
@@ -6020,7 +6031,7 @@ public:
     }
 
 protected:
-    bool onMousePress(Vec2 local, int button) override {
+    bool onMousePress(const MouseEventArgs&) override {
         count++;
         return true;   // Consume event
     }

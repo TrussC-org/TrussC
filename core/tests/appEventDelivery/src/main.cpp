@@ -315,8 +315,8 @@ void cameraChecks() {
     buttonEvent(SAPP_EVENTTYPE_MOUSE_UP, SAPP_MOUSEBUTTON_LEFT);
     buttonEvent(SAPP_EVENTTYPE_MOUSE_UP, SAPP_MOUSEBUTTON_MIDDLE);
     position = cam.getPosition();
-    cam.mouseDragged(95, 25, MOUSE_BUTTON_LEFT);
-    cam.mouseDragged(95, 25, MOUSE_BUTTON_MIDDLE);
+    cam.mouseDragged(95, 25, static_cast<int>(MouseButton::Left));
+    cam.mouseDragged(95, 25, static_cast<int>(MouseButton::Middle));
     check("each owned button release ends its gesture", cam.getPosition() == position);
     feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 20);
     cam.disableMouseInput(); cam.enableMouseInput();

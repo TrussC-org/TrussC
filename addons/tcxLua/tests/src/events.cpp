@@ -33,6 +33,23 @@ int runLuaEventTests(const std::filesystem::path& temp) {
     tcxLua binding;
     auto state = binding.getLuaState();
     auto& lua = *state;
+    MouseEventArgs mousePress;
+    MouseDragEventArgs mouseDrag;
+    mousePress.button = MouseButton::Left;
+    mouseDrag.button = MouseButton::Right;
+    lua["typedMousePress"] = &mousePress;
+    lua["typedMouseDrag"] = &mouseDrag;
+    check("typed mouse fields and getter", script(lua, R"(
+        assert(typedMousePress.button == MouseButton.Left)
+        assert(typedMousePress.button == MOUSE_BUTTON_LEFT)
+        assert(MouseButton.Right == MOUSE_BUTTON_RIGHT)
+        assert(MouseButton.Middle == MOUSE_BUTTON_MIDDLE)
+        assert(typedMouseDrag.button == MouseButton.Right)
+        assert(getMouseButton() == MouseButton.None)
+        typedMousePress.button = MouseButton.Middle
+        assert(typedMousePress.button == MouseButton.Middle)
+    )"));
+    check("Lua writes the typed field", mousePress.button == MouseButton::Middle);
     Event<TouchEventArgs> touchSignal;
     lua["touchSignal"] = &touchSignal;
     check("active touch vector listener", script(lua, R"(

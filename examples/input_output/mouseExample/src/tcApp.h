@@ -22,14 +22,14 @@ private:
     // Drag trail
     struct DragPoint {
         float x, y;
-        int button;
+        MouseButton button;
     };
     std::vector<DragPoint> dragTrail;
 
     // Click positions
     struct ClickPoint {
         float x, y;
-        int button;
+        MouseButton button;
         float alpha;  // For fade out
     };
     std::vector<ClickPoint> clickPoints;
@@ -40,5 +40,5 @@ private:
 
     // Current mouse state
     bool isDragging = false;
-    int currentButton = -1;
+    MouseButton currentButton = MouseButton::None;
 };

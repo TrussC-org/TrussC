@@ -33,7 +33,7 @@ struct Probe : RectNode {
     Probe() { setSize(100, 100); enableEvents(); }
     bool onMousePress(const MouseEventArgs&) override { ++presses; return true; }
     bool onMouseRelease(const MouseEventArgs& e) override {
-        ++releases; lastRelease = e; releaseButtons.push_back(e.button); return true;
+        ++releases; lastRelease = e; releaseButtons.push_back(static_cast<int>(e.button)); return true;
     }
     bool onMouseMove(const MouseMoveEventArgs&) override { ++moves; return true; }
     bool onMouseDrag(const MouseDragEventArgs&) override { ++drags; return true; }
@@ -42,9 +42,9 @@ struct TestApp : App {
     int releases = 0, moves = 0, drags = 0;
     MouseEventArgs lastRelease;
     std::vector<int> releaseButtons, dragButtons;
-    void mouseReleased(const MouseEventArgs& e) override { ++releases; lastRelease = e; releaseButtons.push_back(e.button); }
+    void mouseReleased(const MouseEventArgs& e) override { ++releases; lastRelease = e; releaseButtons.push_back(static_cast<int>(e.button)); }
     void mouseMoved(const MouseMoveEventArgs&) override { ++moves; }
-    void mouseDragged(const MouseDragEventArgs& e) override { ++drags; dragButtons.push_back(e.button); }
+    void mouseDragged(const MouseDragEventArgs& e) override { ++drags; dragButtons.push_back(static_cast<int>(e.button)); }
 };
 
 void feed(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
@@ -213,7 +213,7 @@ void scenario(int kind, int button, unsigned int bit, bool secondary = false) {
     check("exactly one release reaches event listeners, App and node",
           releases == 1 && app->releases == 1 && probe->releases == 1);
     check("release retains button and last known position",
-          lastRelease.button == button && lastRelease.pos == expectedRelease &&
+          lastRelease.button == static_cast<MouseButton>(button) && lastRelease.pos == expectedRelease &&
           lastRelease.globalPos == expectedRelease && app->lastRelease.pos == expectedRelease &&
           probe->lastRelease.globalPos == expectedRelease);
     check("state is cleared before release notification", stateClearAtRelease && !isMousePressed());
@@ -234,7 +234,7 @@ void multiScenario(int kind, bool secondary) {
     Fixture f(secondary);
     auto& ctx = internal::currentWindowContext();
     std::vector<int> released;
-    auto listener = events().mouseReleased.listen([&](const MouseEventArgs& e) { released.push_back(e.button); });
+    auto listener = events().mouseReleased.listen([&](const MouseEventArgs& e) { released.push_back(static_cast<int>(e.button)); });
     auto down = [&](int button) {
         f.send(SAPP_EVENTTYPE_MOUSE_DOWN, button, SAPP_MODIFIER_LMB | SAPP_MODIFIER_RMB);
     };
@@ -307,7 +307,7 @@ void secondaryLeaveScenario(bool focusLoss) {
     if (focusLoss) f.send(SAPP_EVENTTYPE_UNFOCUSED);
     else f.send(SAPP_EVENTTYPE_MOUSE_MOVE, SAPP_MOUSEBUTTON_LEFT, 0, 30, 40);
     check("secondary recovery releases once at last real pointer position",
-          releases == 1 && released.button == SAPP_MOUSEBUTTON_LEFT && released.pos == Vec2(10, 20) &&
+          releases == 1 && released.button == MouseButton::Left && released.pos == Vec2(10, 20) &&
           released.globalPos == Vec2(10, 20) && f.app->lastRelease.pos == Vec2(10, 20) && f.probe->lastRelease.globalPos == Vec2(10, 20));
     check("secondary recovery clears grabbed node", ctx.grabbedNode.expired() && !isMousePressed());
     if (focusLoss) check("focus recovery keeps hover offscreen", ctx.mouseX == -1 && ctx.mouseY == -1);

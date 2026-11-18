@@ -189,7 +189,7 @@ private:
     // The root is locked once per call, so it stays alive for the whole call
     // even if a handler detaches the window's App (destroyApp()).
     TC_LUA_SKIP void dispatchMousePressToTree(const MouseEventArgs& e) {
-        internal::MouseDispatchScope dispatch(ctx_, e.button, true);
+        internal::MouseDispatchScope dispatch(ctx_, static_cast<int>(e.button), true);
         if (auto root = ctx_.rootNode.lock()) root->dispatchMousePress(e);
     }
     TC_LUA_SKIP void dispatchMouseReleaseToTree(const MouseEventArgs& e) {

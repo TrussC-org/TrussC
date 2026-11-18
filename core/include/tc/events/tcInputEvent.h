@@ -113,8 +113,9 @@ private:
         touch_.touches = event.touches;
         touch_.cancelled = event.cancelled;
     }
-    static MouseButton receivedButton(int button) {
-        return button >= 0 && button <= 2 ? static_cast<MouseButton>(button) : MouseButton::None;
+    static MouseButton receivedButton(MouseButton button) {
+        // Bound (supported mouse buttons): normalize values outside Left/Right/Middle to None.
+        return button >= MouseButton::Left && button <= MouseButton::Middle ? button : MouseButton::None;
     }
     template<class T> static InputModifiers modifiers(const T& event) {
         return {event.shift, event.ctrl, event.alt, event.super};

@@ -75,13 +75,13 @@ public:
 
     void press(float x, float y, int button = 0) {
         MouseEventArgs e;
-        e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = button;
+        e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = static_cast<MouseButton>(button);
         e.syncLegacy();
         trussc::internal::WindowRequestAccess::dispatchMousePressToTree(win_, e);
     }
     void release(float x, float y, int button = 0) {
         MouseEventArgs e;
-        e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = button;
+        e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = static_cast<MouseButton>(button);
         e.syncLegacy();
         trussc::internal::WindowRequestAccess::dispatchMouseReleaseToTree(win_, e);
     }
