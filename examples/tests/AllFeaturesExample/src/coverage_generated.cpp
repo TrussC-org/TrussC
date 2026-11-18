@@ -57,6 +57,7 @@ static void cover_file() {
     (void)listDirectory(af::val<const fs::path>());
     (void)loadErrorName(af::val<LoadError>());
     (void)loadJson(af::val<const fs::path>());
+    (void)loadJson(af::val<const fs::path>(), af::val<Json>());
     (void)loadTextFile(af::val<const fs::path>());
     (void)loadXml(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
@@ -669,6 +670,7 @@ static void cover_utility() {
     (void)logWarning(af::val<const std::string>());
     (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
     (void)parseJson(af::val<const std::string>());
+    (void)parseJson(af::val<const std::string>(), af::val<Json>());
     (void)parseXml(af::val<const std::string>());
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());

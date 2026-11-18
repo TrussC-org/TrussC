@@ -2607,7 +2607,7 @@ LogStream logNotice(const std::string & module = std::string(""))  // Logs a mes
 LogStream logVerbose(const std::string & module = std::string(""))  // Creates a stream for verbose-level log messages.
 LogStream logWarning(const std::string & module = std::string(""))  // Creates a stream for warning-level logging.
 Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serializes a node and its subtree to JSON.
-Json parseJson(const std::string & str)  // Parses a JSON string into a Json value.
+Json parseJson(const std::string & str) [+1]  // Parses JSON text; use the LoadResult overload to distinguish failure from valid null.
 Xml parseXml(const std::string & str)  // Parses an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Applies JSON values to an object's reflected members.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Returns an object's reflected members as JSON.
@@ -2673,7 +2673,7 @@ fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Return a path
 std::string joinPath(const fs::path & dir, const fs::path & file)  // Joins two filesystem paths.
 std::vector<std::string> listDirectory(const fs::path & path)  // Lists the immediate files and directories in a directory.
 const char * loadErrorName(LoadError e)  // Returns the short name of a load error.
-Json loadJson(const fs::path & path)  // Loads a JSON value from a file.
+Json loadJson(const fs::path & path) [+1]  // Loads a JSON file; use the LoadResult overload to distinguish failure from valid null.
 std::string loadTextFile(const fs::path & path)  // Loads an entire file into a string.
 Xml loadXml(const fs::path & path)  // Loads an XML file into an Xml object.
 std::string pathToUtf8(const fs::path & p)  // Converts a filesystem path to a UTF-8 string.
