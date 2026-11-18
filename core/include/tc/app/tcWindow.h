@@ -847,6 +847,10 @@ inline void Window::setPosition(int x, int y) {
     control(internal::WindowControl::Position, x, y, nullptr, internal::WindowGeometryCall::WindowPosition);
 }
 inline IVec2 Window::getPosition() const {
+    if (!isOpen()) {
+        logWarning("Platform") << "Window::getPosition() requires an open window; returning (-1, -1)";
+        return {-1, -1};
+    }
     return const_cast<Window*>(this)->control(internal::WindowControl::PositionQuery);
 }
 inline void Window::setFullscreen(bool full) {

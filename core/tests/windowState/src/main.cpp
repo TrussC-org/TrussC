@@ -13,6 +13,18 @@ void check(const char* name, bool ok) {
     ++checks;
     if (!ok) { ++failures; std::printf("windowState: FAIL: %s\n", name); }
 }
+void checkClosedPosition(Window& window) {
+    int warnings = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning &&
+            event.message == "[Platform] Window::getPosition() requires an open window; returning (-1, -1)") ++warnings;
+    });
+    for (int call = 1; call <= 2; ++call) {
+        const auto position = window.getPosition();
+        check("closed position keeps sentinel", position.x == -1 && position.y == -1);
+        check("closed position warns on every call", warnings == call);
+    }
+}
 struct Native {
     sapp_tc_window_metadata metadata{};
     uint32_t id = 0;
@@ -68,6 +80,7 @@ void exercise(Window& w, uint32_t id) {
     n.metadata.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
     n.metadata.trust_hidden_signals = true;
     check("unbound Window is closed and visible", !w.isOpen() && !w.isOccluded());
+    checkClosedPosition(w);
     check("zero ID cannot bind", !internal::bindWindow(w, {0}, operations, &n));
     check("same production binding path for both roots", internal::bindWindow(w, {id}, operations, &n));
     check("identity comes from binding", internal::WindowRequestAccess::creationId(w) == id);
@@ -158,6 +171,7 @@ void exercise(Window& w, uint32_t id) {
     checkResizeDelivery(w, n.metadata, app, sizeEntry, sizeEntry, check);
     internal::WindowRequestAccess::unbind(w);
     check("closed getter and identity clear", !w.isOpen() && !w.isOccluded() && internal::WindowRequestAccess::creationId(w) == 0);
+    checkClosedPosition(w);
     internal::WindowRequestAccess::endApp(w);
     check("repeat bindings retain exactly-once App exit and cleanup", app->exits == 1 && app->cleanups == 1);
 }
