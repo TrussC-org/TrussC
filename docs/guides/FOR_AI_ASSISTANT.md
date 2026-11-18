@@ -2554,7 +2554,7 @@ int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
 bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
-IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
+IVec2 getWindowPosition() [macos,windows,linux]  // Returns the current window’s position in OS screen coordinates; returns (-1, -1) when unavailable.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
 bool isFullscreen()  // Returns this window's observed fullscreen state.
 bool isRecording()  // Returns whether the global screen recorder is capturing.
@@ -5239,7 +5239,7 @@ CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
 float Window::getFps() const  // Returns this window's target frame rate.
 int Window::getHeight() const  // Returns this window's content height.
-IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
+IVec2 Window::getPosition() const [macos,windows,linux]  // Reads this window’s position in OS screen coordinates; use it on desktop when you need the decorated frame location. Returns (-1, -1) when unavailable.
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values).
