@@ -435,6 +435,8 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
                     unsigned char* srcRow = baseAddress + y * bytesPerRow;
                     unsigned char* dstRow = _pixelBuffer + y * (size_t)_videoWidth * 4;
 
+                    // Plain loop on purpose: Apple clang -O3 auto-vectorizes it to
+                    // NEON; tc::simd measured no gain here (#1554).
                     for (size_t x = 0; x < copyW; x++) {
                         // BGRA -> RGBA
                         dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
