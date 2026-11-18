@@ -114,7 +114,7 @@ TC_CORE_TEST_MAIN() {
         // B lifts while listed first: no release.
         feed(m, c, TouchPhase::Ended, {touch(kIdB, 220, 220, true), touch(kIdA, 30, 30, false)});
         TouchMouseAction r = feed(m, c, TouchPhase::Ended, {touch(kIdA, 30, 30, true)});
-        check("reordered touches: drags follow the primary, not touches[0]",
+        check("reordered touches: drags follow the primary, not the first slot",
               d1.kind == TouchMouseAction::Kind::Drag && at(d1, 20, 20) &&
               d2.kind == TouchMouseAction::Kind::Drag && at(d2, 30, 30));
         check("reordered touches: one press and one release, at the primary",

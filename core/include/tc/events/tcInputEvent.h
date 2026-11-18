@@ -110,11 +110,8 @@ private:
                       MouseMoved, MouseScrolled, TouchPressed, TouchMoved, TouchReleased };
     explicit InputEvent(Kind kind) : kind_(kind) {}
     InputEvent(Kind kind, const TouchEventArgs& event) : kind_(kind) {
-        touch_.numTouches = event.numTouches;
+        touch_.touches = event.touches;
         touch_.cancelled = event.cancelled;
-        // Bound (platform): copy at most MAX_TOUCHES array entries; the gate rejects the unchanged invalid count.
-        for (int i = 0; i < event.numTouches && i < TouchEventArgs::MAX_TOUCHES; ++i)
-            touch_.touches[i] = event.touches[i];
     }
     static MouseButton receivedButton(int button) {
         return button >= 0 && button <= 2 ? static_cast<MouseButton>(button) : MouseButton::None;

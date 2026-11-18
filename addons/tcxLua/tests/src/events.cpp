@@ -33,6 +33,36 @@ int runLuaEventTests(const std::filesystem::path& temp) {
     tcxLua binding;
     auto state = binding.getLuaState();
     auto& lua = *state;
+    Event<TouchEventArgs> touchSignal;
+    lua["touchSignal"] = &touchSignal;
+    check("active touch vector listener", script(lua, R"(
+        touchHandle = touchSignal:listen(function(e)
+            assert(#e.touches == expectedTouchCount)
+            local count = 0
+            for i, point in ipairs(e.touches) do
+                count = count + 1
+                assert(point.id == 100 - i)
+                assert(point.x == 9 + i and point.y == 19 + i)
+            end
+            assert(count == expectedTouchCount)
+            assert(e:x() == (count == 0 and 0 or 10))
+            assert(e:y() == (count == 0 and 0 or 20))
+            assert(e:id() == (count == 0 and 0 or 99))
+            retainedTouch = e
+        end)
+    )"));
+    for (int count : {0, 1, 3, TouchEventArgs::MAX_TOUCHES}) {
+        TouchEventArgs event;
+        for (int i = 0; i < count; ++i)
+            event.touches.push_back({99 - i, 10.0f + i, 20.0f + i});
+        lua["expectedTouchCount"] = count;
+        touchSignal.notify(event);
+        event.touches.clear();
+        check("Lua retains only active touch points", script(lua, R"(
+            assert(#retainedTouch.touches == expectedTouchCount)
+        )"));
+    }
+    check("active touch listener disconnects", script(lua, "touchHandle:disconnect()"));
     DragDropEventArgs dropped;
     FilesOpenedEventArgs opened;
     dropped.files = {std::filesystem::path(u8"日本語😀.png")};

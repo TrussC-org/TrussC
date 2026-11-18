@@ -1140,8 +1140,7 @@ map<int, Vec2> fingers;   // finger id -> position
 
 // tcApp.cpp
 void tcApp::touchMoved(const TouchEventArgs& touch) {
-    for (int i = 0; i < touch.numTouches; i++) {
-        const TouchPoint& t = touch.touches[i];
+    for (const auto& t : touch.touches) {
         if (t.changed) fingers[t.id] = Vec2(t.x, t.y);   // fingers that moved
     }
 }
@@ -1155,47 +1154,71 @@ description.ja = "1 本以上の指が画面に触れたときに呼ばれる。
 description.ko = "손가락이 하나 이상 화면에 닿았을 때 호출된다."
 details.en = '''
 - Override `touchPressed(const TouchEventArgs& touch)` in your tcApp. This is the only form; there is no `(x, y, id)` version.
-- `touch.touches[0]` to `touch.touches[numTouches - 1]` hold every finger that is currently down (up to 32). The fingers with `changed == true` are the ones that have just touched down.
+- `touch.touches` is a vector of active points in backend order (up to `MAX_TOUCHES`). Check each point's `changed` flag.
 
 ```cpp
-const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
+for (const auto& t : touch.touches) {
+    drawCircle(t.x, t.y, 20);
+}
 ```
 
 - `id` identifies each finger. It stays the same for one finger until that finger lifts, so you can use it as a key. It is an ID assigned by the OS, not a 0, 1, 2... index.
 - Coordinates start at the top-left of the window (0, 0). They use the same logical pixels as the mouse, and node transforms are not applied. Only with `WindowSettings::setPixelPerfect` do they become actual framebuffer pixels.
-- `pressure` is always 1.0. `touch.x()` and `touch.y()` are shortcuts for `touches[0]`.
+- `pressure` is always 1.0. `touch.x()` and `touch.y()` are shortcuts for `touches.front()`.
 - This function is called on the main thread, so you can work with nodes and GPU objects here.
 - By default, the first finger also acts as the mouse: right after this function, `mousePressed` is called with the left button at that finger's position, and it reaches nodes as well. Other fingers send touch events only. To turn this off, call `setTouchAsMouse(false)` in `setup()`. For how mouse events reach nodes and how `consumed` works, see `App::mousePressed`.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - Touch events themselves are never delivered to nodes, and they have no `consumed` flag.
 '''
 details.ja = '''
 - tcApp で `touchPressed(const TouchEventArgs& touch)` をオーバーライドします。書き方はこの 1 通りだけで、`(x, y, id)` 版はありません。
-- `touch.touches[0]` から `touch.touches[numTouches - 1]` に、いま画面に触れているすべての指が入っています（最大 32 本）。`changed` が true の指が、今回新しく触れた指です。
+- `touch.touches` はバックエンド順の有効な点の vector です（最大 `MAX_TOUCHES`）。各点の `changed` を確認します。
 
 ```cpp
-const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
+for (const auto& t : touch.touches) {
+    drawCircle(t.x, t.y, 20);
+}
 ```
 
 - `id` は指を見分けるための値です。同じ指であれば離れるまで変わらないため、キーとして使えます。OS が付けた ID なので、0, 1, 2... という連番ではありません。
 - 座標はウィンドウの左上が (0, 0) です。単位はマウスと同じ論理ピクセルで、ノードの変換は適用されません。`WindowSettings::setPixelPerfect` にしたときだけ、実際のフレームバッファのピクセルになります。
-- `pressure` は常に 1.0 です。`touch.x()` と `touch.y()` は `touches[0]` の座標を返します。
+- `pressure` は常に 1.0 です。`touch.x()` と `touch.y()` は `touches.front()` の座標を返します。
 - メインスレッドで呼ばれるため、ここでノードや GPU オブジェクトを操作できます。
 - デフォルトでは、1 本目の指がマウスとしても動作します。この関数のすぐあとに、その指の位置で左ボタンの `mousePressed` が呼ばれ、ノードにも届きます。2 本目以降の指はタッチイベントだけを送ります。不要な場合は `setup()` で `setTouchAsMouse(false)` にしてください。マウスがノードに届く仕組みと `consumed` については `App::mousePressed` を参照してください。
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - タッチイベントそのものはノードには届かず、`consumed` もありません。
 '''
 details.ko = '''
 - tcApp에서 `touchPressed(const TouchEventArgs& touch)`를 오버라이드합니다. 작성법은 이것 하나뿐이며 `(x, y, id)` 버전은 없습니다.
-- `touch.touches[0]`부터 `touch.touches[numTouches - 1]`까지 지금 화면에 닿아 있는 모든 손가락이 들어 있습니다(최대 32개). `changed`가 true인 손가락이 이번에 새로 닿은 손가락입니다.
+- `touch.touches`는 백엔드 순서의 활성 점 vector입니다(최대 `MAX_TOUCHES`). 각 점의 `changed`를 확인하세요.
 
 ```cpp
-const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
+for (const auto& t : touch.touches) {
+    drawCircle(t.x, t.y, 20);
+}
 ```
 
 - `id`는 손가락을 구별하기 위한 값입니다. 같은 손가락이면 뗄 때까지 바뀌지 않으므로 키로 사용할 수 있습니다. OS가 붙인 ID이므로 0, 1, 2... 같은 연번이 아닙니다.
 - 좌표는 윈도우 왼쪽 위가 (0, 0)입니다. 단위는 마우스와 같은 논리 픽셀이며 노드 변환은 적용되지 않습니다. `WindowSettings::setPixelPerfect`로 설정했을 때만 실제 프레임버퍼 픽셀이 됩니다.
-- `pressure`는 항상 1.0입니다. `touch.x()`와 `touch.y()`는 `touches[0]`의 좌표를 반환합니다.
+- `pressure`는 항상 1.0입니다. `touch.x()`와 `touch.y()`는 `touches.front()`의 좌표를 반환합니다.
 - 메인 스레드에서 호출되므로 여기서 노드나 GPU 객체를 다룰 수 있습니다.
 - 기본적으로 첫 번째 손가락은 마우스로도 동작합니다. 이 함수 바로 뒤에 그 손가락 위치에서 왼쪽 버튼의 `mousePressed`가 호출되고 노드에도 전달됩니다. 두 번째 이후의 손가락은 터치 이벤트만 보냅니다. 필요하지 않다면 `setup()`에서 `setTouchAsMouse(false)`로 설정하세요. 마우스가 노드에 전달되는 방식과 `consumed`는 `App::mousePressed`를 참고하세요.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - 터치 이벤트 자체는 노드에 전달되지 않으며 `consumed`도 없습니다.
 - 터치를 받을 수 있는 것은 `runApp()`으로 시작한 App뿐입니다. 핫 리로드 중인 App, 헤드리스 App, `Window::setApp` 윈도우에는 전달되지 않습니다.
 '''
@@ -1204,15 +1227,9 @@ platform_note.en = "Only iOS, Android and Web (including phone and tablet browse
 platform_note.ja = "タッチイベントが届くのは iOS / Android / Web（スマートフォンやタブレットのブラウザを含む）だけです。ネイティブの Windows / macOS / Linux では届きません。"
 platform_note.ko = "터치 이벤트는 iOS / Android / Web(스마트폰·태블릿 브라우저 포함)에서만 전달됩니다. 네이티브 Windows / macOS / Linux에서는 전달되지 않습니다."
 snippet = '''
-// tcApp.h (inside class tcApp : public App)
-void touchPressed(const TouchEventArgs& touch) override;
-map<int, Vec2> fingers;   // finger id -> position
-
-// tcApp.cpp
-void tcApp::touchPressed(const TouchEventArgs& touch) {
-    for (int i = 0; i < touch.numTouches; i++) {
-        const TouchPoint& t = touch.touches[i];
-        if (t.changed) fingers[t.id] = Vec2(t.x, t.y);   // fingers that just went down
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
     }
 }
 '''
@@ -1272,8 +1289,8 @@ map<int, Vec2> fingers;   // finger id -> position
 
 // tcApp.cpp
 void tcApp::touchReleased(const TouchEventArgs& touch) {
-    for (int i = 0; i < touch.numTouches; i++) {
-        if (touch.touches[i].changed) fingers.erase(touch.touches[i].id);
+    for (const auto& t : touch.touches) {
+        if (t.changed) fingers.erase(t.id);
     }
     if (touch.cancelled) fingers.clear();   // the OS took the touches (call, system gesture)
 }
@@ -6896,42 +6913,92 @@ description.en = "Fired when a touch moves."
 description.ja = "タッチが移動したときに発生する。"
 description.ko = "터치가 이동하면 발생한다."
 details.en = '''
-- Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. Inspect `touches[0..numTouches)` and each point's `changed` flag; at most 32 points are delivered.
+- Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. Inspect `e.touches` and each point's `changed` flag; at most 32 points are delivered.
 - Touch positions are window coordinates without node transforms; see `MouseEventArgs::pos` for coordinate units.
 - Runs before any primary-touch mouse drag generated by touch-as-mouse, which is enabled by default. `setTouchAsMouse(false)` disables that conversion; the arguments have neither `cancel` nor `consumed`.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ja = '''
-- Android、iOS、Web のマルチタッチ入力で、メインスレッドから `TouchEventArgs&` を渡します。`touches[0..numTouches)` と各点の `changed` を確認してください。渡す点は最大 32 個です。
+- Android、iOS、Web のマルチタッチ入力で、メインスレッドから `TouchEventArgs&` を渡します。`e.touches` と各点の `changed` を確認してください。渡す点は最大 32 個です。
 - タッチ位置はノードの変換を適用しないウィンドウ座標です。座標の単位は `MouseEventArgs::pos` を参照してください。
 - 既定で有効なタッチからマウスへの変換で、最初の指からマウスのドラッグが発生する場合は、その前に呼びます。`setTouchAsMouse(false)` で変換を無効にできます。引数に `cancel` と `consumed` はありません。
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ko = '''
-- Android, iOS 및 Web의 멀티터치 입력에서 메인 스레드가 `TouchEventArgs&`를 전달합니다. `touches[0..numTouches)`와 각 점의 `changed`를 확인하세요. 최대 32개 점을 전달합니다.
+- Android, iOS 및 Web의 멀티터치 입력에서 메인 스레드가 `TouchEventArgs&`를 전달합니다. `e.touches`와 각 점의 `changed`를 확인하세요. 최대 32개 점을 전달합니다.
 - 터치 위치는 노드 변환을 적용하지 않은 윈도우 좌표입니다. 좌표 단위는 `MouseEventArgs::pos`를 참조하세요.
 - 기본적으로 활성화된 터치의 마우스 변환에서 첫 번째 손가락의 마우스 드래그가 발생하면 그 전에 호출합니다. `setTouchAsMouse(false)`로 변환을 비활성화합니다. 인수에 `cancel`과 `consumed`는 없습니다.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 related = ["TouchEventArgs", "MouseEventArgs::pos", "setTouchAsMouse", "Event<T>"]
+snippet = '''
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+'''
 
 ["CoreEvents::touchPressed"]
 description.en = "Fired when a touch begins."
 description.ja = "タッチが開始したときに発生する。"
 description.ko = "터치가 시작되면 발생한다."
 details.en = '''
-- Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. Inspect `touches[0..numTouches)` and each point's `changed` flag; at most 32 points are delivered.
+- Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. Inspect `e.touches` and each point's `changed` flag; at most 32 points are delivered.
 - Touch positions are window coordinates without node transforms; see `MouseEventArgs::pos` for coordinate units.
 - Runs before any primary-touch left-button press generated by touch-as-mouse, which is enabled by default. `setTouchAsMouse(false)` disables that conversion; the arguments have neither `cancel` nor `consumed`.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ja = '''
-- Android、iOS、Web のマルチタッチ入力で、メインスレッドから `TouchEventArgs&` を渡します。`touches[0..numTouches)` と各点の `changed` を確認してください。渡す点は最大 32 個です。
+- Android、iOS、Web のマルチタッチ入力で、メインスレッドから `TouchEventArgs&` を渡します。`e.touches` と各点の `changed` を確認してください。渡す点は最大 32 個です。
 - タッチ位置はノードの変換を適用しないウィンドウ座標です。座標の単位は `MouseEventArgs::pos` を参照してください。
 - 既定で有効なタッチからマウスへの変換で、最初の指から左ボタンの押下が発生する場合は、その前に呼びます。`setTouchAsMouse(false)` で変換を無効にできます。引数に `cancel` と `consumed` はありません。
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ko = '''
-- Android, iOS 및 Web의 멀티터치 입력에서 메인 스레드가 `TouchEventArgs&`를 전달합니다. `touches[0..numTouches)`와 각 점의 `changed`를 확인하세요. 최대 32개 점을 전달합니다.
+- Android, iOS 및 Web의 멀티터치 입력에서 메인 스레드가 `TouchEventArgs&`를 전달합니다. `e.touches`와 각 점의 `changed`를 확인하세요. 최대 32개 점을 전달합니다.
 - 터치 위치는 노드 변환을 적용하지 않은 윈도우 좌표입니다. 좌표 단위는 `MouseEventArgs::pos`를 참조하세요.
 - 기본적으로 활성화된 터치의 마우스 변환에서 첫 번째 손가락의 왼쪽 버튼 누름이 발생하면 그 전에 호출합니다. `setTouchAsMouse(false)`로 변환을 비활성화합니다. 인수에 `cancel`과 `consumed`는 없습니다.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 related = ["TouchEventArgs", "MouseEventArgs::pos", "setTouchAsMouse", "Event<T>"]
+snippet = '''
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+'''
 
 ["CoreEvents::touchReleased"]
 description.en = "Fired when a touch ends or is canceled."
@@ -6939,20 +7006,45 @@ description.ja = "タッチが終了またはキャンセルされたときに�
 description.ko = "터치가 끝나거나 취소되면 발생한다."
 details.en = '''
 - Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. `args.cancelled` is true for system cancellation and false for a normal end.
-- Inspect `touches[0..numTouches)` and each point's `changed` flag; at most 32 points are delivered. Positions are window coordinates without node transforms; see `MouseEventArgs::pos` for units.
+- Inspect `e.touches` and each point's `changed` flag; at most 32 points are delivered. Positions are window coordinates without node transforms; see `MouseEventArgs::pos` for units.
 - Runs before any primary-touch left-button release generated by touch-as-mouse, which is enabled by default. `setTouchAsMouse(false)` disables that conversion; the arguments have neither `cancel` nor `consumed`.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ja = '''
 - Android、iOS、Web のマルチタッチ入力で、メインスレッドから `TouchEventArgs&` を渡します。システムによるキャンセルでは `args.cancelled` が true、通常の終了では false になります。
-- `touches[0..numTouches)` と各点の `changed` を確認してください。渡す点は最大 32 個です。位置はノードの変換を適用しないウィンドウ座標です。単位は `MouseEventArgs::pos` を参照してください。
+- `e.touches` と各点の `changed` を確認してください。渡す点は最大 32 個です。位置はノードの変換を適用しないウィンドウ座標です。単位は `MouseEventArgs::pos` を参照してください。
 - 既定で有効なタッチからマウスへの変換で、最初の指から左ボタンのリリースが発生する場合は、その前に呼びます。`setTouchAsMouse(false)` で変換を無効にできます。引数に `cancel` と `consumed` はありません。
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 details.ko = '''
 - Android, iOS 및 Web의 멀티터치 입력에서 메인 스레드가 `TouchEventArgs&`를 전달합니다. 시스템 취소에서는 `args.cancelled`가 true이며 정상 종료에서는 false입니다.
-- `touches[0..numTouches)`와 각 점의 `changed`를 확인하세요. 최대 32개 점을 전달합니다. 위치는 노드 변환을 적용하지 않은 윈도우 좌표입니다. 단위는 `MouseEventArgs::pos`를 참조하세요.
+- `e.touches`와 각 점의 `changed`를 확인하세요. 최대 32개 점을 전달합니다. 위치는 노드 변환을 적용하지 않은 윈도우 좌표입니다. 단위는 `MouseEventArgs::pos`를 참조하세요.
 - 기본적으로 활성화된 터치의 마우스 변환에서 첫 번째 손가락의 왼쪽 버튼 해제가 발생하면 그 전에 호출합니다. `setTouchAsMouse(false)`로 변환을 비활성화합니다. 인수에 `cancel`과 `consumed`는 없습니다.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 '''
 related = ["TouchEventArgs", "TouchEventArgs::cancelled", "MouseEventArgs::pos", "setTouchAsMouse", "Event<T>"]
+snippet = '''
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+'''
 
 ["CoreEvents::update"]
 keywords = ["listen", "EventListener", "before App update", "per window", "poll"]
@@ -35566,31 +35658,95 @@ related = ["Direction"]
 
 ["TouchEventArgs"]
 keywords = ["finger", "tap", "multitouch", "gesture", "mobile"]
-description.en = "Carries multitouch event data."
-description.ja = "マルチタッチイベントの情報を保持する。"
-description.ko = "멀티터치 이벤트 정보를 담는다."
+description.en = "Carries active multitouch points in backend order for range-for iteration."
+description.ja = "バックエンド順の有効なマルチタッチ点を保持し、範囲 for で走査できる。"
+description.ko = "백엔드 순서의 활성 멀티터치 점을 담아 범위 for로 순회할 수 있다."
 details.en = '''
-- Used by `events().touchPressed`, `events().touchMoved`, and `events().touchReleased` on Android, iOS, and touch-capable Web browsers.
-- Read the `numTouches` valid elements of `touches`; up to `MAX_TOUCHES == 32` points are delivered. Points released or canceled by the current event can also be included.
-- `x()`, `y()`, and `id()` read the first array element, which is not necessarily a point whose `changed` flag is `true`.
+- `touches` is a vector of active `TouchPoint` values in backend order. `MAX_TOUCHES` is the backend bound, not the vector size; released or canceled points can be included in the current event.
+- `numTouches` was removed in v0.9.0; use `e.touches.size()`.
+
+```cpp
+auto count = e.touches.size();
+```
+
+- `x()`, `y()`, and `id()` read the first vector element, which is not necessarily a point whose `changed` flag is `true`.
 - Touch events are delivered before mouse events generated from the primary touch. `setTouchAsMouse(false)` disables that mouse generation without disabling touch events.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - See `Event<T>` for listener registration, lifetime, priority arguments, and delivery threads.
+
+```cpp
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+```
 '''
 details.ja = '''
-- Android、iOS、タッチ対応の Web ブラウザーで、`events().touchPressed`、`events().touchMoved`、`events().touchReleased` が使用します。
-- `touches` のうち `numTouches` 個が有効です。最大 `MAX_TOUCHES == 32` 点が届きます。今回のイベントで離された点やキャンセルされた点も含まれる場合があります。
-- `x()`、`y()`、`id()` は配列の最初の要素を読みます。この点の `changed` が `true` とは限りません。
+- `touches` はバックエンド順の有効な `TouchPoint` の vector です。`MAX_TOUCHES` はバックエンドの上限で、vector のサイズではありません。今回離された点やキャンセルされた点も含まれます。
+- v0.9.0 で `numTouches` は削除されました。`e.touches.size()` を使います。
+
+```cpp
+auto count = e.touches.size();
+```
+
+- `x()`、`y()`、`id()` は vector の最初の要素を読みます。この点の `changed` が `true` とは限りません。
 - タッチイベントは、最初に触れた指から生成されるマウスイベントより先に届きます。`setTouchAsMouse(false)` はタッチイベントを止めずに、このマウスイベントの生成を無効にします。
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - リスナーの登録、寿命、優先度引数、実行スレッドについては `Event<T>` を参照してください。
+
+```cpp
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+```
 '''
 details.ko = '''
-- Android, iOS, 터치를 지원하는 Web 브라우저에서 `events().touchPressed`, `events().touchMoved`, `events().touchReleased`가 사용합니다.
-- `touches`에서 `numTouches`개 요소가 유효합니다. 최대 `MAX_TOUCHES == 32`개 점이 전달됩니다. 현재 이벤트에서 해제되거나 취소된 점도 포함될 수 있습니다.
-- `x()`, `y()`, `id()`는 배열의 첫 번째 요소를 읽습니다. 이 점의 `changed`가 반드시 `true`인 것은 아닙니다.
+- `touches`는 백엔드 순서의 활성 `TouchPoint` vector입니다. `MAX_TOUCHES`는 백엔드 한도이며 vector 크기가 아닙니다. 현재 이벤트에서 해제되거나 취소된 점도 포함됩니다.
+- v0.9.0에서 `numTouches`가 제거되었습니다. `e.touches.size()`를 사용하세요.
+
+```cpp
+auto count = e.touches.size();
+```
+
+- `x()`, `y()`, `id()`는 vector의 첫 번째 요소를 읽습니다. 이 점의 `changed`가 반드시 `true`인 것은 아닙니다.
 - 터치 이벤트는 처음 닿은 손가락에서 생성되는 마우스 이벤트보다 먼저 전달됩니다. `setTouchAsMouse(false)`는 터치 이벤트를 중단하지 않고 이 마우스 이벤트 생성을 비활성화합니다.
+
+```cpp
+void tcApp::setup() {
+    setTouchAsMouse(false);
+}
+```
 - 리스너 등록, 수명, 우선순위 인자, 실행 스레드는 `Event<T>`를 참조하세요.
+
+```cpp
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+```
 '''
 related = ["TouchPoint", "setTouchAsMouse", "Event<T>"]
+snippet = '''
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+'''
 
 ["TouchEventArgs::cancelled"]
 description.en = "Identifies a touch release caused by system cancellation."
@@ -35614,71 +35770,104 @@ description.en = "Returns the first touch point's identifier."
 description.ja = "最初のタッチ点の識別子を返す。"
 description.ko = "첫 번째 터치 점의 식별자를 반환한다."
 details.en = '''
-- Call `e.id()` to return `touches[0].id` as an `int` when `numTouches > 0`, or `0` otherwise.
+- Call `e.id()` to return `touches.front().id` as an `int` when `!e.touches.empty()`, or `0` otherwise.
 - This method does not search for a changed point; see `TouchPoint::id` for identifier semantics.
 '''
 details.ja = '''
-- `e.id()` は、`numTouches > 0` のとき `touches[0].id` を int 型で返し、それ以外は `0` を返します。
+- `e.id()` は、`!e.touches.empty()` のとき `touches.front().id` を int 型で返し、それ以外は `0` を返します。
 - このメソッドは変化した点を検索しません。識別子の意味については `TouchPoint::id` を参照してください。
 '''
 details.ko = '''
-- `e.id()`는 `numTouches > 0`이면 `touches[0].id`를 int로 반환하고, 그렇지 않으면 `0`을 반환합니다.
+- `e.id()`는 `!e.touches.empty()`이면 `touches.front().id`를 int로 반환하고, 그렇지 않으면 `0`을 반환합니다.
 - 이 메서드는 변경된 점을 검색하지 않습니다. 식별자의 의미는 `TouchPoint::id`를 참조하세요.
 '''
 related = ["TouchPoint::id"]
 
-["TouchEventArgs::numTouches"]
-description.en = "Counts the valid touch points in the event."
-description.ja = "イベント内の有効なタッチ点の数を表す。"
-description.ko = "이벤트에 포함된 유효한 터치 점의 수를 나타낸다."
-details.en = '''
-- This integer defaults to `0`; read `touches[i]` only for `0 <= i && i < numTouches`.
-- Platform input is limited to `MAX_TOUCHES == 32` points per event; additional points are omitted.
-'''
-details.ja = '''
-- int 型で、デフォルトは `0` です。`touches[i]` は `0 <= i && i < numTouches` の範囲だけ読み取ってください。
-- プラットフォームからの入力はイベントごとに最大 `MAX_TOUCHES == 32` 点に制限され、超過した点は省かれます。
-'''
-details.ko = '''
-- int 형식이며 기본값은 `0`입니다. `touches[i]`는 `0 <= i && i < numTouches` 범위에서만 읽으세요.
-- 플랫폼 입력은 이벤트당 최대 `MAX_TOUCHES == 32`개 점으로 제한되며 초과한 점은 생략됩니다.
-'''
 
 ["TouchEventArgs::touches"]
 description.en = "Stores the event's touch points."
 description.ja = "イベントのタッチ点を格納する。"
 description.ko = "이벤트의 터치 점을 저장한다."
 details.en = '''
-- A fixed array of `TouchPoint` with `MAX_TOUCHES == 32` elements; only the first `numTouches` elements are valid for the event.
-- The array can include both changed and unchanged points, including points released or canceled by the event; check each point's `changed` flag.
-- Use `TouchPoint::id` to identify a touch across events rather than its array index.
+- `touches` is a vector of active `TouchPoint` values in backend order. `MAX_TOUCHES` is the backend bound, not the vector size; released or canceled points can be included in the current event.
+- `numTouches` was removed in v0.9.0; use `e.touches.size()`.
+
+```cpp
+auto count = e.touches.size();
+```
+
+- The vector can include both changed and unchanged points, including points released or canceled by the event; check each point's `changed` flag.
+- Use `TouchPoint::id` to identify a touch across events rather than its vector index.
+
+```cpp
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+```
 '''
 details.ja = '''
-- `MAX_TOUCHES == 32` 要素の固定長 `TouchPoint` 配列です。イベントで有効なのは先頭の `numTouches` 要素だけです。
-- 配列には変化した点と変化していない点の両方が含まれる場合があり、今回離された点やキャンセルされた点も含まれます。各点の `changed` を確認してください。
-- イベントをまたいでタッチを識別するときは、配列のインデックスではなく `TouchPoint::id` を使用します。
+- `touches` はバックエンド順の有効な `TouchPoint` の vector です。`MAX_TOUCHES` はバックエンドの上限で、vector のサイズではありません。今回離された点やキャンセルされた点も含まれます。
+- v0.9.0 で `numTouches` は削除されました。`e.touches.size()` を使います。
+
+```cpp
+auto count = e.touches.size();
+```
+
+- vector には変化した点と変化していない点の両方が含まれる場合があり、今回離された点やキャンセルされた点も含まれます。各点の `changed` を確認してください。
+- イベントをまたいでタッチを識別するときは、vector のインデックスではなく `TouchPoint::id` を使用します。
+
+```cpp
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+```
 '''
 details.ko = '''
-- `MAX_TOUCHES == 32`개 요소를 가진 고정 길이 `TouchPoint` 배열입니다. 이벤트에서 유효한 요소는 처음 `numTouches`개뿐입니다.
-- 배열에는 변경된 점과 변경되지 않은 점이 함께 포함될 수 있으며, 현재 이벤트에서 해제되거나 취소된 점도 포함됩니다. 각 점의 `changed`를 확인하세요.
-- 이벤트 간에 터치를 식별할 때는 배열 인덱스 대신 `TouchPoint::id`를 사용합니다.
+- `touches`는 백엔드 순서의 활성 `TouchPoint` vector입니다. `MAX_TOUCHES`는 백엔드 한도이며 vector 크기가 아닙니다. 현재 이벤트에서 해제되거나 취소된 점도 포함됩니다.
+- v0.9.0에서 `numTouches`가 제거되었습니다. `e.touches.size()`를 사용하세요.
+
+```cpp
+auto count = e.touches.size();
+```
+
+- vector에는 변경된 점과 변경되지 않은 점이 함께 포함될 수 있으며, 현재 이벤트에서 해제되거나 취소된 점도 포함됩니다. 각 점의 `changed`를 확인하세요.
+- 이벤트 간에 터치를 식별할 때는 vector 인덱스 대신 `TouchPoint::id`를 사용합니다.
+
+```cpp
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+```
 '''
 related = ["TouchPoint", "TouchPoint::changed", "TouchPoint::id"]
+snippet = '''
+void tcApp::touchPressed(const TouchEventArgs& e) {
+    for (const auto& touch : e.touches) {
+        drawCircle(touch.x, touch.y, 20);
+    }
+}
+'''
 
 ["TouchEventArgs::x"]
 description.en = "Returns the first touch point's X coordinate."
 description.ja = "最初のタッチ点の X 座標を返す。"
 description.ko = "첫 번째 터치 점의 X 좌표를 반환한다."
 details.en = '''
-- Call `e.x()` to return `touches[0].x` as a `float` when `numTouches > 0`, or `0.0f` otherwise.
+- Call `e.x()` to return `touches.front().x` as a `float` when `!e.touches.empty()`, or `0.0f` otherwise.
 - This method does not search for a changed point; see `TouchPoint::x` for coordinates and units.
 '''
 details.ja = '''
-- `e.x()` は、`numTouches > 0` のとき `touches[0].x` を float 型で返し、それ以外は `0.0f` を返します。
+- `e.x()` は、`!e.touches.empty()` のとき `touches.front().x` を float 型で返し、それ以外は `0.0f` を返します。
 - このメソッドは変化した点を検索しません。座標と単位については `TouchPoint::x` を参照してください。
 '''
 details.ko = '''
-- `e.x()`는 `numTouches > 0`이면 `touches[0].x`를 float로 반환하고, 그렇지 않으면 `0.0f`를 반환합니다.
+- `e.x()`는 `!e.touches.empty()`이면 `touches.front().x`를 float로 반환하고, 그렇지 않으면 `0.0f`를 반환합니다.
 - 이 메서드는 변경된 점을 검색하지 않습니다. 좌표와 단위는 `TouchPoint::x`를 참조하세요.
 '''
 related = ["TouchPoint::x"]
@@ -35688,15 +35877,15 @@ description.en = "Returns the first touch point's Y coordinate."
 description.ja = "最初のタッチ点の Y 座標を返す。"
 description.ko = "첫 번째 터치 점의 Y 좌표를 반환한다."
 details.en = '''
-- Call `e.y()` to return `touches[0].y` as a `float` when `numTouches > 0`, or `0.0f` otherwise.
+- Call `e.y()` to return `touches.front().y` as a `float` when `!e.touches.empty()`, or `0.0f` otherwise.
 - This method does not search for a changed point; see `TouchPoint::y` for coordinates and units.
 '''
 details.ja = '''
-- `e.y()` は、`numTouches > 0` のとき `touches[0].y` を float 型で返し、それ以外は `0.0f` を返します。
+- `e.y()` は、`!e.touches.empty()` のとき `touches.front().y` を float 型で返し、それ以外は `0.0f` を返します。
 - このメソッドは変化した点を検索しません。座標と単位については `TouchPoint::y` を参照してください。
 '''
 details.ko = '''
-- `e.y()`는 `numTouches > 0`이면 `touches[0].y`를 float로 반환하고, 그렇지 않으면 `0.0f`를 반환합니다.
+- `e.y()`는 `!e.touches.empty()`이면 `touches.front().y`를 float로 반환하고, 그렇지 않으면 `0.0f`를 반환합니다.
 - 이 메서드는 변경된 점을 검색하지 않습니다. 좌표와 단위는 `TouchPoint::y`를 참조하세요.
 '''
 related = ["TouchPoint::y"]
@@ -35729,15 +35918,15 @@ description.ja = "この点が今回のタッチ操作の対象かを表す。"
 description.ko = "이 점이 현재 터치 동작의 대상인지 나타낸다."
 details.en = '''
 - This boolean copies the platform's per-point changed flag and defaults to `false`.
-- Check `e.touches[i].changed` to distinguish affected points from other points included in the event.
+- Check `touch.changed` to distinguish affected points from other points included in the event.
 '''
 details.ja = '''
 - プラットフォームの各点の変化フラグをコピーする bool 型の値で、デフォルトは `false` です。
-- `e.touches[i].changed` を確認すると、今回の操作の対象となった点を、同じイベントに含まれるほかの点と区別できます。
+- `touch.changed` を確認すると、今回の操作の対象となった点を、同じイベントに含まれるほかの点と区別できます。
 '''
 details.ko = '''
 - 플랫폼의 점별 변경 플래그를 복사하는 bool 값이며 기본값은 `false`입니다.
-- `e.touches[i].changed`를 확인하면 현재 동작의 대상인 점을 같은 이벤트에 포함된 다른 점과 구분할 수 있습니다.
+- `touch.changed`를 확인하면 현재 동작의 대상인 점을 같은 이벤트에 포함된 다른 점과 구분할 수 있습니다.
 '''
 
 ["TouchPoint::id"]
@@ -55896,19 +56085,19 @@ description.ko = "터치 입력에서 마우스 이벤트도 생성할지 설정
 details.en = '''
 - Enabled by default on all platforms; pass `false` to disable mouse events generated from touch input, including on Android and iOS.
 - Only the first finger drives the left mouse button: touch begin generates a press, movement generates a drag, and ending or canceling that touch generates a release.
-- The finger used for mouse input is identified by its ID, so changing the order of `touches` does not switch it to `touches[0]`.
+- The finger used for mouse input is identified by its ID, so changing the order of `touches` does not switch it to `touches.front()`.
 - Touch events are delivered before the corresponding mouse events and remain enabled when this setting is `false`.
 '''
 details.ja = '''
 - すべてのプラットフォームで既定は有効です。Android や iOS を含め、タッチ入力から生成するマウスイベントを無効にするには `false` を渡します。
 - 最初の指だけがマウスの左ボタンを操作します。タッチ開始でプレス、移動でドラッグ、そのタッチの終了またはキャンセルでリリースを生成します。
-- マウス入力に使う指は ID で識別するため、`touches` の順番が変わっても `touches[0]` の指に切り替わりません。
+- マウス入力に使う指は ID で識別するため、`touches` の順番が変わっても `touches.front()` の指に切り替わりません。
 - タッチイベントは対応するマウスイベントより先に呼ばれ、この設定が `false` でも有効です。
 '''
 details.ko = '''
 - 모든 플랫폼에서 기본적으로 활성화합니다. Android와 iOS를 포함하여 터치 입력에서 생성하는 마우스 이벤트를 비활성화하려면 `false`를 전달합니다.
 - 첫 번째 손가락만 마우스 왼쪽 버튼을 조작합니다. 터치 시작 시 누름, 이동 시 드래그, 해당 터치의 종료 또는 취소 시 놓음 이벤트를 생성합니다.
-- 마우스 입력에 사용하는 손가락은 ID로 식별하므로 `touches`의 순서가 바뀌어도 `touches[0]`의 손가락으로 바뀌지 않습니다.
+- 마우스 입력에 사용하는 손가락은 ID로 식별하므로 `touches`의 순서가 바뀌어도 `touches.front()`의 손가락으로 바뀌지 않습니다.
 - 터치 이벤트는 해당 마우스 이벤트보다 먼저 전달하며, 이 설정이 `false`여도 활성 상태를 유지합니다.
 '''
 related = ["getTouchAsMouse"]
