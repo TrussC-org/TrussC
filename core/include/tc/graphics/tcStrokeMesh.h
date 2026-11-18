@@ -674,6 +674,25 @@ inline void endStroke(bool close) {
     wctx.strokeStarted = false;
 }
 
+class StrokeScope;
+TC_LUA_SKIP [[nodiscard]] inline StrokeScope scopedStroke(bool close = false);
+
+class [[nodiscard]] TC_LUA_SKIP StrokeScope {
+public:
+    ~StrokeScope() { if (!internal::frameworkShutdown()) endStroke(close_); }
+    StrokeScope(const StrokeScope&) = delete;
+    StrokeScope& operator=(const StrokeScope&) = delete;
+    StrokeScope(StrokeScope&&) = delete;
+    StrokeScope& operator=(StrokeScope&&) = delete;
+
+private:
+    explicit StrokeScope(bool close) : close_(close) { beginStroke(); }
+    friend StrokeScope scopedStroke(bool close);
+    bool close_;
+};
+
+TC_LUA_SKIP [[nodiscard]] inline StrokeScope scopedStroke(bool close) { return StrokeScope(close); }
+
 // ===========================================================================
 // drawStroke() - Draw a single line segment with stroke style
 // ===========================================================================

@@ -2285,6 +2285,85 @@ bool retirementFailureProbe() {
     return ok;
 }
 
+// #1566: exercise the real guards with the existing windowless GPU backend.
+bool raiiPairsProbe() {
+    DrawingWindowState drawing;
+    auto& window = drawing.context;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    window.swapchainTarget.resources().context = sgl_default_context();
+    window.acquireSwapchain = dummySwapchain;
+    Fbo fbo;
+    fbo.allocate(32, 32);
+    Shader shader, other;
+    bool ok = shader.load(descriptor) && other.load(descriptor);
+    auto earlyFbo = [&] { auto f = fbo.scoped(0, 0, 0); return; };
+    earlyFbo();
+    ok &= !fbo.isActive();
+    auto earlyShader = [&] { auto guard = shader.scoped(); return; };
+    earlyShader();
+    ok &= window.shaderStack.empty();
+    auto points = [] { vertex(4, 4); vertex(20, 4); vertex(20, 20); };
+    noFill();
+    for (bool stroke : {false, true}) {
+        if (stroke) beginStroke(); else beginShape();
+        points();
+        int start = sgl_num_vertices();
+        if (stroke) endStroke(true); else endShape(true);
+        const int expected = sgl_num_vertices() - start;
+        start = sgl_num_vertices();
+        auto early = [&] {
+            if (stroke) { auto guard = scopedStroke(true); points(); return; }
+            auto guard = scopedShape(true);
+            points();
+            return;
+        };
+        early();
+        ok &= !window.shapeStarted && !window.strokeStarted && expected > 0 &&
+              sgl_num_vertices() - start == expected;
+    }
+    int warnings = 0;
+    std::string warning;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning) { ++warnings; warning = event.message; }
+    });
+    { auto guard = fbo.scoped(); fbo.end(); }
+    ok &= !fbo.isActive();
+    { auto guard = shader.scoped(); shader.end(); }
+    ok &= window.shaderStack.empty();
+    int count = 0;
+    {
+        auto guard = scopedShape();
+        points();
+        const int start = sgl_num_vertices();
+        endShape();
+        count = sgl_num_vertices();
+        ok &= count > start;
+    }
+    ok &= !window.shapeStarted && sgl_num_vertices() == count;
+    {
+        auto guard = scopedStroke();
+        points();
+        const int start = sgl_num_vertices();
+        endStroke();
+        count = sgl_num_vertices();
+        ok &= count > start;
+    }
+    ok &= !window.strokeStarted && sgl_num_vertices() == count && warnings == 0;
+    { auto guard = shader.scoped(); shader.end(); other.begin(); }
+    ok &= warnings == 1 && warning.find("end() called on wrong shader") != std::string::npos &&
+          window.shaderStack.size() == 1 && window.shaderStack.back() == &other;
+    other.end();
+    ok &= window.shaderStack.empty();
+    fill();
+    window.swapchainTarget.endPass();
+    sg_commit();
+    sgl_tc_context_reset(sgl_default_context());
+    internal::currentWindowCtx() = previous;
+    std::printf("RAII PAIRS early_return_close_manual_end_expected_warning=%d\n", ok);
+    return ok;
+}
+
 }
 int main(int argc, char** argv) {
     if (argc == 2 && std::strcmp(argv[1], "--native-allocation-check") == 0) {
@@ -2315,6 +2394,8 @@ int main(int argc, char** argv) {
     if (!lateShader.load(descriptor)) return 1;
     sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied;
     hooks.apply_viewport = viewportApplied; hooks.apply_scissor_rect = scissorApplied; sg_install_trace_hooks(&hooks);
+    if (!raiiPairsProbe()) return 1;
+    internal::currentWindowCtx() = &fixture;
     const bool textureUploads = textureUploadLayoutProbe();
     const bool closedWindows = closedWindowContextProbe();
     if (argc > 1 && std::strcmp(argv[1],"--closed-window") == 0) return closedWindows ? 0 : 1;

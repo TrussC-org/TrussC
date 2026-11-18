@@ -14,6 +14,8 @@
 
 namespace trussc {
 
+class FboScope;
+
 // Forward declaration
 class Fbo;
 namespace internal { class FontAtlasManager; }
@@ -360,6 +362,9 @@ public:
         if (!target_.activation) return;
         internal::popTarget(target_, target_.activation);
     }
+
+    TC_LUA_SKIP [[nodiscard]] FboScope scoped();
+    TC_LUA_SKIP [[nodiscard]] FboScope scoped(float r, float g, float b, float a = 1.0f);
 
     // Always read RGBA8, whatever the Fbo format: clamp to 0–1 and quantise
     // to 8 bits, round to nearest (CPU ties round up; native desktop GL may
@@ -1003,5 +1008,27 @@ private:
     bool readPixelsPlatform(unsigned char* pixels, bool reportError = true) const;
     bool readPixelsFloatPlatform(float* pixels) const;
 };
+
+// Scope-bound form of begin()/end(); the explicit pair remains the main form.
+class [[nodiscard]] TC_LUA_SKIP FboScope {
+public:
+    ~FboScope() { if (!internal::frameworkShutdown()) owner_.end(); }
+    FboScope(const FboScope&) = delete;
+    FboScope& operator=(const FboScope&) = delete;
+    FboScope(FboScope&&) = delete;
+    FboScope& operator=(FboScope&&) = delete;
+
+private:
+    explicit FboScope(Fbo& owner) : owner_(owner) { owner_.begin(); }
+    FboScope(Fbo& owner, float r, float g, float b, float a) : owner_(owner) { owner_.begin(r, g, b, a); }
+    friend FboScope Fbo::scoped();
+    friend FboScope Fbo::scoped(float r, float g, float b, float a);
+    Fbo& owner_;
+};
+
+TC_LUA_SKIP [[nodiscard]] inline FboScope Fbo::scoped() { return FboScope(*this); }
+TC_LUA_SKIP [[nodiscard]] inline FboScope Fbo::scoped(float r, float g, float b, float a) {
+    return FboScope(*this, r, g, b, a);
+}
 
 } // namespace trussc

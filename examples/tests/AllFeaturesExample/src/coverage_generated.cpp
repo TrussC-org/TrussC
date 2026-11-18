@@ -244,6 +244,8 @@ static void cover_graphics_shapes() {
     (void)getBitmapStringWidth(af::val<const std::string>());
     (void)getTextAlignH();
     (void)getTextAlignV();
+    (void)scopedShape(af::val<bool>());
+    (void)scopedStroke(af::val<bool>());
     (void)setBitmapLineHeight(af::val<float>());
     (void)setFps(af::val<float>());
     (void)setTextAlign(af::val<Direction>(), af::val<Direction>());
@@ -1572,6 +1574,8 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().readStencil(af::val<Pixels>());
 #endif
         (void)af::val<const Fbo>().save(af::val<const fs::path>());
+        (void)af::val<Fbo>().scoped();
+        (void)af::val<Fbo>().scoped(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
         (void)af::val<Fbo>().setFilter(af::val<TextureFilter>());
         (void)af::val<Fbo>().setMagFilter(af::val<TextureFilter>());
@@ -1741,6 +1745,7 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
         (void)af::val<FullscreenShader>().end();
         (void)af::val<const FullscreenShader>().isLoaded();
         (void)af::val<FullscreenShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<FullscreenShader>().scoped();
         (void)af::val<FullscreenShader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
@@ -3730,6 +3735,7 @@ struct Cover_Shader : af::Scope<Shader> {
         (void)af::val<Shader>().end();
         (void)af::val<const Shader>().isLoaded();
         (void)af::val<Shader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<Shader>().scoped();
         (void)af::val<Shader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
