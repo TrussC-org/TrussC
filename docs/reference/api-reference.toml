@@ -43282,40 +43282,40 @@ description.en = "Reads this window’s position in OS screen coordinates; use i
 description.ja = "デスクトップで装飾込みの外枠位置が必要なときに使う、OS スクリーン座標での現在位置です。取得できない場合は (-1, -1) を返します。"
 description.ko = "데스크톱에서 장식을 포함한 외곽 프레임 위치가 필요할 때 OS 스크린 좌표로 현재 위치를 읽습니다. 조회할 수 없으면 (-1, -1)을 반환합니다."
 details.en = '''
-- Web, iOS and Android always return `(-1, -1)`. A closed or not-yet-open Window, Linux without X11, and native failures on Windows/macOS also return `(-1, -1)`. Closed-window calls, Windows/macOS native failures and unsupported-platform calls warn each time. Check that the window is open before reading:
+- Web, iOS and Android always return `(-1, -1)`, and so does a closed or not-yet-open Window. After checking `Platform::isDesktop()` and `isOpen()`, `(-1, -1)` comes back only on Linux without X11 or when the OS call fails, and then a warning is logged:
 ```cpp
 void tcApp::setup() {
     Window* window = getWindow();
-    if (window && window->isOpen()) {
-        logNotice() << window->getPosition().x;
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = window->getPosition();
     }
 }
 ```
-- `isOpen()` checks the window lifetime, not native query success. There is no public API that distinguishes a failed query from a valid position exactly at `(-1, -1)`; do not use that value alone as a success check.
+- No public API tells a failed query apart from a real position at `(-1, -1)`, so don't use that value alone as a success check.
 '''
 details.ja = '''
-- Web・iOS・Android は常に `(-1, -1)` を返します。閉じた、またはまだ開いていない Window、X11 のない Linux、Windows/macOS のネイティブ取得失敗も `(-1, -1)` を返します。閉じたウィンドウ、Windows/macOS のネイティブ取得失敗、非対応プラットフォームでは呼び出しごとに警告します。取得前にウィンドウが開いていることを確認します：
+- Web・iOS・Android は常に `(-1, -1)` を返し、閉じた、またはまだ開いていない Window も同じです。`Platform::isDesktop()` と `isOpen()` を確かめれば、`(-1, -1)` が返るのは X11 のない Linux と、OS の呼び出しが失敗したときだけです。そのときは警告が出ます：
 ```cpp
 void tcApp::setup() {
     Window* window = getWindow();
-    if (window && window->isOpen()) {
-        logNotice() << window->getPosition().x;
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = window->getPosition();
     }
 }
 ```
-- `isOpen()` はウィンドウの寿命を確認し、ネイティブ取得の成功は保証しません。取得失敗と実際の位置 `(-1, -1)` を区別する公開 API はないため、この値だけで成功を判定できません。
+- 取得の失敗と実際の位置 `(-1, -1)` を区別する公開 API はないため、この値だけで成功を判定しないでください。
 '''
 details.ko = '''
-- Web, iOS, Android는 항상 `(-1, -1)`을 반환합니다. 닫혔거나 아직 열리지 않은 Window, X11이 없는 Linux, Windows/macOS의 네이티브 조회 실패도 `(-1, -1)`을 반환합니다. 닫힌 윈도우, Windows/macOS 네이티브 조회 실패, 미지원 플랫폼에서는 호출마다 경고합니다. 읽기 전에 윈도우가 열려 있는지 확인하세요:
+- Web, iOS, Android는 항상 `(-1, -1)`을 반환하며, 닫혔거나 아직 열리지 않은 Window도 마찬가지입니다. `Platform::isDesktop()`과 `isOpen()`을 확인하면 `(-1, -1)`이 반환되는 경우는 X11이 없는 Linux와 OS 호출이 실패한 경우뿐입니다. 이때는 경고가 출력됩니다:
 ```cpp
 void tcApp::setup() {
     Window* window = getWindow();
-    if (window && window->isOpen()) {
-        logNotice() << window->getPosition().x;
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = window->getPosition();
     }
 }
 ```
-- `isOpen()`은 윈도우 수명을 확인하며 네이티브 조회 성공을 보장하지 않습니다. 조회 실패와 실제 위치 `(-1, -1)`을 구별하는 공개 API가 없으므로 이 값만으로 성공 여부를 판단할 수 없습니다.
+- 조회 실패와 실제 위치 `(-1, -1)`을 구별하는 공개 API가 없으므로 이 값만으로 성공 여부를 판단하지 마세요.
 '''
 related = ["Window::setPosition"]
 
@@ -50777,46 +50777,46 @@ description.en = "Returns the current window’s position in OS screen coordinat
 description.ja = "現在のウィンドウ位置を OS スクリーン座標で返します。取得できない場合は (-1, -1) を返します。"
 description.ko = "현재 윈도우 위치를 OS 스크린 좌표로 반환합니다. 조회할 수 없으면 (-1, -1)을 반환합니다."
 details.en = '''
-- Web, iOS and Android always return `(-1, -1)`. A closed or not-yet-open Window, Linux without X11, and native failures on Windows/macOS also return `(-1, -1)`. Closed-window calls, Windows/macOS native failures and unsupported-platform calls warn each time. Check that the window is open before reading:
+- Web, iOS and Android always return `(-1, -1)`, and so does a closed or not-yet-open Window. After checking `Platform::isDesktop()` and `isOpen()`, `(-1, -1)` comes back only on Linux without X11 or when the OS call fails, and then a warning is logged:
 ```cpp
 void tcApp::setup() {
     Window* window = getWindow();
-    if (window && window->isOpen()) {
-        logNotice() << getWindowPosition().x;
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = getWindowPosition();
     }
 }
 ```
-- `isOpen()` checks the window lifetime, not native query success. There is no public API that distinguishes a failed query from a valid position exactly at `(-1, -1)`; do not use that value alone as a success check.
+- No public API tells a failed query apart from a real position at `(-1, -1)`, so don't use that value alone as a success check.
 - Position is the decorated frame top-left in OS screen coordinates relative to the primary screen top-left; negative coordinates are allowed. macOS uses screen points, Windows native screen coordinates, and X11 device coordinates. These are separate from logical content sizes and framebuffer pixels.
 - Move first, then enter fullscreen on that screen. The getter reports the real WM position, including clamping.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and returns 0 (see `events`).
 '''
 details.ja = '''
-- Web・iOS・Android は常に `(-1, -1)` を返します。閉じた、またはまだ開いていない Window、X11 のない Linux、Windows/macOS のネイティブ取得失敗も `(-1, -1)` を返します。閉じたウィンドウ、Windows/macOS のネイティブ取得失敗、非対応プラットフォームでは呼び出しごとに警告します。取得前にウィンドウが開いていることを確認します：
+- Web・iOS・Android は常に `(-1, -1)` を返し、閉じた、またはまだ開いていない Window も同じです。`Platform::isDesktop()` と `isOpen()` を確かめれば、`(-1, -1)` が返るのは X11 のない Linux と、OS の呼び出しが失敗したときだけです。そのときは警告が出ます：
 ```cpp
 void tcApp::setup() {
     Window* window = getWindow();
-    if (window && window->isOpen()) {
-        logNotice() << getWindowPosition().x;
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = getWindowPosition();
     }
 }
 ```
-- `isOpen()` はウィンドウの寿命を確認し、ネイティブ取得の成功は保証しません。取得失敗と実際の位置 `(-1, -1)` を区別する公開 API はないため、この値だけで成功を判定できません。
+- 取得の失敗と実際の位置 `(-1, -1)` を区別する公開 API はないため、この値だけで成功を判定しないでください。
 - 位置はプライマリ画面左上を原点とする OS 画面座標で、装飾込み外枠の左上です。負座標も指定できます。macOS は画面のポイント、Windows はネイティブ画面座標、X11 はデバイス座標です。内容の論理サイズやフレームバッファのピクセルとは別です。
 - 移動してから fullscreen にすると移動先の画面を使います。取得値は WM の丸めも含む実位置です。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して 0 を返します（`events` を参照）。
 '''
 details.ko = '''
-- Web, iOS, Android는 항상 `(-1, -1)`을 반환합니다. 닫혔거나 아직 열리지 않은 Window, X11이 없는 Linux, Windows/macOS의 네이티브 조회 실패도 `(-1, -1)`을 반환합니다. 닫힌 윈도우, Windows/macOS 네이티브 조회 실패, 미지원 플랫폼에서는 호출마다 경고합니다. 읽기 전에 윈도우가 열려 있는지 확인하세요:
+- Web, iOS, Android는 항상 `(-1, -1)`을 반환하며, 닫혔거나 아직 열리지 않은 Window도 마찬가지입니다. `Platform::isDesktop()`과 `isOpen()`을 확인하면 `(-1, -1)`이 반환되는 경우는 X11이 없는 Linux와 OS 호출이 실패한 경우뿐입니다. 이때는 경고가 출력됩니다:
 ```cpp
 void tcApp::setup() {
     Window* window = getWindow();
-    if (window && window->isOpen()) {
-        logNotice() << getWindowPosition().x;
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = getWindowPosition();
     }
 }
 ```
-- `isOpen()`은 윈도우 수명을 확인하며 네이티브 조회 성공을 보장하지 않습니다. 조회 실패와 실제 위치 `(-1, -1)`을 구별하는 공개 API가 없으므로 이 값만으로 성공 여부를 판단할 수 없습니다.
+- 조회 실패와 실제 위치 `(-1, -1)`을 구별하는 공개 API가 없으므로 이 값만으로 성공 여부를 판단하지 마세요.
 - 위치는 기본 화면 왼쪽 위를 원점으로 하는 OS 화면 좌표이며 장식을 포함한 외곽 프레임의 왼쪽 위입니다. 음수 좌표도 허용합니다. macOS는 화면 포인트, Windows는 네이티브 화면 좌표, X11은 장치 좌표를 사용합니다. 논리 콘텐츠 크기 및 프레임버퍼 픽셀과 별개입니다.
 - 먼저 이동한 뒤 fullscreen을 켜면 이동한 화면을 사용합니다. 조회는 WM의 위치 제한을 포함한 실제 위치를 반환합니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 0을 반환합니다(`events` 참조).
