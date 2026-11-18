@@ -40943,15 +40943,27 @@ description.en = "Returns the reported video decoding backend name."
 description.ja = "報告される動画デコードバックエンド名を返す。"
 description.ko = "보고되는 비디오 디코딩 백엔드 이름을 반환한다."
 details.en = '''
-- Linux returns an FFmpeg hardware device name such as `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, or `"drm"`, `"software"` without a hardware device, or `"unknown"` if its name is unavailable; an unloaded player returns `"none"`.
+On Linux, this reports what is actually decoding, including FFmpeg falling back to software.
+```cpp
+void tcApp::update() { logNotice() << player.getHwAccelName(); }
+```
+- Linux returns an FFmpeg hardware device name such as `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, or `"drm"`, `"software"` when decoding in software, or `"unknown"` if its name is unavailable; an unloaded player returns `"none"`.
 - Loaded macOS and iOS players report `"videotoolbox"`, and Windows reports `"mediafoundation"`. Web currently reports `"none"`. See `VideoPlayer::isUsingHwAccel` for the limits of these reports.
 '''
 details.ja = '''
-- Linux は `"cuda"`、`"vaapi"`、`"vdpau"`、`"v4l2m2m"`、`"drm"` などの FFmpeg のハードウェアデバイス名を返します。ハードウェアデバイスがなければ `"software"`、名前を取得できなければ `"unknown"` を返します。未ロード時は `"none"` を返します。
+Linux では、FFmpeg 内部でのソフトウェアへのフォールバックも含め、実際のデコード状態を報告します。
+```cpp
+void tcApp::update() { logNotice() << player.getHwAccelName(); }
+```
+- Linux は `"cuda"`、`"vaapi"`、`"vdpau"`、`"v4l2m2m"`、`"drm"` などの FFmpeg のハードウェアデバイス名を返します。ソフトウェアでデコードしていれば `"software"`、名前を取得できなければ `"unknown"` を返します。未ロード時は `"none"` を返します。
 - ロード済みの macOS と iOS は `"videotoolbox"`、Windows は `"mediafoundation"` を返します。Web は現在 `"none"` を返します。これらの報告の制約は `VideoPlayer::isUsingHwAccel` を参照してください。
 '''
 details.ko = '''
-- Linux는 `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, `"drm"` 등의 FFmpeg 하드웨어 장치 이름을 반환합니다. 하드웨어 장치가 없으면 `"software"`, 이름을 구할 수 없으면 `"unknown"`을 반환합니다. 로드되지 않았으면 `"none"`을 반환합니다.
+Linux에서는 FFmpeg 내부의 소프트웨어 폴백을 포함하여 실제 디코딩 상태를 보고합니다.
+```cpp
+void tcApp::update() { logNotice() << player.getHwAccelName(); }
+```
+- Linux는 `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, `"drm"` 등의 FFmpeg 하드웨어 장치 이름을 반환합니다. 소프트웨어로 디코딩하면 `"software"`, 이름을 구할 수 없으면 `"unknown"`을 반환합니다. 로드되지 않았으면 `"none"`을 반환합니다.
 - 로드된 macOS와 iOS 플레이어는 `"videotoolbox"`, Windows는 `"mediafoundation"`을 반환합니다. Web은 현재 `"none"`을 반환합니다. 이러한 보고의 한계는 `VideoPlayer::isUsingHwAccel`을 참조하세요.
 '''
 
@@ -41109,17 +41121,29 @@ description.en = "Returns the reported hardware decoding state."
 description.ja = "報告されるハードウェアデコードの状態を返す。"
 description.ko = "보고되는 하드웨어 디코딩 상태를 반환한다."
 details.en = '''
-- On Linux, returns whether the decoder has an active FFmpeg hardware device; query after `load()` to distinguish the result from the `getUseHwAccel()` preference.
+On Linux, this reports what is actually decoding, including FFmpeg falling back to software.
+```cpp
+void tcApp::update() { logNotice() << player.isUsingHwAccel(); }
+```
+- On Linux, returns whether decoded frames use FFmpeg hardware acceleration; query after `load()` to distinguish the result from the `getUseHwAccel()` preference.
 - macOS, iOS, and Windows return `true` whenever a platform player is loaded; they do not verify hardware use for the individual clip, and the native framework may fall back internally.
 - Returns `false` when unloaded. Web currently also returns `false` after loading because it does not set the platform handle used by this query.
 '''
 details.ja = '''
-- Linux では、デコーダに有効な FFmpeg のハードウェアデバイスがあるかを返します。`getUseHwAccel()` の設定値と区別するため、`load()` の後に確認してください。
+Linux では、FFmpeg 内部でのソフトウェアへのフォールバックも含め、実際のデコード状態を報告します。
+```cpp
+void tcApp::update() { logNotice() << player.isUsingHwAccel(); }
+```
+- Linux では、デコードされたフレームが FFmpeg のハードウェアアクセラレーションを使用しているかを返します。`getUseHwAccel()` の設定値と区別するため、`load()` の後に確認してください。
 - macOS、iOS、Windows はプラットフォームのプレイヤーがロードされていれば `true` を返します。個々の動画でのハードウェア使用を検証するものではなく、ネイティブのフレームワーク内部でフォールバックする場合があります。
 - 未ロード時は `false` を返します。Web はこの取得処理が使用するプラットフォームのハンドルを設定しないため、現在はロード後も `false` を返します。
 '''
 details.ko = '''
-- Linux에서는 디코더에 활성 FFmpeg 하드웨어 장치가 있는지 반환합니다. `getUseHwAccel()` 설정값과 구분하려면 `load()` 후에 확인하세요.
+Linux에서는 FFmpeg 내부의 소프트웨어 폴백을 포함하여 실제 디코딩 상태를 보고합니다.
+```cpp
+void tcApp::update() { logNotice() << player.isUsingHwAccel(); }
+```
+- Linux에서는 디코딩된 프레임이 FFmpeg 하드웨어 가속을 사용하는지 반환합니다. `getUseHwAccel()` 설정값과 구분하려면 `load()` 후에 확인하세요.
 - macOS, iOS, Windows는 플랫폼 플레이어가 로드되어 있으면 `true`를 반환합니다. 개별 비디오의 하드웨어 사용을 검증하지 않으며 네이티브 프레임워크 내부에서 폴백할 수 있습니다.
 - 로드되지 않았으면 `false`를 반환합니다. Web은 이 조회에 사용하는 플랫폼 핸들을 설정하지 않으므로 현재는 로드 후에도 `false`를 반환합니다.
 '''

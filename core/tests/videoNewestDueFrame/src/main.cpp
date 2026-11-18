@@ -21,6 +21,9 @@ void check(const char* name, bool ok) {
     if (!ok) { std::printf("FAIL: %s\n", name); ++failures; }
 }
 bool nearlyEqual(double a, double b) { return std::abs(a - b) < 0.0001; }
+size_t openFdCount() {
+    return std::distance(tc::fs::directory_iterator("/proc/self/fd"), tc::fs::directory_iterator{});
+}
 bool videoFixture(const tc::fs::path& path, const char* container = "avi") {
     AVFormatContext* f = nullptr;
     if (avformat_alloc_output_context2(&f, nullptr, container, path.c_str()) < 0) return false;
@@ -77,8 +80,29 @@ bool videoFixture(const tc::fs::path& path, const char* container = "avi") {
 #endif
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
 #if defined(__linux__) && !defined(__ANDROID__)
+    if (argc == 5 && std::string(argv[1]) == "--hw-device") {
+        double loadAverage = 0;
+        if (getloadavg(&loadAverage, 1) != 1 || loadAverage >= 2.0) {
+            std::fprintf(stderr, "Device check requires load1 < 2\n");
+            return 2;
+        }
+        const int count = std::stoi(argv[3]);
+        const int threads = std::stoi(argv[4]);
+        if (count < 1 || count > 4 || threads < 0) return 2;
+        std::array<tc::VideoPlayer, 4> players;
+        for (int i = 0; i < count; ++i) {
+            players[i].setDecodeThreads(threads);
+            if (!Access::loadHeadlessForTests(players[i], tc::fs::absolute(argv[2]), true)) return 1;
+        }
+        for (int i = 0; i < count; ++i) {
+            Access::stepPlaybackForTests(players[i], 0.0, 8);
+            std::printf("player %d: isUsingHwAccel=%d getHwAccelName=%s\n", i,
+                players[i].isUsingHwAccel(), players[i].getHwAccelName().c_str());
+        }
+        return 0;
+    }
     const auto path = tc::fs::temp_directory_path() /
         ("tc-newest-frame-" + std::to_string(getpid()) + ".avi");
     if (!videoFixture(path)) return 1;
@@ -86,6 +110,45 @@ TC_CORE_TEST_MAIN() {
         player.setDecodeThreads(1);
         check("headless load", Access::loadHeadlessForTests(player, path));
     };
+    {
+        tc::VideoPlayer player;
+        const auto baselineFds = openFdCount();
+        auto close = [&] {
+            player.close();
+            check("close releases decoder file descriptors", openFdCount() == baselineFds);
+        };
+        load(player);
+        int warnings = 0;
+        auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+            if (event.level == tc::LogLevel::Warning && event.message ==
+                "[VideoPlayer] cuda was requested but FFmpeg decodes in software; reporting software") ++warnings;
+        });
+        Access::decodedBackendForTests(player, AV_PIX_FMT_YUV420P, false, true);
+        check("software first frame reports fallback", !player.isUsingHwAccel() && player.getHwAccelName() == "software" && warnings == 1);
+        Access::decodedBackendForTests(player, AV_PIX_FMT_YUV420P, false, false);
+        check("fallback warning once per load", warnings == 1);
+        close();
+        load(player);
+        Access::decodedBackendForTests(player, AV_PIX_FMT_CUDA, true, true);
+        check("hardware frame retains CUDA reporting", player.isUsingHwAccel() && player.getHwAccelName() == "cuda" && warnings == 1);
+        Access::decodedBackendForTests(player, AV_PIX_FMT_YUV420P, false, false);
+        check("only first frame checked", player.isUsingHwAccel() && warnings == 1);
+        Access::decodedBackendForTests(player, AV_PIX_FMT_CUDA, false, true);
+        check("hardware pixel format sufficient", player.isUsingHwAccel() && warnings == 1);
+        Access::decodedBackendForTests(player, AV_PIX_FMT_YUV420P, true, true);
+        check("hardware frames context sufficient", player.isUsingHwAccel() && warnings == 1);
+        player.setPosition(0.0f);
+        Access::stepPlaybackForTests(player, 0.0, 2);
+        check("seek naturally rechecks the next decoded frame", !player.isUsingHwAccel() && player.getHwAccelName() == "software" && warnings == 2);
+        player.setPosition(0.0f);
+        Access::stepPlaybackForTests(player, 0.0, 2);
+        check("seek does not repeat a fallback warning", warnings == 2);
+        close();
+        load(player);
+        Access::decodedBackendForTests(player, AV_PIX_FMT_YUV420P, false, true);
+        check("reload allows one new warning", !player.isUsingHwAccel() && player.getHwAccelName() == "software" && warnings == 3);
+        close();
+    }
     {
         tc::VideoPlayer player;
         load(player);
@@ -275,6 +338,8 @@ TC_CORE_TEST_MAIN() {
     std::printf("videoNewestDueFrame: %d failures\n", failures);
     return failures ? 1 : 0;
 #else
+    (void)argc;
+    (void)argv;
     return 0;
 #endif
 }
