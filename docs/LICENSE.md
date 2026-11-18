@@ -102,7 +102,7 @@ These libraries are only included if you use the corresponding addon.
 | **Lua** | 5.4.9 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
 | **LuaJIT** | 2.1 (rolling), commit not recorded (see [local changes](../addons/tcxLua/TRUSSC_MODIFICATIONS.md)) | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
-| **luajit-cmake** | commit `94444a6` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
+| **luajit-cmake** | commit `f0f1650` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
 | **ofxMidi helper ports** | version/commit not recorded (see [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports)) | `addons/tcxMidi/src/tcxMidiClock.h`, `addons/tcxMidi/src/tcxMidiTimecode.h` | https://github.com/danomatika/ofxMidi | BSD Simplified; [notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) | Dan Wilcox and contributors | tcxMidi |
 | **Mozilla/curl CA bundle** | snapshot 2026-02-11; source commit not recorded; payload unchanged since TrussC import `f59a10fd`; refresh via [update_ca_bundle.sh](../addons/tcxTls/scripts/update_ca_bundle.sh) | `addons/tcxTls/data/cacert.pem` | https://curl.se/ca/cacert.pem ([extraction/source](https://curl.se/docs/caextract.html)) | Mozilla source database: MPL-2.0; exact standalone redistribution terms not recorded; retain bundle notices | Mozilla / curl contributors | tcxTls |
 
