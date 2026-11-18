@@ -43357,23 +43357,41 @@ description.ja = "このウィンドウの目標フレームレートを設定�
 description.ko = "이 윈도우의 목표 프레임레이트를 설정한다."
 details.en = '''
 - Sets synchronized update/draw pacing for this window, including main. `VSYNC` (-1, default) follows the OS tick source, `EVENT_DRIVEN` (0) draws on `redraw()`, and a positive rate skips native ticks as needed. Drawing runs at most once per native tick.
-- From this window's callbacks, `setIndependentFps()` and `redraw()` use the same scheduler. `getFps()` returns the draw target; `getFrameRate()` measures updates without changing its samples.
+- From this window's callbacks, `setIndependentFps()` and `redraw()` use the same scheduler. `getTargetFps()` returns the draw target; `getFrameRate()` measures updates without changing its samples.
 - For main-thread requirements, see `Window::setApp`.
 - On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+
+For fixed pacing, set a positive rate. Hide the pacing window to hand its clock to another visible window.
+```cpp
+getWindow()->setFps(30);
+getWindow()->setVisible(false);
+```
 '''
 details.ja = '''
 - メインを含むこのウィンドウの update/draw を同期して設定します。`VSYNC`（-1、既定）は OS の tick に従い、`EVENT_DRIVEN`（0）は `redraw()` で描画し、正の値では必要な tick を間引きます。描画は native tick ごとに最大 1 回です。
-- このウィンドウのコールバック内の `setIndependentFps()` と `redraw()` も同じスケジューラを使います。`getFps()` は描画の目標値、`getFrameRate()` はサンプルを変更しない実測の更新レートです。
+- このウィンドウのコールバック内の `setIndependentFps()` と `redraw()` も同じスケジューラを使います。`getTargetFps()` は描画の目標値、`getFrameRate()` はサンプルを変更しない実測の更新レートです。
 - メインスレッドでの使用は `Window::setApp` を参照してください。
 - Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+
+固定レートには正の値を設定します。ペーシング元を非表示にすると、別の表示中のウィンドウにクロックを渡せます。
+```cpp
+getWindow()->setFps(30);
+getWindow()->setVisible(false);
+```
 '''
 details.ko = '''
 - 메인을 포함한 이 윈도우의 update/draw를 동기화하여 설정합니다. `VSYNC`(-1, 기본값)는 OS 틱을 따르고, `EVENT_DRIVEN`(0)은 `redraw()`로 그리며, 양수는 필요한 틱을 건너뜁니다. 네이티브 틱당 최대 한 번 그립니다.
-- 이 윈도우의 콜백에서 `setIndependentFps()`와 `redraw()`도 같은 스케줄러를 사용합니다. `getFps()`는 그리기 목표값이며 `getFrameRate()`는 샘플을 변경하지 않는 실측 업데이트 빈도입니다.
+- 이 윈도우의 콜백에서 `setIndependentFps()`와 `redraw()`도 같은 스케줄러를 사용합니다. `getTargetFps()`는 그리기 목표값이며 `getFrameRate()`는 샘플을 변경하지 않는 실측 업데이트 빈도입니다.
 - 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 - Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+
+고정 빈도에는 양수를 설정합니다. 페이싱 창을 숨기면 다른 표시 중인 창에 클록을 넘깁니다.
+```cpp
+getWindow()->setFps(30);
+getWindow()->setVisible(false);
+```
 '''
-related = ["Window::getFps"]
+related = ["Window::getTargetFps", "Window::getFps"]
 
 ["Window::setIndependentFps"]
 keywords = ["frame rate", "framerate", "update rate", "draw rate"]
@@ -43401,20 +43419,75 @@ win->setIndependentFps(30, VSYNC);  // this window: update 30 Hz, draw at its di
 '''
 
 ["Window::getFps"]
-keywords = ["frame rate", "framerate", "throttle", "target"]
-description.en = "Returns this window's target frame rate."
-description.ja = "このウィンドウの目標フレームレートを返す。"
-description.ko = "이 윈도우의 목표 프레임레이트를 반환한다."
+keywords = ["frame rate", "framerate", "measured"]
+description.en = "Returns this window's measured update rate."
+description.ja = "このウィンドウの実測更新レートを返します。"
+description.ko = "이 윈도우의 실측 업데이트 빈도를 반환합니다."
 details.en = '''
-- Returns this window's draw target, initially `VSYNC` (-1). `EVENT_DRIVEN` (0) means draw on request. See `Window::setFps`; use `getFrameRate()` for measured updates.
+- Returns the measured update rate of this window, matching global `getFps()` when this window is current. Reading it does not change the samples.
+- Changed in v0.9.0: use `getTargetFps()` for the old target value.
+
+Read the measured and target rates separately.
+```cpp
+float measured = getWindow()->getFps();
+float target = getWindow()->getTargetFps();
+```
 '''
 details.ja = '''
-- このウィンドウの描画の目標値を返します。初期値は `VSYNC`（-1）で、`EVENT_DRIVEN`（0）は要求時の描画です。`Window::setFps` を参照し、実測の更新には `getFrameRate()` を使ってください。
+- このウィンドウの実測更新レートを返します。このウィンドウが現在の対象なら、グローバルの `getFps()` と同じ値です。読み取りはサンプルを変更しません。
+- v0.9.0 で変更されました。従来の目標値には `getTargetFps()` を使います。
+
+実測値と目標値を個別に読み取ります。
+```cpp
+float measured = getWindow()->getFps();
+float target = getWindow()->getTargetFps();
+```
 '''
 details.ko = '''
-- 이 윈도우의 그리기 목표값을 반환합니다. 초기값은 `VSYNC`(-1)이며 `EVENT_DRIVEN`(0)은 요청 시 그립니다. `Window::setFps`를 참조하고 실측 업데이트에는 `getFrameRate()`를 사용하세요.
+- 이 윈도우의 실측 업데이트 빈도를 반환합니다. 이 윈도우가 현재 대상이면 전역 `getFps()`와 같은 값입니다. 읽기는 샘플을 변경하지 않습니다.
+- v0.9.0에서 변경되었습니다. 이전 목표값은 `getTargetFps()`로 읽습니다.
+
+실측값과 목표값을 각각 읽습니다.
+```cpp
+float measured = getWindow()->getFps();
+float target = getWindow()->getTargetFps();
+```
 '''
-related = ["Window::setFps"]
+related = ["Window::setFps", "Window::setIndependentFps", "Window::getTargetFps"]
+
+["Window::getTargetFps"]
+keywords = ["frame rate", "framerate", "target"]
+description.en = "Returns this window's target drawing rate."
+description.ja = "このウィンドウの目標描画レートを返します。"
+description.ko = "이 윈도우의 목표 그리기 빈도를 반환합니다."
+details.en = '''
+- Returns this window's configured draw target: `VSYNC` (-1, default), `EVENT_DRIVEN` (0), or positive fps. Use it to read the setting from `setFps()` or `setIndependentFps()`.
+
+Read the measured and target rates separately.
+```cpp
+float measured = getWindow()->getFps();
+float target = getWindow()->getTargetFps();
+```
+'''
+details.ja = '''
+- このウィンドウに設定された描画の目標値を返します。`VSYNC`（-1、既定）、`EVENT_DRIVEN`（0）、または正の fps です。`setFps()` または `setIndependentFps()` の設定値を確認するときに使います。
+
+実測値と目標値を個別に読み取ります。
+```cpp
+float measured = getWindow()->getFps();
+float target = getWindow()->getTargetFps();
+```
+'''
+details.ko = '''
+- 이 윈도우에 설정된 그리기 목표값을 반환합니다. `VSYNC`(-1, 기본값), `EVENT_DRIVEN`(0), 또는 양수 fps입니다. `setFps()` 또는 `setIndependentFps()`의 설정값을 확인할 때 사용합니다.
+
+실측값과 목표값을 각각 읽습니다.
+```cpp
+float measured = getWindow()->getFps();
+float target = getWindow()->getTargetFps();
+```
+'''
+related = ["Window::setFps", "Window::setIndependentFps", "Window::getFps"]
 
 ["Window::setFullscreen"]
 keywords = ["fullscreen", "full screen", "maximize", "borderless"]
