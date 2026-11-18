@@ -3361,8 +3361,8 @@ int Fbo::getWidth() const  // Returns the framebuffer width.
 bool Fbo::isActive() const  // Reports whether the framebuffer has an active rendering scope.
 bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeeded.
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a top-first CPU RGBA8 buffer.
-bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
+bool Fbo::readPixels(unsigned char * pixels) const [+1] [macos,windows,linux,ios,android,web]  // Reads an ended Fbo as RGBA8 into Pixels with automatic sizing or a byte buffer allocated by the caller.
+bool Fbo::readPixelsFloat(float * pixels) const [+1] [macos,ios,windows,linux,android,web]  // Reads an ended Fbo as F32 into Pixels with automatic sizing or a float buffer allocated by the caller, using the source channel count.
 bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
 FboScope Fbo::scoped() [+1]  // Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return.
