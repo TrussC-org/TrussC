@@ -4688,7 +4688,6 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<const VideoGrabber>().getMinFilter();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
-        (void)af::val<VideoGrabber>().getPixels();
         (void)af::val<const VideoGrabber>().getPixels();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
@@ -4866,7 +4865,6 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<const VideoPlayer>().getPath();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
-        (void)af::val<VideoPlayer>().getPixels();
         (void)af::val<const VideoPlayer>().getPixels();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -5068,7 +5066,6 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<const VideoPlayerBase>().getMagFilter();
         (void)af::val<const VideoPlayerBase>().getMinFilter();
         (void)af::val<const VideoPlayerBase>().getPan();
-        (void)af::val<VideoPlayerBase>().getPixels();
         (void)af::val<const VideoPlayerBase>().getPixels();
         (void)af::val<const VideoPlayerBase>().getPosition();
         (void)af::val<const VideoPlayerBase>().getResyncThreshold();

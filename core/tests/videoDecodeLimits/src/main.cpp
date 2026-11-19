@@ -393,15 +393,22 @@ void playHeadless(const tc::fs::path& path, const char* label) {
     bool loaded = Access::loadHeadlessForTests(player, path);
     check(label, loaded);
     if (!loaded) return;
+    const auto* storage = player.getPixels().getData();
+    check("RGBA Pixels describes backend storage", storage &&
+          player.getPixels().getWidth() == player.getWidth() &&
+          player.getPixels().getHeight() == player.getHeight() &&
+          player.getPixels().getChannels() == 4 &&
+          player.getPixels().getFormat() == tc::PixelFormat::U8);
     Access::playHeadlessForTests(player);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     bool gotFrame = false;
     do {
         Access::updateHeadlessForTests(player);
-        gotFrame |= player.getPixels() && player.getPixels()[0] != 0;
+        gotFrame |= player.getPixels().isAllocated() && player.getPixels().getData()[0] != 0;
         if (player.isDone() || player.hasError()) break;
         std::this_thread::yield();
     } while (std::chrono::steady_clock::now() < deadline);
+    check("frame updates keep the same Pixels storage", storage == player.getPixels().getData());
     check("whole video reaches EOF with decoded output", player.isDone() && !player.hasError() && gotFrame);
     check("admitted video has no storage rejections", Access::decodeRejectionsForTests(player) == 0);
     player.close();

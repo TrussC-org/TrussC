@@ -46,8 +46,8 @@ public:
     float getPosition() const override { return 0.0f; }
     float getFrameRate() const override { return 0.0f; }
 
-    unsigned char* getPixels() override { return nullptr; }
-    const unsigned char* getPixels() const override { return nullptr; }
+    Pixels pixels;
+    const Pixels& getPixels() const override { return pixels; }
 
 protected:
     int getCurrentFrameImpl() const override { return 0; }

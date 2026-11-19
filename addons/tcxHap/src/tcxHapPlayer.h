@@ -345,7 +345,7 @@ public:
         texture_.clear();
         std::vector<uint8_t>().swap(frameBuffer_);
         std::vector<uint8_t>().swap(sampleBuffer_);
-        std::vector<uint8_t>().swap(pixels_);
+        pixels_.clear();
         pixelsValid_ = false;
         videoTrack_ = nullptr;
         audioTrack_ = nullptr;
@@ -466,20 +466,13 @@ public:
     // Pixel access (for encoding to other formats)
     // =========================================================================
 
-    // Get RGBA pixels (decoded from BC/DXT)
-    // Returns nullptr if no frame has been decoded yet
-    unsigned char* getPixels() override {
-        if (!pixelsValid_) {
-            decodeFrameToRgba();
-        }
-        return pixels_.empty() ? nullptr : pixels_.data();
-    }
-
-    const unsigned char* getPixels() const override {
+    // Const only: resizing frame storage would make backend writes go out of bounds.
+    // Hap retains its existing lazy BC/DXT decode directly into RGBA storage.
+    TC_LUA_SKIP const tc::Pixels& getPixels() const override {
         if (!pixelsValid_) {
             const_cast<HapPlayer*>(this)->decodeFrameToRgba();
         }
-        return pixels_.empty() ? nullptr : pixels_.data();
+        return pixels_;
     }
 
     // =========================================================================
@@ -685,7 +678,7 @@ private:
     mutable bool ycocgShaderFailed_ = false;
 
     // RGBA pixel buffer for encoding (decoded from BC/DXT on demand)
-    std::vector<uint8_t> pixels_;
+    tc::Pixels pixels_;
     bool pixelsValid_ = false;
 
     // Performance stats (low-pass filtered)
@@ -921,8 +914,10 @@ private:
 
         // Allocate pixel buffer if needed (RGBA = 4 bytes per pixel)
         size_t pixelCount = static_cast<size_t>(width_) * height_ * 4;
-        if (pixels_.size() != pixelCount) {
-            if (!detail::resizeMovBuffer(pixels_, pixelCount)) {
+        if (pixels_.getTotalBytes() != pixelCount) {
+            try { pixels_.allocate(width_, height_, 4); }
+            catch (const std::bad_alloc&) {
+                pixels_.clear();
                 tc::logError("HapPlayer") << "HAP RGBA allocation failed";
                 return;
             }
@@ -930,7 +925,7 @@ private:
 
         // Decode based on format
         const uint8_t* src = frameBuffer_.data();
-        uint8_t* dst = pixels_.data();
+        uint8_t* dst = pixels_.getData();
 
         // BC textures are 4x4 block compressed
         int blocksX = (width_ + 3) / 4;
@@ -983,7 +978,7 @@ private:
 
             default:
                 // Unknown format
-                std::fill(pixels_.begin(), pixels_.end(), 0);
+                std::memset(pixels_.getData(), 0, pixels_.getTotalBytes());
                 break;
         }
 
@@ -995,7 +990,7 @@ private:
     void convertYCoCgToRgb() {
         size_t pixelCount = static_cast<size_t>(width_) * height_;
         for (size_t i = 0; i < pixelCount; i++) {
-            uint8_t* pixel = pixels_.data() + i * 4;
+            uint8_t* pixel = pixels_.getData() + i * 4;
             // DXT5 texture channels: R=Co, G=Cg, B=Scale, A=Y
             // Convert to 0-1 range
             float coRaw = pixel[0] / 255.0f;

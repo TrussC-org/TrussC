@@ -19,7 +19,11 @@ void check(const char* name, bool ok) {
 
 class FakePlayer : public VideoPlayerBase {
 public:
-    array<unsigned char, 4> pixels{255, 0, 0, 255};
+    Pixels pixels;
+    FakePlayer() {
+        const unsigned char rgba[] = {255, 0, 0, 255};
+        pixels.setFromPixels(rgba, 1, 1, 4);
+    }
     int pauses = 0;
     int stops = 0;
     float position = 0.5f;
@@ -40,8 +44,7 @@ public:
     float getPosition() const override { return position; }
     float getFrameRate() const override { return initialized_ ? 1.0f : 0.0f; }
 
-    unsigned char* getPixels() override { return pixels.data(); }
-    const unsigned char* getPixels() const override { return pixels.data(); }
+    const Pixels& getPixels() const override { return pixels; }
 protected:
     int getCurrentFrameImpl() const override { return 1; }
     int getTotalFramesImpl() const override { return 2; }
@@ -50,7 +53,7 @@ protected:
     void previousFrameImpl() override {}
 
     void playImpl() override {}
-    void stopImpl() override { ++stops; position = 0; pixels.fill(0); }
+    void stopImpl() override { ++stops; position = 0; std::memset(pixels.getData(), 0, pixels.getTotalBytes()); }
     void setPausedImpl(bool paused) override { if (paused) ++pauses; }
     void setPositionImpl(float p) override { position = p; }
     void setVolumeImpl(float) override {}
@@ -64,7 +67,7 @@ void checkState() {
     check("new player has no error", !player.hasError() && player.getErrorMessage().empty());
     player.load({});
     player.play();
-    const auto lastPixels = player.pixels;
+    const auto lastPixels = player.pixels.clone();
     const auto mainThread = this_thread::get_id();
     int events = 0;
     auto listener = player.onError.listen([&](VideoErrorEventArgs& error) {
@@ -82,7 +85,7 @@ void checkState() {
     player.update();
     check("one event for the stopped playback", events == 1 && player.pauses == 1);
     check("polling retains message", player.getErrorMessage() == "decoder failed");
-    check("loaded and last picture retained", player.isLoaded() && player.isReady() && player.pixels == lastPixels);
+    check("loaded and last picture retained", player.isLoaded() && player.isReady() && std::equal(lastPixels.getData(), lastPixels.getData() + lastPixels.getTotalBytes(), player.pixels.getData()));
     check("error neither rewinds nor announces a frame", player.stops == 0 && player.getPosition() == 0.5f && !player.isFrameNew());
     player.setPosition(0.25f);
     player.play();
@@ -158,7 +161,7 @@ public:
         FakePlayer player;
         player.load({});
         Pixels poster;
-        poster.setFromPixels(player.pixels.data(), 1, 1, 4);
+        poster.setFromPixels(player.pixels.getData(), 1, 1, 4);
         player.getTexture().allocate(poster);
         const auto image = player.getTexture().getImage();
         Fbo fbo;
@@ -243,16 +246,16 @@ public:
         hadFrameBeforeError = hadFrameBeforeError || player.isReady();
         const auto texture = player.getTexture().getImage();
         vector<unsigned char> before;
-        if (player.getPixels()) {
+        if (player.getPixels().isAllocated()) {
             const size_t size = static_cast<size_t>(player.getWidth() * player.getHeight() * 4);
-            before.assign(player.getPixels(), player.getPixels() + size);
+            before.assign(player.getPixels().getData(), player.getPixels().getData() + size);
         }
         player.update();
         if (!player.hasError() && !player.isDone()) return;
         if (player.hasError() && hadFrameBeforeError) {
             check("real failure keeps last pixels and texture", !before.empty() &&
-                  player.getPixels() &&
-                  equal(before.begin(), before.end(), player.getPixels()) &&
+                  player.getPixels().isAllocated() &&
+                  equal(before.begin(), before.end(), player.getPixels().getData()) &&
                   texture.id == player.getTexture().getImage().id);
         }
         check("real backend distinguishes failure from EOF", player.hasError() == expectVideoError);

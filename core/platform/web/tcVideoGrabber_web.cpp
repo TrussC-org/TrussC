@@ -131,7 +131,7 @@ void VideoGrabber::updatePlatform() {
 }
 
 void VideoGrabber::updateDelegatePixels() {
-    tc_video_buffer(state_->webId, state_->pixels.get(), state_->width, state_->height);
+    tc_video_buffer(state_->webId, state_->pixels.getData(), state_->width, state_->height);
 }
 
 bool VideoGrabber::checkResizeNeeded() { return tc_video_size(state_->webId, 0) != 0; }

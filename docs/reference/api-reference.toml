@@ -40910,27 +40910,100 @@ details.ko = '''
 '''
 
 ["VideoGrabber::getPixels"]
-description.en = "Return a pointer to the current camera pixel buffer."
-description.ja = "現在のカメラのピクセルバッファへのポインタを返す。"
-description.ko = "현재 카메라 픽셀 버퍼의 포인터를 반환한다."
+description.en = "Return read-only RGBA Pixels owned by the grabber; empty when no CPU frame storage exists."
+description.ja = "所有する読み取り専用 RGBA Pixels を返す。CPU フレームの格納領域がない場合は空。"
+description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. CPU 프레임 저장 공간이 없으면 비어 있다."
 details.en = '''
-- Returns an `unsigned char*`, or `const unsigned char*` for a const grabber, to tightly packed RGBA8 data with `getWidth() * getHeight() * 4` bytes; it returns null when no buffer is allocated.
-- The grabber owns this memory; do not free it or retain the pointer across resizing, `setup()`, `close()`, or destruction.
-- This accessor does not lock or copy the buffer; native capture threads can overwrite it independently of `update()`, so `isFrameNew()` does not make direct pixel access synchronized.
-- Use `copyToImage()` for a locked copy into an image, or `getQueuedFrames()` for separately owned CPU frames.
+- Returns only `const Pixels&`: resizing the frame storage would make the backend write out of bounds. The backend writes directly into this RGBA U8 storage without an additional per-frame copy.
+- The result is empty before load/setup and after `close()`. After allocation it initially contains zeros; an automatic video poster can fill it before playback. Check allocation before reading:
+```cpp
+void tcApp::update() {
+    if (grabber.getPixels().isAllocated()) grabber.copyToImage(image);
+}
+```
+- The owner retains the storage. References and byte pointers can be invalidated by resize, reload/setup, close, move, or destruction; frames can overwrite data on updates. Use a locked image copy when an owned snapshot is needed:
+```cpp
+void tcApp::update() {
+    grabber.copyToImage(image);
+}
+```
+- Thread safety is unchanged: this accessor neither locks nor copies; capture threads can overwrite it independently of `update()`. Use the existing locked image copy for a snapshot:
+```cpp
+void tcApp::update() {
+    grabber.copyToImage(image);
+}
+```
+- Video getPixels is not available from Lua; use an Fbo readback.
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(grabber:getWidth(), grabber:getHeight())
+fbo:begin()
+grabber:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
 details.ja = '''
-- 隙間なく並んだ RGBA8 データへの `unsigned char*` を返します。const のグラバーでは `const unsigned char*` を返します。サイズは `getWidth() * getHeight() * 4` バイトで、バッファ未確保なら null です。
-- メモリはグラバーが所有します。解放したり、サイズ変更、`setup()`、`close()`、破棄をまたいでポインタを保持したりしないでください。
-- この取得処理はバッファをロックもコピーもしません。ネイティブのキャプチャスレッドは `update()` と独立して上書きするため、`isFrameNew()` を確認しても直接アクセスは同期されません。
-- ロックして画像へコピーする場合は `copyToImage()`、個別に所有できる CPU フレームを取得する場合は `getQueuedFrames()` を使用してください。
+- `const Pixels&` のみを返します。フレームの格納領域をリサイズするとバックエンドが範囲外へ書き込むためです。バックエンドは RGBA U8 の格納領域へ直接書き込み、フレームごとの追加コピーは行いません。
+- 読み込み・セットアップ前と `close()` 後は空です。確保直後はゼロで埋まり、動画の自動ポスターが再生前に格納される場合もあります。読み取り前に確保を確認します。
+```cpp
+void tcApp::update() {
+    if (grabber.getPixels().isAllocated()) grabber.copyToImage(image);
+}
+```
+- 格納領域は所有元が保持します。サイズ変更、再読み込み・セットアップ、クローズ、移動、破棄で参照とバイトポインタが無効になり、更新で内容も上書きされます。独立したスナップショットにはロック付き画像コピーを使用します。
+```cpp
+void tcApp::update() {
+    grabber.copyToImage(image);
+}
+```
+- スレッド安全性は変わりません。取得時にロックもコピーもせず、キャプチャスレッドが `update()` と独立して上書きします。スナップショットには既存のロック付き画像コピーを使用します。
+```cpp
+void tcApp::update() {
+    grabber.copyToImage(image);
+}
+```
+- 動画の getPixels は Lua では利用できません。Fbo からピクセルを読み戻します。
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(grabber:getWidth(), grabber:getHeight())
+fbo:begin()
+grabber:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
 details.ko = '''
-- 빈 공간 없이 연속된 RGBA8 데이터의 `unsigned char*`를 반환합니다. const 그래버에서는 `const unsigned char*`를 반환합니다. 크기는 `getWidth() * getHeight() * 4`바이트이며, 버퍼가 할당되지 않았으면 null입니다.
-- 메모리는 그래버가 소유합니다. 직접 해제하거나 크기 변경, `setup()`, `close()`, 소멸 이후까지 포인터를 보관하지 않아야 합니다.
-- 이 접근자는 버퍼를 잠그거나 복사하지 않습니다. 네이티브 캡처 스레드가 `update()`와 독립적으로 덮어쓸 수 있으므로 `isFrameNew()`를 확인해도 직접 접근이 동기화되지는 않습니다.
-- 잠금 상태에서 이미지로 복사하려면 `copyToImage()`, 별도로 소유하는 CPU 프레임을 얻으려면 `getQueuedFrames()`를 사용합니다.
+- `const Pixels&`만 반환합니다. 프레임 저장 공간의 크기를 바꾸면 백엔드가 범위를 벗어나 쓰기 때문입니다. 백엔드는 RGBA U8 저장 공간에 직접 쓰며 프레임마다 추가 복사하지 않습니다.
+- 로드·설정 전과 `close()` 후에는 비어 있습니다. 할당 직후에는 0이며 자동 비디오 포스터가 재생 전에 채울 수도 있습니다. 읽기 전에 할당 여부를 확인합니다.
+```cpp
+void tcApp::update() {
+    if (grabber.getPixels().isAllocated()) grabber.copyToImage(image);
+}
+```
+- 저장 공간은 소유 객체가 유지합니다. 크기 변경, 다시 로드·설정, 닫기, 이동, 소멸로 참조와 바이트 포인터가 무효화될 수 있고 갱신 시 내용이 덮어써집니다. 독립적인 스냅샷에는 잠금 이미지 복사를 사용합니다.
+```cpp
+void tcApp::update() {
+    grabber.copyToImage(image);
+}
+```
+- 스레드 안전성은 변하지 않습니다. 접근 시 잠그거나 복사하지 않으며 캡처 스레드가 `update()`와 독립적으로 덮어쓸 수 있습니다. 스냅샷에는 기존 잠금 이미지 복사를 사용합니다.
+```cpp
+void tcApp::update() {
+    grabber.copyToImage(image);
+}
+```
+- 비디오 getPixels는 Lua에서 사용할 수 없습니다. Fbo에서 픽셀을 읽습니다.
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(grabber:getWidth(), grabber:getHeight())
+fbo:begin()
+grabber:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
+related = ["Pixels::clone", "Fbo::readPixels", "VideoGrabber::copyToImage"]
 
 ["VideoGrabber::getTexture"]
 description.en = "Return the texture used to display the camera frame."
@@ -41901,30 +41974,121 @@ details.ko = '''
 related = ["VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::extractKeyFrame"]
 
 ["VideoPlayer::getPixels"]
-category = "video"
-keywords = ["rgba", "buffer", "raw"]
-description.en = "Returns a pointer to the RGBA pixel buffer."
-description.ja = "RGBA ピクセルバッファへのポインタを返す。"
-description.ko = "RGBA 픽셀 버퍼의 포인터를 반환한다."
+description.en = "Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists."
+description.ja = "所有する読み取り専用 RGBA Pixels を返す。CPU フレームの格納領域がない場合は空。"
+description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. CPU 프레임 저장 공간이 없으면 비어 있다."
 details.en = '''
-- Returns tightly packed RGBA U8 data with four bytes per pixel; the non-const overload permits editing, and the const overload returns a const pointer. Returns `nullptr` when no RGBA buffer exists, including Linux NV12 hardware playback, rotated or not.
-- The buffer can exist before a live frame arrives and initially contains zeros; an automatic poster may fill it before playback.
-- The player owns all pointers returned by `getPixels()`, `getPixelsY()`, and `getPixelsUV()`. Do not free them or access them concurrently with buffer updates; copy data that must survive a later update, resize, reload, or `close()`.
-- Editing CPU data does not immediately update the GPU texture.
+- Returns only `const Pixels&`: resizing the frame storage would make the backend write out of bounds. The backend writes directly into this RGBA U8 storage without an additional per-frame copy.
+- The result is empty before load/setup and after `close()`. After allocation it initially contains zeros; an automatic video poster can fill it before playback. Check allocation before reading:
+```cpp
+void tcApp::update() {
+    if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
+}
+```
+- Linux hardware NV12 mode returns empty pixels and an empty texture from `getPixels()` / `getTexture()`, with one warning per player instance on the first access. Neither accessor converts NV12 to RGBA. For guaranteed frame access, allocate an Fbo at the video size and draw into it, then use `fbo.getTexture()` or read back pixels:
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+- The owner retains the storage. References and byte pointers can be invalidated by resize, reload/setup, close, move, or destruction; frames can overwrite data on updates. Clone within the current frame when an owned copy is needed:
+```cpp
+void tcApp::update() {
+    pixels = video.getPixels().clone();
+}
+```
+- There is no API to lock a borrowed VideoPlayer pixel buffer; access adds no synchronization. `VideoPlayer` returns its CPU mirror without conversion or GPU readback. `HapPlayer` retains its existing lazy BC/DXT decode into its own Pixels storage; it is empty until a compressed frame is available.
+- Video getPixels is not available from Lua; use an Fbo readback.
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(video:getWidth(), video:getHeight())
+fbo:begin()
+video:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
 details.ja = '''
-- 1 ピクセルあたり 4 バイトで隙間なく並んだ RGBA U8 データを返します。非 const 版は編集可能で、const 版は const ポインタを返します。回転の有無にかかわらず Linux の NV12 ハードウェア再生など、RGBA バッファがない場合は `nullptr` を返します。
-- バッファはライブフレームの到着前から存在する場合があり、初期値はゼロです。自動ポスターによって再生前に画像が格納される場合があります。
-- `getPixels()`、`getPixelsY()`、`getPixelsUV()` が返すポインタはプレイヤーが所有します。解放したり、バッファの更新と同時にアクセスしたりしないでください。後の更新、サイズ変更、再読み込み、`close()` を超えて保持するデータはコピーしてください。
-- CPU 上のデータを編集しても、GPU テクスチャには直ちに反映されません。
+- `const Pixels&` のみを返します。フレームの格納領域をリサイズするとバックエンドが範囲外へ書き込むためです。バックエンドは RGBA U8 の格納領域へ直接書き込み、フレームごとの追加コピーは行いません。
+- 読み込み・セットアップ前と `close()` 後は空です。確保直後はゼロで埋まり、動画の自動ポスターが再生前に格納される場合もあります。読み取り前に確保を確認します。
+```cpp
+void tcApp::update() {
+    if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
+}
+```
+- Linux のハードウェア NV12 モードでは `getPixels()` / `getTexture()` は空を返し、最初の取得時にプレイヤーごとに一度だけ警告します。どちらも NV12 から RGBA へ変換しません。確実にフレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+- 格納領域は所有元が保持します。サイズ変更、再読み込み・セットアップ、クローズ、移動、破棄で参照とバイトポインタが無効になり、更新で内容も上書きされます。独立したコピーが必要な場合は現在のフレーム内で複製します。
+```cpp
+void tcApp::update() {
+    pixels = video.getPixels().clone();
+}
+```
+- 借用した VideoPlayer のピクセルバッファをロックする API はなく、取得時に同期は追加しません。`VideoPlayer` は変換や GPU 読み戻しをせず CPU ミラーを返します。`HapPlayer` は従来どおり BC/DXT を必要時に自身の Pixels へデコードし、圧縮フレームが用意されるまでは空です。
+- 動画の getPixels は Lua では利用できません。Fbo からピクセルを読み戻します。
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(video:getWidth(), video:getHeight())
+fbo:begin()
+video:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
 details.ko = '''
-- 픽셀당 4바이트로 빈틈없이 배열된 RGBA U8 데이터를 반환합니다. 비 const 오버로드는 편집할 수 있고 const 오버로드는 const 포인터를 반환합니다. 회전 여부와 관계없이 Linux의 NV12 하드웨어 재생 등 RGBA 버퍼가 없으면 `nullptr`를 반환합니다.
-- 버퍼는 실시간 프레임이 도착하기 전부터 존재할 수 있으며 초기값은 0입니다. 자동 포스터가 재생 전에 이미지를 채울 수 있습니다.
-- `getPixels()`, `getPixelsY()`, `getPixelsUV()`가 반환하는 포인터는 플레이어가 소유합니다. 해제하거나 버퍼 갱신과 동시에 접근하지 마세요. 이후 갱신, 크기 변경, 다시 로드, `close()`를 넘어 유지할 데이터는 복사해야 합니다.
-- CPU 데이터를 편집해도 GPU 텍스처에 즉시 반영되지 않습니다.
+- `const Pixels&`만 반환합니다. 프레임 저장 공간의 크기를 바꾸면 백엔드가 범위를 벗어나 쓰기 때문입니다. 백엔드는 RGBA U8 저장 공간에 직접 쓰며 프레임마다 추가 복사하지 않습니다.
+- 로드·설정 전과 `close()` 후에는 비어 있습니다. 할당 직후에는 0이며 자동 비디오 포스터가 재생 전에 채울 수도 있습니다. 읽기 전에 할당 여부를 확인합니다.
+```cpp
+void tcApp::update() {
+    if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
+}
+```
+- Linux 하드웨어 NV12 모드에서 `getPixels()` / `getTexture()`는 빈 값을 반환하며 첫 접근 시 플레이어마다 한 번 경고합니다. 어느 접근자도 NV12를 RGBA로 변환하지 않습니다. 프레임을 확실하게 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+- 저장 공간은 소유 객체가 유지합니다. 크기 변경, 다시 로드·설정, 닫기, 이동, 소멸로 참조와 바이트 포인터가 무효화될 수 있고 갱신 시 내용이 덮어써집니다. 독립적인 복사본이 필요하면 현재 프레임 안에서 복제합니다.
+```cpp
+void tcApp::update() {
+    pixels = video.getPixels().clone();
+}
+```
+- 빌린 VideoPlayer 픽셀 버퍼를 잠그는 API는 없으며 접근 시 동기화를 추가하지 않습니다. `VideoPlayer`는 변환이나 GPU 읽기 없이 CPU 미러를 반환합니다. `HapPlayer`는 기존처럼 필요할 때 BC/DXT를 자체 Pixels로 디코드하며 압축 프레임이 준비될 때까지 비어 있습니다.
+- 비디오 getPixels는 Lua에서 사용할 수 없습니다. Fbo에서 픽셀을 읽습니다.
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(video:getWidth(), video:getHeight())
+fbo:begin()
+video:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
-related = ["VideoPlayer::getPixelsY", "VideoPlayer::getPixelsUV"]
+related = ["Pixels::clone", "Fbo::readPixels", "VideoPlayer::getPixelsY", "VideoPlayer::getPixelsUV"]
 
 ["VideoPlayer::getPixelsUV"]
 category = "video"
@@ -59493,34 +59657,121 @@ details.ko = '''
 '''
 
 ["VideoPlayerBase::getPixels"]
-description.en = "Return a pointer to the player's RGBA pixel buffer."
-description.ja = "プレイヤーの RGBA ピクセルバッファへのポインターを返す。"
-description.ko = "플레이어의 RGBA 픽셀 버퍼 포인터를 반환한다."
+description.en = "Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists."
+description.ja = "所有する読み取り専用 RGBA Pixels を返す。CPU フレームの格納領域がない場合は空。"
+description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. CPU 프레임 저장 공간이 없으면 비어 있다."
 details.en = '''
-- Provide mutable and const pointer overloads for 8-bit RGBA data; `nullptr` means no RGBA buffer is available. `VideoPlayer` can allocate a zero-filled buffer before decoding, so a non-null pointer does not prove that a frame is ready.
-- The player owns the memory: do not free it, copy data needed beyond later updates, and do not retain the pointer across close, reload, or destruction. `VideoPlayer` returns its CPU buffer without copying or locking; this is not GPU texture readback.
-- Linux `VideoPlayer` returns `nullptr` on its NV12 path even during playback; `HapPlayer` instead decodes its compressed frame to RGBA on the CPU when the cached pixels are invalid, including through the const overload.
-'''
-details.ja = '''
-- 8 ビット RGBA データへの変更可能なポインターと const ポインターのオーバーロードがあります。`nullptr` は RGBA バッファがないことを示します。`VideoPlayer` はデコード前にゼロで埋めたバッファを確保する場合があるため、非 null でもフレームの準備ができているとは限りません。
-- メモリはプレイヤーが所有するため解放しないでください。後の更新をまたいで必要なデータはコピーし、クローズ、再ロード、破棄をまたいでポインターを保持しないでください。`VideoPlayer` はコピーやロックなしで CPU バッファを返し、GPU テクスチャからの読み戻しは行いません。
-- Linux の `VideoPlayer` は NV12 経路では再生中でも `nullptr` を返します。`HapPlayer` はピクセルのキャッシュが無効な場合、const 版でも圧縮フレームを CPU で RGBA にデコードします。
-'''
-details.ko = '''
-- 8비트 RGBA 데이터에 대한 수정 가능한 포인터와 const 포인터 오버로드를 제공합니다. `nullptr`은 RGBA 버퍼가 없음을 뜻합니다. `VideoPlayer`는 디코드 전에 0으로 채운 버퍼를 할당할 수 있으므로, 포인터가 null이 아니어도 프레임이 준비되었다는 뜻은 아닙니다.
-- 메모리는 플레이어가 소유하므로 해제하지 않습니다. 이후 갱신을 지나서도 필요한 데이터는 복사하고, 닫기, 다시 로드, 소멸 이후까지 포인터를 보관하지 않습니다. `VideoPlayer`는 복사나 잠금 없이 CPU 버퍼를 반환하며, GPU 텍스처를 읽어 오는 작업은 하지 않습니다.
-- Linux의 `VideoPlayer`는 NV12 경로에서 재생 중에도 `nullptr`을 반환합니다. `HapPlayer`는 픽셀 캐시가 유효하지 않으면 const 오버로드에서도 압축 프레임을 CPU에서 RGBA로 디코드합니다.
-'''
-snippet = '''
-// tcApp.h: VideoPlayer video_;
+- Returns only `const Pixels&`: resizing the frame storage would make the backend write out of bounds. The backend writes directly into this RGBA U8 storage without an additional per-frame copy.
+- The result is empty before load/setup and after `close()`. After allocation it initially contains zeros; an automatic video poster can fill it before playback. Check allocation before reading:
+```cpp
 void tcApp::update() {
-    video_.update();
-    Pixels pixels;
-    if (const auto* data = video_.getPixels()) {
-        pixels.setFromPixels(data, (int)video_.getWidth(), (int)video_.getHeight(), 4);
+    if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
+}
+```
+- Linux hardware NV12 mode returns empty pixels and an empty texture from `getPixels()` / `getTexture()`, with one warning per player instance on the first access. Neither accessor converts NV12 to RGBA. For guaranteed frame access, allocate an Fbo at the video size and draw into it, then use `fbo.getTexture()` or read back pixels:
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
     }
 }
+```
+- The owner retains the storage. References and byte pointers can be invalidated by resize, reload/setup, close, move, or destruction; frames can overwrite data on updates. Clone within the current frame when an owned copy is needed:
+```cpp
+void tcApp::update() {
+    pixels = video.getPixels().clone();
+}
+```
+- There is no API to lock a borrowed VideoPlayer pixel buffer; access adds no synchronization. `VideoPlayer` returns its CPU mirror without conversion or GPU readback. `HapPlayer` retains its existing lazy BC/DXT decode into its own Pixels storage; it is empty until a compressed frame is available.
+- Video getPixels is not available from Lua; use an Fbo readback.
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(video:getWidth(), video:getHeight())
+fbo:begin()
+video:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
 '''
+details.ja = '''
+- `const Pixels&` のみを返します。フレームの格納領域をリサイズするとバックエンドが範囲外へ書き込むためです。バックエンドは RGBA U8 の格納領域へ直接書き込み、フレームごとの追加コピーは行いません。
+- 読み込み・セットアップ前と `close()` 後は空です。確保直後はゼロで埋まり、動画の自動ポスターが再生前に格納される場合もあります。読み取り前に確保を確認します。
+```cpp
+void tcApp::update() {
+    if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
+}
+```
+- Linux のハードウェア NV12 モードでは `getPixels()` / `getTexture()` は空を返し、最初の取得時にプレイヤーごとに一度だけ警告します。どちらも NV12 から RGBA へ変換しません。確実にフレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+- 格納領域は所有元が保持します。サイズ変更、再読み込み・セットアップ、クローズ、移動、破棄で参照とバイトポインタが無効になり、更新で内容も上書きされます。独立したコピーが必要な場合は現在のフレーム内で複製します。
+```cpp
+void tcApp::update() {
+    pixels = video.getPixels().clone();
+}
+```
+- 借用した VideoPlayer のピクセルバッファをロックする API はなく、取得時に同期は追加しません。`VideoPlayer` は変換や GPU 読み戻しをせず CPU ミラーを返します。`HapPlayer` は従来どおり BC/DXT を必要時に自身の Pixels へデコードし、圧縮フレームが用意されるまでは空です。
+- 動画の getPixels は Lua では利用できません。Fbo からピクセルを読み戻します。
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(video:getWidth(), video:getHeight())
+fbo:begin()
+video:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
+'''
+details.ko = '''
+- `const Pixels&`만 반환합니다. 프레임 저장 공간의 크기를 바꾸면 백엔드가 범위를 벗어나 쓰기 때문입니다. 백엔드는 RGBA U8 저장 공간에 직접 쓰며 프레임마다 추가 복사하지 않습니다.
+- 로드·설정 전과 `close()` 후에는 비어 있습니다. 할당 직후에는 0이며 자동 비디오 포스터가 재생 전에 채울 수도 있습니다. 읽기 전에 할당 여부를 확인합니다.
+```cpp
+void tcApp::update() {
+    if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
+}
+```
+- Linux 하드웨어 NV12 모드에서 `getPixels()` / `getTexture()`는 빈 값을 반환하며 첫 접근 시 플레이어마다 한 번 경고합니다. 어느 접근자도 NV12를 RGBA로 변환하지 않습니다. 프레임을 확실하게 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+- 저장 공간은 소유 객체가 유지합니다. 크기 변경, 다시 로드·설정, 닫기, 이동, 소멸로 참조와 바이트 포인터가 무효화될 수 있고 갱신 시 내용이 덮어써집니다. 독립적인 복사본이 필요하면 현재 프레임 안에서 복제합니다.
+```cpp
+void tcApp::update() {
+    pixels = video.getPixels().clone();
+}
+```
+- 빌린 VideoPlayer 픽셀 버퍼를 잠그는 API는 없으며 접근 시 동기화를 추가하지 않습니다. `VideoPlayer`는 변환이나 GPU 읽기 없이 CPU 미러를 반환합니다. `HapPlayer`는 기존처럼 필요할 때 BC/DXT를 자체 Pixels로 디코드하며 압축 프레임이 준비될 때까지 비어 있습니다.
+- 비디오 getPixels는 Lua에서 사용할 수 없습니다. Fbo에서 픽셀을 읽습니다.
+```lua
+local fbo, pixels = Fbo(), Pixels()
+fbo:allocate(video:getWidth(), video:getHeight())
+fbo:begin()
+video:draw(0, 0)
+fbo:end_fbo()
+fbo:readPixels(pixels)
+```
+'''
+related = ["Pixels::clone", "Fbo::readPixels", "VideoPlayer::getPixelsY", "VideoPlayer::getPixelsUV"]
 
 ["VideoPlayerBase::hasAudio"]
 description.en = "Report whether the video has an audio track."
@@ -72306,3 +72557,135 @@ struct tcApp : App {
 - 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
 - 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
 '''
+
+["VideoPlayer::isNV12Mode"]
+description.en = "Report whether the player uses hardware NV12 planes (protected)."
+description.ja = "ハードウェア NV12 平面を使用中か返す（protected）。"
+description.ko = "하드웨어 NV12 평면 사용 여부를 반환한다(protected)."
+details.en = '''
+- Subclass escape hatch for the Linux NV12 draw path; no conversion or readback.
+'''
+details.ja = '''
+- Linux NV12 描画経路を利用する派生クラス用です。変換も読み戻しも行いません。
+'''
+details.ko = '''
+- Linux NV12 그리기 경로를 사용하는 파생 클래스용입니다. 변환이나 읽기는 하지 않습니다.
+'''
+related = ["VideoPlayer::getPixels"]
+
+["VideoPlayer::getTextureY"]
+description.en = "Return the Y plane texture as const Texture& (protected)."
+description.ja = "Y 平面のテクスチャを const Texture& で返す（protected）。"
+description.ko = "Y 평면 텍스처를 const Texture&로 반환한다(protected)."
+details.en = '''
+- Subclass access to the Linux NV12 luma plane, without conversion or copying.
+'''
+details.ja = '''
+- 変換やコピーを行わず、派生クラスから Linux NV12 の輝度平面へアクセスします。
+'''
+details.ko = '''
+- 변환이나 복사 없이 파생 클래스에서 Linux NV12 휘도 평면에 접근합니다.
+'''
+related = ["VideoPlayer::getPixels"]
+
+["VideoPlayer::getTextureUV"]
+description.en = "Return the UV plane texture as const Texture& (protected)."
+description.ja = "UV 平面のテクスチャを const Texture& で返す（protected）。"
+description.ko = "UV 평면 텍스처를 const Texture&로 반환한다(protected)."
+details.en = '''
+- Subclass access to the Linux NV12 chroma plane, without conversion or copying.
+'''
+details.ja = '''
+- 変換やコピーを行わず、派生クラスから Linux NV12 の色差平面へアクセスします。
+'''
+details.ko = '''
+- 변환이나 복사 없이 파생 클래스에서 Linux NV12 색차 평면에 접근합니다.
+'''
+related = ["VideoPlayer::getPixels"]
+
+["VideoPlayer::hasTexture"]
+description.en = "Returns whether the active video texture is allocated, without the NV12 warning."
+description.ja = "使用中の動画テクスチャが確保済みかどうかを、NV12 の警告なしで返す。"
+description.ko = "사용 중인 비디오 텍스처가 할당되었는지 NV12 경고 없이 반환한다."
+details.en = '''
+- Checks the texture the player draws with: both NV12 plane textures in Linux hardware NV12 mode, otherwise the RGBA texture. It does not call `getTexture()`, so it never logs the NV12 access warning.
+- `true` does not mean `getTexture()` has content: in NV12 mode `getTexture()` stays empty. Draw the video itself:
+```cpp
+void tcApp::draw() {
+    if (video.hasTexture()) {
+        video.draw(0, 0);
+    }
+}
+```
+'''
+details.ja = '''
+- プレイヤーが描画に使うテクスチャを調べます。Linux ハードウェア NV12 モードでは 2 つの平面テクスチャ、それ以外では RGBA テクスチャです。`getTexture()` を呼ばないため、NV12 のアクセス警告は出ません。
+- `true` でも `getTexture()` に中身があるとは限りません。NV12 モードでは `getTexture()` は空のままです。動画そのものを描画してください。
+```cpp
+void tcApp::draw() {
+    if (video.hasTexture()) {
+        video.draw(0, 0);
+    }
+}
+```
+'''
+details.ko = '''
+- 플레이어가 그리기에 사용하는 텍스처를 확인합니다. Linux 하드웨어 NV12 모드에서는 두 평면 텍스처, 그 외에는 RGBA 텍스처입니다. `getTexture()`를 호출하지 않으므로 NV12 접근 경고가 출력되지 않습니다.
+- `true`라도 `getTexture()`에 내용이 있다는 뜻은 아닙니다. NV12 모드에서 `getTexture()`는 비어 있습니다. 비디오 자체를 그리세요.
+```cpp
+void tcApp::draw() {
+    if (video.hasTexture()) {
+        video.draw(0, 0);
+    }
+}
+```
+'''
+related = ["VideoPlayer::getTexture", "HasTexture::hasTexture"]
+
+["VideoPlayer::getTexture"]
+description.en = "Return the display texture; empty in Linux hardware NV12 mode."
+description.ja = "表示テクスチャを返す。Linux ハードウェア NV12 モードでは空。"
+description.ko = "표시 텍스처를 반환한다. Linux 하드웨어 NV12 모드에서는 비어 있다."
+details.en = '''
+- Linux hardware NV12 mode returns empty pixels and an empty texture from `getPixels()` / `getTexture()`, with one warning per player instance on the first access. Neither accessor converts NV12 to RGBA. For guaranteed frame access, allocate an Fbo at the video size and draw into it, then use `fbo.getTexture()` or read back pixels:
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+'''
+details.ja = '''
+- Linux のハードウェア NV12 モードでは `getPixels()` / `getTexture()` は空を返し、最初の取得時にプレイヤーごとに一度だけ警告します。どちらも NV12 から RGBA へ変換しません。確実にフレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+'''
+details.ko = '''
+- Linux 하드웨어 NV12 모드에서 `getPixels()` / `getTexture()`는 빈 값을 반환하며 첫 접근 시 플레이어마다 한 번 경고합니다. 어느 접근자도 NV12를 RGBA로 변환하지 않습니다. 프레임을 확실하게 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+```cpp
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        fbo.readPixels(pixels);
+    }
+}
+```
+'''
+related = ["Pixels::clone", "Fbo::readPixels", "VideoPlayer::getPixelsY", "VideoPlayer::getPixelsUV"]

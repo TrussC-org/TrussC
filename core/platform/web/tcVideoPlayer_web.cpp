@@ -236,9 +236,9 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     }
 
     // Allocate pixel buffer
-    pixels_ = new (std::nothrow) unsigned char[bytes];
-    if (!pixels_) { closePlatform(); return false; }
-    std::memset(pixels_, 0, bytes);
+    try { pixels_.allocate(width_, height_, 4); }
+    catch (const std::bad_alloc&) { pixels_.clear(); }
+    if (!pixels_.isAllocated()) { closePlatform(); return false; }
 
     updatePlatform();
     logNotice("VideoPlayer") << "loaded '" << pathStr << "' [Web]";
@@ -334,8 +334,7 @@ void VideoPlayer::updatePlatform() {
         texture_.clear();
         width_ = newWidth;
         height_ = newHeight;
-        delete[] pixels_;
-        pixels_ = nullptr;
+        pixels_.clear();
 
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);
         if (!texture_.isAllocated()) {
@@ -344,14 +343,14 @@ void VideoPlayer::updatePlatform() {
         }
 
         // Size the CPU mirror only after the replacement texture is available.
-        pixels_ = new (std::nothrow) unsigned char[bytes];
-        if (!pixels_) { reportPlaybackError("Video frame allocation failed", -863); return; }
-        std::memset(pixels_, 0, bytes);
+        try { pixels_.allocate(width_, height_, 4); }
+        catch (const std::bad_alloc&) { pixels_.clear(); }
+        if (!pixels_.isAllocated()) { reportPlaybackError("Video frame allocation failed", -863); return; }
 
         logVerbose("VideoPlayer") << "resized to " << width_ << "x" << height_ << " [Web]";
     }
 
-    if (!pixels_ || width_ <= 0 || height_ <= 0) return;
+    if (!pixels_.isAllocated() || width_ <= 0 || height_ <= 0) return;
 
     // Get pixel data from JavaScript
     char script[2048];
@@ -398,7 +397,7 @@ void VideoPlayer::updatePlatform() {
             window._trussc_player_frameNew = true;
             return 1;
         })();
-    )JS", width_, height_, (unsigned int)(uintptr_t)pixels_);
+    )JS", width_, height_, (unsigned int)(uintptr_t)pixels_.getData());
 
     emscripten_run_script_int(script);
 }

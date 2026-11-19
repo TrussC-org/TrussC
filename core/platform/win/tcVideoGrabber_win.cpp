@@ -157,9 +157,9 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                     // Publish under the State lock, including pointer/size checks.
                     {
                         std::lock_guard<std::mutex> lock(state->mtx);
-                        if (state->pixels && state->width == data->bufferWidth &&
+                        if (state->pixels.isAllocated() && state->width == data->bufferWidth &&
                             state->height == data->bufferHeight) {
-                            std::memcpy(state->pixels.get(), data->backBuffer,
+                            std::memcpy(state->pixels.getData(), data->backBuffer,
                                         (size_t)data->bufferWidth * data->bufferHeight * 4);
                             state->dirty.store(true);
                         }

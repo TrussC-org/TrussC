@@ -169,7 +169,7 @@ struct GrabberSharedState {
     std::mutex mtx;
     std::atomic<bool> dirty{false};
     std::atomic<bool> stopped{false};
-    std::unique_ptr<unsigned char[]> pixels;
+    Pixels pixels;
     GrabberFrameQueue frameQueue;
     // Retained Event storage, never a pointer to the public grabber. Moves
     // rebind this target atomically; an in-flight dispatch owns its snapshot.
@@ -436,7 +436,7 @@ public:
         // Update texture if buffer was updated
         if (state_->dirty.exchange(false)) {
             std::lock_guard<std::mutex> lock(state_->mtx);
-            texture_.loadData(state_->pixels.get(), state_->width, state_->height, 4);
+            texture_.loadData(state_->pixels.getData(), state_->width, state_->height, 4);
             frameNew_ = true;
         }
     }
@@ -466,8 +466,8 @@ public:
     // Pixel access
     // =========================================================================
 
-    unsigned char* getPixels() { return state_->pixels.get(); }
-    const unsigned char* getPixels() const { return state_->pixels.get(); }
+    // Const only: resizing frame storage would make backend writes go out of bounds.
+    TC_LUA_SKIP const Pixels& getPixels() const { return state_->pixels; }
 
     // =========================================================================
     // Buffered frames (opt-in, timestamped)
@@ -509,11 +509,11 @@ public:
 
     // Copy to Image
     void copyToImage(Image& image) const {
-        if (!initialized_ || !state_->pixels) return;
+        if (!initialized_ || !state_->pixels.isAllocated()) return;
 
         image.allocate(state_->width, state_->height, 4);
         std::lock_guard<std::mutex> lock(state_->mtx);
-        std::memcpy(image.getPixelsData(), state_->pixels.get(), state_->width * state_->height * 4);
+        std::memcpy(image.getPixelsData(), state_->pixels.getData(), state_->width * state_->height * 4);
         image.setDirty();
         image.update();
     }
@@ -637,11 +637,9 @@ private:
         reopenName_ = pick.name;
 
         // Allocate pixel buffer
-        size_t bufferSize = state_->width * state_->height * 4;
         {
             std::lock_guard<std::mutex> lock(state_->mtx);
-            state_->pixels = std::make_unique<unsigned char[]>(bufferSize);
-            std::memset(state_->pixels.get(), 0, bufferSize);
+            state_->pixels.allocate(state_->width, state_->height, 4);
         }
 
         // Set pixel buffer pointer for delegate
@@ -659,14 +657,13 @@ private:
     // -------------------------------------------------------------------------
     void resizeBuffers(int newWidth, int newHeight) {
         // Allocate new pixel buffer
-        size_t newBufferSize = newWidth * newHeight * 4;
-        unsigned char* newPixels = new unsigned char[newBufferSize];
-        std::memset(newPixels, 0, newBufferSize);
+        Pixels newPixels;
+        newPixels.allocate(newWidth, newHeight, 4);
 
         // Lock mutex and swap old buffer
         {
             std::lock_guard<std::mutex> lock(state_->mtx);
-            state_->pixels.reset(newPixels);
+            state_->pixels = std::move(newPixels);
             state_->width = newWidth;
             state_->height = newHeight;
 

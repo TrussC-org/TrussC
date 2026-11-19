@@ -238,10 +238,6 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpErrorEventArgs::message;
     }
-    {
-        sol::usertype<trussc::BackPressedEventArgs> t = lua->new_usertype<trussc::BackPressedEventArgs>("BackPressedEventArgs");
-        t["cancel"] = &trussc::BackPressedEventArgs::cancel;
-    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)
