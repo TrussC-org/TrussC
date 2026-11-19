@@ -33,7 +33,7 @@ void publishFrame(const std::shared_ptr<internal::GrabberSharedState>& state, ui
     const unsigned char rgba[] = {static_cast<unsigned char>(number), 2, 3, 255};
     {
         std::lock_guard<std::mutex> lock(state->mtx);
-        std::memcpy(state->pixels.get(), rgba, sizeof(rgba));
+        std::memcpy(state->pixels.getData(), rgba, sizeof(rgba));
         state->dirty.store(true);
     }
     state->frameQueue.push(rgba, 1, 1, number);
@@ -200,7 +200,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           received[1].timestampUs == 2 && received[2].timestampUs == 3 &&
           received[2].pixels.getData()[0] == 3);
     check("move keeps capture active and updates destination pixels",
-          !receivingState->stopped.load() && receiving.getPixels()[0] == 3);
+          !receivingState->stopped.load() && receiving.getPixels().getData()[0] == 3);
 
     VideoGrabber independent;
     Access::prepare(independent);
@@ -217,7 +217,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("two live grabbers publish independent pixels and queues",
           received.size() == 1 && received[0].timestampUs == 4 &&
           otherFrames.size() == 1 && otherFrames[0].timestampUs == 9 &&
-          receiving.getPixels()[0] == 4 && independent.getPixels()[0] == 9);
+          receiving.getPixels().getData()[0] == 4 && independent.getPixels().getData()[0] == 9);
 
     std::weak_ptr<internal::GrabberSharedState> oldRun = independentState;
     independent.close();

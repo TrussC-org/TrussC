@@ -28,8 +28,8 @@ public:
     mutable int frameCalls = 0;
     mutable int rateQueries = 0;
     void update() override {}
-    unsigned char* getPixels() override { return nullptr; }
-    const unsigned char* getPixels() const override { return nullptr; }
+    Pixels pixels;
+    const Pixels& getPixels() const override { return pixels; }
     // Return raw loaded rates so the base guard itself must reject NaN/Inf.
     float getFrameRate() const override {
         ++rateQueries;

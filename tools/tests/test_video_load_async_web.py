@@ -96,7 +96,7 @@ class VideoPlayer {
 '''
         support = r'''
     fs::path sourcePath_;
-    unsigned char* pixels_ = nullptr;
+    struct PixelStorage { bool isAllocated() const { return false; } } pixels_;
     int width_ = 0, height_ = 0;
     int decodeThreads_ = 0;
     float volume_ = 1, speed_ = 1;

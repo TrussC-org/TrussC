@@ -28,7 +28,7 @@ struct VideoGrabberTestAccess {
         grabber.initialized_ = true;
         grabber.state_->width = 1;
         grabber.state_->height = 1;
-        grabber.state_->pixels = std::make_unique<unsigned char[]>(4);
+        grabber.state_->pixels.allocate(1, 1, 4);
     }
     // What a backend does when the OS reports the camera lost (any thread).
     static void reportLost(VideoGrabber& grabber, const std::string& reason) {

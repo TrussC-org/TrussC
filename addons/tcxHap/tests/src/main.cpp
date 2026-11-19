@@ -29,6 +29,7 @@
 #include "../../../../core/tests/common/tcDisplayTest.h"
 #include "tcxHapPlayer.h"
 
+#include <type_traits>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -1481,7 +1482,12 @@ public:
         HapPlayer loaded(std::move(other));
         drawMany(loaded);
         check("HAP-Q: moves preserve a successfully loaded shader", attempts == 4 && errors == 3);
+        const auto& rgba = loaded.getPixels();
+        check("Hap Pixels has decoded RGBA dimensions", rgba.isAllocated() &&
+              rgba.getWidth() == 4 && rgba.getHeight() == 4 && rgba.getChannels() == 4);
+        check("Hap cached Pixels reuses storage", rgba.getData() == loaded.getPixels().getData());
         loaded.close();
+        check("decoded Hap pixels empty after close", !loaded.getPixels().isAllocated());
         fs::remove(path);
         exitApp();
     }
@@ -1490,6 +1496,15 @@ public:
 int runRecordedFormatsTests();
 
 int main(int argc, char** argv) {
+    static_assert(std::is_same_v<decltype(std::declval<tcx::hap::HapPlayer&>().getPixels()), const tc::Pixels&>);
+    static_assert(std::is_same_v<decltype(std::declval<const tcx::hap::HapPlayer&>().getPixels()), const tc::Pixels&>);
+    {
+        tcx::hap::HapPlayer player;
+        check("Hap pixels empty before load", !player.getPixels().isAllocated());
+        player.close();
+        check("Hap pixels empty after close", !player.getPixels().isAllocated());
+    }
+
     if (argc > 1 && string(argv[1]) == "--recorded-formats") return runRecordedFormatsTests();
     g_fail += runRecordedFormatsTests();
     if (argc > 1 && string(argv[1]) == "--shader-failure") {

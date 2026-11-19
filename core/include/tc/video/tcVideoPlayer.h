@@ -48,7 +48,7 @@ class TC_PLATFORMS("macos,windows,linux,ios,web") VideoPlayer : public VideoPlay
 #elif defined(__EMSCRIPTEN__)
         std::unique_ptr<VideoPlayer> prepared;
         size_t retainedBytes() const noexcept override {
-            return prepared && prepared->pixels_ ? size_t(prepared->width_) * prepared->height_ * 4 : 0;
+            return prepared && prepared->pixels_.isAllocated() ? size_t(prepared->width_) * prepared->height_ * 4 : 0;
         }
         void discardPayload() noexcept override { prepared.reset(); }
 #endif
@@ -270,7 +270,7 @@ private:
         textureY_.clear();
         textureUV_.clear();
 
-        if (pixels_)  { delete[] pixels_;  pixels_  = nullptr; }
+        pixels_.clear();
         if (pixelsY_) { delete[] pixelsY_; pixelsY_ = nullptr; }
         if (pixelsUV_){ delete[] pixelsUV_; pixelsUV_ = nullptr; }
         nv12Mode_ = false;
@@ -324,8 +324,8 @@ public:
                     markFrameNew();
                 }
             } else {
-                if (pixels_ && width_ > 0 && height_ > 0) {
-                    texture_.loadData(pixels_, width_, height_, 4);
+                if (pixels_.isAllocated() && width_ > 0 && height_ > 0) {
+                    texture_.loadData(pixels_.getData(), width_, height_, 4);
                     texUploadFrame_ = internal::deviceFrameCount();
                     markFrameNew();
                 }
@@ -497,8 +497,25 @@ public:
     // Pixel access
     // =========================================================================
 
-    unsigned char* getPixels() override { return pixels_; }
-    const unsigned char* getPixels() const override { return pixels_; }
+    // Const only: resizing frame storage would make backend writes go out of bounds.
+    TC_LUA_SKIP const Pixels& getPixels() const override {
+        warnNV12Access();
+        return pixels_;
+    }
+
+    bool hasTexture() const override {
+        return nv12Mode_ ? textureY_.isAllocated() && textureUV_.isAllocated()
+                         : texture_.isAllocated();
+    }
+
+    Texture& getTexture() override {
+        warnNV12Access();
+        return nv12Mode_ ? emptyNV12Texture_ : texture_;
+    }
+    const Texture& getTexture() const override {
+        warnNV12Access();
+        return nv12Mode_ ? emptyNV12Texture_ : texture_;
+    }
 
     unsigned char* getPixelsY()  { return pixelsY_; }
     unsigned char* getPixelsUV() { return pixelsUV_; }
@@ -526,6 +543,10 @@ public:
     fs::path getPath() const { return sourcePath_; }
 
 protected:
+    bool isNV12Mode() const { return nv12Mode_; }
+    const Texture& getTextureY() const { return textureY_; }
+    const Texture& getTextureUV() const { return textureUV_; }
+
     // -------------------------------------------------------------------------
     // Implementation methods
     // -------------------------------------------------------------------------
@@ -599,8 +620,17 @@ protected:
     }
 
 private:
+    Texture emptyNV12Texture_;
+    mutable OnceGate nv12AccessWarning_;
+    void warnNV12Access() const {
+        if (nv12Mode_ && nv12AccessWarning_.isFirstTime()) {
+            logWarning("VideoPlayer") << "getPixels()/getTexture() is empty in hardware NV12 mode (Linux). "
+                "Draw the video into an Fbo and use fbo.getTexture() / fbo.readPixels().";
+        }
+    }
+
     // Pixel data (RGBA)
-    unsigned char* pixels_ = nullptr;
+    Pixels pixels_;
 
     // NV12 hardware planes use encoded dimensions; public dimensions are display-oriented.
     unsigned char* pixelsY_  = nullptr;
@@ -653,7 +683,7 @@ private:
         loop_ = other.loop_;
         volume_ = other.volume_;
         speed_ = other.speed_;
-        pixels_    = other.pixels_;
+        pixels_    = std::move(other.pixels_);
         pixelsY_   = other.pixelsY_;
         pixelsUV_  = other.pixelsUV_;
         texture_   = std::move(other.texture_);
@@ -678,7 +708,6 @@ private:
         decodeStatus_ = std::move(other.decodeStatus_);
         sourcePath_      = std::move(other.sourcePath_);
 
-        other.pixels_    = nullptr;
         other.pixelsY_   = nullptr;
         other.pixelsUV_  = nullptr;
         other.posterUploadPending_ = false;
@@ -720,8 +749,8 @@ private:
         {
             // keep the CPU mirror in sync so getPixels() matches what is shown
             std::lock_guard<std::mutex> lock(mutex_);
-            if (pixels_) {
-                std::memcpy(pixels_, px.getData(), (size_t)width_ * height_ * 4);
+            if (pixels_.isAllocated()) {
+                std::memcpy(pixels_.getData(), px.getData(), (size_t)width_ * height_ * 4);
             }
         }
         // texture_ accepts ONE loadData per app frame (sokol). During playback
@@ -747,10 +776,10 @@ private:
     }
 
     void clearTexture() {
-        if (width_ > 0 && height_ > 0 && pixels_) {
+        if (width_ > 0 && height_ > 0 && pixels_.isAllocated()) {
             std::lock_guard<std::mutex> lock(mutex_);
-            std::memset(pixels_, 0, size_t(width_) * height_ * 4);
-            texture_.loadData(pixels_, width_, height_, 4);
+            std::memset(pixels_.getData(), 0, size_t(width_) * height_ * 4);
+            texture_.loadData(pixels_.getData(), width_, height_, 4);
             texUploadFrame_ = internal::deviceFrameCount();
         }
     }
@@ -996,11 +1025,8 @@ public:
         player.width_ = w;
         player.height_ = h;
     }
-    static void setPixelBuffer(VideoPlayer& player, unsigned char* pixels) {
-        player.pixels_ = pixels;
-    }
-    static unsigned char*& getPixelBufferRef(VideoPlayer& player) {
-        return player.pixels_;
+    static unsigned char* getPixelBuffer(VideoPlayer& player) {
+        return player.pixels_.getData();
     }
     static void*& getPlatformHandleRef(VideoPlayer& player) {
         return player.platformHandle_;

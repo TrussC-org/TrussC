@@ -165,8 +165,9 @@ TC_CORE_TEST_MAIN() {
     player.setAutoPoster(true);
     player.loadAsync(path); deliver();
     check("Linux fallback retains automatic poster behavior", events == 6 && player.isReady()
-          && player.getPixels() != nullptr);
+          && player.getPixels().isAllocated());
     player.close();
+    check("loaded player pixels empty after close", !player.getPixels().isAllocated());
     fs::remove(path);
 #endif
 

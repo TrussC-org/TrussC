@@ -5067,7 +5067,7 @@ int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return t
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the stored capture device name.
 size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux,ios]  // Return the configured frame queue capacity.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the current capture frame height.
-unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current camera pixel buffer.
+const Pixels & VideoGrabber::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the grabber; empty when no CPU frame storage exists.
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux,ios]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
@@ -5106,17 +5106,22 @@ float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Return
 float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Returns the gamma correction setting.
 std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Returns the reported video decoding backend name.
 fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Returns the loaded video's source path.
-unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // Returns a pointer to the RGBA pixel buffer.
+const Pixels & VideoPlayer::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists.
 unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
 unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
 float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
 float VideoPlayer::getRotation() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in radians.
 int VideoPlayer::getRotationDeg() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in degrees.
+Texture & VideoPlayer::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the display texture; empty in Linux hardware NV12 mode.
+const Texture & VideoPlayer::getTextureUV() const [macos,windows,linux,ios,web]  // Return the UV plane texture as const Texture& (protected).
+const Texture & VideoPlayer::getTextureY() const [macos,windows,linux,ios,web]  // Return the Y plane texture as const Texture& (protected).
 int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.
+bool VideoPlayer::hasTexture() const [macos,windows,linux,ios,web]  // Returns whether the active video texture is allocated, without the NV12 warning.
 bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Returns the audio streaming preference.
 bool VideoPlayer::isLoading() const [macos,windows,linux,ios,web]  // Reports whether a video load is pending for the current App run.
+bool VideoPlayer::isNV12Mode() const [macos,windows,linux,ios,web]  // Report whether the player uses hardware NV12 planes (protected).
 bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Returns the reported hardware decoding state.
 LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source synchronously, blocking the caller.
 void VideoPlayer::loadAsync(const fs::path & path) [macos,windows,linux,ios,web]  // Starts a video load with completion on a later main-loop pass.
@@ -5162,7 +5167,7 @@ float VideoPlayerBase::getFrameRate() const  // Return the video frame rate.
 float VideoPlayerBase::getHeight() const  // Returns the video height.
 std::string VideoPlayerBase::getHwAccelName() const  // Return the reported decode backend name.
 float VideoPlayerBase::getPan() const  // Returns the stored stereo pan.
-unsigned char * VideoPlayerBase::getPixels() [+1]  // Return a pointer to the player's RGBA pixel buffer.
+const Pixels & VideoPlayerBase::getPixels() const  // Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists.
 float VideoPlayerBase::getPosition() const  // Return the normalized playback position.
 float VideoPlayerBase::getResyncThreshold() const  // Returns the playback catch-up threshold in seconds.
 float VideoPlayerBase::getSpeed() const  // Returns the stored playback speed.
