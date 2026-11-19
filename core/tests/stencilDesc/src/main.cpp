@@ -92,11 +92,16 @@ void clearValues() {
     check("color clears preserve stencil", bytesEqual(fbo, 255));
 }
 void colorClearIgnoresDesc() {
-    // Matches the window: Windows enforces a minimum top-level width.
+    // Logical screen fixture size; also meets Windows' minimum window width.
     constexpr int width = 128, height = 96;
     Fbo fbo;
     fbo.allocate(width, height);
     for (bool screen : {true, false}) {
+        if (screen && (getWindowWidth() < width || getWindowHeight() < height)) {
+            std::puts("SKIP: stencilDesc screen clear needs a 128x96 logical fixture");
+            continue;
+        }
+        const float pixelScale = screen ? getDpiScale() : 1.0f;
         for (const auto desc : {StencilDesc::inside(7), StencilDesc::shape(9)}) {
             std::printf("CLEAR %s %s\n", screen ? "screen" : "Fbo", desc.write ? "shape(9)" : "inside(7)");
             resetStyle();
@@ -125,8 +130,8 @@ void colorClearIgnoresDesc() {
                 return pixels;
             };
             const auto cleared = capture();
-            bool green = cleared.getWidth() == width && cleared.getHeight() == height;
-            for (int i = 0; i < width * height && green; ++i) {
+            bool green = cleared.getWidth() > 0 && cleared.getHeight() > 0 && cleared.getChannels() == 4;
+            for (int i = 0; i < cleared.getWidth() * cleared.getHeight() && green; ++i) {
                 const auto* p = cleared.getData() + i * 4;
                 green &= p[0] == 0 && p[1] == 255 && p[2] == 0 && p[3] == 255;
             }
@@ -149,10 +154,14 @@ void colorClearIgnoresDesc() {
             setColor(1, 0, 0);
             drawRect(0, 0, width, height);
             const auto probed = capture();
-            bool retained = probed.getWidth() == width && probed.getHeight() == height;
+            bool retained = probed.getWidth() >= int(width * pixelScale) &&
+                probed.getHeight() >= int(height * pixelScale) && probed.getChannels() == 4;
             for (int y = 0; y < height && retained; ++y)
                 for (int x = 0; x < width; ++x) {
-                    const auto* p = probed.getData() + (y * width + x) * 4;
+                    // Sample logical pixel centers inside the fixture.
+                    const int px = int((x + 0.5f) * pixelScale);
+                    const int py = int((y + 0.5f) * pixelScale);
+                    const auto* p = probed.getData() + (py * probed.getWidth() + px) * 4;
                     retained &= p[0] == (x < width / 2 ? 0 : 255) && p[1] == 0 &&
                         p[2] == (x < width / 2 ? 255 : 0) && p[3] == 255;
                 }

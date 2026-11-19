@@ -18,6 +18,7 @@ extern "C" {
 #include <libavutil/time.h>
 #include <libavutil/opt.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/pixdesc.h>
 }
 
 #include "tcVideoDecodeFFmpeg.h"
@@ -105,9 +106,9 @@ public:
     int getAudioChannels() const { return audioChannels_; }
     std::vector<uint8_t> getAudioData() const;
 
-    bool        isUsingHwAccel() const { return hwType_ != AV_HWDEVICE_TYPE_NONE; }
+    bool        isUsingHwAccel() const { return hwType_ != AV_HWDEVICE_TYPE_NONE && !decodedInSoftware_; }
     std::string getHwAccelName() const {
-        if (hwType_ == AV_HWDEVICE_TYPE_NONE) return "software";
+        if (!isUsingHwAccel()) return "software";
         const char* n = av_hwdevice_get_type_name(hwType_);
         return n ? n : "unknown";
     }
@@ -157,6 +158,7 @@ private:
     void seekToTime(double seconds);
     void requestSeek(double seconds); // mutex_ held; also resets the decode clock anchor.
     bool probeHwOutputFormat();
+    void confirmDecodedBackend(const AVFrame* frame);
 
     // FFmpeg context
     AVFormatContext* formatCtx_ = nullptr;
@@ -171,6 +173,8 @@ private:
     bool packetPending_ = false;
     AVBufferRef*   hwDeviceCtx_   = nullptr;
     AVHWDeviceType hwType_        = AV_HWDEVICE_TYPE_NONE;
+    std::atomic<bool> decodedInSoftware_{false}; // Published to reporting queries.
+    bool decodedBackendChecked_ = false; // Decoder only; reset for each load.
     AVPixelFormat  lastScalerFmt_ = AV_PIX_FMT_NONE;
     // Filled by probeHwOutputFormat() after opening the codec. For HW decode
     // this is the format the first transferred frame actually produced (e.g.
@@ -455,6 +459,8 @@ void TCVideoPlayerImpl::close() {
         hwDeviceCtx_ = nullptr;
     }
     hwType_        = AV_HWDEVICE_TYPE_NONE;
+    decodedBackendChecked_ = false;
+    decodedInSoftware_ = false;
     lastScalerFmt_ = AV_PIX_FMT_NONE;
 
     if (packet_) {
@@ -707,6 +713,7 @@ bool TCVideoPlayerImpl::seekDecoder(int64_t timestamp) {
         return false;
     ++seekCount_;
     avcodec_flush_buffers(codecCtx_);
+    decodedBackendChecked_ = false;
     if (packetPending_) {
         av_packet_unref(packet_);
         packetPending_ = false;
@@ -785,6 +792,17 @@ void TCVideoPlayerImpl::decodeStep(double clock, float threshold) {
     }
 }
 
+void TCVideoPlayerImpl::confirmDecodedBackend(const AVFrame* frame) {
+    if (decodedBackendChecked_) return;
+    decodedBackendChecked_ = true;
+    if (hwType_ == AV_HWDEVICE_TYPE_NONE || decodedInSoftware_) return;
+    const AVPixFmtDescriptor* format = av_pix_fmt_desc_get(AVPixelFormat(frame->format));
+    if (frame->hw_frames_ctx || (format && (format->flags & AV_PIX_FMT_FLAG_HWACCEL))) return;
+    decodedInSoftware_ = true;
+    logWarning("VideoPlayer") << av_hwdevice_get_type_name(hwType_)
+        << " was requested but FFmpeg decodes in software; reporting software";
+}
+
 // Decodes a single frame up-front to learn the actual post-transfer pixel
 // format (e.g. NV12 on VAAPI/NVDEC, P010 for 10-bit, YUV420P on some
 // V4L2M2M). The frames context and its transfer formats determine the CPU
@@ -823,6 +841,7 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
             if (ret < 0) { captured = false; break; }
 
+            confirmDecodedBackend(frame_);
             size_t bytes = 0;
             if (!internal::VideoDecodeLimits::rgba(frame_->width, frame_->height, bytes)) {
                 status_->reject(bytes, 0);
@@ -854,9 +873,10 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
         return false;
     }
     avcodec_flush_buffers(codecCtx_);
+    decodedBackendChecked_ = false;
     packetPending_ = false;
 
-    if (captured) {
+    if (captured && isUsingHwAccel()) {
         const char* name = av_get_pix_fmt_name(probedFormat_);
         logNotice("VideoPlayer") << "HW transfer format: "
                                   << (name ? name : "unknown");
@@ -867,7 +887,7 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
             logError("VideoPlayer") << "Failed to open software codec after HW format probe";
             return false;
         }
-    } else {
+    } else if (!captured) {
         logWarning("VideoPlayer") << "HW format probe failed; using RGBA fallback";
     }
     return true;
@@ -974,6 +994,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             return false;
         }
 
+        confirmDecodedBackend(frame_);
         size_t sourceBytes = 0;
         if (!internal::VideoDecodeLimits::rgba(frame_->width, frame_->height, sourceBytes)) {
             status_->reject(sourceBytes, 0);
@@ -1385,6 +1406,20 @@ void TCVideoPlayerImpl::previousFrame() {
 
 namespace trussc {
 
+void internal::VideoPlayerPlatformAccess::decodedBackendForTests(VideoPlayer& player,
+        int format, bool framesContext, bool newLoad) {
+    auto* impl = static_cast<TCVideoPlayerImpl*>(player.platformHandle_);
+    if (newLoad) {
+        impl->hwType_ = AV_HWDEVICE_TYPE_CUDA;
+        impl->decodedBackendChecked_ = false;
+    }
+    AVFrame frame{};
+    frame.format = format;
+    frame.hw_frames_ctx = framesContext ? av_buffer_alloc(1) : nullptr;
+    impl->confirmDecodedBackend(&frame);
+    av_buffer_unref(&frame.hw_frames_ctx);
+}
+
 int internal::VideoPlayerPlatformAccess::decodeThreadsForTests(const VideoPlayer& player) {
     return player.platformHandle_ ?
         static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->decodeThreads() : 0;
@@ -1439,7 +1474,7 @@ void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player)
         static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->audioSound_.stop();
 }
 
-bool VideoPlayer::loadPlatform(const fs::path& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path, bool createShader) {
     auto owned = std::make_unique<TCVideoPlayerImpl>();
     auto* impl = owned.get();
 
@@ -1471,9 +1506,11 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             std::memset(pixelsY_,  0, size_t(nv12Width_) * nv12Height_);
             std::memset(pixelsUV_, 128, size_t(nv12Width_) * nv12Height_ / 2);  // 128 = neutral chroma in NV12
 
-            auto* shader = new internal::NV12VideoShader(impl->rotation_);
-            shader->loadShader();
-            nv12ShaderHandle_ = shader;
+            if (createShader) {
+                auto* shader = new internal::NV12VideoShader(impl->rotation_);
+                shader->loadShader();
+                nv12ShaderHandle_ = shader;
+            }
         } else {
             pixels_ = new (std::nothrow) unsigned char[size_t(width_) * height_ * 4];
             if (!pixels_) { closePlatform(); return false; }

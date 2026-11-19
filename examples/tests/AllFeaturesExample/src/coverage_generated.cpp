@@ -57,6 +57,7 @@ static void cover_file() {
     (void)listDirectory(af::val<const fs::path>());
     (void)loadErrorName(af::val<LoadError>());
     (void)loadJson(af::val<const fs::path>());
+    (void)loadJson(af::val<const fs::path>(), af::val<Json>());
     (void)loadTextFile(af::val<const fs::path>());
     (void)loadXml(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
@@ -240,11 +241,12 @@ static void cover_graphics_shapes() {
     (void)getBitmapFontHeight();
     (void)getBitmapLineHeight();
     (void)getBitmapStringBBox(af::val<const std::string>());
-    (void)getBitmapStringBounds(af::val<const std::string>(), af::val<float>(), af::val<float>());
     (void)getBitmapStringHeight(af::val<const std::string>());
     (void)getBitmapStringWidth(af::val<const std::string>());
     (void)getTextAlignH();
     (void)getTextAlignV();
+    (void)scopedShape(af::val<bool>());
+    (void)scopedStroke(af::val<bool>());
     (void)setBitmapLineHeight(af::val<float>());
     (void)setFps(af::val<float>());
     (void)setTextAlign(af::val<Direction>(), af::val<Direction>());
@@ -665,6 +667,7 @@ static void cover_utility() {
     (void)logWarning(af::val<const std::string>());
     (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
     (void)parseJson(af::val<const std::string>());
+    (void)parseJson(af::val<const std::string>(), af::val<Json>());
     (void)parseXml(af::val<const std::string>());
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());
@@ -1559,14 +1562,18 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().lifetimeToken();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixels(af::val<unsigned char *>());
+        (void)af::val<const Fbo>().readPixels(af::val<Pixels>());
 #endif
 #if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
+        (void)af::val<const Fbo>().readPixelsFloat(af::val<Pixels>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readStencil(af::val<Pixels>());
 #endif
         (void)af::val<const Fbo>().save(af::val<const fs::path>());
+        (void)af::val<Fbo>().scoped();
+        (void)af::val<Fbo>().scoped(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
         (void)af::val<Fbo>().setFilter(af::val<TextureFilter>());
         (void)af::val<Fbo>().setMagFilter(af::val<TextureFilter>());
@@ -1736,6 +1743,7 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
         (void)af::val<FullscreenShader>().end();
         (void)af::val<const FullscreenShader>().isLoaded();
         (void)af::val<FullscreenShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<FullscreenShader>().scoped();
         (void)af::val<FullscreenShader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
@@ -1763,6 +1771,9 @@ struct Cover_GlyphBatch : af::Scope<GlyphBatch> {
         (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<float>(), af::val<float>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Mat4>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().clear();
         (void)af::val<GlyphBatch>().draw();
         (void)af::val<GlyphBatch>().draw(af::val<const Mat4>());
@@ -3722,6 +3733,7 @@ struct Cover_Shader : af::Scope<Shader> {
         (void)af::val<Shader>().end();
         (void)af::val<const Shader>().isLoaded();
         (void)af::val<Shader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<Shader>().scoped();
         (void)af::val<Shader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());

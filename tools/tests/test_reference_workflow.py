@@ -229,6 +229,89 @@ class StructureAstTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(exported.read_bytes(), self.ast.read_bytes())
 
+    def test_lua_skip_applies_to_one_overload(self):
+        header = self.directory / 'core/include/TrussC.h'
+        header.parent.mkdir(parents=True)
+        header.write_text('Json parseJson(const std::string&);\n'
+                          'TC_LUA_SKIP LoadResult parseJson(const std::string&, Json&);\n', encoding='utf-8')
+        functions = []
+        for index, (result, args) in enumerate([
+                ('Json', [('const std::string &', 'text')]),
+                ('LoadResult', [('const std::string &', 'text'), ('Json &', 'out')])]):
+            function = {'kind': 'FunctionDecl', 'name': 'parseJson',
+                        'loc': {'file': str(header)},
+                        'type': {'qualType': result + ' (' + ', '.join(t for t, _ in args) + ')'},
+                        'inner': [{'kind': 'ParmVarDecl', 'name': name, 'type': {'qualType': t}}
+                                  for t, name in args]}
+            if index:
+                function['inner'].append({'kind': 'AnnotateAttr',
+                                          'range': {'begin': {'line': 2}}})
+            functions.append(function)
+        self.ast.write_text(json.dumps({'kind': 'NamespaceDecl', 'name': 'trussc',
+                                       'loc': {'file': str(header)}, 'inner': functions}), encoding='utf-8')
+        result = self.run_structure('--json', str(self.output))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entry = json.loads(self.output.read_text(encoding='utf-8'))['parseJson']
+        self.assertFalse(entry.get('lua_skip'))
+        self.assertFalse(entry['signatures'][0].get('lua_skip'))
+        self.assertTrue(entry['signatures'][1]['lua_skip'])
+        bindings = subprocess.run(['node', str(ROOT / 'addons/tcxLua/tools/luagen/luagen.js'),
+                                   str(self.output)], capture_output=True, text=True, encoding='utf-8', check=True)
+        self.assertIn('return trussc::parseJson(text);', bindings.stdout)
+        self.assertNotIn('trussc::parseJson(text, out)', bindings.stdout)
+
+    def test_unrelated_overload_metadata_is_unchanged(self):
+        header = self.directory / 'core/include/TrussC.h'
+        header.parent.mkdir(parents=True)
+        header.write_text('TC_LUA_SKIP void fixture();\n', encoding='utf-8')
+        self.ast.write_text(json.dumps({'kind': 'NamespaceDecl', 'name': 'trussc',
+            'loc': {'file': str(header)}, 'inner': [{'kind': 'FunctionDecl', 'name': 'fixture',
+                'loc': {'file': str(header)}, 'type': {'qualType': 'void ()'},
+                'inner': [{'kind': 'AnnotateAttr', 'range': {'begin': {'line': 1}}}]}]}), encoding='utf-8')
+        result = self.run_structure('--json', str(self.output))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entry = json.loads(self.output.read_text(encoding='utf-8'))['fixture']
+        self.assertTrue(entry['lua_skip'])
+        self.assertNotIn('lua_skip', entry['signatures'][0])
+
+    def test_sketch_reference_preserves_other_signatures(self):
+        # Compare full output bytes, including WindowSettings' existing skipped overload.
+        runner = r"""
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const { createRequire } = require('module');
+const file = path.resolve(process.argv[1]);
+const localRequire = createRequire(file);
+const ref = {
+    WindowSettings: { id: 'WindowSettings', kind: 'type', name: 'WindowSettings' },
+    'WindowSettings::setParentWindow': { id: 'WindowSettings::setParentWindow', kind: 'method',
+        owner: 'WindowSettings', name: 'setParentWindow', signatures: [
+            { ret: 'void', args: [{ name: 'handle', type: 'int' }] },
+            { ret: 'void', args: [{ name: 'parent', type: 'Window &', isRef: true }] }
+        ] }
+};
+function emit() {
+    let output;
+    const fakeFs = Object.create(fs);
+    fakeFs.readFileSync = (p, ...args) => String(p).endsWith('/reference-data.json')
+        ? JSON.stringify(ref) : fs.readFileSync(p, ...args);
+    fakeFs.writeFileSync = (p, contents) => { output = contents; };
+    vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
+        require: name => name === 'fs' ? fakeFs : localRequire(name),
+        __dirname: path.dirname(file), process: { argv: ['node', file, '--out', '/tmp/unused.js'], cwd: process.cwd },
+        console: { log() {} }
+    }, { filename: file });
+    return output;
+}
+const before = emit();
+ref['WindowSettings::setParentWindow'].signatures[1].lua_skip = true;
+assert.equal(emit(), before);
+assert.ok(before.includes('"params": "parent"'));
+"""
+        subprocess.run(['node', '-e', runner, str(ROOT / 'docs/scripts/emit-sketch-reference.js')], check=True)
+
     def test_bad_dumps_fail_loudly(self):
         for data, cause in [('', 'no top-level JSON objects'),
                             ('{}\ntrailing', "expected '{' at byte 3"),

@@ -1,6 +1,6 @@
 // #916: bitmap string bounds, height and drawn position must agree.
 //
-// Headless part (always runs): getBitmapStringBounds / Width / Height follow
+// Headless part (always runs): getBitmapStringBBox / Width / Height follow
 // setBitmapLineHeight, and the vertical alignment offsets use the whole text
 // height. Pixel part (--gpu-check, Xvfb works on Linux): draws into an Fbo and
 // compares the lit glyph pixels with the measured size, for the plain draw,
@@ -55,8 +55,8 @@ int lineCount(const string& text) {
 // The documented offset from the anchor to the text's top-left corner, built
 // from the measured size only (independent of the drawing code).
 Vec2 expectedOffset(const string& text, Direction h, Direction v) {
-    float w, hgt;
-    getBitmapStringBounds(text, w, hgt);
+    const Rect box = getBitmapStringBBox(text);
+    const float w = box.width, hgt = box.height;
     Vec2 o;
     o.x = h == Direction::Left ? 0 : h == Direction::Center ? -w / 2 : -w;
     switch (v) {
@@ -74,14 +74,12 @@ void headlessChecks() {
         setBitmapLineHeight(lh);
         for (const string& text : texts) {
             const string tag = "lh " + to_string((int)lh) + " lines " + to_string(lineCount(text)) + ": ";
-            float w = -1, h = -1;
-            getBitmapStringBounds(text, w, h);
+            const Rect box = getBitmapStringBBox(text);
+            const float w = box.width, h = box.height;
             const float expectedH = bitmapfont::CHAR_TEX_HEIGHT + (lineCount(text) - 1) * lh;
             check(tag + "bounds height follows the line height", h == expectedH);
             check(tag + "bounds height == getBitmapStringHeight", h == getBitmapStringHeight(text));
             check(tag + "bounds width == getBitmapStringWidth", w == getBitmapStringWidth(text));
-            const Rect box = getBitmapStringBBox(text);
-            check(tag + "bbox size == bounds", box.width == w && box.height == h);
 
             for (Direction hd : hs) for (Direction vd : vs) {
                 const Vec2 e = expectedOffset(text, hd, vd);
@@ -92,8 +90,8 @@ void headlessChecks() {
     }
     // The default line height keeps the old single-line numbers.
     setBitmapLineHeight(bitmapfont::CHAR_TEX_HEIGHT);
-    float w, h;
-    getBitmapStringBounds("Hi", w, h);
+    const Rect box = getBitmapStringBBox("Hi");
+    const float w = box.width, h = box.height;
     check("single line: bounds 16 x 16", w == 16 && h == bitmapfont::CHAR_TEX_HEIGHT);
     check("single line: Center offset -8", internal::bitmapAlignOffset(w, h, Direction::Left, Direction::Center).y == -8);
     check("single line: Bottom offset -16", internal::bitmapAlignOffset(w, h, Direction::Left, Direction::Bottom).y == -16);
@@ -179,8 +177,8 @@ private:
         const float savedLineHeight = getBitmapLineHeight();
         for (float lh : lineHeights) for (const string& text : texts) {
             setBitmapLineHeight(lh);
-            float w, hgt;
-            getBitmapStringBounds(text, w, hgt);
+            const Rect boxSize = getBitmapStringBBox(text);
+            const float w = boxSize.width, hgt = boxSize.height;
             // Glyph extents relative to the Left/Top draw: the reference.
             Box ref, none;
             render(text, lh, Direction::Left, Direction::Top, Mode::Plain, ref, none);
