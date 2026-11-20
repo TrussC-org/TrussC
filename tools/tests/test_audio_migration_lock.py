@@ -120,7 +120,7 @@ struct PlayingSoundInfo {
     float position, duration, volume, pan, speed, level;
 };
 struct Diagnostics {
-    std::atomic<bool> running{true}, lossPending{false};
+    std::atomic<bool> running{true}, lossPending{false}, reroutePending{false};
     bool isStalled() const { return false; }
 };
 struct AudioDeviceInfo { std::string name; };
