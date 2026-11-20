@@ -257,7 +257,7 @@ cmake --build --preset web --parallel
 Requires:
 - Android SDK (`ANDROID_HOME` environment variable)
 - Android NDK (`ANDROID_NDK_HOME` environment variable)
-- JDK (`JAVA_HOME` environment variable) — javac/jar for core and app Java, d8 from SDK build-tools, and APK signing
+- JDK (`JAVA_HOME` environment variable) — javac/jar for core and app Java, d8 from SDK build-tools, and APK signing. CMake looks for javac and jar in `$JAVA_HOME/bin` as well as its normal program paths.
 
 ```bash
 # Using trusscli (adds android preset to CMakePresets.json)
@@ -324,6 +324,8 @@ void tcApp::update() {
     if (isWindowOccluded()) return;
 }
 ```
+
+Android hidden ticks also deliver queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks follow the same GPU restriction and visibility check. Image/Font/Video completions, other resource callbacks and GPU readback polling wait for a visible host turn. TrussC has no API for background GPU work.
 
 Android 13+ requires runtime POST_NOTIFICATIONS permission for the notification drawer. TrussC does not request it and has no notification-permission request API. If denied, the service still runs but its notification is hidden from the drawer. With permission, a low-importance notification channel and ongoing notification appear. No wake lock is acquired: active audio normally keeps the CPU awake, while CPU-only ticks with the screen off need device verification. TrussC has no background wake-lock API.
 

@@ -129,6 +129,14 @@ void setDrawWhileHidden(bool allow) {
 
 void Window::setUpdateWhileHidden(bool allow) {
     ctx_.updateWhileHidden = allow;
+    if (!allow && (isOccluded() || ctx_.suspended || ctx_.lifecycleSuspended)) {
+        // Disabling Android's source can leave no paused tick before resume.
+        ctx_.loop.lastUpdateTimeInitialized = false;
+        ctx_.loop.updateAccumulator = ctx_.loop.updateTargetFps > 0.0f ? 1.0 / ctx_.loop.updateTargetFps : 0.0;
+        ctx_.mainUpdateCallTime = internal::windowClockNow();
+        ctx_.mainUpdateCallTimeInitialized = false;
+        ctx_.visibilityPaused = true;
+    }
 #ifdef __ANDROID__
     if (binding_.bound)
         sapp_tc_android_set_background_tick(allow ? internal::androidBackgroundTick : nullptr);
@@ -2478,12 +2486,19 @@ void windowClosed(sapp_tc_window handle, void* user) noexcept {
 #ifdef __ANDROID__
 void androidBackgroundTick() noexcept {
     if (runtimeEnding()) return;
-    // No host queues/maintenance or GPU polling while Android has no drawable.
+    // Deliver CPU work without host GPU activation, maintenance or readbacks.
     // setup has already run on the visible surface before this source is enabled.
     backgroundUpdateOnly() = true;
     struct Restore { ~Restore() { backgroundUpdateOnly() = false; } } restore;
     TeardownSteps steps;
     steps.run("Android background update", [&] {
+        if (processPendingQuit()) return;
+        {
+            auto loads = takeCpuResourceLoadBatch();
+            EntryStackGuard guard(AppEntry::Prelude);
+            deliverResourceLoadBatch(std::move(loads));
+            drainMainThreadQueue(); // Includes external Deliver::Main events.
+        }
         auto* window = resolveWindow();
         if (!window) return;
         WindowEntryScope entry(*window, true);

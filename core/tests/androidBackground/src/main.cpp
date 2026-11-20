@@ -1,5 +1,7 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcBackgroundAudio.h"
+#include <thread>
 using namespace tc;
 namespace {
 bool smoke = false;
@@ -9,10 +11,19 @@ class BackgroundProbe : public App {
     uint64_t counter = 0;
     bool updatesEnabled = true;
     bool serviceEnabled = true;
+    bool backgroundProbeStarted = false;
+    SoundBuffer nextTrack;
+    EventListener trackLoaded;
+    fs::path wav;
 public:
     void setup() override {
         setAndroidForegroundService(true);
         setUpdateWhileHidden(true);
+        wav = getTempPath("androidBackground.wav");
+        tcCoreTest::writeBackgroundWav(wav);
+        trackLoaded = nextTrack.onLoad.listen([](LoadResult& result) {
+            logNotice("androidBackground") << "loadAsync onLoad ok=" << bool(result) << " hidden=" << isWindowOccluded();
+        });
         nextLog = std::chrono::steady_clock::now();
         visibility = events().occludedChanged.listen([](OccludedEventArgs& event) {
             logNotice("androidBackground") << "occluded=" << event.occluded;
@@ -21,6 +32,16 @@ public:
     }
     void update() override {
         ++counter;
+        if (!isWindowOccluded()) backgroundProbeStarted = false;
+        else if (!backgroundProbeStarted) {
+            backgroundProbeStarted = true;
+            nextTrack.loadAsync(wav);
+            std::thread([] {
+                runOnMainThread([] {
+                    logNotice("androidBackground") << "runOnMainThread hidden=" << isWindowOccluded();
+                });
+            }).detach();
+        }
         const auto now = std::chrono::steady_clock::now();
         if (now >= nextLog) {
             logNotice("androidBackground") << "tick=" << counter << " hidden=" << isWindowOccluded();
@@ -49,7 +70,10 @@ public:
         setAndroidForegroundService(serviceEnabled);
         logNotice("androidBackground") << "service=" << serviceEnabled;
     }
-    void cleanup() override { setAndroidForegroundService(false); }
+    void cleanup() override {
+        setAndroidForegroundService(false);
+        fs::remove(wav);
+    }
 };
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {

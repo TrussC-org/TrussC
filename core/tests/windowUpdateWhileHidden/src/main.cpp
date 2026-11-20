@@ -1,10 +1,19 @@
 #include <TrussC.h>
 #include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcBackgroundAudio.h"
 #include <cstdio>
+#include <thread>
 using namespace tc;
+namespace trussc::internal { void backgroundTickForTests() noexcept; }
 namespace {
 int failures = 0;
+std::chrono::steady_clock::time_point fakeNow;
+std::chrono::steady_clock::time_point readClock() { return fakeNow; }
+void timeAt(double seconds) {
+    fakeNow = std::chrono::steady_clock::time_point{} +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(seconds));
+}
 void check(const char* label, bool ok) {
     std::printf("windowUpdateWhileHidden: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -28,6 +37,7 @@ TC_CORE_TEST_MAIN() {
         return 0;
     }
     getMainThreadId();
+    internal::beginRuntimeRun();
     tcCoreTest::WindowFixture first(901), second(902);
     auto& window = *first.window;
     auto& ctx = internal::WindowRequestAccess::context(window);
@@ -89,7 +99,87 @@ TC_CORE_TEST_MAIN() {
     tick(window, 10802, true);
     check("ordinary ticks resume GPU readback polling", polls > 0);
     internal::bufferReadbacks().shutdown();
-    internal::releaseRuntimeWindow(window);
+
+    // Android has one Window; the production entry resolves that sole receiver.
+    internal::WindowRequestAccess::teardown(*second.window);
     internal::releaseRuntimeWindow(*second.window);
+    internal::windowClockForTests() = readClock;
+    for (bool synced : {false, true}) {
+        for (bool global : {false, true}) {
+            for (bool reenable : {false, true}) {
+                if (synced) window.setFps(VSYNC);
+                else window.setIndependentFps(4, VSYNC);
+                window.setUpdateWhileHidden(true);
+                hidden(window, true);
+                timeAt(20000);
+                internal::backgroundTickForTests();
+                auto disable = window.events().update.listen([&] {
+                    if (global) setUpdateWhileHidden(false);
+                    else window.setUpdateWhileHidden(false);
+                });
+                timeAt(20000.25);
+                internal::backgroundTickForTests();
+                disable.disconnect();
+                check("hidden update setter records pause immediately", ctx.visibilityPaused && !ctx.mainUpdateCallTimeInitialized);
+                const auto before = ctx.updateCount;
+                // Android removes the callback: NO more hidden ticks follow.
+                timeAt(23600.25);
+                if (reenable) {
+                    if (global) setUpdateWhileHidden(true);
+                    else window.setUpdateWhileHidden(true);
+                }
+                hidden(window, false);
+                ctx.lifecycleSuspended = false; // Android RESUMED precedes the visible tick.
+                const internal::WindowTickPresentation presentation{[] {}, [] { return true; }, [] {}};
+                internal::runWindowTick(fakeNow, .016, false, &presentation, false);
+                check("no hidden tick after disable: one visible update and normal delta",
+                    ctx.updateCount == before + 1 && ctx.updateDeltaTime >= 0 && ctx.updateDeltaTime < 1);
+            }
+        }
+    }
+
+    window.setFps(VSYNC);
+    window.setUpdateWhileHidden(true);
+    hidden(window, true);
+    const auto wav = getTempPath("windowUpdateWhileHidden.wav");
+    const auto png = getTempPath("windowUpdateWhileHidden.png");
+    check("write local WAV", tcCoreTest::writeBackgroundWav(wav));
+    Pixels pixels;
+    pixels.allocate(1, 1, 4);
+    check("write local PNG", bool(pixels.save(png)));
+    SoundBuffer sound;
+    Image image;
+    int soundLoads = 0, imageLoads = 0, mainWork = 0, externalDeliveries = 0;
+    auto soundListener = sound.onLoad.listen([&](LoadResult& result) {
+        if (result && sound.samples.size() == 80) ++soundLoads;
+    });
+    auto imageListener = image.onLoad.listen([&](LoadResult& result) { if (result) ++imageLoads; });
+    Event<std::string> external;
+    auto mainListener = external.listen([&](std::string&) { ++externalDeliveries; }, Deliver::Main);
+    auto delivery = internal::EventSnapshotDelivery<std::string>::bind(external, std::make_shared<internal::NetworkDelivery>());
+    image.loadAsync(png); // GPU result first: must not block a later CPU result.
+    sound.loadAsync(wav);
+    internal::waitForResourceLoadsForTests();
+    std::thread([&] {
+        runOnMainThread([&] { ++mainWork; });
+        std::string payload = "background delivery";
+        delivery->dispatch(payload, {}, true);
+    }).join();
+    for (int i = 0; i < 100; ++i) {
+        timeAt(24000 + i * .016);
+        internal::backgroundTickForTests();
+    }
+    check("background-only ticks publish PCM and onLoad", soundLoads == 1 && !sound.isLoading());
+    check("background-only ticks deliver queued control and external Main events", mainWork == 1 && externalDeliveries == 1);
+    check("background-only ticks defer GPU-backed load", imageLoads == 0 && image.isLoading());
+    hidden(window, false);
+    ctx.lifecycleSuspended = false;
+    internal::beforeHostTurn();
+    internal::afterHostTurn();
+    check("visible host turn completes GPU-backed load", imageLoads == 1 && !image.isLoading());
+    fs::remove(wav);
+    fs::remove(png);
+    internal::windowClockForTests() = nullptr;
+    internal::releaseRuntimeWindow(window);
     return failures ? 1 : 0;
 }

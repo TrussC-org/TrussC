@@ -154,6 +154,7 @@ class SoundBuffer : public SoundSource {
     struct AsyncState : internal::ResourceLoadState {
         fs::path input, path;
         std::shared_ptr<SoundBuffer> decoded;
+        bool requiresGpu() const noexcept override { return false; }
         size_t retainedBytes() const noexcept override {
             return decoded ? decoded->samples.capacity() * sizeof(float) : 0;
         }

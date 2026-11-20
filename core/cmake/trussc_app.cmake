@@ -975,7 +975,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
             set(_TC_PRE_CMDS)
             set(_TC_AAPT_EXTRA_ARGS)
             if(_TC_ANDROID_JAVA_DIRS)
-                find_program(_TC_JAVAC javac)
+                find_program(_TC_JAVAC javac HINTS "$ENV{JAVA_HOME}/bin")
                 find_program(_TC_D8 d8 HINTS "${ANDROID_BUILD_TOOLS_DIR}")
                 if(NOT _TC_JAVAC OR "${_TC_JAVAC}" MATCHES "NOTFOUND$")
                     message(FATAL_ERROR "[${PROJECT_NAME}] javac not found but android/java/ exists")
@@ -984,7 +984,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                     message(FATAL_ERROR "[${PROJECT_NAME}] d8 not found in ${ANDROID_BUILD_TOOLS_DIR} but android/java/ exists")
                 endif()
 
-                find_program(_TC_JAR jar)
+                find_program(_TC_JAR jar HINTS "$ENV{JAVA_HOME}/bin")
                 if(NOT _TC_JAR OR "${_TC_JAR}" MATCHES "NOTFOUND$")
                     message(FATAL_ERROR "[${PROJECT_NAME}] jar (from JDK) not found")
                 endif()

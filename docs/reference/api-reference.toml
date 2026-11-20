@@ -43843,7 +43843,7 @@ void tcApp::update() {
 }
 ```
 
-- Android hidden ticks deliver updates only; host queues, resource completions and GPU readbacks wait for visible frames. There is no API to drain these while hidden.
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
 
 - Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
 ```cpp
@@ -43879,7 +43879,7 @@ void tcApp::update() {
 }
 ```
 
-- Android の非表示 tick は更新のみを実行します。ホストのキュー、リソース完了処理、GPU readback は表示中のフレームまで待ちます。非表示中にこれらを処理する API はありません。
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
 
 - Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
 ```cpp
@@ -43915,7 +43915,7 @@ void tcApp::update() {
 }
 ```
 
-- Android 숨김 tick은 업데이트만 실행합니다. 호스트 큐, 리소스 완료 처리, GPU readback은 표시 중인 프레임까지 기다립니다. 숨김 상태에서 이를 처리하는 API는 없습니다.
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
 
 - Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
 ```cpp
@@ -43963,7 +43963,7 @@ void tcApp::update() {
 }
 ```
 
-- Android hidden ticks deliver updates only; host queues, resource completions and GPU readbacks wait for visible frames. There is no API to drain these while hidden.
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
 
 - Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
 ```cpp
@@ -43999,7 +43999,7 @@ void tcApp::update() {
 }
 ```
 
-- Android の非表示 tick は更新のみを実行します。ホストのキュー、リソース完了処理、GPU readback は表示中のフレームまで待ちます。非表示中にこれらを処理する API はありません。
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
 
 - Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
 ```cpp
@@ -44035,7 +44035,7 @@ void tcApp::update() {
 }
 ```
 
-- Android 숨김 tick은 업데이트만 실행합니다. 호스트 큐, 리소스 완료 처리, GPU readback은 표시 중인 프레임까지 기다립니다. 숨김 상태에서 이를 처리하는 API는 없습니다.
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
 
 - Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
 ```cpp
