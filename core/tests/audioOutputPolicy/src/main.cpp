@@ -5,7 +5,6 @@
 
 using namespace tc;
 
-namespace {
 TC_CORE_TEST_MAIN() {
     int failures = 0;
     auto check = [&](const char* label, bool ok) {
@@ -38,4 +37,3 @@ TC_CORE_TEST_MAIN() {
         && config.aaudio.usage == defaults.aaudio.usage);
     return failures ? 1 : 0;
 }
-} // namespace

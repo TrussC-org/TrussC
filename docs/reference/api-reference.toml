@@ -71367,11 +71367,11 @@ related = ["AudioSettings::contentType"]
 ["AudioSettings::performanceProfile"]
 category = "sound"
 description.en = "Chooses low latency for instruments or a conservative profile for long BGM playback."
-description.ja = "楽器向けの低レイテンシーか、長時間のBGM再生向けの保守的なプロファイルを選ぶ。"
-description.ko = "악기용 저지연 또는 장시간 BGM 재생용 보수적 프로파일을 선택한다."
+description.ja = "楽器向けの低レイテンシーか、長時間のBGM再生向けの保守的なプロファイルを選びます。"
+description.ko = "악기용 저지연 또는 장시간 BGM 재생용 보수적 프로파일을 선택합니다."
 details.en = '''
-- `LowLatency` is the default for instruments; `Conservative` requests larger periods for long BGM playback. The generic miniaudio performance profile also changes period sizes on desktop backends.
-- Conservative raises latency; use low latency for instruments:
+- `LowLatency` is the default for instruments; `Conservative` requests larger default periods for long BGM playback, including on desktop backends, when `bufferSize` is 0 (automatic), subject to backend negotiation. A positive `bufferSize` is used as-is.
+- Conservative can raise latency; use low latency for instruments:
 ```cpp
 void tcApp::setup() {
     AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
@@ -71379,10 +71379,16 @@ void tcApp::setup() {
 ```
 - On AAudio, conservative maps to `AAUDIO_PERFORMANCE_MODE_NONE`. `POWER_SAVING` has no TrussC API.
 - Settings apply when `AudioEngine::init(settings)` opens or reopens output. Editing the local settings object does not change a running device; pass it to `init(settings)` again to apply it. Zero-argument `init()` retains the last profile and content type, including after a failed initialization.
+- On Android, an automatic reroute (headphones, Bluetooth) reopens the stream with LowLatency; call `init(settings)` again to restore Conservative:
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::Conservative});
+}
+```
 '''
 details.ja = '''
-- 楽器向けの `LowLatency` が既定値で、`Conservative` は長時間のBGM再生向けに大きい処理周期を要求します。miniaudio共通のパフォーマンスプロファイルのため、デスクトップのバックエンドでも処理周期が変わります。
-- Conservativeではレイテンシーが増えるため、楽器演奏には低レイテンシーを使います。
+- 楽器向けの `LowLatency` が既定値で、`Conservative` は `bufferSize` が0（自動）のとき、デスクトップを含むバックエンドに長時間のBGM再生向けの大きい既定の処理周期を要求します。実際の周期はバックエンドとの交渉で決まり、正の `bufferSize` はそのまま使います。
+- Conservativeではレイテンシーが増えることがあるため、楽器演奏には低レイテンシーを使います。
 ```cpp
 void tcApp::setup() {
     AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
@@ -71390,10 +71396,16 @@ void tcApp::setup() {
 ```
 - AAudioではConservativeが `AAUDIO_PERFORMANCE_MODE_NONE` に対応します。`POWER_SAVING` を指定するTrussC APIはありません。
 - `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用します。ローカルの設定オブジェクトの編集だけでは動作中のデバイスは変わりません。適用するには再度 `init(settings)` に渡します。引数なしの `init()` は、初期化が失敗した場合も最後のプロファイルとコンテンツ種別を再利用します。
+- Androidでは自動的な出力先の切り替え（ヘッドホン、Bluetooth）でストリームがLowLatencyで開き直されるため、Conservativeに戻すには再度 `init(settings)` を呼びます。
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::Conservative});
+}
+```
 '''
 details.ko = '''
-- 악기용 `LowLatency`가 기본값이며 `Conservative`는 장시간 BGM 재생을 위해 더 큰 처리 주기를 요청합니다. miniaudio 공통 성능 프로파일이므로 데스크톱 백엔드에서도 주기 크기가 바뀝니다.
-- Conservative는 지연을 늘리므로 악기 연주에는 저지연을 사용합니다.
+- 악기용 `LowLatency`가 기본값이며 `Conservative`는 `bufferSize`가 0(자동)일 때 데스크톱을 포함한 백엔드에 장시간 BGM 재생용으로 더 큰 기본 처리 주기를 요청합니다. 실제 주기는 백엔드와의 협상에 따라 결정되며 양수 `bufferSize`는 그대로 사용합니다.
+- Conservative는 지연을 늘릴 수 있으므로 악기 연주에는 저지연을 사용합니다.
 ```cpp
 void tcApp::setup() {
     AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
@@ -71401,6 +71413,12 @@ void tcApp::setup() {
 ```
 - AAudio에서 Conservative는 `AAUDIO_PERFORMANCE_MODE_NONE`에 대응합니다. `POWER_SAVING`을 지정하는 TrussC API는 없습니다.
 - `AudioEngine::init(settings)`가 출력을 열거나 다시 열 때 적용합니다. 로컬 설정 객체를 편집하는 것만으로 실행 중인 장치는 바뀌지 않습니다. 적용하려면 다시 `init(settings)`에 전달합니다. 인자 없는 `init()`은 초기화 실패 후에도 마지막 프로파일과 콘텐츠 유형을 재사용합니다.
+- Android에서는 자동 출력 경로 변경(헤드폰, Bluetooth) 시 스트림이 LowLatency로 다시 열리므로 Conservative를 복원하려면 `init(settings)`를 다시 호출합니다.
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::Conservative});
+}
+```
 '''
 snippet = '''
 void tcApp::setup() {
@@ -71414,10 +71432,10 @@ void tcApp::setup() {
 ["AudioSettings::contentType"]
 category = "sound"
 description.en = "Labels AAudio output as music for BGM or background playback."
-description.ja = "BGMやバックグラウンド再生のAAudio出力を音楽として指定する。"
-description.ko = "BGM 또는 백그라운드 재생의 AAudio 출력을 음악으로 지정한다."
+description.ja = "BGMやバックグラウンド再生のAAudio出力を音楽として指定します。"
+description.ko = "BGM 또는 백그라운드 재생의 AAudio 출력을 음악으로 지정합니다."
 details.en = '''
-- `Default` leaves AAudio content type at miniaudio's default (unknown); `Music` maps to `AAUDIO_CONTENT_TYPE_MUSIC` for BGM. Other backends ignore this field; there is no content-type API for those backends.
+- `Default` skips the AAudio content-type setter (AAudio's effective default is MUSIC); `Music` explicitly requests `AAUDIO_CONTENT_TYPE_MUSIC` for BGM, independently of the platform default. Other backends ignore this field; there is no content-type API for those backends.
 - Applied when output opens or reopens through `AudioEngine::init(settings)`; zero-argument `init()` retains the last content type. To apply a changed settings object, reopen output:
 ```cpp
 void tcApp::setup() {
@@ -71426,7 +71444,7 @@ void tcApp::setup() {
 ```
 '''
 details.ja = '''
-- `Default` はAAudioのコンテンツ種別をminiaudioの既定値（unknown）のままにし、`Music` はBGM向けの `AAUDIO_CONTENT_TYPE_MUSIC` に対応します。他のバックエンドでは無視され、それらのコンテンツ種別を指定するAPIはありません。
+- `Default` はAAudioのコンテンツ種別の設定を省略し、AAudioの実効的な既定値はMUSICです。`Music` はプラットフォームの既定値に依存せず、BGM向けに `AAUDIO_CONTENT_TYPE_MUSIC` を明示的に要求します。他のバックエンドでは無視され、それらのコンテンツ種別を指定するAPIはありません。
 - `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用し、引数なしの `init()` は最後の種別を再利用します。変更した設定オブジェクトを適用するには出力を開き直します。
 ```cpp
 void tcApp::setup() {
@@ -71435,7 +71453,7 @@ void tcApp::setup() {
 ```
 '''
 details.ko = '''
-- `Default`는 AAudio 콘텐츠 유형을 miniaudio 기본값(unknown)으로 두며 `Music`은 BGM용 `AAUDIO_CONTENT_TYPE_MUSIC`에 대응합니다. 다른 백엔드는 이 필드를 무시하며 해당 백엔드의 콘텐츠 유형을 지정하는 API는 없습니다.
+- `Default`는 AAudio 콘텐츠 유형 설정을 생략하며 AAudio의 실제 기본값은 MUSIC입니다. `Music`은 플랫폼 기본값과 관계없이 BGM용 `AAUDIO_CONTENT_TYPE_MUSIC`을 명시적으로 요청합니다. 다른 백엔드는 이 필드를 무시하며 해당 백엔드의 콘텐츠 유형을 지정하는 API는 없습니다.
 - `AudioEngine::init(settings)`로 출력을 열거나 다시 열 때 적용하며 인자 없는 `init()`은 마지막 유형을 재사용합니다. 변경한 설정 객체를 적용하려면 출력을 다시 엽니다.
 ```cpp
 void tcApp::setup() {

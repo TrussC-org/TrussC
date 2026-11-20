@@ -779,9 +779,11 @@ struct AudioSettings {
     // Object selection wins over deviceName and selects the object's backend.
     // A missing ID or name fails initialization without opening another device.
     std::optional<AudioDeviceInfo> device = std::nullopt;
-    // Applied when opening output; conservative trades latency for larger periods.
+    // Applied when opening output; conservative requests larger default periods when bufferSize is 0.
+    // On Android, an automatic reroute (headphones, Bluetooth) reopens with LowLatency;
+    // call init(settings) again to restore Conservative.
     AudioPerformanceProfile performanceProfile = AudioPerformanceProfile::LowLatency;
-    AudioContentType contentType = AudioContentType::Default; // AAudio only
+    AudioContentType contentType = AudioContentType::Default; // AAudio only; Default skips the setter (AAudio defaults to MUSIC)
 };
 
 // ---------------------------------------------------------------------------
