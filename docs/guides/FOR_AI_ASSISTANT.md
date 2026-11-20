@@ -5106,13 +5106,13 @@ float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Return
 float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Returns the gamma correction setting.
 std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Returns the reported video decoding backend name.
 fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Returns the loaded video's source path.
-const Pixels & VideoPlayer::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists.
+const Pixels & VideoPlayer::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the player; may be empty on any platform during hardware decode.
 unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
 unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
 float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
 float VideoPlayer::getRotation() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in radians.
 int VideoPlayer::getRotationDeg() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in degrees.
-Texture & VideoPlayer::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the display texture; empty in Linux hardware NV12 mode.
+Texture & VideoPlayer::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the display texture; may be empty on any platform during hardware decode.
 const Texture & VideoPlayer::getTextureUV() const [macos,windows,linux,ios,web]  // Return the UV plane texture as const Texture& (protected).
 const Texture & VideoPlayer::getTextureY() const [macos,windows,linux,ios,web]  // Return the Y plane texture as const Texture& (protected).
 int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
@@ -5167,7 +5167,7 @@ float VideoPlayerBase::getFrameRate() const  // Return the video frame rate.
 float VideoPlayerBase::getHeight() const  // Returns the video height.
 std::string VideoPlayerBase::getHwAccelName() const  // Return the reported decode backend name.
 float VideoPlayerBase::getPan() const  // Returns the stored stereo pan.
-const Pixels & VideoPlayerBase::getPixels() const  // Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists.
+const Pixels & VideoPlayerBase::getPixels() const  // Return read-only RGBA Pixels owned by the player; may be empty on any platform during hardware decode.
 float VideoPlayerBase::getPosition() const  // Return the normalized playback position.
 float VideoPlayerBase::getResyncThreshold() const  // Returns the playback catch-up threshold in seconds.
 float VideoPlayerBase::getSpeed() const  // Returns the stored playback speed.
