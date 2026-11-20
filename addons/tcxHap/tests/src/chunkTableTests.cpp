@@ -1,9 +1,7 @@
 #include "tcxHapDecoder.h"
-#include "impl/bcdec.h"
 #include <snappy-c.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -148,17 +146,6 @@ void accepted(const std::string& name, const Bytes& bytes, const Bytes& expected
         }
     }
 #endif
-    // Exact BC bytes preserve pixels; also compare BC1 RGBA output explicitly.
-    if (format == tcx::hap::HapFormat::DXT1 && output == expected) {
-        std::array<uint32_t, 16> actualPixels{}, expectedPixels{};
-        bool equal = true;
-        for (size_t offset = 0; offset < output.size(); offset += 8) {
-            bcdec_bc1(output.data() + offset, actualPixels.data(), 16);
-            bcdec_bc1(expected.data() + offset, expectedPixels.data(), 16);
-            equal = equal && actualPixels == expectedPixels;
-        }
-        check(name + " pixels", equal);
-    }
 }
 Bytes chunkFrame(const Bytes& compressors, const std::vector<uint32_t>& sizes,
                  const Bytes& data, const std::vector<uint32_t>& offsets = {}) {
