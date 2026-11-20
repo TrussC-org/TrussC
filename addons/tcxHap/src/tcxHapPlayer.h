@@ -16,11 +16,10 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include <algorithm>
 #include "tcxMovParser.h"
 #include "tcxHapDecoder.h"
 #include "ycocg.glsl.h"
-#include "impl/bcdec.h"
-#include "impl/tcxHapRgba.h"
 #include "impl/tcxHapDrawData.h"
 #include <tc/sound/internal/tcAudioDecode.h>
 

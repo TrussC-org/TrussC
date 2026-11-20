@@ -32,7 +32,7 @@ Frame table checks cover compressor, size and offset tables, section bounds,
 extended headers, cumulative input/output sizes, Snappy streams, and both
 textures in multi-texture frames. Both decoder entry points must reject a
 malformed frame before changing output. Valid raw, Snappy and mixed chunk
-fixtures preserve texture bytes and BC1 pixels. Decoder diagnostics check a
+fixtures preserve texture bytes. Decoder diagnostics check a
 single warning per decoder and a cumulative invalid-frame count. Copy/move
 construction and assignment remain available (compile-time assertions), and
 copies preserve warning/counter state. Empty unknown instruction sections
@@ -57,17 +57,6 @@ when compiled with `TC_HAP_CHUNK_TABLE_TEST_MAIN`. Use `--list`,
 when comparing with a base build. On Linux, defining `TC_HAP_TRACE_DECODE`
 and linking with `-Wl,--wrap=HapDecode` also checks that malformed fixtures
 never reach the reference decoder.
-
-Video regressions (#283) check BC1, BC3 (Hap Alpha and HAP-Q), and BC7
-decoding at 6x5, 6x8, 8x5, 8x8, and 1x1. Hand-built blocks have known pixel
-values; both a 64-byte guard region and an exact-sized allocation are checked.
-Run these tests under AddressSanitizer with the BC decoder implementation
-instrumented as well.
-
-BC1, BC3, BC7, and BC4 (Hap Q Alpha) also decode known blocks at every input
-byte offset from 0 through 7, covering bcdec 0.985's unaligned-input fix.
-Run with AddressSanitizer and UndefinedBehaviorSanitizer to check input
-bounds and alignment, including the decoder implementation.
 
 HAP-Q draw setup checks transformed quad corners, UVs, tint and alpha,
 column-major MVP uniforms, an Fbo-sized projection, and a perspective camera.
