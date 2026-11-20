@@ -263,6 +263,10 @@ private:
     void closeInternal(bool clearError) {
         if (!initialized_) { if (clearError) clearPlaybackError(); return; }
 
+#ifdef _WIN32
+        winLiveTexture_ = nullptr;
+        winZeroCopy_ = false;
+#endif
         closePlatform();
         if (clearError) clearPlaybackError();
 
@@ -317,6 +321,11 @@ public:
         // Check for new frame from platform
         if (hasNewFramePlatform()) {
             std::lock_guard<std::mutex> lock(mutex_);
+#ifdef _WIN32
+            if (winZeroCopy_) {
+                if (winLiveTexture_) markFrameNew();
+            } else
+#endif
             if (nv12Mode_) {
                 if (pixelsY_ && pixelsUV_ && nv12Width_ > 0 && nv12Height_ > 0) {
                     textureY_.loadData(pixelsY_,  nv12Width_,     nv12Height_,     1);
@@ -412,6 +421,12 @@ public:
             return;
         }
 #endif
+#ifdef _WIN32
+        if (winZeroCopy_ && winLiveTexture_ && !posterActive_) {
+            winLiveTexture_->draw(x, y, w, h);
+            return;
+        }
+#endif
         if (texture_.isAllocated()) texture_.draw(x, y, w, h);
     }
 
@@ -504,16 +519,25 @@ public:
     }
 
     bool hasTexture() const override {
+#ifdef _WIN32
+        if (winZeroCopy_) return winLiveTexture_ || texture_.isAllocated();
+#endif
         return nv12Mode_ ? textureY_.isAllocated() && textureUV_.isAllocated()
                          : texture_.isAllocated();
     }
 
     Texture& getTexture() override {
         warnNV12Access();
+#ifdef _WIN32
+        if (winZeroCopy_) return emptyNV12Texture_;
+#endif
         return nv12Mode_ ? emptyNV12Texture_ : texture_;
     }
     const Texture& getTexture() const override {
         warnNV12Access();
+#ifdef _WIN32
+        if (winZeroCopy_) return emptyNV12Texture_;
+#endif
         return nv12Mode_ ? emptyNV12Texture_ : texture_;
     }
 
@@ -620,6 +644,11 @@ protected:
     }
 
 private:
+#ifdef _WIN32
+    // Borrowed from the per-player Windows state, published only while its key is held.
+    const Texture* winLiveTexture_ = nullptr;
+    bool winZeroCopy_ = false;
+#endif
     Texture emptyNV12Texture_;
     mutable OnceGate nv12AccessWarning_;
     void warnNV12Access() const {
@@ -704,6 +733,12 @@ private:
         decodeThreads_ = other.decodeThreads_;
         rotationDeg_ = other.rotationDeg_;
         other.rotationDeg_ = 0;
+#ifdef _WIN32
+        winLiveTexture_ = other.winLiveTexture_;
+        winZeroCopy_ = other.winZeroCopy_;
+        other.winLiveTexture_ = nullptr;
+        other.winZeroCopy_ = false;
+#endif
         platformHandle_  = other.platformHandle_;
         decodeStatus_ = std::move(other.decodeStatus_);
         sourcePath_      = std::move(other.sourcePath_);
@@ -741,6 +776,10 @@ private:
 
     bool applyPosterFrame(Pixels px, float timeSec) try {
         if (!px.getData() || px.getWidth() != width_ || px.getHeight() != height_) return false;
+#ifdef _WIN32
+        if (winZeroCopy_ && (texture_.getWidth() != width_ || texture_.getHeight() != height_))
+            texture_.clear();
+#endif
         bool freshTexture = !texture_.isAllocated();
         if (freshTexture) {
             texture_.allocate(width_, height_, 4, TextureUsage::Stream);
@@ -776,6 +815,12 @@ private:
     }
 
     void clearTexture() {
+#ifdef _WIN32
+        if (winZeroCopy_) {
+            texture_.clear();  // No CPU mirror to clear; draw nothing until a poster/live frame exists.
+            return;
+        }
+#endif
         if (width_ > 0 && height_ > 0 && pixels_.isAllocated()) {
             std::lock_guard<std::mutex> lock(mutex_);
             std::memset(pixels_.getData(), 0, size_t(width_) * height_ * 4);
@@ -971,6 +1016,39 @@ namespace internal {
 // Helper class for platform implementations to access protected members
 class VideoPlayerPlatformAccess {
 public:
+#ifdef _WIN32
+    static void publishWinLiveTexture(VideoPlayer& player, const Texture* texture) {
+        player.winLiveTexture_ = texture;
+    }
+    // Experiment-only native adoption; Texture owns the Sokol handles and retirement.
+    static bool adoptWinTexture(Texture& texture, const void* native, int width, int height) {
+        texture.clear();
+        if (!sg_isvalid() || !texture.prepareRetirement_()) return false;
+        texture.width_ = width;
+        texture.height_ = height;
+        texture.channels_ = 4;
+        texture.pixelFormat_ = SG_PIXELFORMAT_BGRA8;
+        sg_image_desc desc = {};
+        desc.width = width;
+        desc.height = height;
+        desc.num_mipmaps = 1;
+        desc.num_slices = 1;
+        desc.sample_count = 1;
+        desc.pixel_format = SG_PIXELFORMAT_BGRA8;
+        desc.d3d11_texture = native;
+        texture.image_ = sg_make_image(&desc);
+        if (sg_query_image_state(texture.image_) != SG_RESOURCESTATE_VALID) {
+            texture.clearResources_(false);
+            return false;
+        }
+        sg_view_desc view = {};
+        view.texture.image = texture.image_;
+        texture.view_ = sg_make_view(&view);
+        texture.createSampler();
+        texture.finishResources_();
+        return texture.isAllocated();
+    }
+#endif
     static void reportError(VideoPlayer& player, const VideoErrorEventArgs& error) {
         player.reportPlaybackError(error.message, error.errorCode);
     }

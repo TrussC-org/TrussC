@@ -17,6 +17,9 @@
 #include "tcVideoPlayerPixels.h"
 #include <vector>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <iomanip>
 #include <fstream>
 #include "tc/video/internal/tcVideoNotifyQueue.h"
 #include "tc/video/internal/tcMatroskaDuration.h"
@@ -127,6 +130,26 @@ struct VideoPlayerState {
     ComPtr<ID3D11Texture2D> renderTexture_;
     ComPtr<ID3D11Texture2D> stagingTexture_;
 
+    // Throwaway #1547 experiment. No shared resources exist unless explicitly enabled.
+    bool zeroCopyRequested_ = false;
+    bool zeroCopy_ = false;
+    bool mutexLog_ = false;
+    bool renderOwns_ = false;
+    bool renderPending_ = false;
+    bool liveFrame_ = false;
+    bool mutexBroken_ = false;
+    bool timeoutWarned_ = false;
+    UINT64 pendingKey_ = 0;
+    uint64_t playerId_ = 0;
+    uint64_t transferredFrames_ = 0;
+    uint64_t logFrame_ = 1;
+    ComPtr<ID3D11Texture2D> openedTexture_;
+    ComPtr<IDXGIKeyedMutex> mfMutex_;
+    ComPtr<IDXGIKeyedMutex> renderMutex_;
+    ComPtr<ID3D11DeviceContext> renderContext_;
+    ComPtr<ID3D11Query> renderDone_;
+    std::unique_ptr<Texture> liveTexture_;
+
     // State
     int width_ = 0;
     int height_ = 0;
@@ -166,6 +189,7 @@ public:
     void setPaused(bool paused);
     void update(VideoPlayer* player);
 
+    bool isZeroCopy() const { return state_->zeroCopy_; }
     bool hasNewFrame() const { return state_->hasNewFrame_; }
     bool isFinished() const { return state_->isFinished_; }
 
@@ -204,6 +228,11 @@ private:
     bool createMediaEngine(const std::string& path);
     bool createRenderTexture();
     bool transferVideoFrame();
+    bool createSharedTexture(D3D11_TEXTURE2D_DESC desc);
+    bool waitForRendering();
+    HRESULT mutexStep(IDXGIKeyedMutex* mutex, bool acquire, UINT64 key, const char* step);
+    bool acquireRendering();
+    void clearSharedTexture();
     bool loadMediaInfo(const std::string& path);
 
     std::shared_ptr<VideoPlayerState> state_ = std::make_shared<VideoPlayerState>();
@@ -383,12 +412,149 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     return true;
 }
 
+// Legacy shared handles need no CloseHandle and work with the existing D3D11 devices;
+// no D3D11.1 interfaces or changes to Sokol's device creation are required.
+bool TCVideoPlayerImpl::createSharedTexture(D3D11_TEXTURE2D_DESC desc) {
+    auto fail = [&](const char* step, HRESULT hr) {
+        logWarning("VideoPlayer") << "zerocopy player=" << state_->playerId_ << " " << step
+            << " HRESULT=0x" << std::hex << static_cast<unsigned long>(hr)
+            << "; falling back to staging readback";
+        clearSharedTexture();
+        state_->renderTexture_.Reset();
+        state_->zeroCopyRequested_ = false;  // One attempt/warning per load.
+        return false;
+    };
+    if (!sg_isvalid() || sg_query_backend() != SG_BACKEND_D3D11)
+        return fail("Sokol D3D11 unavailable", E_NOINTERFACE);
+    auto* device = static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));
+    if (!device) return fail("Sokol device unavailable", E_POINTER);
+    desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+    HRESULT hr = state_->d3dDevice_->CreateTexture2D(&desc, nullptr, &state_->renderTexture_);
+    if (hr != S_OK) return fail("CreateTexture2D", hr);
+    ComPtr<IDXGIResource> resource;
+    hr = state_->renderTexture_.As(&resource);
+    if (hr != S_OK) return fail("IDXGIResource", hr);
+    HANDLE handle = nullptr;
+    hr = resource->GetSharedHandle(&handle);
+    if (hr != S_OK) return fail("GetSharedHandle", hr);
+    hr = device->OpenSharedResource(handle, IID_PPV_ARGS(&state_->openedTexture_));
+    if (hr != S_OK) return fail("OpenSharedResource (adapter compatibility)", hr);
+    hr = state_->renderTexture_.As(&state_->mfMutex_);
+    if (hr != S_OK) return fail("MF keyed mutex", hr);
+    hr = state_->openedTexture_.As(&state_->renderMutex_);
+    if (hr != S_OK) return fail("Sokol keyed mutex", hr);
+    device->GetImmediateContext(&state_->renderContext_);
+    D3D11_QUERY_DESC query = {};
+    query.Query = D3D11_QUERY_EVENT;
+    hr = device->CreateQuery(&query, &state_->renderDone_);
+    if (hr != S_OK) return fail("CreateQuery", hr);
+    state_->liveTexture_ = std::make_unique<Texture>();
+    if (!internal::VideoPlayerPlatformAccess::adoptWinTexture(*state_->liveTexture_,
+            state_->openedTexture_.Get(), state_->width_, state_->height_))
+        return fail("Sokol native image/view", E_FAIL);
+    state_->zeroCopy_ = true;
+    logNotice("VideoPlayer") << "zerocopy player=" << state_->playerId_
+        << " shared BGRA8 " << state_->width_ << "x" << state_->height_;
+    return true;
+}
+
+HRESULT TCVideoPlayerImpl::mutexStep(IDXGIKeyedMutex* mutex, bool acquire, UINT64 key, const char* step) {
+    const auto start = std::chrono::steady_clock::now();
+    const HRESULT hr = acquire ? mutex->AcquireSync(key, 100) : mutex->ReleaseSync(key);
+    if (state_->mutexLog_ && state_->logFrame_ <= 120) {
+        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        logNotice("WinZeroCopy") << "player=" << state_->playerId_
+            << " frame=" << state_->logFrame_ << " step=" << step
+            << " key=" << key << " HRESULT=0x" << std::hex << static_cast<unsigned long>(hr)
+            << std::dec << " wait_us=" << us;
+    }
+    // WAIT_TIMEOUT and WAIT_ABANDONED are success-valued HRESULTs, not ownership.
+    if (hr == S_OK) return hr;
+    if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
+        if (!state_->timeoutWarned_) {
+            state_->timeoutWarned_ = true;
+            logWarning("VideoPlayer") << "zerocopy player=" << state_->playerId_
+                << " " << step << " timed out (100 ms); retrying on the next update";
+        }
+    } else {
+        state_->mutexBroken_ = true;
+        state_->playbackErrors_.report(hr == static_cast<HRESULT>(WAIT_ABANDONED)
+            ? "Zero-copy keyed mutex abandoned" : "Zero-copy keyed mutex failed", hr);
+    }
+    return hr;
+}
+
+bool TCVideoPlayerImpl::waitForRendering() {
+    // update() follows submission of the previous frame's recorded draws. An event
+    // query proves GPU completion before handing the single target back to MF.
+    state_->renderContext_->End(state_->renderDone_.Get());
+    state_->renderContext_->Flush();
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::milliseconds(100);
+    HRESULT hr = S_FALSE;
+    do {
+        hr = state_->renderContext_->GetData(state_->renderDone_.Get(), nullptr, 0,
+            D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (hr != S_FALSE) break;
+        Sleep(1);
+    } while (std::chrono::steady_clock::now() < deadline);
+    if (state_->mutexLog_ && state_->logFrame_ <= 120) {
+        logNotice("WinZeroCopy") << "player=" << state_->playerId_
+            << " frame=" << state_->logFrame_
+            << " step=sokol-gpu-complete key=0 HRESULT=0x" << std::hex
+            << static_cast<unsigned long>(hr) << std::dec << " wait_us="
+            << std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - start).count();
+    }
+    if (hr == S_FALSE) {
+        if (!state_->timeoutWarned_) {
+            state_->timeoutWarned_ = true;
+            logWarning("VideoPlayer") << "zerocopy GPU completion timed out (100 ms); keeping previous frame";
+        }
+        return false;  // Still owns the key; the previous live frame remains drawable.
+    }
+    if (hr != S_OK) {
+        state_->mutexBroken_ = true;
+        state_->playbackErrors_.report("Zero-copy GPU completion failed", hr);
+        return false;
+    }
+    return true;
+}
+
+bool TCVideoPlayerImpl::acquireRendering() {
+    if (mutexStep(state_->renderMutex_.Get(), true, state_->pendingKey_, "sokol-acquire") != S_OK)
+        return false;
+    state_->renderOwns_ = true;
+    state_->renderPending_ = false;
+    return true;
+}
+
+void TCVideoPlayerImpl::clearSharedTexture() {
+    if (state_->renderOwns_) {
+        // close/resize happens on the main thread. Keyed ReleaseSync also orders
+        // the device's submitted work; the normal transfer path additionally queries completion.
+        mutexStep(state_->renderMutex_.Get(), false, 0, "sokol-release-close");
+    }
+    state_->liveTexture_.reset();  // Sokol retires handles referenced by recorded draws.
+    state_->renderOwns_ = false;
+    state_->renderPending_ = false;
+    state_->liveFrame_ = false;
+    state_->zeroCopy_ = false;
+    state_->openedTexture_.Reset();
+    state_->mfMutex_.Reset();
+    state_->renderMutex_.Reset();
+    state_->renderDone_.Reset();
+    state_->renderContext_.Reset();
+}
+
 bool TCVideoPlayerImpl::createRenderTexture() {
     size_t bytes = 0;
     if (!internal::VideoDecodeLimits::rgba(state_->width_, state_->height_, bytes)) {
         state_->status_->reject(bytes, 0);
         state_->status_->warn(); return false;
     }
+    clearSharedTexture();
     state_->renderTexture_.Reset();
     state_->stagingTexture_.Reset();
     std::vector<unsigned char>().swap(state_->pixels_);
@@ -404,6 +570,8 @@ bool TCVideoPlayerImpl::createRenderTexture() {
     desc.SampleDesc.Quality = 0;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    if (state_->zeroCopyRequested_ && createSharedTexture(desc)) return true;
 
     HRESULT hr = state_->d3dDevice_->CreateTexture2D(&desc, nullptr, &state_->renderTexture_);
     if (FAILED(hr)) {
@@ -434,6 +602,13 @@ bool TCVideoPlayerImpl::createRenderTexture() {
 bool TCVideoPlayerImpl::transferVideoFrame() {
     if (!state_->mediaEngine_ || !state_->renderTexture_) return false;
 
+    if (state_->zeroCopy_ && state_->mutexBroken_) return false;
+    if (state_->zeroCopy_ && state_->renderPending_) {
+        const bool newFrame = state_->pendingKey_ == 1;
+        if (!acquireRendering()) return false;
+        if (newFrame) return true;
+    }
+
     // Check if video has new frame
     LONGLONG pts;
     if (state_->mediaEngine_->OnVideoStreamTick(&pts) != S_OK) {
@@ -448,6 +623,29 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
         state_->playbackErrors_.report("Video frame dimensions exceed decode limits", E_INVALIDARG);
         return false;
     }
+    if (state_->zeroCopy_) state_->logFrame_ = state_->transferredFrames_ + 1;
+    if (state_->zeroCopy_ && (actualWidth != DWORD(state_->width_) || actualHeight != DWORD(state_->height_))) {
+        if (state_->renderOwns_ && !waitForRendering()) return false;
+        state_->width_ = int(actualWidth);
+        state_->height_ = int(actualHeight);
+        if (!createRenderTexture())
+            state_->playbackErrors_.report("Zero-copy target resize failed", E_FAIL);
+        return false;  // Publish the new dimensions/storage before copying another frame.
+    }
+    if (state_->zeroCopy_) {
+        if (state_->renderOwns_) {
+            if (!waitForRendering()) return false;
+            if (mutexStep(state_->renderMutex_.Get(), false, 0, "sokol-release") != S_OK) return false;
+            state_->renderOwns_ = false;
+        }
+        if (mutexStep(state_->mfMutex_.Get(), true, 0, "mf-acquire") != S_OK) {
+            // No write happened; recover the previous frame's key before sampling.
+            state_->pendingKey_ = 0;
+            state_->renderPending_ = true;
+            if (!state_->mutexBroken_) acquireRendering();
+            return false;
+        }
+    }
     // Transfer frame to our texture
     MFARGB bgColor = {0, 0, 0, 0};
     MFVideoNormalizedRect srcRect = {0.0f, 0.0f, 1.0f, 1.0f};
@@ -459,6 +657,25 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
         &dstRect,
         &bgColor
     );
+
+    if (state_->zeroCopy_) {
+        if (state_->mutexLog_ && state_->logFrame_ <= 120)
+            logNotice("WinZeroCopy") << "player=" << state_->playerId_
+                << " frame=" << state_->logFrame_
+                << " step=transfer key=0 HRESULT=0x" << std::hex
+                << static_cast<unsigned long>(hr) << std::dec << " wait_us=0";
+        state_->d3dContext_->Flush();
+        const bool transferred = hr == S_OK;
+        const UINT64 key = transferred ? 1 : 0;
+        if (mutexStep(state_->mfMutex_.Get(), false, key, "mf-release") != S_OK) return false;
+        state_->pendingKey_ = key;
+        state_->renderPending_ = true;
+        if (transferred) state_->liveFrame_ = true;
+        const bool acquired = acquireRendering();
+        if (transferred) ++state_->transferredFrames_;
+        if (!transferred) state_->playbackErrors_.report("Zero-copy TransferVideoFrame failed", hr);
+        return transferred && acquired;
+    }
 
     if (FAILED(hr)) {
         HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
@@ -672,6 +889,14 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     }
 
     state_->mediaPath_ = path;
+    const char* enabled = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY");
+    state_->zeroCopyRequested_ = enabled && std::strcmp(enabled, "1") == 0;
+    if (state_->zeroCopyRequested_) {
+        static uint64_t nextPlayerId = 0;  // Player loads and updates are main-thread only.
+        state_->playerId_ = ++nextPlayerId;
+        const char* logging = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY_LOG");
+        state_->mutexLog_ = logging && std::strcmp(logging, "1") == 0;
+    }
 
     state_->mfInitialized = true;
 
@@ -703,7 +928,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         }
     }
 
-    if (!state_->isReady_ || state_->pixels_.empty()) {
+    if (!state_->isReady_ || (!state_->zeroCopy_ && state_->pixels_.empty())) {
         logError("VideoPlayer") << "Timeout waiting for video to load";
         return false;
     }
@@ -728,6 +953,7 @@ void TCVideoPlayerImpl::close() {
         state_->eventNotify_ = nullptr;
     }
 
+    clearSharedTexture();
     state_->renderTexture_.Reset();
     state_->stagingTexture_.Reset();
     state_->dxgiManager_.Reset();
@@ -811,6 +1037,10 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
             }
         }
     }
+
+    if (state_->zeroCopy_ && player)
+        internal::VideoPlayerPlatformAccess::publishWinLiveTexture(*player,
+            state_->renderOwns_ && state_->liveFrame_ && !state_->mutexBroken_ ? state_->liveTexture_.get() : nullptr);
 
     // Check for loop
     if (state_->isLoop_ && state_->isFinished_) {
@@ -899,7 +1129,7 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             size_t bytes = 0;
             if (SUCCEEDED(state_->mediaEngine_->GetNativeVideoSize(&w, &h)) &&
                 internal::VideoDecodeLimits::rgba(w, h, bytes)) {
-                if (state_->pixels_.empty()) {
+                if (state_->pixels_.empty() && !state_->zeroCopy_) {
                     state_->width_ = static_cast<int>(w);
                     state_->height_ = static_cast<int>(h);
                 }
@@ -917,7 +1147,7 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             logNotice("VideoPlayer") << "Duration: " << state_->duration_ << " sec";
 
             // Create render texture
-            if (state_->pixels_.empty()) createRenderTexture();
+            if (state_->pixels_.empty() && !state_->zeroCopy_) createRenderTexture();
             break;
         }
 
@@ -967,8 +1197,13 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     height_ = impl->getHeight();
     rotationDeg_ = impl->getRotationDeg();
 
+    winZeroCopy_ = impl->isZeroCopy();
+    if (winZeroCopy_)
+        logNotice("VideoPlayer") << "Experimental Windows playback: getPixels()/getTexture() stay empty; "
+            "draw into an Fbo and use fbo.readPixels() / fbo.getTexture()";
+
     // Allocate pixel buffer
-    if (width_ > 0 && height_ > 0) {
+    if (!winZeroCopy_ && width_ > 0 && height_ > 0) {
         try { pixels_.allocate(width_, height_, 4); }
         catch (const std::bad_alloc&) { pixels_.clear(); }
         if (!pixels_.isAllocated()) { closePlatform(); return false; }
@@ -1005,7 +1240,20 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 
 void VideoPlayer::updatePlatform() {
     if (platformHandle_) {
-        static_cast<TCVideoPlayerImpl*>(platformHandle_)->update(this);
+        auto* impl = static_cast<TCVideoPlayerImpl*>(platformHandle_);
+        impl->update(this);
+        if (winZeroCopy_ && (width_ != impl->getWidth() || height_ != impl->getHeight() || !impl->isZeroCopy())) {
+            width_ = impl->getWidth();
+            height_ = impl->getHeight();
+            winZeroCopy_ = impl->isZeroCopy();
+            winLiveTexture_ = nullptr;
+            if (!winZeroCopy_) {
+                texture_.allocate(width_, height_, 4, TextureUsage::Stream);
+                try { pixels_.allocate(width_, height_, 4); }
+                catch (const std::bad_alloc&) { pixels_.clear(); }
+                if (!pixels_.isAllocated()) reportPlaybackError("Zero-copy fallback pixel allocation failed");
+            }
+        }
     }
 }
 

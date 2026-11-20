@@ -16,6 +16,9 @@
 namespace trussc {
 
 namespace internal {
+#ifdef _WIN32
+class VideoPlayerPlatformAccess;
+#endif
 inline LoadResult checkImageSize(int width, int height) {
     // Headless Images keep their CPU pixels; there is no GPU limit to query.
     if (sg_isvalid()) {
@@ -546,6 +549,9 @@ public:
 
 private:
     friend class Fbo;
+#ifdef _WIN32
+    friend class internal::VideoPlayerPlatformAccess;
+#endif
 
     // Only Fbo may immediately discard textures it has never published.
     void clearResources_(bool deferred) noexcept {
