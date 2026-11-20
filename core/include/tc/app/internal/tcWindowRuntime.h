@@ -11,6 +11,12 @@ namespace internal {
 struct Runtime;
 Runtime& runtime();
 bool& defaultDrawWhileHidden();
+bool& defaultUpdateWhileHidden();
+// Main-thread CPU-only Android tick scope; framework GPU polling waits for resume.
+bool& backgroundUpdateOnly();
+#ifdef __ANDROID__
+void androidBackgroundTick() noexcept;
+#endif
 void applyWindowDrawWhileHidden(Window&);
 // Host/guest internal ABI: null type disables the creation-time Warning.
 void setHotReloadSource(const char* type, const char* file);

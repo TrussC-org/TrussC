@@ -118,6 +118,7 @@ include("{recipe.as_posix()}")
             if line.startswith('{'):
                 entry = json.loads(line)
                 if 'cmd' in entry:
+                    entry['binary_dir'] = str(fixture / 'build')
                     records.append(entry)
         result = run_build(command, capture_output=True, text=True, on_line=observe,
                            encoding='utf-8', errors='replace', timeout=60)
@@ -158,7 +159,10 @@ include("{recipe.as_posix()}")
                         'target_compile_definitions', 'target_compile_options',
                         'target_link_options', 'target_include_directories',
                         'set_property', 'set_source_files_properties'}
-            return {(str(Path(entry['file']).resolve()), entry['cmd'], tuple(entry['args']))
+            # Generated sources belong to each configure's binary directory.
+            return {(str(Path(entry['file']).resolve()), entry['cmd'],
+                     tuple(arg.replace(entry['binary_dir'], '<BINARY_DIR>')
+                           for arg in entry['args']))
                     for entry in trace if entry['cmd'] in commands
                     and Path(entry['file']).is_relative_to(self.tests)
                     and Path(entry['file']) != self.tests / 'allCoreTests/local.cmake'}

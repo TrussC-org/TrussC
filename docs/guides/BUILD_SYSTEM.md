@@ -257,7 +257,7 @@ cmake --build --preset web --parallel
 Requires:
 - Android SDK (`ANDROID_HOME` environment variable)
 - Android NDK (`ANDROID_NDK_HOME` environment variable)
-- Java (`JAVA_HOME` environment variable) — for APK signing
+- JDK (`JAVA_HOME` environment variable) — javac/jar for core and app Java, d8 from SDK build-tools, and APK signing. CMake looks for javac and jar in `$JAVA_HOME/bin` as well as its normal program paths.
 
 ```bash
 # Using trusscli (adds android preset to CMakePresets.json)
@@ -297,6 +297,72 @@ If neither file exists, the bundled "everything" manifest at
 
 Suggested workflow: copy the bundled manifest into `android/` and strip
 out the `<uses-permission>` lines you don't actually need.
+
+## Android background media playback
+
+Android background media playback can opt in to TrussC's mediaPlayback foreground service. The core Java service is compiled into every Android APK through javac/d8, so `hasCode` is always true. Nothing starts until the app opts in. Android 12+ forbids background service starts; start in setup() or another visible callback:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+To advance tracks from update() without a visible surface, enable hidden updates too. Without the foreground service Android may freeze or kill the background process:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or trigger GPU flushes. Check visibility before GPU work:
+
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+Android hidden ticks also deliver queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks follow the same GPU restriction and visibility check. Image/Font/Video completions, other resource callbacks and GPU readback polling wait for a visible host turn. TrussC has no API for background GPU work.
+
+Android 13+ requires runtime POST_NOTIFICATIONS permission for the notification drawer. TrussC does not request it and has no notification-permission request API. If denied, the service still runs but its notification is hidden from the drawer. With permission, a low-importance notification channel and ongoing notification appear. No wake lock is acquired: active audio normally keeps the CPU awake, while CPU-only ticks with the screen off need device verification. TrussC has no background wake-lock API.
+
+Stop the service when playback ends:
+
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+For targetSdk 34+, Google Play requires justification for every declared foreground service type in Play Console. For a store build that does not use background playback, copy `core/resources/android/AndroidManifest.xml.in` into the project's `android/AndroidManifest.xml.in`, then remove these entries (keep hasCode true, since core Java is still packaged):
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<!-- Remove this entire service element from application: -->
+<service android:name="org.trussc.core.ForegroundService"
+    android:foregroundServiceType="mediaPlayback" android:exported="false"/>
+```
+
+The app should leave the service stopped in that build:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(false);
+}
+```
+
+iOS hidden updates are not implemented. Keep `setUpdateWhileHidden(false)` and use Sound/AudioEngine's audio thread for playback; audio background mode must be configured in the app's Info.plist. TrussC has no iOS background update API:
+
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
 
 **iOS Build (beta):**
 

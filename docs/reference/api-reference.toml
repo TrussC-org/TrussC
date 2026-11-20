@@ -43544,70 +43544,615 @@ void tcApp::setup() {
 related = ["Window::setPosition"]
 
 ["Window::setDrawWhileHidden"]
-keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
-description.en = "Keeps this window drawing while hidden when enabled."
-description.ja = "有効にすると、非表示中もこのウィンドウの描画を続けます。"
-description.ko = "활성화하면 숨겨진 동안에도 이 윈도우의 그리기를 계속합니다."
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder", "android"]
+description.en = "Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android."
+description.ja = "デスクトップの非表示中も Spout/Syphon/NDI への送信や録画用に描画します。iOS/Android では効果がありません。"
+description.ko = "데스크톱에서 숨겨진 동안 Spout/Syphon/NDI 전송이나 녹화를 위해 그립니다. iOS/Android에서는 효과가 없습니다."
 details.en = '''
-- With `true`, update and draw keep running while minimized or fully covered. Use this when `draw()` sends frames to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
-- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see `setDrawWhileHidden`).
-- The default is `false`: hidden windows keep updating and stop drawing. This window inherits the global default at creation; the last global or per-window call wins. A local call does not change the default for future windows.
-- Call on the main thread. The setting survives App replacement on this Window.
-- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+- Default: false on every OS. Desktop windows keep updating by default; iOS/Android stop receiving frames while hidden. This setting never changes the update policy.
+
+Enable hidden desktop draws in setup:
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- Targets this Window only, inherits the global default at creation, and survives App replacement. The last global or per-window call wins; a local call leaves the default unchanged. Call on the main thread.
+
+- iOS/Android have no drawable surface or frame source while hidden; there is no API for drawing there. For Android CPU-only updates use `setUpdateWhileHidden` and `setAndroidForegroundService` instead.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- Desktop hidden ticks run at about the display base rate (~60 Hz); faster pacing and swapInterval are not preserved. Choose a fixed rate explicitly:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ja = '''
-- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送る場合に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
-- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（`setDrawWhileHidden` を参照）。
-- 既定値は `false` で、非表示中も更新を続けますが描画は停止します。作成時にグローバルの既定値を引き継ぎ、その後はグローバルとウィンドウ単位の最後の呼び出しが優先されます。この呼び出しは今後作成するウィンドウの既定値を変更しません。
-- メインスレッドで呼び出してください。この Window の App を差し替えても設定を保持します。
-- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+- 既定値は全 OS で false です。デスクトップは既定で非表示中も更新し、iOS/Android は非表示中にフレームが届きません。更新設定は変更しません。
+
+setup でデスクトップの非表示描画を有効にします：
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- この Window のみを対象にし、作成時にグローバルの既定値を継承します。App 交換後も保持し、グローバルと窓単位の最後の呼び出しが優先されます。ローカル呼び出しは既定値を変えません。メインスレッドで呼びます。
+
+- iOS/Android は非表示中に描画サーフェスもフレーム源もなく、そこで描画する API はありません。Android の CPU のみの更新には setUpdateWhileHidden と setAndroidForegroundService を使います。
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- デスクトップの非表示 tick は画面の基本レート（約 60 Hz）です。それ以上のペースと swapInterval は保たれません。固定レートを明示します：
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ko = '''
-- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 보낼 때 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
-- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(`setDrawWhileHidden` 참조).
-- 기본값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다. 생성 시 전역 기본값을 상속하며 이후에는 전역 호출과 윈도우별 호출 중 마지막 호출이 우선합니다. 이 호출은 앞으로 생성할 윈도우의 기본값을 변경하지 않습니다.
-- 메인 스레드에서 호출합니다. 이 Window의 App을 교체해도 설정을 유지합니다.
-- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+- 기본값은 모든 OS에서 false입니다. 데스크톱은 기본적으로 숨겨져도 업데이트하며 iOS/Android는 숨겨진 동안 프레임을 받지 않습니다. 업데이트 설정은 바꾸지 않습니다.
+
+setup에서 데스크톱 숨김 그리기를 켭니다:
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- 이 Window만 대상으로 하며 생성 시 전역 기본값을 상속하고 App 교체 후에도 유지합니다. 전역/창별 호출 중 마지막 호출이 우선하며 창별 호출은 기본값을 바꾸지 않습니다. 메인 스레드에서 호출합니다.
+
+- iOS/Android는 숨겨진 동안 그릴 surface나 프레임 소스가 없으며 그 상태에서 그리는 API가 없습니다. Android CPU 전용 업데이트에는 setUpdateWhileHidden과 setAndroidForegroundService를 사용합니다.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- 데스크톱 숨김 tick은 디스플레이 기본 레이트(약 60 Hz)입니다. 더 빠른 속도와 swapInterval은 유지되지 않습니다. 고정 레이트를 지정합니다:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
-related = ["setDrawWhileHidden", "Window::isOccluded", "Window::setVisible", "Window::setFps"]
+related = ["setUpdateWhileHidden", "Window::setUpdateWhileHidden", "setAndroidForegroundService"]
 snippet = '''
-window->setDrawWhileHidden(true);
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
 '''
 
 ["setDrawWhileHidden"]
-keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
-description.en = "Sets drawing while hidden for all existing windows and the default for new ones."
-description.ja = "非表示中に描画するかを全ウィンドウに設定し、新規ウィンドウの既定値にします。"
-description.ko = "숨겨진 동안 그릴지 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다."
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder", "android"]
+description.en = "Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android."
+description.ja = "デスクトップの非表示中も Spout/Syphon/NDI への送信や録画用に描画します。iOS/Android では効果がありません。"
+description.ko = "데스크톱에서 숨겨진 동안 Spout/Syphon/NDI 전송이나 녹화를 위해 그립니다. iOS/Android에서는 효과가 없습니다."
 details.en = '''
-- Sets every existing window and becomes the default for new windows, even when called from one App's callbacks. The initial default is `false`: hidden windows keep updating and stop drawing.
-- With `true`, hidden windows keep updating and drawing, including while minimized or fully covered. This supports sending frames from `draw()` to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
-- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see the snippet).
-- `Window::setDrawWhileHidden()` changes one window only. The last global or per-window call wins. Call on the main thread; setup may set the policy before the first draw.
-- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+- Default: false on every OS. Desktop windows keep updating by default; iOS/Android stop receiving frames while hidden. This setting never changes the update policy.
+
+Enable hidden desktop draws in setup:
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- Sets all existing windows and the default for future windows, even from one App callback. The last global or per-window call wins. Call on the main thread.
+
+- iOS/Android have no drawable surface or frame source while hidden; there is no API for drawing there. For Android CPU-only updates use `setUpdateWhileHidden` and `setAndroidForegroundService` instead.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- Desktop hidden ticks run at about the display base rate (~60 Hz); faster pacing and swapInterval are not preserved. Choose a fixed rate explicitly:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ja = '''
-- ある App のコールバックから呼んだ場合も、既存のすべてのウィンドウに設定し、新規ウィンドウの既定値にします。初期値は `false` で、非表示中も更新を続けますが描画は停止します。
-- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送り続ける用途に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
-- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（スニペット参照）。
-- `Window::setDrawWhileHidden()` は 1 つのウィンドウだけを変更し、最後の呼び出しが優先されます。メインスレッドで呼び出してください。setup で初回描画の前に設定できます。
-- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+- 既定値は全 OS で false です。デスクトップは既定で非表示中も更新し、iOS/Android は非表示中にフレームが届きません。更新設定は変更しません。
+
+setup でデスクトップの非表示描画を有効にします：
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- ある App のコールバックから呼んでも、既存の全窓と今後の既定値に設定します。グローバルと窓単位の最後の呼び出しが優先されます。メインスレッドで呼びます。
+
+- iOS/Android は非表示中に描画サーフェスもフレーム源もなく、そこで描画する API はありません。Android の CPU のみの更新には setUpdateWhileHidden と setAndroidForegroundService を使います。
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- デスクトップの非表示 tick は画面の基本レート（約 60 Hz）です。それ以上のペースと swapInterval は保たれません。固定レートを明示します：
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ko = '''
-- 한 App의 콜백에서 호출해도 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다. 초기값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다.
-- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 계속 보내는 데 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
-- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(스니펫 참조).
-- `Window::setDrawWhileHidden()`는 하나의 윈도우만 변경하며 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다. setup에서 첫 그리기 전에 설정할 수 있습니다.
-- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+- 기본값은 모든 OS에서 false입니다. 데스크톱은 기본적으로 숨겨져도 업데이트하며 iOS/Android는 숨겨진 동안 프레임을 받지 않습니다. 업데이트 설정은 바꾸지 않습니다.
+
+setup에서 데스크톱 숨김 그리기를 켭니다:
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- 한 App 콜백에서 호출해도 모든 기존 창과 새 창의 기본값에 적용합니다. 전역/창별 호출 중 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다.
+
+- iOS/Android는 숨겨진 동안 그릴 surface나 프레임 소스가 없으며 그 상태에서 그리는 API가 없습니다. Android CPU 전용 업데이트에는 setUpdateWhileHidden과 setAndroidForegroundService를 사용합니다.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- 데스크톱 숨김 tick은 디스플레이 기본 레이트(약 60 Hz)입니다. 더 빠른 속도와 swapInterval은 유지되지 않습니다. 고정 레이트를 지정합니다:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
-related = ["Window::setDrawWhileHidden", "Window::isOccluded", "setFps"]
+related = ["setUpdateWhileHidden", "Window::setUpdateWhileHidden", "setAndroidForegroundService"]
 snippet = '''
-EventListener occListener;  // member
-setDrawWhileHidden(true);
-// Optional: a slower rate while hidden
-occListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
-    setFps(e.occluded ? 10 : VSYNC);
-});
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+'''
+
+["setUpdateWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "background", "android", "update", "pause"]
+description.en = "Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet."
+description.ja = "非表示中の更新を制御します。デスクトップの処理停止や Android の CPU バックグラウンド処理に使い、iOS の有効化は未対応です。"
+description.ko = "숨김 업데이트를 제어하여 데스크톱 작업을 멈추거나 Android CPU 백그라운드 작업을 켭니다. iOS 활성화는 아직 지원하지 않습니다."
+details.en = '''
+- Default: true on desktop/Web, false on iOS/Android. Drawing is independent: draw=true/update=false draws without updating. Resuming paused updates resets timing without a catch-up burst.
+
+Choose the update policy in setup:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- Sets all existing windows and the default for future windows, even from one App callback. The last global or per-window call wins. Call on the main thread.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
+
+- Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- setUpdateWhileHidden(true) has no effect on iOS yet. Keep the default and use the existing Sound/AudioEngine audio thread for playback; TrussC has no iOS background update API. Audio background mode still needs app Info.plist configuration:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ja = '''
+- 既定値はデスクトップ/Web で true、iOS/Android で false です。描画とは独立し、draw=true/update=false は更新なしで描画します。再開時は時間をリセットし、停止分をまとめて更新しません。
+
+setup で更新設定を選びます：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- ある App のコールバックから呼んでも、既存の全窓と今後の既定値に設定します。グローバルと窓単位の最後の呼び出しが優先されます。メインスレッドで呼びます。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
+
+- Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS では setUpdateWhileHidden(true) はまだ効果がありません。既定値を保ち、再生には既存の Sound/AudioEngine の音声スレッドを使います。iOS のバックグラウンド更新 API はありません。音声の background mode はアプリの Info.plist 設定が必要です：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ko = '''
+- 기본값은 데스크톱/Web에서 true, iOS/Android에서 false입니다. 그리기와 독립적이므로 draw=true/update=false이면 업데이트 없이 그립니다. 재개 시 시간을 초기화해 밀린 업데이트를 몰아서 실행하지 않습니다.
+
+setup에서 업데이트 정책을 선택합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- 한 App 콜백에서 호출해도 모든 기존 창과 새 창의 기본값에 적용합니다. 전역/창별 호출 중 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
+
+- Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS에서는 setUpdateWhileHidden(true)가 아직 효과가 없습니다. 기본값을 유지하고 재생에는 기존 Sound/AudioEngine 오디오 스레드를 사용합니다. iOS 백그라운드 업데이트 API는 없습니다. 오디오 background mode는 앱 Info.plist 설정이 필요합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+related = ["setDrawWhileHidden", "setAndroidForegroundService", "isWindowOccluded", "CoreEvents::occludedChanged"]
+snippet = '''
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+'''
+
+["Window::setUpdateWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "background", "android", "update", "pause"]
+description.en = "Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet."
+description.ja = "非表示中の更新を制御します。デスクトップの処理停止や Android の CPU バックグラウンド処理に使い、iOS の有効化は未対応です。"
+description.ko = "숨김 업데이트를 제어하여 데스크톱 작업을 멈추거나 Android CPU 백그라운드 작업을 켭니다. iOS 활성화는 아직 지원하지 않습니다."
+details.en = '''
+- Default: true on desktop/Web, false on iOS/Android. Drawing is independent: draw=true/update=false draws without updating. Resuming paused updates resets timing without a catch-up burst.
+
+Choose the update policy in setup:
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- Targets this Window only, inherits the global default at creation, and survives App replacement. The last global or per-window call wins; a local call leaves the default unchanged. Call on the main thread.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
+
+- Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- setUpdateWhileHidden(true) has no effect on iOS yet. Keep the default and use the existing Sound/AudioEngine audio thread for playback; TrussC has no iOS background update API. Audio background mode still needs app Info.plist configuration:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ja = '''
+- 既定値はデスクトップ/Web で true、iOS/Android で false です。描画とは独立し、draw=true/update=false は更新なしで描画します。再開時は時間をリセットし、停止分をまとめて更新しません。
+
+setup で更新設定を選びます：
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- この Window のみを対象にし、作成時にグローバルの既定値を継承します。App 交換後も保持し、グローバルと窓単位の最後の呼び出しが優先されます。ローカル呼び出しは既定値を変えません。メインスレッドで呼びます。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
+
+- Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS では setUpdateWhileHidden(true) はまだ効果がありません。既定値を保ち、再生には既存の Sound/AudioEngine の音声スレッドを使います。iOS のバックグラウンド更新 API はありません。音声の background mode はアプリの Info.plist 設定が必要です：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ko = '''
+- 기본값은 데스크톱/Web에서 true, iOS/Android에서 false입니다. 그리기와 독립적이므로 draw=true/update=false이면 업데이트 없이 그립니다. 재개 시 시간을 초기화해 밀린 업데이트를 몰아서 실행하지 않습니다.
+
+setup에서 업데이트 정책을 선택합니다:
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- 이 Window만 대상으로 하며 생성 시 전역 기본값을 상속하고 App 교체 후에도 유지합니다. 전역/창별 호출 중 마지막 호출이 우선하며 창별 호출은 기본값을 바꾸지 않습니다. 메인 스레드에서 호출합니다.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
+
+- Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS에서는 setUpdateWhileHidden(true)가 아직 효과가 없습니다. 기본값을 유지하고 재생에는 기존 Sound/AudioEngine 오디오 스레드를 사용합니다. iOS 백그라운드 업데이트 API는 없습니다. 오디오 background mode는 앱 Info.plist 설정이 필요합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+related = ["setDrawWhileHidden", "setAndroidForegroundService", "isWindowOccluded", "CoreEvents::occludedChanged"]
+snippet = '''
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+'''
+
+["setAndroidForegroundService"]
+keywords = ["android", "background", "foreground service", "mediaPlayback", "audio", "notification"]
+description.en = "Opts in to Android mediaPlayback foreground service for background playback; no wake lock or automatic notification permission request."
+description.ja = "Android のバックグラウンド再生用 mediaPlayback foreground service を有効にします。wake lock と通知権限の自動要求は行いません。"
+description.ko = "Android 백그라운드 재생용 mediaPlayback foreground service를 켭니다. wake lock이나 자동 알림 권한 요청은 하지 않습니다."
+details.en = '''
+- Default: stopped on Android; no service runs until true is passed. Other OSes do nothing and log one Notice per call.
+
+- Android 12+ rejects starting a foreground service from the background. Call true in setup() or another visible callback:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+Stop the service when background playback ends:
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13+ POST_NOTIFICATIONS is a runtime permission. This API does not request it; if denied, the service still runs but its notification is hidden from the notification drawer. TrussC has no notification-permission request API. With permission, a low-importance channel and ongoing notification are created.
+- No wake lock is acquired. Active audio normally keeps the CPU awake; this service alone does not guarantee CPU-only ticks with the screen off. TrussC has no background wake-lock API.
+- For targetSdk 34+, justify the mediaPlayback foreground service type in Play Console. Unused store builds should remove the service and the three related permissions from their project manifest; see BUILD_SYSTEM.md › Android background media playback.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+details.ja = '''
+- Android の既定は停止で、true を渡すまで動きません。他 OS は何もせず、呼び出しごとに Notice を 1 回出します。
+
+- Android 12 以降はバックグラウンドからの foreground service 開始を拒否します。setup() または表示中のコールバックで true を呼びます：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+バックグラウンド再生が終わったらサービスを停止します：
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13 以降の POST_NOTIFICATIONS は実行時権限です。この API は要求しません。拒否されてもサービスは動きますが通知一覧には表示されません。TrussC に通知権限要求 API はありません。許可されていれば重要度の低いチャンネルと継続通知を作成します。
+- wake lock は取得しません。音声再生中は通常 CPU が動き続けますが、サービス単体では画面オフ中の CPU 更新を保証しません。TrussC にバックグラウンド wake-lock API はありません。
+- targetSdk 34 以降は Play Console で mediaPlayback 型の説明が必要です。使わないストア用アプリは自身の manifest から service と関連する 3 権限を削除します。BUILD_SYSTEM.md › Android background media playback を参照してください。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+details.ko = '''
+- Android 기본값은 중지이며 true를 전달할 때만 실행합니다. 다른 OS에서는 아무것도 하지 않고 호출마다 Notice를 한 번 기록합니다.
+
+- Android 12 이상은 백그라운드에서 foreground service 시작을 거부합니다. setup() 또는 표시 중인 콜백에서 true를 호출합니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+백그라운드 재생이 끝나면 서비스를 중지합니다:
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13 이상의 POST_NOTIFICATIONS는 런타임 권한입니다. 이 API는 요청하지 않습니다. 거부되어도 서비스는 실행되지만 알림 목록에는 보이지 않습니다. TrussC에는 알림 권한 요청 API가 없습니다. 허용된 경우 중요도가 낮은 채널과 지속 알림을 만듭니다.
+- wake lock을 획득하지 않습니다. 오디오 재생 중에는 보통 CPU가 깨어 있지만 서비스만으로 화면이 꺼진 동안의 CPU 업데이트를 보장하지 않습니다. TrussC에는 백그라운드 wake-lock API가 없습니다.
+- targetSdk 34 이상은 Play Console에서 mediaPlayback 유형의 용도를 설명해야 합니다. 사용하지 않는 스토어 빌드는 자체 manifest에서 service와 관련 권한 3개를 제거합니다. BUILD_SYSTEM.md › Android background media playback을 참고하세요.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+related = ["setUpdateWhileHidden", "isWindowOccluded"]
+snippet = '''
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
 '''
 
 ["Window::setFps"]

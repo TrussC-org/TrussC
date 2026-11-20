@@ -2955,8 +2955,10 @@ void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a d
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
-void setDrawWhileHidden(bool allow)  // Sets drawing while hidden for all existing windows and the default for new ones.
+void setAndroidForegroundService(bool enabled)  // Opts in to Android mediaPlayback foreground service for background playback; no wake lock or automatic notification permission request.
+void setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
+void setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
 Top  // Provides the shorthand constant for Direction::Top.
@@ -5254,7 +5256,7 @@ bool Window::isOpen() const  // Returns whether this window is open.
 bool Window::isVisible() const  // Returns this open window's requested visibility.
 void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
-void Window::setDrawWhileHidden(bool allow)  // Keeps this window drawing while hidden when enabled.
+void Window::setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
@@ -5262,6 +5264,7 @@ void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this windo
 void Window::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
+void Window::setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
 void Window::setVisible(bool visible)  // Hides or shows this window without closing it.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ```

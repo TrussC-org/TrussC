@@ -527,6 +527,43 @@ struct JniScope {
 
 } // anonymous namespace
 
+// Start from setup()/a visible callback: Android 12+ rejects background starts.
+void setAndroidForegroundService(bool enabled) {
+    JniScope jni;
+    if (!jni) {
+        logWarning("Android") << "Foreground service requires a running Activity";
+        return;
+    }
+    auto* env = jni.env;
+    // Use an explicit class-name Intent: FindClass on this native app thread
+    // cannot resolve app classes through Android's bootstrap class loader.
+    if (env->PushLocalFrame(8) < 0) {
+        env->ExceptionClear();
+        logWarning("Android") << "Unable to allocate foreground service JNI references";
+        return;
+    }
+    auto activity = jni.activity();
+    auto contextClass = env->GetObjectClass(activity);
+    auto intentClass = env->FindClass("android/content/Intent");
+    auto constructor = env->GetMethodID(intentClass, "<init>", "()V");
+    auto intent = env->NewObject(intentClass, constructor);
+    auto setClassName = env->GetMethodID(intentClass, "setClassName",
+        "(Landroid/content/Context;Ljava/lang/String;)Landroid/content/Intent;");
+    auto serviceName = env->NewStringUTF("org.trussc.core.ForegroundService");
+    env->CallObjectMethod(intent, setClassName, activity, serviceName);
+    auto method = env->GetMethodID(contextClass, enabled ? "startForegroundService" : "stopService",
+        enabled ? "(Landroid/content/Intent;)Landroid/content/ComponentName;" : "(Landroid/content/Intent;)Z");
+    if (!env->ExceptionCheck()) {
+        if (enabled) env->CallObjectMethod(activity, method, intent);
+        else env->CallBooleanMethod(activity, method, intent);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        logWarning("Android") << "Foreground service request failed; start while visible and check the manifest";
+    }
+    env->PopLocalFrame(nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // Battery (via BatteryManager system service)
 // ---------------------------------------------------------------------------

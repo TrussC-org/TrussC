@@ -116,7 +116,8 @@ struct WindowRequestAccess {
 bool refreshWindowMetadata(Window&) { return true; } // single-window binding has no operations
 void syncWindowAppSize(Window&, bool) {}
 int queries=0;
-struct { struct { bool has_resumed=false, has_focus=false; } android; } _sapp_tc;
+constexpr int EGL_NO_SURFACE=0;
+struct { struct { bool has_resumed=false, has_focus=false; int surface=1; } android; } _sapp_tc;
 ''' + query + r'''
 bool sapp_isvalid() { return true; }
 int sapp_width() { return 100; } int sapp_height() { return 100; }
@@ -128,7 +129,7 @@ void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
     w.ctx.suspended=m.trust_hidden_signals && (m.iconified || m.occluded);
 }
 ''' + body(runtime, 'void refreshSelectedWindowMetadata()') + r'''
-''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()').replace('trussc::internal::WindowRequestAccess::', 'WindowRequestAccess::') + r'''
+''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()').replace('trussc::internal::WindowRequestAccess::', 'WindowRequestAccess::') + r'''
 enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
 struct sapp_event {
     sapp_event_type type{}; uint64_t frame_count=0;
@@ -164,7 +165,7 @@ void frame(bool hidden) {
     refreshWindowEntryMetadata(owner);
     check("single-window frame refreshes native observation", queries==before+1);
     check("frame getter and suspension follow current native lifecycle/focus", owner.isOccluded()==hidden && owner.ctx.suspended==hidden);
-    check("mobile hidden state still pauses native updates", nativeSuspensionPausesUpdate());
+    check("mobile lifecycle suspension remains distinct from visibility", owner.ctx.lifecycleSuspended == ! _sapp_tc.android.has_resumed);
     deliverPendingWindowVisibilityAtReadyEntry(owner);
 }
 void run() {
@@ -196,7 +197,7 @@ int main() { mac::run(); mobile::run(); return failures?1:0; }
     if os.environ.get('TC_VISIBILITY_LIFECYCLE_MUTATIONS'):
         edits=[
             ('single_late_observation', 'if constexpr (supportsSecondaryWindows()) { if (b.visibilityReady) return; }', 'if (b.visibilityReady) return;'),
-            ('lifecycle_snapshot_overwrite', 'ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();', 'ctx.suspended = true; ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();'),
+            ('lifecycle_snapshot_overwrite', 'ctx.lifecycleSuspended = true;', 'ctx.suspended = true; ctx.lifecycleSuspended = true;'),
             ('lifecycle_raw_name_as_visibility', 'if ((type == SAPP_EVENTTYPE_SUSPENDED) != hidden)\n        return supportsSecondaryWindows() ? VisibilityDelivery::Drop : VisibilityDelivery::RawOnly;', '/* wrongly reuse lifecycle raw name */'),
             ('single_attempt_not_committed', 'binding.lastDeliveredHidden = hidden;', '/* omit attempt commit */'),
         ]

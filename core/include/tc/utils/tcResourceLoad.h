@@ -36,6 +36,8 @@ struct ResourceLoadBatch {
 };
 void enqueueResourceLoad(std::function<void()> completion);
 ResourceLoadBatch takeResourceLoadBatch();
+// Leave GPU-backed results and unclassified callbacks for a visible host turn.
+ResourceLoadBatch takeCpuResourceLoadBatch();
 void deliverResourceLoadBatch(ResourceLoadBatch batch);
 void startResourceLoad(std::function<void()> preparation);
 void finishResourceLoadsAtExit();
@@ -74,6 +76,7 @@ struct ResourceLoadState : std::enable_shared_from_this<ResourceLoadState> {
     std::function<void()> cancelBackend; // main-thread Web cancellation only
     std::shared_ptr<std::function<void()>> stop;
     virtual size_t retainedBytes() const noexcept { return 0; }
+    virtual bool requiresGpu() const noexcept { return true; }
     virtual void discardPayload() noexcept {}
     void cancel();
 };
