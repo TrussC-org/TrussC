@@ -1069,9 +1069,11 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
         (void)af::val<AudioSettings>().backend;
         (void)af::val<AudioSettings>().bufferSize;
         (void)af::val<AudioSettings>().channels;
+        (void)af::val<AudioSettings>().contentType;
         (void)af::val<AudioSettings>().device;
         (void)af::val<AudioSettings>().deviceName;
         (void)af::val<AudioSettings>().maxPolyphony;
+        (void)af::val<AudioSettings>().performanceProfile;
         (void)af::val<AudioSettings>().sampleRate;
     }
 };

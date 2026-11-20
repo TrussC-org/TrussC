@@ -5342,7 +5342,9 @@ ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Sets the access level
 
 ```cpp
 enum AudioBackend { Default, Null, WASAPI, DirectSound, WinMM, CoreAudio, PulseAudio, ALSA, JACK, AAudio, OpenSLES, WebAudio }  // Selects the audio engine backend.
+enum AudioContentType { Default, Music }  // Selects the AAudio output content type for background music.
 enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifies the stage at which audio initialization failed.
+enum AudioPerformanceProfile { LowLatency, Conservative }  // Selects the output performance profile for instruments or BGM.
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
 enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Selects a built-in synthesized notification sound.

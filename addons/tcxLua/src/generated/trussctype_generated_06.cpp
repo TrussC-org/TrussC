@@ -187,45 +187,40 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["tell"] = &trussc::FileReader::tell;
     }
     {
-        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
-        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
-        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
-        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
-        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
-        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
-        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
-        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget),
+        "Storage", sol::var(trussc::TextureUsage::Storage));
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
     {
-        auto constructors = tcxLuaConstructors<trussc::LogEventArgs
-            , trussc::LogEventArgs(trussc::LogLevel, const std::string &)
-        >();
-        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs", constructors, sol::call_constructor, constructors);
-        t["level"] = &trussc::LogEventArgs::level;
-        t["message"] = &trussc::LogEventArgs::message;
-        t["timestamp"] = &trussc::LogEventArgs::timestamp;
-    }
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
-    {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["success"] = &trussc::FileDialogResult::success;
-    }
-    {
-        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
     {
         sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
@@ -233,8 +228,8 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["raw"] = &trussc::ConsoleEventArgs::raw;
     }
     {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
+        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

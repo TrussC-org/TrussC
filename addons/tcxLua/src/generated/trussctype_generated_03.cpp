@@ -205,27 +205,31 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["loadFromString"] = &trussc::IesProfile::loadFromString;
     }
     {
-        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
-        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
-        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
-        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
-        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
-        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
-        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["injected"] = &trussc::KeyEventArgs::injected;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["sourceTag"] = &trussc::KeyEventArgs::sourceTag;
+        t["super"] = &trussc::KeyEventArgs::super;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget),
-        "Storage", sol::var(trussc::TextureUsage::Storage));
-    {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
-    }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
     {
         sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
         t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
@@ -233,20 +237,19 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["synced"] = &trussc::FpsSettings::synced;
         t["updateFps"] = &trussc::FpsSettings::updateFps;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    lua->new_usertype<trussc::AudioContentType>("AudioContentType",
+        sol::meta_function::equal_to, [](trussc::AudioContentType a, trussc::AudioContentType b){ return a == b; },
+        "Default", sol::var(trussc::AudioContentType::Default),
+        "Music", sol::var(trussc::AudioContentType::Music));
     {
-        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
-        t["mode"] = &trussc::CurveStyle::mode;
-        t["resolution"] = &trussc::CurveStyle::resolution;
-        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

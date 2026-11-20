@@ -177,59 +177,52 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         "DstAlpha", sol::var(trussc::BlendFactor::DstAlpha),
         "OneMinusDstAlpha", sol::var(trussc::BlendFactor::OneMinusDstAlpha));
     {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["name"] = &trussc::Platform::name;
+        sol::usertype<trussc::CharEventArgs> t = lua->new_usertype<trussc::CharEventArgs>("CharEventArgs");
+        t["alt"] = &trussc::CharEventArgs::alt;
+        t["codepoint"] = &trussc::CharEventArgs::codepoint;
+        t["consumed"] = &trussc::CharEventArgs::consumed;
+        t["ctrl"] = &trussc::CharEventArgs::ctrl;
+        t["injected"] = &trussc::CharEventArgs::injected;
+        t["isRepeat"] = &trussc::CharEventArgs::isRepeat;
+        t["shift"] = &trussc::CharEventArgs::shift;
+        t["sourceTag"] = &trussc::CharEventArgs::sourceTag;
+        t["super"] = &trussc::CharEventArgs::super;
     }
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["endGroup"] = &trussc::Reflector::endGroup;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
+        t["error"] = &trussc::SaveResult::error;
+        t["message"] = &trussc::SaveResult::message;
+        t["ok"] = &trussc::SaveResult::ok;
+        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
+        t["success"] = &trussc::SaveResult::success;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::BlendOp>("BlendOp",
+        sol::meta_function::equal_to, [](trussc::BlendOp a, trussc::BlendOp b){ return a == b; },
+        "Add", sol::var(trussc::BlendOp::Add),
+        "Subtract", sol::var(trussc::BlendOp::Subtract),
+        "ReverseSubtract", sol::var(trussc::BlendOp::ReverseSubtract),
+        "Minimum", sol::var(trussc::BlendOp::Minimum),
+        "Maximum", sol::var(trussc::BlendOp::Maximum));
     {
         sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
         t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
         t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpServerErrorEventArgs::message;
     }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-    }
-    {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
-        t["format"] = &trussc::AudioRecordSettings::format;
-    }
-    {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
-    }
-    {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
 #ifdef _MSC_VER

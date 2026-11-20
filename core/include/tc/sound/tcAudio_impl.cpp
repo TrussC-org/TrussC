@@ -135,6 +135,13 @@ ma_result initContext(ma_context* ctx, bool probe = false,
 } // namespace
 
 namespace internal {
+void applyAudioOutputPolicy(ma_device_config& config, const AudioSettings& settings) {
+    config.performanceProfile = settings.performanceProfile == AudioPerformanceProfile::Conservative
+        ? ma_performance_profile_conservative : ma_performance_profile_low_latency;
+    config.aaudio.contentType = settings.contentType == AudioContentType::Music
+        ? ma_aaudio_content_type_music : ma_aaudio_content_type_default;
+}
+
 ma_backend audioBackendToMA(AudioBackend backend) {
     switch (backend) {
         case AudioBackend::Null: return ma_backend_null;
@@ -2120,6 +2127,8 @@ bool AudioEngine::init() {
         .bufferSize   = bufferSize_,
         .maxPolyphony = maxPolyphony_,
         .deviceName   = std::string(),
+        .performanceProfile = performanceProfile_,
+        .contentType = contentType_,
     });
 }
 
@@ -2172,6 +2181,8 @@ bool AudioEngine::init(const AudioSettings& settings) {
     sampleRate_ = settings.sampleRate > 0 ? settings.sampleRate : DEFAULT_SAMPLE_RATE;
     channels_   = settings.channels   > 0 ? settings.channels   : DEFAULT_CHANNELS;
     bufferSize_ = settings.bufferSize  > 0 ? settings.bufferSize : DEFAULT_BUFFER_SIZE;
+    performanceProfile_ = settings.performanceProfile;
+    contentType_ = settings.contentType;
     {
         std::lock_guard<std::mutex> lock(analysisMutex_);
         analysisRing_ = std::make_unique<internal::AudioOutputRing>(sampleRate_, channels_);
@@ -2254,6 +2265,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     diag_->openedByName.store(deviceIDPtr != nullptr, std::memory_order_release);
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    internal::applyAudioOutputPolicy(config, settings);
     config.playback.format     = ma_format_f32;
     config.playback.channels   = channels_;
     config.playback.pDeviceID  = deviceIDPtr;

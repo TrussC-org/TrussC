@@ -128,6 +128,7 @@ struct AudioSettings {
     int sampleRate = 96000, channels = 2, bufferSize = 256, maxPolyphony = 1;
     std::string deviceName;
     std::optional<AudioDeviceInfo> device;
+    int performanceProfile = 0, contentType = 0; // Opaque policy values in this lock fixture.
 };
 namespace internal { struct AudioOutputRing { AudioOutputRing(int, int) {} }; }
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
@@ -144,6 +145,7 @@ struct AudioEngine {
     std::atomic<bool> inputNotifyEnabled_{true};
     void* device_ = new ma_device;
     int sampleRate_ = 48000, channels_ = 2, bufferSize_ = 256, maxPolyphony_ = 3;
+    int performanceProfile_ = 0, contentType_ = 0;
     mutable ObservedMutex mutex_;
     std::mutex analysisMutex_;
     std::unique_ptr<internal::AudioOutputRing> analysisRing_;

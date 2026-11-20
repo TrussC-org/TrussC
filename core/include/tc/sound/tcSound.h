@@ -766,6 +766,9 @@ struct AudioDeviceInfo {
     AudioBackend backend = AudioBackend::Default;
 };
 
+enum class AudioPerformanceProfile { LowLatency, Conservative };
+enum class AudioContentType { Default, Music };
+
 struct AudioSettings {
     int sampleRate   = 0;       // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
     int channels     = 2;       // output channel count (1 = mono, 2 = stereo)
@@ -776,6 +779,9 @@ struct AudioSettings {
     // Object selection wins over deviceName and selects the object's backend.
     // A missing ID or name fails initialization without opening another device.
     std::optional<AudioDeviceInfo> device = std::nullopt;
+    // Applied when opening output; conservative trades latency for larger periods.
+    AudioPerformanceProfile performanceProfile = AudioPerformanceProfile::LowLatency;
+    AudioContentType contentType = AudioContentType::Default; // AAudio only
 };
 
 // ---------------------------------------------------------------------------
@@ -1066,8 +1072,9 @@ public:
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //
     // init(settings) stores sampleRate, channels, bufferSize and maxPolyphony
-    // from `settings` (0 or less picks DEFAULT_*) before it opens the device,
-    // so they are kept even when the open fails. init() with no arguments
+    // (0 or less picks DEFAULT_*), plus performanceProfile and contentType,
+    // before opening the device, so they are kept even when the open fails.
+    // init() with no arguments
     // reuses the settings of the last init(settings) call, failed or not
     // (the DEFAULT_* values if there was none), but always opens the system
     // default device on AudioBackend::Default: deviceName and backend are
@@ -1533,6 +1540,8 @@ private:
     int sampleRate_ = DEFAULT_SAMPLE_RATE;
     int channels_   = DEFAULT_CHANNELS;
     int bufferSize_ = DEFAULT_BUFFER_SIZE;
+    AudioPerformanceProfile performanceProfile_ = AudioPerformanceProfile::LowLatency;
+    AudioContentType contentType_ = AudioContentType::Default;
 
     // Monotonic count of output frames emitted since the engine started.
     // Exposed to audioOut listeners via AudioOutBuffer::framePosition so

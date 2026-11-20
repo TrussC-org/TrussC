@@ -213,51 +213,52 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["speed"] = &trussc::PlayingSound::speed;
         t["volume"] = &trussc::PlayingSound::volume;
     }
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown),
+        "TooLarge", sol::var(trussc::LoadError::TooLarge),
+        "Cancelled", sol::var(trussc::LoadError::Cancelled));
+    lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
+        sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
+        "None", sol::var(trussc::EasyCam::Modifier::None),
+        "Shift", sol::var(trussc::EasyCam::Modifier::Shift),
+        "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
+        "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
+        "Super", sol::var(trussc::EasyCam::Modifier::Super));
     {
-        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
-        t["date"] = &trussc::BuildInfo::date;
-        t["dateTime"] = &trussc::BuildInfo::dateTime;
-        t["day"] = &trussc::BuildInfo::day;
-        t["hour"] = &trussc::BuildInfo::hour;
-        t["minute"] = &trussc::BuildInfo::minute;
-        t["month"] = &trussc::BuildInfo::month;
-        t["second"] = &trussc::BuildInfo::second;
-        t["time"] = &trussc::BuildInfo::time;
-        t["timestamp"] = &trussc::BuildInfo::timestamp;
-        t["year"] = &trussc::BuildInfo::year;
-    }
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
-    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
-        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
-        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
-    {
-        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
-        t["note"] = &trussc::ChipSoundBundle::Entry::note;
-        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
+        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
+        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
+        t["host"] = &trussc::TcpClientConnectEventArgs::host;
+        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+    }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    {
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+    }
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
+    }
+    {
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
     }
 }
 #ifdef _MSC_VER

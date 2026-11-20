@@ -7,6 +7,9 @@
 namespace trussc {
 namespace internal {
 
+// Fill output policy without changing device selection, usage, or explicit periods.
+void applyAudioOutputPolicy(ma_device_config& config, const AudioSettings& settings);
+
 // Backend/ID conversion uses only the active union member, never padding.
 ma_backend audioBackendToMA(AudioBackend backend);
 AudioBackend audioBackendFromMA(ma_backend backend);
