@@ -142,6 +142,12 @@ void applyAudioOutputPolicy(ma_device_config& config, const AudioSettings& setti
         ? ma_aaudio_content_type_music : ma_aaudio_content_type_default;
 }
 
+bool shouldReapplyProfileAfterReroute(ma_device_notification_type type,
+                                    AudioPerformanceProfile profile, bool openedDefault) {
+    return type == ma_device_notification_type_rerouted
+        && profile == AudioPerformanceProfile::Conservative && openedDefault;
+}
+
 ma_backend audioBackendToMA(AudioBackend backend) {
     switch (backend) {
         case AudioBackend::Null: return ma_backend_null;
@@ -2037,11 +2043,37 @@ void releaseVoice(PlayingSound& voice) {
 // themselves also comes through here, but those two clear the mark right
 // after they have released the device (they run on the main thread, so the
 // slot cannot run in between), and the slot then finds nothing to report. A
-// rerouted notification is not a loss and is ignored.
+// rerouted notification is not a loss. Android restores Conservative below.
 // ---------------------------------------------------------------------------
+#if defined(__ANDROID__)
+namespace {
+internal::MainThreadSlot& profileRerouteSlot() {
+    static auto* slot = new internal::MainThreadSlot([](internal::MainThreadSlot&) {
+        // init() opens the default with retained settings; it does not emit rerouted.
+        if (AudioEngine::getInstance().init()) {
+            logNotice("AudioEngine") << "Conservative profile reapplied after a reroute";
+        }
+    });
+    return *slot;
+}
+} // namespace
+
+struct internal::AudioProfileReroute {
+    static void notification(const ma_device_notification* notification) {
+        AudioEngine& engine = AudioEngine::getInstance();
+        if (!shouldReapplyProfileAfterReroute(notification->type, engine.performanceProfile_,
+                !engine.diag_->openedByName.load(std::memory_order_acquire))) return;
+        profileRerouteSlot().post(std::shared_ptr<void>(std::shared_ptr<void>(), &profileRerouteSlot()));
+    }
+};
+#endif
+
 namespace {
 void deviceNotificationCallback(const ma_device_notification* notification) {
     if (notification->type == ma_device_notification_type_stopped) internal::AudioDeviceLoss::stopped();
+#if defined(__ANDROID__)
+    internal::AudioProfileReroute::notification(notification);
+#endif
 }
 
 // Leaked with the engine: the slot is queued only while the engine lives.
@@ -2171,6 +2203,9 @@ bool AudioEngine::init(const AudioSettings& settings) {
     // includes the stop its release just caused)
     diag_->lossPending.store(false, std::memory_order_release);
     deviceLossSlot();  // created here, not on the notification thread
+#if defined(__ANDROID__)
+    profileRerouteSlot();
+#endif
 
     // No device runs here: drop the previous device's meters (also when the
     // init below fails, so a dead engine never reports old output).

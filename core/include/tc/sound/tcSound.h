@@ -780,8 +780,8 @@ struct AudioSettings {
     // A missing ID or name fails initialization without opening another device.
     std::optional<AudioDeviceInfo> device = std::nullopt;
     // Applied when opening output; conservative requests larger default periods when bufferSize is 0.
-    // On Android, an automatic reroute (headphones, Bluetooth) reopens with LowLatency;
-    // call init(settings) again to restore Conservative.
+    // On Android, after an automatic reroute (headphones, Bluetooth), TrussC reopens
+    // output once more to restore Conservative, so there is a second short gap.
     AudioPerformanceProfile performanceProfile = AudioPerformanceProfile::LowLatency;
     AudioContentType contentType = AudioContentType::Default; // AAudio only; Default skips the setter (AAudio defaults to MUSIC)
 };
@@ -911,6 +911,8 @@ namespace internal {
     // the exit paths call it (AudioEngine::shutdown(), runHeadlessApp()).
     // Main thread.
     void flushAudioDiagnostics();
+
+    struct AudioProfileReroute;
 
     // The engine's device-loss path (tcAudio_impl.cpp). stopped() runs on the
     // device's notification thread: it only sets atomics and posts a
@@ -1279,6 +1281,7 @@ private:
     friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
     friend struct internal::AudioDeviceLoss;
+    friend struct internal::AudioProfileReroute;
     friend class MicInput;
     friend struct internal::MicState;
     friend class SoundBuffer;

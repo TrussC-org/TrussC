@@ -10,6 +10,9 @@ namespace internal {
 // Fill output policy without changing device selection, usage, or explicit periods.
 void applyAudioOutputPolicy(ma_device_config& config, const AudioSettings& settings);
 
+bool shouldReapplyProfileAfterReroute(ma_device_notification_type type,
+                                    AudioPerformanceProfile profile, bool openedDefault);
+
 // Backend/ID conversion uses only the active union member, never padding.
 ma_backend audioBackendToMA(AudioBackend backend);
 AudioBackend audioBackendFromMA(ma_backend backend);

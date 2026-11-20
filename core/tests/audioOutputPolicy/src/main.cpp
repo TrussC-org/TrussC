@@ -30,6 +30,18 @@ TC_CORE_TEST_MAIN() {
                 && config.aaudio.usage == ma_aaudio_usage_media);
         }
     }
+    for (auto type : {ma_device_notification_type_started, ma_device_notification_type_stopped,
+                      ma_device_notification_type_rerouted, ma_device_notification_type_interruption_began,
+                      ma_device_notification_type_interruption_ended, ma_device_notification_type_unlocked}) {
+        for (auto profile : {AudioPerformanceProfile::LowLatency, AudioPerformanceProfile::Conservative}) {
+            for (bool openedDefault : {false, true}) {
+                check("reroute reapply requires rerouted, Conservative, and default output",
+                    internal::shouldReapplyProfileAfterReroute(type, profile, openedDefault) ==
+                        (type == ma_device_notification_type_rerouted
+                            && profile == AudioPerformanceProfile::Conservative && openedDefault));
+            }
+        }
+    }
     auto config = defaults;
     internal::applyAudioOutputPolicy(config, AudioSettings{});
     check("defaults match miniaudio", config.performanceProfile == defaults.performanceProfile

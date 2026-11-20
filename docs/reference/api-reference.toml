@@ -71379,12 +71379,7 @@ void tcApp::setup() {
 ```
 - On AAudio, conservative maps to `AAUDIO_PERFORMANCE_MODE_NONE`. `POWER_SAVING` has no TrussC API.
 - Settings apply when `AudioEngine::init(settings)` opens or reopens output. Editing the local settings object does not change a running device; pass it to `init(settings)` again to apply it. Zero-argument `init()` retains the last profile and content type, including after a failed initialization.
-- On Android, an automatic reroute (headphones, Bluetooth) reopens the stream with LowLatency; call `init(settings)` again to restore Conservative:
-```cpp
-void tcApp::setup() {
-    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::Conservative});
-}
-```
+- On Android, after an automatic reroute (headphones, Bluetooth), TrussC reopens output once more to restore Conservative, so there is a second short gap.
 '''
 details.ja = '''
 - 楽器向けの `LowLatency` が既定値で、`Conservative` は `bufferSize` が0（自動）のとき、デスクトップを含むバックエンドに長時間のBGM再生向けの大きい既定の処理周期を要求します。実際の周期はバックエンドとの交渉で決まり、正の `bufferSize` はそのまま使います。
@@ -71396,12 +71391,7 @@ void tcApp::setup() {
 ```
 - AAudioではConservativeが `AAUDIO_PERFORMANCE_MODE_NONE` に対応します。`POWER_SAVING` を指定するTrussC APIはありません。
 - `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用します。ローカルの設定オブジェクトの編集だけでは動作中のデバイスは変わりません。適用するには再度 `init(settings)` に渡します。引数なしの `init()` は、初期化が失敗した場合も最後のプロファイルとコンテンツ種別を再利用します。
-- Androidでは自動的な出力先の切り替え（ヘッドホン、Bluetooth）でストリームがLowLatencyで開き直されるため、Conservativeに戻すには再度 `init(settings)` を呼びます。
-```cpp
-void tcApp::setup() {
-    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::Conservative});
-}
-```
+- Androidでは自動的な出力先の切り替え（ヘッドホン、Bluetooth）の後、Conservativeを復元するためにTrussCが出力をもう一度開き直すので、短い中断がもう一度発生します。
 '''
 details.ko = '''
 - 악기용 `LowLatency`가 기본값이며 `Conservative`는 `bufferSize`가 0(자동)일 때 데스크톱을 포함한 백엔드에 장시간 BGM 재생용으로 더 큰 기본 처리 주기를 요청합니다. 실제 주기는 백엔드와의 협상에 따라 결정되며 양수 `bufferSize`는 그대로 사용합니다.
@@ -71413,12 +71403,7 @@ void tcApp::setup() {
 ```
 - AAudio에서 Conservative는 `AAUDIO_PERFORMANCE_MODE_NONE`에 대응합니다. `POWER_SAVING`을 지정하는 TrussC API는 없습니다.
 - `AudioEngine::init(settings)`가 출력을 열거나 다시 열 때 적용합니다. 로컬 설정 객체를 편집하는 것만으로 실행 중인 장치는 바뀌지 않습니다. 적용하려면 다시 `init(settings)`에 전달합니다. 인자 없는 `init()`은 초기화 실패 후에도 마지막 프로파일과 콘텐츠 유형을 재사용합니다.
-- Android에서는 자동 출력 경로 변경(헤드폰, Bluetooth) 시 스트림이 LowLatency로 다시 열리므로 Conservative를 복원하려면 `init(settings)`를 다시 호출합니다.
-```cpp
-void tcApp::setup() {
-    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::Conservative});
-}
-```
+- Android에서는 자동 출력 경로 변경(헤드폰, Bluetooth) 후 TrussC가 Conservative를 복원하기 위해 출력을 한 번 더 열므로 짧은 재생 중단이 한 번 더 발생합니다.
 '''
 snippet = '''
 void tcApp::setup() {
