@@ -5067,7 +5067,7 @@ int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return t
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the stored capture device name.
 size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux,ios]  // Return the configured frame queue capacity.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the current capture frame height.
-const Pixels & VideoGrabber::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the grabber; may be empty on any platform during hardware decode.
+const Pixels & VideoGrabber::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the grabber; empty when no CPU frame storage exists.
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux,ios]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
