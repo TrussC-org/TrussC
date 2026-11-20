@@ -1482,12 +1482,19 @@ public:
         HapPlayer loaded(std::move(other));
         drawMany(loaded);
         check("HAP-Q: moves preserve a successfully loaded shader", attempts == 4 && errors == 3);
-        const auto& rgba = loaded.getPixels();
-        check("Hap Pixels has decoded RGBA dimensions", rgba.isAllocated() &&
-              rgba.getWidth() == 4 && rgba.getHeight() == 4 && rgba.getChannels() == 4);
-        check("Hap cached Pixels reuses storage", rgba.getData() == loaded.getPixels().getData());
+        int pixelsWarnings = 0;
+        auto pixelsLogger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.level == LogLevel::Warning && log.message ==
+                "[HapPlayer] getPixels() is empty for Hap video. Draw the video into an Fbo and use fbo.readPixels().") {
+                ++pixelsWarnings;
+            }
+        });
+        check("Hap Pixels empty after load and draw", !loaded.getPixels().isAllocated());
+        check("Hap Pixels still empty on repeated access", !loaded.getPixels().isAllocated());
+        check("Hap Pixels warns once per player", pixelsWarnings == 1);
         loaded.close();
-        check("decoded Hap pixels empty after close", !loaded.getPixels().isAllocated());
+        check("Hap pixels empty after close", !loaded.getPixels().isAllocated());
+        check("Hap Pixels does not warn after close", pixelsWarnings == 1);
         fs::remove(path);
         exitApp();
     }
@@ -1499,10 +1506,15 @@ int main(int argc, char** argv) {
     static_assert(std::is_same_v<decltype(std::declval<tcx::hap::HapPlayer&>().getPixels()), const tc::Pixels&>);
     static_assert(std::is_same_v<decltype(std::declval<const tcx::hap::HapPlayer&>().getPixels()), const tc::Pixels&>);
     {
+        int warnings = 0;
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.level == LogLevel::Warning && log.message.find("[HapPlayer]") == 0) ++warnings;
+        });
         tcx::hap::HapPlayer player;
         check("Hap pixels empty before load", !player.getPixels().isAllocated());
         player.close();
         check("Hap pixels empty after close", !player.getPixels().isAllocated());
+        check("Hap Pixels does not warn before load or after close", warnings == 0);
     }
 
     if (argc > 1 && string(argv[1]) == "--recorded-formats") return runRecordedFormatsTests();
