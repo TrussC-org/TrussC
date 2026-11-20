@@ -708,6 +708,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const trussc::Vec2 & screenPos, float worldZ) { return trussc::screenToWorld(screenPos, worldZ); }
     ));
     lua->set_function("sendErrorName", [](trussc::SendError e) { return trussc::sendErrorName(e); });
+    lua->set_function("setAndroidForegroundService", [](bool enabled) { return trussc::setAndroidForegroundService(enabled); });
     lua->set_function("setBeepVolume", [](float vol) { return trussc::setBeepVolume(vol); });
     lua->set_function("setBitmapLineHeight", [](float h) { return trussc::setBitmapLineHeight(h); });
     lua->set_function("setBlendMode", [](trussc::BlendMode mode) { return trussc::setBlendMode(mode); });
@@ -783,6 +784,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setSystemVolume", [](float volume) { return trussc::setSystemVolume(volume); });
     lua->set_function("setTextAlign", [](trussc::Direction h, trussc::Direction v) { return trussc::setTextAlign(h, v); });
     lua->set_function("setTouchAsMouse", [](bool enabled) { return trussc::setTouchAsMouse(enabled); });
+    lua->set_function("setUpdateWhileHidden", [](bool allow) { return trussc::setUpdateWhileHidden(allow); });
     lua->set_function("setUserDataPathRoot", [](const fs::path & path) { return trussc::setUserDataPathRoot(path); });
     lua->set_function("setWindowDecorated", [](bool decorated) { return trussc::setWindowDecorated(decorated); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))

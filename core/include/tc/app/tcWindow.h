@@ -175,8 +175,11 @@ public:
 
     // Keep drawing this window while minimized, covered or hidden (hidden frames
     // come at about the display's base rate). The last global or per-window call
-    // wins. Screen output is up to the OS.
+    // wins. Screen output is up to the OS; no effect on iOS/Android.
     void setDrawWhileHidden(bool allow);
+
+    // Independently control hidden updates for this window; last global/local call wins.
+    void setUpdateWhileHidden(bool allow);
 
 private:
     TC_LUA_SKIP internal::WindowContext& context() { return ctx_; }

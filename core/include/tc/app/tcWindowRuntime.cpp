@@ -15,6 +15,7 @@ Window::Window()
       events_(owned_->events), render_(owned_->render), title_(owned_->title) {
     ctx_.hostWindow = this;
     ctx_.drawWhileHidden = internal::defaultDrawWhileHidden();
+    ctx_.updateWhileHidden = internal::defaultUpdateWhileHidden();
     ctx_.deferredResponseTarget = &ctx_;
     clearColorSet_ = true;
     internal::WindowRequestAccess::prepareInitialBindings(*this);
@@ -126,6 +127,25 @@ void setDrawWhileHidden(bool allow) {
     for (auto* window : internal::openWindows()) window->setDrawWhileHidden(allow);
 }
 
+void Window::setUpdateWhileHidden(bool allow) {
+    ctx_.updateWhileHidden = allow;
+#ifdef __ANDROID__
+    if (binding_.bound)
+        sapp_tc_android_set_background_tick(allow ? internal::androidBackgroundTick : nullptr);
+#endif
+}
+
+void setUpdateWhileHidden(bool allow) {
+    internal::defaultUpdateWhileHidden() = allow;
+    for (auto* window : internal::openWindows()) window->setUpdateWhileHidden(allow);
+}
+
+#ifndef __ANDROID__
+void setAndroidForegroundService(bool) {
+    logNotice("Android") << "setAndroidForegroundService(): unsupported on this platform";
+}
+#endif
+
 namespace internal {
 namespace {
 void processQueues();
@@ -203,6 +223,11 @@ struct Runtime {
     unsigned entries = 0, turns = 0, appExitCallbacks = 0;
     bool servicing = false, pollingReload = false, bootstrapping = false, servicedTurn = false;
     bool drawWhileHidden = false;
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    bool updateWhileHidden = false;
+#else
+    bool updateWhileHidden = true;
+#endif
     uint64_t epoch = 0;
     void (*reload)() = nullptr;
     std::string hotReloadType, hotReloadFile;
@@ -241,6 +266,8 @@ Runtime& runtime() {
 }
 BufferReadbackQueue& bufferReadbacks() { return runtime().readbacks; }
 bool& defaultDrawWhileHidden() { return runtime().drawWhileHidden; }
+bool& defaultUpdateWhileHidden() { return runtime().updateWhileHidden; }
+bool& backgroundUpdateOnly() { static bool active = false; return active; }
 void applyWindowDrawWhileHidden(Window& window) {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     const auto& binding = WindowRequestAccess::binding(window);
@@ -1558,7 +1585,7 @@ WindowEntryScope::WindowEntryScope(Window& window, bool tick, bool bootstrap, bo
     entered_ = true;
     try {
         // Park the actual caller before installing the receiver. No drawable is acquired here.
-        if (&currentWindowContext() != &WindowRequestAccess::context(window) && sg_isvalid()) parkWindowPass();
+        if (!backgroundUpdateOnly() && &currentWindowContext() != &WindowRequestAccess::context(window) && sg_isvalid()) parkWindowPass();
         currentWindowCtx() = &WindowRequestAccess::context(window);
         if (!refreshWindowEntryMetadata(window)) return;
         requestsReady_ = true;
@@ -2376,6 +2403,9 @@ void bootstrapWindow(Window& target, void (*bootstrap)()) {
     try {
         if constexpr (!supportsSecondaryWindows()) {
             WindowRequestAccess::binding(target).bound = sapp_isvalid();
+#ifdef __ANDROID__
+            target.setUpdateWhileHidden(WindowRequestAccess::context(target).updateWhileHidden);
+#endif
 #ifdef __EMSCRIPTEN__
             // The page reports focus/blur only when it changes, so start from its current focus.
             WindowRequestAccess::binding(target).focused = emscripten_run_script_int("document.hasFocus() ? 1 : 0") != 0;
@@ -2445,6 +2475,23 @@ void windowClosed(sapp_tc_window handle, void* user) noexcept {
         WindowRequestAccess::teardown(*window);
     });
 }
+#ifdef __ANDROID__
+void androidBackgroundTick() noexcept {
+    if (runtimeEnding()) return;
+    // No host queues/maintenance or GPU polling while Android has no drawable.
+    // setup has already run on the visible surface before this source is enabled.
+    backgroundUpdateOnly() = true;
+    struct Restore { ~Restore() { backgroundUpdateOnly() = false; } } restore;
+    TeardownSteps steps;
+    steps.run("Android background update", [&] {
+        auto* window = resolveWindow();
+        if (!window) return;
+        WindowEntryScope entry(*window, true);
+        if (!entry) return;
+        runWindowTick(windowClockNow(), 0.016, false, nullptr, true);
+    });
+}
+#endif
 void singleWindowFrame() noexcept {
     beforeHostTurn();
     TeardownSteps steps;

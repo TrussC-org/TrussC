@@ -13,9 +13,17 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:hasCode="@TC_APP_HAS_CODE@"
         android:label="@TC_APP_LIB_NAME@">
+        <service
+            android:name="org.trussc.core.ForegroundService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false"/>
         <activity
             android:name="android.app.NativeActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
