@@ -377,6 +377,10 @@ struct AudioDiagnostics {
     // release the device, so the stop that releasing causes is dropped, and so
     // is a loss the app has already reopened or closed.
     std::atomic<bool> lossPending{false};
+    // Android: a reroute reopened the default device with LowLatency and the
+    // reapply slot is queued. Cleared like lossPending, so a queued reapply
+    // never undoes an init() or shutdown() the app made after the reroute.
+    std::atomic<bool> reroutePending{false};
     // The device was explicitly selected (by object or name), rather than as
     // the system default. Only such a device reports a loss. init() sets it
     // before the device exists; the notification thread reads it.
@@ -2047,15 +2051,7 @@ void releaseVoice(PlayingSound& voice) {
 // ---------------------------------------------------------------------------
 #if defined(__ANDROID__)
 namespace {
-internal::MainThreadSlot& profileRerouteSlot() {
-    static auto* slot = new internal::MainThreadSlot([](internal::MainThreadSlot&) {
-        // init() opens the default with retained settings; it does not emit rerouted.
-        if (AudioEngine::getInstance().init()) {
-            logNotice("AudioEngine") << "Conservative profile reapplied after a reroute";
-        }
-    });
-    return *slot;
-}
+internal::MainThreadSlot& profileRerouteSlot();
 } // namespace
 
 struct internal::AudioProfileReroute {
@@ -2063,9 +2059,27 @@ struct internal::AudioProfileReroute {
         AudioEngine& engine = AudioEngine::getInstance();
         if (!shouldReapplyProfileAfterReroute(notification->type, engine.performanceProfile_,
                 !engine.diag_->openedByName.load(std::memory_order_acquire))) return;
+        engine.diag_->reroutePending.store(true, std::memory_order_release);
         profileRerouteSlot().post(std::shared_ptr<void>(std::shared_ptr<void>(), &profileRerouteSlot()));
     }
+    // Main thread. init() opens the default with retained settings; it does not emit rerouted.
+    static void deliver() {
+        AudioEngine& engine = AudioEngine::getInstance();
+        if (!engine.diag_->reroutePending.exchange(false, std::memory_order_acq_rel)) return;
+        if (engine.init()) {
+            logNotice("AudioEngine") << "Conservative profile reapplied after a reroute";
+        }
+    }
 };
+
+namespace {
+internal::MainThreadSlot& profileRerouteSlot() {
+    static auto* slot = new internal::MainThreadSlot([](internal::MainThreadSlot&) {
+        internal::AudioProfileReroute::deliver();
+    });
+    return *slot;
+}
+} // namespace
 #endif
 
 namespace {
@@ -2202,6 +2216,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     // A loss not delivered yet belongs to the device released above (this
     // includes the stop its release just caused)
     diag_->lossPending.store(false, std::memory_order_release);
+    diag_->reroutePending.store(false, std::memory_order_release);
     deviceLossSlot();  // created here, not on the notification thread
 #if defined(__ANDROID__)
     profileRerouteSlot();
@@ -2597,6 +2612,7 @@ void AudioEngine::shutdown() {
     }
     waitForCallbacks(false);
     diag_->lossPending.store(false, std::memory_order_release);
+    diag_->reroutePending.store(false, std::memory_order_release);
     if (context_) {
         ma_context* ctx = static_cast<ma_context*>(context_);
         ma_context_uninit(ctx);
