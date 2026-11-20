@@ -240,7 +240,8 @@ public:
     // =========================================================================
 
     // Read-only RGBA storage: resizing it would make backend writes go out of bounds.
-    // Empty before load, after close, or when no CPU RGBA mirror is available.
+    // Empty before load/after close; may be empty on any platform during hardware decode.
+    // For pixels, draw into an Fbo and call readPixels(); access does not convert or read back.
     TC_LUA_SKIP virtual const Pixels& getPixels() const = 0;
 
     // =========================================================================
@@ -298,6 +299,7 @@ public:
     // HasTexture implementation
     // =========================================================================
 
+    // May be empty on any platform during hardware decode; use draw() into an Fbo.
     Texture& getTexture() override { return texture_; }
     const Texture& getTexture() const override { return texture_; }
 

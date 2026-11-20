@@ -40910,11 +40910,20 @@ details.ko = '''
 '''
 
 ["VideoGrabber::getPixels"]
-description.en = "Return read-only RGBA Pixels owned by the grabber; empty when no CPU frame storage exists."
-description.ja = "所有する読み取り専用 RGBA Pixels を返す。CPU フレームの格納領域がない場合は空。"
-description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. CPU 프레임 저장 공간이 없으면 비어 있다."
+description.en = "Return read-only RGBA Pixels owned by the grabber; may be empty on any platform during hardware decode."
+description.ja = "所有する読み取り専用 RGBA Pixels を返す。ハードウェアデコード中はどのプラットフォームでも空になり得る。"
+description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. 하드웨어 디코딩 중에는 모든 플랫폼에서 비어 있을 수 있다."
 details.en = '''
 - Returns only `const Pixels&`: resizing the frame storage would make the backend write out of bounds. The backend writes directly into this RGBA U8 storage without an additional per-frame copy.
+- `getPixels()` / `getTexture()` may be empty on any platform while hardware decode runs; today this happens in VideoPlayer's Linux hardware NV12 mode. Access does not convert or read back a frame. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size, draw into it, then use `fbo.getTexture()` or read back pixels:
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    grabber.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - The result is empty before load/setup and after `close()`. After allocation it initially contains zeros; an automatic video poster can fill it before playback. Check allocation before reading:
 ```cpp
 void tcApp::update() {
@@ -40945,6 +40954,15 @@ fbo:readPixels(pixels)
 '''
 details.ja = '''
 - `const Pixels&` のみを返します。フレームの格納領域をリサイズするとバックエンドが範囲外へ書き込むためです。バックエンドは RGBA U8 の格納領域へ直接書き込み、フレームごとの追加コピーは行いません。
+- ハードウェアデコード中は、どのプラットフォームでも `getPixels()` / `getTexture()` が空になる場合があります。現在は VideoPlayer の Linux ハードウェア NV12 モードで発生します。取得時に変換やフレームの読み戻しは行いません。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    grabber.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - 読み込み・セットアップ前と `close()` 後は空です。確保直後はゼロで埋まり、動画の自動ポスターが再生前に格納される場合もあります。読み取り前に確保を確認します。
 ```cpp
 void tcApp::update() {
@@ -40975,6 +40993,15 @@ fbo:readPixels(pixels)
 '''
 details.ko = '''
 - `const Pixels&`만 반환합니다. 프레임 저장 공간의 크기를 바꾸면 백엔드가 범위를 벗어나 쓰기 때문입니다. 백엔드는 RGBA U8 저장 공간에 직접 쓰며 프레임마다 추가 복사하지 않습니다.
+- 하드웨어 디코딩 중에는 모든 플랫폼에서 `getPixels()` / `getTexture()`가 비어 있을 수 있습니다. 현재는 VideoPlayer의 Linux 하드웨어 NV12 모드에서 발생합니다. 접근 시 변환이나 프레임 읽기를 수행하지 않습니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    grabber.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - 로드·설정 전과 `close()` 후에는 비어 있습니다. 할당 직후에는 0이며 자동 비디오 포스터가 재생 전에 채울 수도 있습니다. 읽기 전에 할당 여부를 확인합니다.
 ```cpp
 void tcApp::update() {
@@ -41011,23 +41038,50 @@ description.ja = "カメラフレームの表示に使うテクスチャを返�
 description.ko = "카메라 프레임 표시에 사용하는 텍스처를 반환한다."
 details.en = '''
 - Implements `HasTexture::getTexture` and returns the grabber-owned `Texture&`, or `const Texture&` for a const grabber, without copying it.
+- `getPixels()` / `getTexture()` may be empty on any platform while hardware decode runs; today this happens in VideoPlayer's Linux hardware NV12 mode. Access does not convert or read back a frame. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size, draw into it, then use `fbo.getTexture()` or read back pixels:
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    grabber.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - `update()` uploads frames to this texture; `setup()`, resizing, and `close()` can replace or clear its GPU contents.
 - For threading requirements, see `VideoGrabber::setup`.
 '''
 details.ja = '''
 - `HasTexture::getTexture` を実装し、グラバーが所有する `Texture&` をコピーせずに返します。const のグラバーでは `const Texture&` を返します。
+- ハードウェアデコード中は、どのプラットフォームでも `getPixels()` / `getTexture()` が空になる場合があります。現在は VideoPlayer の Linux ハードウェア NV12 モードで発生します。取得時に変換やフレームの読み戻しは行いません。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    grabber.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - `update()` がこのテクスチャにフレームをアップロードします。`setup()`、サイズ変更、`close()` によって GPU 上の内容が置き換わるか消去されます。
 - スレッドの扱いは `VideoGrabber::setup` を参照してください。
 '''
 details.ko = '''
 - `HasTexture::getTexture`를 구현하며 그래버가 소유한 `Texture&`를 복사 없이 반환합니다. const 그래버에서는 `const Texture&`를 반환합니다.
+- 하드웨어 디코딩 중에는 모든 플랫폼에서 `getPixels()` / `getTexture()`가 비어 있을 수 있습니다. 현재는 VideoPlayer의 Linux 하드웨어 NV12 모드에서 발생합니다. 접근 시 변환이나 프레임 읽기를 수행하지 않습니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    grabber.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - `update()`가 이 텍스처에 프레임을 업로드합니다. `setup()`, 크기 변경, `close()`로 GPU 내용이 교체되거나 지워질 수 있습니다.
 - 스레드 처리 규칙은 `VideoGrabber::setup`을 참조합니다.
 '''
 snippet = '''
 // tcApp member: VideoGrabber camera;
 void tcApp::draw() {
-    camera.getTexture().draw(0, 0);
+    camera.draw(0, 0);
 }
 '''
 
@@ -41974,9 +42028,9 @@ details.ko = '''
 related = ["VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::extractKeyFrame"]
 
 ["VideoPlayer::getPixels"]
-description.en = "Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists."
-description.ja = "所有する読み取り専用 RGBA Pixels を返す。CPU フレームの格納領域がない場合は空。"
-description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. CPU 프레임 저장 공간이 없으면 비어 있다."
+description.en = "Return read-only RGBA Pixels owned by the player; may be empty on any platform during hardware decode."
+description.ja = "所有する読み取り専用 RGBA Pixels を返す。ハードウェアデコード中はどのプラットフォームでも空になり得る。"
+description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. 하드웨어 디코딩 중에는 모든 플랫폼에서 비어 있을 수 있다."
 details.en = '''
 - Returns only `const Pixels&`: resizing the frame storage would make the backend write out of bounds. The backend writes directly into this RGBA U8 storage without an additional per-frame copy.
 - The result is empty before load/setup and after `close()`. After allocation it initially contains zeros; an automatic video poster can fill it before playback. Check allocation before reading:
@@ -41985,16 +42039,13 @@ void tcApp::update() {
     if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
 }
 ```
-- Linux hardware NV12 mode returns empty pixels and an empty texture from `getPixels()` / `getTexture()`, with one warning per player instance on the first access. Neither accessor converts NV12 to RGBA. For guaranteed frame access, allocate an Fbo at the video size and draw into it, then use `fbo.getTexture()` or read back pixels:
+- `getPixels()` / `getTexture()` may be empty on any platform while hardware decode runs; today this happens in Linux hardware NV12 mode. Access does not convert or read back a frame. Linux NV12 access warns once per player instance. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size, draw into it, then use `fbo.getTexture()` or read back pixels:
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 - The owner retains the storage. References and byte pointers can be invalidated by resize, reload/setup, close, move, or destruction; frames can overwrite data on updates. Clone within the current frame when an owned copy is needed:
@@ -42022,16 +42073,13 @@ void tcApp::update() {
     if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
 }
 ```
-- Linux のハードウェア NV12 モードでは `getPixels()` / `getTexture()` は空を返し、最初の取得時にプレイヤーごとに一度だけ警告します。どちらも NV12 から RGBA へ変換しません。確実にフレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+- ハードウェアデコード中は、どのプラットフォームでも `getPixels()` / `getTexture()` が空になる場合があります。現在は Linux のハードウェア NV12 モードで発生します。取得時に変換やフレームの読み戻しは行いません。Linux NV12 ではプレイヤーごとに一度だけ警告します。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 - 格納領域は所有元が保持します。サイズ変更、再読み込み・セットアップ、クローズ、移動、破棄で参照とバイトポインタが無効になり、更新で内容も上書きされます。独立したコピーが必要な場合は現在のフレーム内で複製します。
@@ -42059,16 +42107,13 @@ void tcApp::update() {
     if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
 }
 ```
-- Linux 하드웨어 NV12 모드에서 `getPixels()` / `getTexture()`는 빈 값을 반환하며 첫 접근 시 플레이어마다 한 번 경고합니다. 어느 접근자도 NV12를 RGBA로 변환하지 않습니다. 프레임을 확실하게 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+- 하드웨어 디코딩 중에는 모든 플랫폼에서 `getPixels()` / `getTexture()`가 비어 있을 수 있습니다. 현재는 Linux 하드웨어 NV12 모드에서 발생합니다. 접근 시 변환이나 프레임 읽기를 수행하지 않습니다. Linux NV12에서는 플레이어마다 한 번 경고합니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 - 저장 공간은 소유 객체가 유지합니다. 크기 변경, 다시 로드·설정, 닫기, 이동, 소멸로 참조와 바이트 포인터가 무효화될 수 있고 갱신 시 내용이 덮어써집니다. 독립적인 복사본이 필요하면 현재 프레임 안에서 복제합니다.
@@ -59657,9 +59702,9 @@ details.ko = '''
 '''
 
 ["VideoPlayerBase::getPixels"]
-description.en = "Return read-only RGBA Pixels owned by the player; empty when no CPU frame storage exists."
-description.ja = "所有する読み取り専用 RGBA Pixels を返す。CPU フレームの格納領域がない場合は空。"
-description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. CPU 프레임 저장 공간이 없으면 비어 있다."
+description.en = "Return read-only RGBA Pixels owned by the player; may be empty on any platform during hardware decode."
+description.ja = "所有する読み取り専用 RGBA Pixels を返す。ハードウェアデコード中はどのプラットフォームでも空になり得る。"
+description.ko = "소유한 읽기 전용 RGBA Pixels를 반환한다. 하드웨어 디코딩 중에는 모든 플랫폼에서 비어 있을 수 있다."
 details.en = '''
 - Returns only `const Pixels&`: resizing the frame storage would make the backend write out of bounds. The backend writes directly into this RGBA U8 storage without an additional per-frame copy.
 - The result is empty before load/setup and after `close()`. After allocation it initially contains zeros; an automatic video poster can fill it before playback. Check allocation before reading:
@@ -59668,16 +59713,13 @@ void tcApp::update() {
     if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
 }
 ```
-- Linux hardware NV12 mode returns empty pixels and an empty texture from `getPixels()` / `getTexture()`, with one warning per player instance on the first access. Neither accessor converts NV12 to RGBA. For guaranteed frame access, allocate an Fbo at the video size and draw into it, then use `fbo.getTexture()` or read back pixels:
+- `getPixels()` / `getTexture()` may be empty on any platform while hardware decode runs; today this happens in Linux hardware NV12 mode. Access does not convert or read back a frame. Linux NV12 access warns once per player instance. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size, draw into it, then use `fbo.getTexture()` or read back pixels:
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 - The owner retains the storage. References and byte pointers can be invalidated by resize, reload/setup, close, move, or destruction; frames can overwrite data on updates. Clone within the current frame when an owned copy is needed:
@@ -59705,16 +59747,13 @@ void tcApp::update() {
     if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
 }
 ```
-- Linux のハードウェア NV12 モードでは `getPixels()` / `getTexture()` は空を返し、最初の取得時にプレイヤーごとに一度だけ警告します。どちらも NV12 から RGBA へ変換しません。確実にフレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+- ハードウェアデコード中は、どのプラットフォームでも `getPixels()` / `getTexture()` が空になる場合があります。現在は Linux のハードウェア NV12 モードで発生します。取得時に変換やフレームの読み戻しは行いません。Linux NV12 ではプレイヤーごとに一度だけ警告します。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 - 格納領域は所有元が保持します。サイズ変更、再読み込み・セットアップ、クローズ、移動、破棄で参照とバイトポインタが無効になり、更新で内容も上書きされます。独立したコピーが必要な場合は現在のフレーム内で複製します。
@@ -59742,16 +59781,13 @@ void tcApp::update() {
     if (video.getPixels().isAllocated()) pixels = video.getPixels().clone();
 }
 ```
-- Linux 하드웨어 NV12 모드에서 `getPixels()` / `getTexture()`는 빈 값을 반환하며 첫 접근 시 플레이어마다 한 번 경고합니다. 어느 접근자도 NV12를 RGBA로 변환하지 않습니다. 프레임을 확실하게 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+- 하드웨어 디코딩 중에는 모든 플랫폼에서 `getPixels()` / `getTexture()`가 비어 있을 수 있습니다. 현재는 Linux 하드웨어 NV12 모드에서 발생합니다. 접근 시 변환이나 프레임 읽기를 수행하지 않습니다. Linux NV12에서는 플레이어마다 한 번 경고합니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 - 저장 공간은 소유 객체가 유지합니다. 크기 변경, 다시 로드·설정, 닫기, 이동, 소멸로 참조와 바이트 포인터가 무효화될 수 있고 갱신 시 내용이 덮어써집니다. 독립적인 복사본이 필요하면 현재 프레임 안에서 복제합니다.
@@ -59916,16 +59952,43 @@ description.ja = "プレイヤーの動画テクスチャを返す。"
 description.ko = "플레이어의 비디오 텍스처를 반환한다."
 details.en = '''
 - Return the player's stored `Texture` by mutable or const reference without copying or uploading; a reference is returned even when the texture is unallocated.
+- `getPixels()` / `getTexture()` may be empty on any platform while hardware decode runs; today this happens in Linux hardware NV12 mode. Access does not convert or read back a frame. Linux NV12 access warns once per player instance. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size, draw into it, then use `fbo.getTexture()` or read back pixels:
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - The player owns the texture and can clear or replace its contents during playback, close, or reload; the reference must not outlive the player.
 - Use the player's `draw()` for its intended output: Linux NV12 playback uses separate textures, and Hap Q drawing applies a YCoCg conversion shader that this getter does not apply.
 '''
 details.ja = '''
 - プレイヤーが保持する `Texture` を変更可能または const の参照で返します。コピーや転送は行わず、テクスチャが未確保でも参照を返します。
+- ハードウェアデコード中は、どのプラットフォームでも `getPixels()` / `getTexture()` が空になる場合があります。現在は Linux のハードウェア NV12 モードで発生します。取得時に変換やフレームの読み戻しは行いません。Linux NV12 ではプレイヤーごとに一度だけ警告します。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - テクスチャはプレイヤーが所有し、再生、クローズ、再ロードで内容が消去または更新される場合があります。プレイヤーの破棄後は参照を使用しないでください。
 - 正しく変換された映像の表示にはプレイヤーの `draw()` を使います。Linux の NV12 再生は別のテクスチャを使用し、Hap Q の描画はこの getter では適用しない YCoCg 変換シェーダーを使います。
 '''
 details.ko = '''
 - 플레이어가 보관하는 `Texture`를 수정 가능한 참조 또는 const 참조로 반환합니다. 복사나 업로드를 하지 않으며, 텍스처가 할당되지 않았어도 참조를 반환합니다.
+- 하드웨어 디코딩 중에는 모든 플랫폼에서 `getPixels()` / `getTexture()`가 비어 있을 수 있습니다. 현재는 Linux 하드웨어 NV12 모드에서 발생합니다. 접근 시 변환이나 프레임 읽기를 수행하지 않습니다. Linux NV12에서는 플레이어마다 한 번 경고합니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+```cpp
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
+}
+```
 - 텍스처는 플레이어가 소유하며 재생, 닫기, 다시 로드 중에 내용이 지워지거나 갱신될 수 있습니다. 플레이어가 소멸한 뒤에는 참조를 사용하지 않습니다.
 - 의도된 영상 출력에는 플레이어의 `draw()`를 사용합니다. Linux의 NV12 재생은 별도 텍스처를 사용하고, Hap Q 그리기는 이 getter가 적용하지 않는 YCoCg 변환 셰이더를 사용합니다.
 '''
@@ -72609,82 +72672,76 @@ description.ja = "使用中の動画テクスチャが確保済みかどうか�
 description.ko = "사용 중인 비디오 텍스처가 할당되었는지 NV12 경고 없이 반환한다."
 details.en = '''
 - Checks the texture the player draws with: both NV12 plane textures in Linux hardware NV12 mode, otherwise the RGBA texture. It does not call `getTexture()`, so it never logs the NV12 access warning.
-- `true` does not mean `getTexture()` has content: in NV12 mode `getTexture()` stays empty. Draw the video itself:
+- `true` does not guarantee content from `getPixels()` / `getTexture()`: they may be empty on any platform during hardware decode; today this happens in Linux hardware NV12 mode. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size and draw into it:
 ```cpp
 void tcApp::draw() {
-    if (video.hasTexture()) {
-        video.draw(0, 0);
-    }
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 '''
 details.ja = '''
 - プレイヤーが描画に使うテクスチャを調べます。Linux ハードウェア NV12 モードでは 2 つの平面テクスチャ、それ以外では RGBA テクスチャです。`getTexture()` を呼ばないため、NV12 のアクセス警告は出ません。
-- `true` でも `getTexture()` に中身があるとは限りません。NV12 モードでは `getTexture()` は空のままです。動画そのものを描画してください。
+- `true` でも `getPixels()` / `getTexture()` に中身があるとは限りません。ハードウェアデコード中はどのプラットフォームでも空になる場合があり、現在は Linux ハードウェア NV12 モードで発生します。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには動画サイズの Fbo を確保して描画します。
 ```cpp
 void tcApp::draw() {
-    if (video.hasTexture()) {
-        video.draw(0, 0);
-    }
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 '''
 details.ko = '''
 - 플레이어가 그리기에 사용하는 텍스처를 확인합니다. Linux 하드웨어 NV12 모드에서는 두 평면 텍스처, 그 외에는 RGBA 텍스처입니다. `getTexture()`를 호출하지 않으므로 NV12 접근 경고가 출력되지 않습니다.
-- `true`라도 `getTexture()`에 내용이 있다는 뜻은 아닙니다. NV12 모드에서 `getTexture()`는 비어 있습니다. 비디오 자체를 그리세요.
+- `true`라도 `getPixels()` / `getTexture()`의 내용을 보장하지 않습니다. 하드웨어 디코딩 중에는 모든 플랫폼에서 비어 있을 수 있으며 현재는 Linux 하드웨어 NV12 모드에서 발생합니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그립니다.
 ```cpp
 void tcApp::draw() {
-    if (video.hasTexture()) {
-        video.draw(0, 0);
-    }
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 '''
 related = ["VideoPlayer::getTexture", "HasTexture::hasTexture"]
 
 ["VideoPlayer::getTexture"]
-description.en = "Return the display texture; empty in Linux hardware NV12 mode."
-description.ja = "表示テクスチャを返す。Linux ハードウェア NV12 モードでは空。"
-description.ko = "표시 텍스처를 반환한다. Linux 하드웨어 NV12 모드에서는 비어 있다."
+description.en = "Return the display texture; may be empty on any platform during hardware decode."
+description.ja = "表示テクスチャを返す。ハードウェアデコード中はどのプラットフォームでも空になり得る。"
+description.ko = "표시 텍스처를 반환한다. 하드웨어 디코딩 중에는 모든 플랫폼에서 비어 있을 수 있다."
 details.en = '''
-- Linux hardware NV12 mode returns empty pixels and an empty texture from `getPixels()` / `getTexture()`, with one warning per player instance on the first access. Neither accessor converts NV12 to RGBA. For guaranteed frame access, allocate an Fbo at the video size and draw into it, then use `fbo.getTexture()` or read back pixels:
+- `getPixels()` / `getTexture()` may be empty on any platform while hardware decode runs; today this happens in Linux hardware NV12 mode. Access does not convert or read back a frame. Linux NV12 access warns once per player instance. `readPixels()` returns false on WebGPU, where synchronous readback is unsupported, and when called inside another active Fbo; check its return value. There is no alternative API for WebGPU readback. For frame access, allocate an Fbo at the video size, draw into it, then use `fbo.getTexture()` or read back pixels:
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 '''
 details.ja = '''
-- Linux のハードウェア NV12 モードでは `getPixels()` / `getTexture()` は空を返し、最初の取得時にプレイヤーごとに一度だけ警告します。どちらも NV12 から RGBA へ変換しません。確実にフレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
+- ハードウェアデコード中は、どのプラットフォームでも `getPixels()` / `getTexture()` が空になる場合があります。現在は Linux のハードウェア NV12 モードで発生します。取得時に変換やフレームの読み戻しは行いません。Linux NV12 ではプレイヤーごとに一度だけ警告します。`readPixels()` は、同期読み戻しに対応していない WebGPU 上と、別の Fbo がアクティブな状態で呼び出した場合に false を返すため、戻り値を確認してください。WebGPU で読み戻すための代替 API はありません。フレームを取得するには、動画サイズの Fbo を確保して描画し、`fbo.getTexture()` またはピクセルの読み戻しを使用します。
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 '''
 details.ko = '''
-- Linux 하드웨어 NV12 모드에서 `getPixels()` / `getTexture()`는 빈 값을 반환하며 첫 접근 시 플레이어마다 한 번 경고합니다. 어느 접근자도 NV12를 RGBA로 변환하지 않습니다. 프레임을 확실하게 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
+- 하드웨어 디코딩 중에는 모든 플랫폼에서 `getPixels()` / `getTexture()`가 비어 있을 수 있습니다. 현재는 Linux 하드웨어 NV12 모드에서 발생합니다. 접근 시 변환이나 프레임 읽기를 수행하지 않습니다. Linux NV12에서는 플레이어마다 한 번 경고합니다. `readPixels()`는 동기 읽기를 지원하지 않는 WebGPU에서 또는 다른 Fbo가 활성화된 상태에서 호출하면 false를 반환하므로 반환값을 확인해야 합니다. WebGPU에서 읽기 위한 대체 API는 없습니다. 프레임을 얻으려면 비디오 크기로 Fbo를 할당하여 그린 뒤 `fbo.getTexture()` 또는 픽셀 읽기를 사용합니다.
 ```cpp
-void tcApp::update() {
-    video.update();
-    if (video.isFrameNew()) {
-        fbo.begin();
-        video.draw(0, 0);
-        fbo.end();
-        fbo.readPixels(pixels);
-    }
+void tcApp::draw() {
+    fbo.begin();
+    video.draw(0, 0);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 '''

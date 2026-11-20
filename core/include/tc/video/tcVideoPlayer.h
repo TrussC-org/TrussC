@@ -498,6 +498,7 @@ public:
     // =========================================================================
 
     // Const only: resizing frame storage would make backend writes go out of bounds.
+    // May be empty on any platform during hardware decode; draw into an Fbo for pixels.
     TC_LUA_SKIP const Pixels& getPixels() const override {
         warnNV12Access();
         return pixels_;
@@ -508,6 +509,7 @@ public:
                          : texture_.isAllocated();
     }
 
+    // May be empty on any platform during hardware decode; use draw() into an Fbo.
     Texture& getTexture() override {
         warnNV12Access();
         return nv12Mode_ ? emptyNV12Texture_ : texture_;
@@ -624,7 +626,7 @@ private:
     mutable OnceGate nv12AccessWarning_;
     void warnNV12Access() const {
         if (nv12Mode_ && nv12AccessWarning_.isFirstTime()) {
-            logWarning("VideoPlayer") << "getPixels()/getTexture() is empty in hardware NV12 mode (Linux). "
+            logWarning("VideoPlayer") << "getPixels()/getTexture() is empty while hardware decode runs. "
                 "Draw the video into an Fbo and use fbo.getTexture() / fbo.readPixels().";
         }
     }

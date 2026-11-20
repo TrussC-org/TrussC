@@ -467,6 +467,7 @@ public:
     // =========================================================================
 
     // Const only: resizing frame storage would make backend writes go out of bounds.
+    // May be empty on any platform during hardware decode; draw into an Fbo for pixels.
     TC_LUA_SKIP const Pixels& getPixels() const { return state_->pixels; }
 
     // =========================================================================
@@ -522,6 +523,7 @@ public:
     // HasTexture implementation
     // =========================================================================
 
+    // May be empty on any platform during hardware decode; use draw() into an Fbo.
     Texture& getTexture() override { return texture_; }
     const Texture& getTexture() const override { return texture_; }
 
