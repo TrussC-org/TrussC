@@ -44,3 +44,9 @@ This is a throwaway branch experiment, not a production rollout. On the owner's 
 9. Report back CSV files, screenshots, mutex log excerpt, debug-layer messages (if any), all warning lines, successful/failed cases, and full build errors if applicable. Tabulate per-player new-frame fps/drops and process CPU medians/ranges over three samples; include measured window fps and any source/display cap. Check for corruption, crashes/hangs, growing private bytes, and unexplained frame/CPU regressions. Seek/loop/resize and older/multi-vendor coverage not exercised by this fixed-clip harness remain explicit follow-ups; device loss is excluded.
 
 
+
+## Update 2 (env switches)
+
+- `TRUSSC_D3D11_DEBUG=1`: the video player's MF device tries the D3D11 debug layer. Unset (the default here) = no debug layer, so the fps/CPU matrix measures release behavior. Use it for the mutex trace and leak runs only.
+- `TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT=1`: zerocopy waits on the CPU for GPU completion (event query) before releasing the key to MF. Unset (the default) = the keyed mutex alone orders the GPU work, no CPU wait. Run zerocopy 4K 1 player once with it set to compare.
+- The harness sets the MCP tool level to ReadOnly, so `tc_get_screenshot` works.

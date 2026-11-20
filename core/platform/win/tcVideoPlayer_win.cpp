@@ -134,6 +134,7 @@ struct VideoPlayerState {
     bool zeroCopyRequested_ = false;
     bool zeroCopy_ = false;
     bool mutexLog_ = false;
+    bool gpuWait_ = false;
     bool renderOwns_ = false;
     bool renderPending_ = false;
     bool liveFrame_ = false;
@@ -275,8 +276,13 @@ bool TCVideoPlayerImpl::createD3D11Device() {
           "BGRA only" },
     };
 
+    // Experiment: the debug layer only with TRUSSC_D3D11_DEBUG=1 (it slows Release playback).
+    const char* debugEnv = std::getenv("TRUSSC_D3D11_DEBUG");
+    const bool debugLayer = debugEnv && std::strcmp(debugEnv, "1") == 0;
+
     HRESULT hr = E_FAIL;
     for (auto& a : attempts) {
+        if (!debugLayer && (a.flags & D3D11_CREATE_DEVICE_DEBUG)) continue;
         hr = D3D11CreateDevice(
             nullptr,
             D3D_DRIVER_TYPE_HARDWARE,
@@ -486,8 +492,10 @@ HRESULT TCVideoPlayerImpl::mutexStep(IDXGIKeyedMutex* mutex, bool acquire, UINT6
 }
 
 bool TCVideoPlayerImpl::waitForRendering() {
-    // update() follows submission of the previous frame's recorded draws. An event
-    // query proves GPU completion before handing the single target back to MF.
+    // By default the keyed mutex orders the GPU work: ReleaseSync is queued after the
+    // previous frame's draws, so the CPU does not wait. TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT=1
+    // adds an event-query wait for GPU completion, to compare both.
+    if (!state_->gpuWait_) return true;
     state_->renderContext_->End(state_->renderDone_.Get());
     state_->renderContext_->Flush();
     const auto start = std::chrono::steady_clock::now();
@@ -497,7 +505,7 @@ bool TCVideoPlayerImpl::waitForRendering() {
         hr = state_->renderContext_->GetData(state_->renderDone_.Get(), nullptr, 0,
             D3D11_ASYNC_GETDATA_DONOTFLUSH);
         if (hr != S_FALSE) break;
-        Sleep(1);
+        SwitchToThread();  // Sleep(1) rounds up to the ~15.6 ms timer tick.
     } while (std::chrono::steady_clock::now() < deadline);
     if (state_->mutexLog_ && state_->logFrame_ <= 120) {
         logNotice("WinZeroCopy") << "player=" << state_->playerId_
@@ -896,6 +904,8 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         state_->playerId_ = ++nextPlayerId;
         const char* logging = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY_LOG");
         state_->mutexLog_ = logging && std::strcmp(logging, "1") == 0;
+        const char* gpuWait = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT");
+        state_->gpuWait_ = gpuWait && std::strcmp(gpuWait, "1") == 0;
     }
 
     state_->mfInitialized = true;

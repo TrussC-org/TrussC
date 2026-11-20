@@ -28,6 +28,7 @@ using UINT64 = uint64_t;
 constexpr HRESULT S_OK = 0, S_FALSE = 1, E_FAIL = -1, WAIT_TIMEOUT = 258, WAIT_ABANDONED = 128;
 constexpr int D3D11_ASYNC_GETDATA_DONOTFLUSH = 1;
 void Sleep(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+void SwitchToThread() { std::this_thread::yield(); }
 std::vector<std::string> logs;
 struct Log : std::ostringstream { ~Log() { logs.push_back(str()); } };
 Log logNotice(const char*) { return {}; }
@@ -63,6 +64,7 @@ struct Errors {
 };
 struct State {
     bool mutexLog_ = false, mutexBroken_ = false, timeoutWarned_ = false;
+    bool gpuWait_ = true;  // Exercise the opt-in completion wait.
     bool renderOwns_ = false, renderPending_ = true;
     uint64_t logFrame_ = 1, transferredFrames_ = 0, playerId_ = 7;
     UINT64 pendingKey_ = 1;

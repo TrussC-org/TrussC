@@ -67,6 +67,8 @@ bool tcApp::openPlayers() {
 }
 
 void tcApp::setup() {
+    // tc_get_screenshot needs the ReadOnly grant.
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     phase_ = options.openclose ? Phase::OpenClose : Phase::Warmup;
     openPlayers();
 }
