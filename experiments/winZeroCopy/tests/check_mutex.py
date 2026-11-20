@@ -14,6 +14,8 @@ for name in ('HRESULT TCVideoPlayerImpl::mutexStep(', 'bool TCVideoPlayerImpl::w
     functions.append(source[begin:end])
 
 prefix = r'''
+#include "tc/video/internal/tcWinExperimentTrace.h"
+namespace internal = trussc::internal;
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -86,12 +88,36 @@ int main() {
     TCVideoPlayerImpl player;
     auto& state = *player.state_;
     auto& mutex = state.renderMutex_.object;
+    if (internal::winexp::enabled()) {
+        namespace trace = internal::winexp;
+        trace::prepare();
+        trace::beginFrame(42);
+        state.mutexLog_ = true;
+        mutex.result = WAIT_TIMEOUT;
+        assert(!player.acquireRendering());
+        assert(!state.renderOwns_ && state.renderPending_ && !state.mutexBroken_);
+        assert(mutex.timeout == (trace::acquire0() ? 0 : 100));
+        assert(trace::rows.size() == 1);
+        const auto row = trace::rows.front();
+        assert(row.player == 7 && row.frame == 1 && row.counter == 42);
+        assert(row.hasHr && row.hr == WAIT_TIMEOUT && row.key == 1 && row.us >= 0);
+        assert(std::string(row.step) == "sokol-acquire");
+        assert(logs.size() == (trace::acquire0() ? 0 : 1)); // No per-frame transfer log.
+        const auto capacity = trace::rows.capacity();
+        while (trace::rows.size() < trace::maxRows) trace::record(7, "fill", trace::epoch, trace::epoch);
+        trace::record(7, "overflow", trace::epoch, trace::epoch);
+        assert(trace::rows.capacity() == capacity && trace::dropped == 1);
+        for (size_t i = 1; i <= trace::maxFrames; ++i) trace::beginFrame(43);
+        assert(!trace::active);
+        return 0;
+    }
     mutex.result = WAIT_TIMEOUT;  // A nonnegative HRESULT still does not grant ownership.
     assert(!player.acquireRendering());
     assert(!state.renderOwns_ && state.renderPending_ && !state.mutexBroken_);
-    assert(mutex.timeout == 100 && mutex.key == 1);
-    assert(logs.size() == 1 && state.timeoutWarned_);
-    assert(!player.acquireRendering() && logs.size() == 1);  // Warning once per player.
+    assert(mutex.timeout == (internal::winexp::acquire0() ? 0 : 100) && mutex.key == 1);
+    const size_t warnings = internal::winexp::acquire0() ? 0 : 1;
+    assert(logs.size() == warnings && state.timeoutWarned_ == (warnings != 0));
+    assert(!player.acquireRendering() && logs.size() == warnings);  // Warning once per player.
     mutex.result = S_OK;
     assert(player.acquireRendering());
     assert(state.renderOwns_ && !state.renderPending_);
@@ -134,8 +160,13 @@ with tempfile.TemporaryDirectory(dir=ROOT / '.build', prefix='win-mutex-') as te
     cpp = path / 'main.cpp'
     cpp.write_text(prefix + '\n'.join(functions) + suffix, encoding='utf-8')
     compiler = os.environ.get('CXX', 'c++')
-    command = [compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror', str(cpp), '-o', str(path / 'mutex')]
+    command = [compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'core/include'), str(cpp), '-o', str(path / 'mutex')]
     print('COMMAND:', *command, flush=True)
     subprocess.run(command, check=True)
-    subprocess.run([str(path / 'mutex')], check=True)
-print('PASS: success, timeout, abandoned, failure, GPU completion, ownership, bounded log')
+    for value in ('', '1', '01'):
+        env = dict(os.environ, TRUSSC_EXP_WIN_ZEROCOPY_ACQUIRE0=value, TRUSSC_EXP_WIN_TRACE='')
+        subprocess.run([str(path / 'mutex')], check=True, env=env)
+    for value in ('', '1'):
+        env = dict(os.environ, TRUSSC_EXP_WIN_TRACE='1', TRUSSC_EXP_WIN_ZEROCOPY_ACQUIRE0=value)
+        subprocess.run([str(path / 'mutex')], check=True, env=env)
+print('PASS: ACQUIRE0 exact switch, success, timeout, abandoned, failure, GPU completion, ownership, bounded log')

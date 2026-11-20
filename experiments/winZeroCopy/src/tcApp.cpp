@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
+#include <map>
 #ifdef _WIN32
 #include <windows.h>
 #include <psapi.h>
@@ -67,6 +68,31 @@ bool tcApp::openPlayers() {
 }
 
 void tcApp::setup() {
+    internal::winexp::prepare();
+    if (internal::winexp::enabled()) {
+#ifdef TRUSSC_EXP_BUILD_SHA
+        logNotice("WinZeroCopy") << "build=" << TRUSSC_EXP_BUILD_SHA << " compiled=" << __DATE__ << " " << __TIME__;
+#else
+        logNotice("WinZeroCopy") << "build=" << __DATE__ << " " << __TIME__;
+#endif
+        for (const char* name : {"TRUSSC_EXP_WIN_TRACE", "TRUSSC_EXP_WIN_ZEROCOPY",
+                "TRUSSC_EXP_WIN_ZEROCOPY_LOG", "TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT",
+                "TRUSSC_EXP_WIN_ZEROCOPY_ACQUIRE0", "TRUSSC_D3D11_DEBUG"}) {
+            const char* value = std::getenv(name);
+            logNotice("WinZeroCopy") << name << "=" << (value ? value : "<unset>")
+                << " enabled=" << internal::winexp::switchOn(name);
+        }
+        const auto pacing = getFpsSettings();
+        if (headless::isActive()) {
+            logNotice("WinZeroCopy") << "headless pacing_fps=" << headless::targetFps << " (no swapchain)";
+        } else {
+            const auto desc = sapp_query_desc();
+            logNotice("WinZeroCopy") << "swap_interval=" << desc.swap_interval
+                << " max_frame_latency=" << desc.max_frame_latency;
+        }
+        logNotice("WinZeroCopy") << "update_fps=" << pacing.updateFps << " draw_fps=" << pacing.drawFps
+            << " synced=" << pacing.synced << " max_update_steps=" << getMaxUpdateSteps();
+    }
     // tc_get_screenshot needs the ReadOnly grant.
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     phase_ = options.openclose ? Phase::OpenClose : Phase::Warmup;
@@ -74,6 +100,25 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
+    namespace trace = internal::winexp;
+    if (!trace::enabled()) { updateBody(); return; }
+    const auto start = Clock::now();
+    const bool measured = phase_ == Phase::Measure;
+    if (measured) {
+        // Attribute the gap to the preceding draw, including its native Present.
+        if (drawEnd_ != Clock::time_point{})
+            trace::record(0, "outside-callbacks", drawEnd_, start);
+        trace::beginFrame(getUpdateCount());
+    }
+    updateBody();
+    if (measured) {
+        updateEnd_ = Clock::now();
+        trace::record(0, "update", start, updateEnd_);
+    }
+    if (finishElapsed_ > 0) finish(finishElapsed_);
+}
+
+void tcApp::updateBody() {
     if (phase_ == Phase::Finished) return;
     for (auto& video : videos_) {
         video->update();
@@ -121,11 +166,28 @@ void tcApp::update() {
     } else {
         for (size_t i = 0; i < videos_.size(); ++i)
             if (videos_[i]->isFrameNew()) ++frames_[i];
-        if (elapsed >= options.seconds) finish(elapsed);
+        if (elapsed >= options.seconds) {
+            if (internal::winexp::enabled()) finishElapsed_ = elapsed;
+            else finish(elapsed);
+        }
     }
 }
 
 void tcApp::draw() {
+    namespace trace = internal::winexp;
+    if (!trace::enabled()) { drawBody(); return; }
+    const bool measured = phase_ == Phase::Measure && trace::frame > 0;
+    const auto start = Clock::now();
+    if (measured) trace::record(0, "update-to-draw", updateEnd_, start);
+    drawBody();
+    const auto end = Clock::now();
+    if (measured) {
+        trace::record(0, "draw", start, end);
+        drawEnd_ = end;
+    }
+}
+
+void tcApp::drawBody() {
     clear(0.08f);
     const int columns = int(std::ceil(std::sqrt(double(options.players))));
     const int rows = (options.players - 1) / columns + 1;
@@ -179,6 +241,72 @@ void tcApp::finish(double elapsed) {
     }
     logNotice("WinZeroCopy") << "mode=" << mode << " seconds=" << elapsed << " window_fps=" << draws_ / elapsed
         << " CSV=" << pathToUtf8(options.output);
+    if (internal::winexp::enabled() && !dumpTrace()) {
+        exitApp(1);
+        return;
+    }
     phase_ = Phase::Finished;
     exitApp();
+}
+
+bool tcApp::dumpTrace() {
+    namespace trace = internal::winexp;
+    trace::active = false;
+    auto path = options.output;
+    path += ".trace.csv";
+    std::ofstream out(path);
+    out << "frame,player,update_counter,step,start_us,duration_us,hresult,key\n";
+    out << std::fixed << std::setprecision(3);
+    std::map<std::pair<uint64_t, std::string>, std::vector<double>> columns;
+    struct Frame { double callbacks = 0, outside = 0, between = 0; bool hasOutside = false; };
+    std::map<uint64_t, Frame> frames;
+    for (const auto& row : trace::rows) {
+        out << row.frame << ',' << row.player << ',' << row.counter << ',' << row.step << ','
+            << row.startUs << ',' << row.us << ',';
+        if (row.hasHr) out << row.hr;
+        out << ',';
+        if (row.key >= 0) out << row.key;
+        out << '\n';
+        columns[{row.player, row.step}].push_back(row.us);
+        if (row.player == 0) {
+            auto& frame = frames[row.frame];
+            if (std::strcmp(row.step, "outside-callbacks") == 0) {
+                frame.outside = row.us;
+                frame.hasOutside = true;
+            } else if (std::strcmp(row.step, "update-to-draw") == 0) frame.between += row.us;
+            else frame.callbacks += row.us;
+        }
+    }
+    out.close();
+    if (!out) {
+        logError("WinZeroCopy") << "Cannot write trace: " << pathToUtf8(path);
+        return false;
+    }
+    logNotice("WinZeroCopy") << "TRACE rows=" << trace::rows.size() << " capacity=" << trace::maxRows
+        << " frame_limit=" << trace::maxFrames << " dropped=" << trace::dropped << " CSV=" << pathToUtf8(path);
+    for (auto& [column, values] : columns) {
+        std::sort(values.begin(), values.end());
+        auto percentile = [&](double p) { return values[size_t(std::ceil(p * values.size())) - 1]; };
+        size_t timeouts = 0;
+        for (const auto& row : trace::rows)
+            if (row.player == column.first && row.step == column.second && row.hasHr && row.hr == 258) ++timeouts;
+        logNotice("WinZeroCopy") << "TRACE player=" << column.first << " step=" << column.second
+            << " n=" << values.size() << " median_us=" << percentile(0.5)
+            << " p90_us=" << percentile(0.9) << " max_us=" << values.back() << " timeouts=" << timeouts;
+    }
+    double callbacks = 0, outside = 0, between = 0;
+    size_t complete = 0;
+    for (const auto& [id, frame] : frames) {
+        (void)id;
+        if (!frame.hasOutside) continue; // Exclude the last frame's unfinished native gap.
+        callbacks += frame.callbacks;
+        outside += frame.outside;
+        between += frame.between;
+        ++complete;
+    }
+    if (complete) logNotice("WinZeroCopy") << "TRACE complete_frames=" << complete
+        << " mean_in_callbacks_us=" << callbacks / complete << " mean_outside_callbacks_us=" << outside / complete
+        << " mean_update_to_draw_us=" << between / complete
+        << " mean_frame_us=" << (callbacks + outside + between) / complete;
+    return true;
 }

@@ -14,3 +14,10 @@ target_compile_definitions(winZeroCopy PRIVATE TRUSSC_SHOW_CONSOLE)
 if(WIN32)
     target_link_libraries(winZeroCopy PRIVATE psapi)
 endif()
+
+execute_process(COMMAND git rev-parse --short=12 HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE WINEXP_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(WINEXP_SHA)
+    target_compile_definitions(winZeroCopy PRIVATE TRUSSC_EXP_BUILD_SHA="${WINEXP_SHA}")
+endif()

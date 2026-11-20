@@ -15,6 +15,7 @@
 #include "TrussC.h"
 #include "tc/video/internal/tcVideoRotation.h"
 #include "tcVideoPlayerPixels.h"
+#include "tc/video/internal/tcWinExperimentTrace.h"
 #include <vector>
 #include <chrono>
 #include <cstdlib>
@@ -466,8 +467,10 @@ bool TCVideoPlayerImpl::createSharedTexture(D3D11_TEXTURE2D_DESC desc) {
 
 HRESULT TCVideoPlayerImpl::mutexStep(IDXGIKeyedMutex* mutex, bool acquire, UINT64 key, const char* step) {
     const auto start = std::chrono::steady_clock::now();
-    const HRESULT hr = acquire ? mutex->AcquireSync(key, 100) : mutex->ReleaseSync(key);
-    if (state_->mutexLog_ && state_->logFrame_ <= 120) {
+    const HRESULT hr = internal::winexp::call(state_->playerId_, step, [&] {
+        return acquire ? mutex->AcquireSync(key, internal::winexp::acquire0() ? 0 : 100) : mutex->ReleaseSync(key);
+    }, static_cast<int64_t>(key));
+    if (state_->mutexLog_ && !internal::winexp::enabled() && state_->logFrame_ <= 120) {
         const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start).count();
         logNotice("WinZeroCopy") << "player=" << state_->playerId_
@@ -478,7 +481,7 @@ HRESULT TCVideoPlayerImpl::mutexStep(IDXGIKeyedMutex* mutex, bool acquire, UINT6
     // WAIT_TIMEOUT and WAIT_ABANDONED are success-valued HRESULTs, not ownership.
     if (hr == S_OK) return hr;
     if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
-        if (!state_->timeoutWarned_) {
+        if (!internal::winexp::acquire0() && !state_->timeoutWarned_) {
             state_->timeoutWarned_ = true;
             logWarning("VideoPlayer") << "zerocopy player=" << state_->playerId_
                 << " " << step << " timed out (100 ms); retrying on the next update";
@@ -507,7 +510,7 @@ bool TCVideoPlayerImpl::waitForRendering() {
         if (hr != S_FALSE) break;
         SwitchToThread();  // Sleep(1) rounds up to the ~15.6 ms timer tick.
     } while (std::chrono::steady_clock::now() < deadline);
-    if (state_->mutexLog_ && state_->logFrame_ <= 120) {
+    if (state_->mutexLog_ && !internal::winexp::enabled() && state_->logFrame_ <= 120) {
         logNotice("WinZeroCopy") << "player=" << state_->playerId_
             << " frame=" << state_->logFrame_
             << " step=sokol-gpu-complete key=0 HRESULT=0x" << std::hex
@@ -518,7 +521,7 @@ bool TCVideoPlayerImpl::waitForRendering() {
     if (hr == S_FALSE) {
         if (!state_->timeoutWarned_) {
             state_->timeoutWarned_ = true;
-            logWarning("VideoPlayer") << "zerocopy GPU completion timed out (100 ms); keeping previous frame";
+            logWarning("VideoPlayer") << "zerocopy player=" << state_->playerId_ << " GPU completion timed out (100 ms); keeping previous frame";
         }
         return false;  // Still owns the key; the previous live frame remains drawable.
     }
@@ -619,13 +622,13 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
 
     // Check if video has new frame
     LONGLONG pts;
-    if (state_->mediaEngine_->OnVideoStreamTick(&pts) != S_OK) {
+    if (internal::winexp::call(state_->playerId_, "OnVideoStreamTick", [&] { return state_->mediaEngine_->OnVideoStreamTick(&pts); }) != S_OK) {
         return false;
     }
 
     DWORD actualWidth = 0, actualHeight = 0;
     size_t actualBytes = 0;
-    if (FAILED(state_->mediaEngine_->GetNativeVideoSize(&actualWidth, &actualHeight)) ||
+    if (FAILED(internal::winexp::call(state_->playerId_, "GetNativeVideoSize", [&] { return state_->mediaEngine_->GetNativeVideoSize(&actualWidth, &actualHeight); })) ||
         !internal::VideoDecodeLimits::rgba(actualWidth, actualHeight, actualBytes)) {
         state_->status_->reject(actualBytes, 0);
         state_->playbackErrors_.report("Video frame dimensions exceed decode limits", E_INVALIDARG);
@@ -659,20 +662,23 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     MFVideoNormalizedRect srcRect = {0.0f, 0.0f, 1.0f, 1.0f};
     RECT dstRect = {0, 0, state_->width_, state_->height_};
 
-    HRESULT hr = state_->mediaEngine_->TransferVideoFrame(
+    const auto transferStart = (state_->mutexLog_ && !internal::winexp::enabled())
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    HRESULT hr = internal::winexp::call(state_->playerId_, "TransferVideoFrame", [&] { return state_->mediaEngine_->TransferVideoFrame(
         state_->renderTexture_.Get(),
         &srcRect,
         &dstRect,
         &bgColor
-    );
+    ); });
 
     if (state_->zeroCopy_) {
-        if (state_->mutexLog_ && state_->logFrame_ <= 120)
+        if (state_->mutexLog_ && !internal::winexp::enabled() && state_->logFrame_ <= 120)
             logNotice("WinZeroCopy") << "player=" << state_->playerId_
                 << " frame=" << state_->logFrame_
                 << " step=transfer key=0 HRESULT=0x" << std::hex
-                << static_cast<unsigned long>(hr) << std::dec << " wait_us=0";
-        state_->d3dContext_->Flush();
+                << static_cast<unsigned long>(hr) << std::dec << " wait_us=" << std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - transferStart).count();
+        internal::winexp::call(state_->playerId_, "MF-Flush", [&] { state_->d3dContext_->Flush(); });
         const bool transferred = hr == S_OK;
         const UINT64 key = transferred ? 1 : 0;
         if (mutexStep(state_->mfMutex_.Get(), false, key, "mf-release") != S_OK) return false;
@@ -686,33 +692,35 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     }
 
     if (FAILED(hr)) {
-        HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
+        HRESULT reason = internal::winexp::call(state_->playerId_, "GetDeviceRemovedReason", [&] { return state_->d3dDevice_->GetDeviceRemovedReason(); });
         if (FAILED(reason)) state_->playbackErrors_.report("D3D11 video device lost", reason);
         return false;
     }
 
     // Copy to staging texture for CPU access
-    state_->d3dContext_->CopyResource(state_->stagingTexture_.Get(), state_->renderTexture_.Get());
+    internal::winexp::call(state_->playerId_, "CopyResource", [&] {
+        state_->d3dContext_->CopyResource(state_->stagingTexture_.Get(), state_->renderTexture_.Get());
+    });
 
     // Map and read pixels
     D3D11_MAPPED_SUBRESOURCE mapped;
-    hr = state_->d3dContext_->Map(state_->stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    hr = internal::winexp::call(state_->playerId_, "Map", [&] { return state_->d3dContext_->Map(state_->stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped); });
     if (SUCCEEDED(hr)) {
         if (!mapped.pData || !internal::VideoDecodeLimits::rows(size_t(state_->width_), size_t(state_->height_),
                 mapped.RowPitch, size_t(mapped.RowPitch) * size_t(state_->height_))) {
             state_->status_->reject(mapped.RowPitch, size_t(mapped.RowPitch) * size_t(state_->height_));
-            state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
+            internal::winexp::call(state_->playerId_, "Unmap", [&] { state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0); });
             state_->playbackErrors_.report("Video frame stride exceeds decode limits", E_INVALIDARG);
             return false;
         }
         internal::copyPlayerStagingBGRA(static_cast<const unsigned char*>(mapped.pData),
             state_->pixels_.data(), state_->width_, state_->height_, mapped.RowPitch);
 
-        state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
+        internal::winexp::call(state_->playerId_, "Unmap", [&] { state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0); });
         return true;
     }
 
-    HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
+    HRESULT reason = internal::winexp::call(state_->playerId_, "GetDeviceRemovedReason", [&] { return state_->d3dDevice_->GetDeviceRemovedReason(); });
     if (FAILED(reason)) state_->playbackErrors_.report("D3D11 video device lost", reason);
     return false;
 }
@@ -899,9 +907,13 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     state_->mediaPath_ = path;
     const char* enabled = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY");
     state_->zeroCopyRequested_ = enabled && std::strcmp(enabled, "1") == 0;
+    static uint64_t nextPlayerId = 0;  // Player loads and updates are main-thread only.
+    state_->playerId_ = ++nextPlayerId;
+    (void)internal::winexp::enabled();
+    (void)internal::winexp::acquire0();
+    if (internal::winexp::enabled())
+        logNotice("WinZeroCopy") << "load player=" << state_->playerId_ << " clip=" << path;
     if (state_->zeroCopyRequested_) {
-        static uint64_t nextPlayerId = 0;  // Player loads and updates are main-thread only.
-        state_->playerId_ = ++nextPlayerId;
         const char* logging = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY_LOG");
         state_->mutexLog_ = logging && std::strcmp(logging, "1") == 0;
         const char* gpuWait = std::getenv("TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT");
@@ -1015,18 +1027,20 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
 }
 
 void TCVideoPlayerImpl::drainNotifications() {
+    internal::winexp::Scope trace{state_->playerId_, "drainNotifications"};
     for (const auto& event : state_->notifications.take())
         onMediaEvent(event.event, event.param1, event.param2);
 }
 
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
+    internal::winexp::Scope trace{state_->playerId_, "player-update"};
     drainNotifications();
     state_->hasNewFrame_ = false;
 
     if (!state_->isLoaded_ || !state_->mediaEngine_) return;
 
     if (state_->d3dDevice_) {
-        HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
+        HRESULT reason = internal::winexp::call(state_->playerId_, "GetDeviceRemovedReason", [&] { return state_->d3dDevice_->GetDeviceRemovedReason(); });
         if (FAILED(reason)) state_->playbackErrors_.report("D3D11 video device lost", reason);
     }
     auto error = state_->playbackErrors_.take();
@@ -1137,7 +1151,7 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             // Get video dimensions
             DWORD w, h;
             size_t bytes = 0;
-            if (SUCCEEDED(state_->mediaEngine_->GetNativeVideoSize(&w, &h)) &&
+            if (SUCCEEDED(internal::winexp::call(state_->playerId_, "GetNativeVideoSize", [&] { return state_->mediaEngine_->GetNativeVideoSize(&w, &h); })) &&
                 internal::VideoDecodeLimits::rgba(w, h, bytes)) {
                 if (state_->pixels_.empty() && !state_->zeroCopy_) {
                     state_->width_ = static_cast<int>(w);

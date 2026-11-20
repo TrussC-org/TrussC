@@ -50,3 +50,38 @@ This is a throwaway branch experiment, not a production rollout. On the owner's 
 - `TRUSSC_D3D11_DEBUG=1`: the video player's MF device tries the D3D11 debug layer. Unset (the default here) = no debug layer, so the fps/CPU matrix measures release behavior. Use it for the mutex trace and leak runs only.
 - `TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT=1`: zerocopy waits on the CPU for GPU completion (event query) before releasing the key to MF. Unset (the default) = the keyed mutex alone orders the GPU work, no CPU wait. Run zerocopy 4K 1 player once with it set to compare.
 - The harness sets the MCP tool level to ReadOnly, so `tc_get_screenshot` works.
+
+## Update 3 (buffered timing and ACQUIRE0)
+
+Use this run to locate the ~133 ms frame period: the trace separates update/draw callbacks from the gap between the end of draw and the next update, then breaks Windows player updates into native API calls. It cannot split the outside gap into Present versus the native message/pacing loop without fork instrumentation.
+
+Rebuild this working tree first. `TRUSSC_EXP_WIN_TRACE=1` and `TRUSSC_EXP_WIN_ZEROCOPY_ACQUIRE0=1` require exact `1` and are read once at startup. TRACE records only the measured phase, up to its first 600 frames and 65,536 call rows; it writes `<out>.trace.csv` after measurement. TRACE suppresses the old per-transfer console log even if LOG=1. Keep LOG, GPUWAIT, and D3D11_DEBUG unset for these comparisons:
+
+```powershell
+$app = ".\experiments\winZeroCopy\bin\winZeroCopy.exe"
+$env:TRUSSC_EXP_WIN_TRACE = "1"
+Remove-Item Env:TRUSSC_EXP_WIN_ZEROCOPY_LOG -ErrorAction SilentlyContinue
+Remove-Item Env:TRUSSC_EXP_WIN_ZEROCOPY_GPUWAIT -ErrorAction SilentlyContinue
+Remove-Item Env:TRUSSC_D3D11_DEBUG -ErrorAction SilentlyContinue
+Remove-Item Env:TRUSSC_EXP_WIN_ZEROCOPY_ACQUIRE0 -ErrorAction SilentlyContinue
+foreach ($mode in @("baseline", "zerocopy")) {
+    if ($mode -eq "zerocopy") { $env:TRUSSC_EXP_WIN_ZEROCOPY = "1" }
+    else { Remove-Item Env:TRUSSC_EXP_WIN_ZEROCOPY -ErrorAction SilentlyContinue }
+    foreach ($players in @(1, 4)) {
+        $name = "trace-$mode-1080-p$players"
+        $arguments = "--clip `"C:\clips\bars-1080-h264.mp4`" --players $players --warmup 5 --seconds 60 --out $name.csv"
+        $p = Start-Process -FilePath $app -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$name.stdout.txt" -RedirectStandardError "$name.stderr.txt"
+        $p.ExitCode
+    }
+}
+$env:TRUSSC_EXP_WIN_ZEROCOPY = "1"
+$env:TRUSSC_EXP_WIN_ZEROCOPY_ACQUIRE0 = "1"
+$p = Start-Process -FilePath $app -ArgumentList '--clip "C:\clips\bars-1080-h264.mp4" --players 4 --warmup 5 --seconds 60 --out trace-zerocopy-1080-p4-acquire0.csv' -Wait -PassThru -NoNewWindow -RedirectStandardOutput trace-zerocopy-1080-p4-acquire0.stdout.txt -RedirectStandardError trace-zerocopy-1080-p4-acquire0.stderr.txt
+$p.ExitCode
+```
+
+ACQUIRE0 changes only the existing keyed-mutex timeout from 100 ms to 0. Timeout means retry through the existing pending-key/ownership logic; it does not grant ownership. These polling timeouts are counted in trace summaries without warnings. Compare its four-player result with `trace-zerocopy-1080-p4.csv` and check each player's frame delivery as well as callback times.
+
+Send back all five ordinary CSV files, their five `.csv.trace.csv` files, stdout/stderr including console summaries and exit codes, and every warning/fallback. Startup output identifies build SHA plus compile time, all six loaded switches, swap interval, maximum frame latency, and update/draw pacing. A SHA identifies the base commit; compile time distinguishes this uncommitted experiment build.
+
+Trace CSV is a call table: `frame` is the measured harness frame, `player=0` identifies harness timings, and positive player IDs match the player's load logs (not CSV player_index). `update_counter` is the framework update counter; `start_us` is relative to the first measured update and `duration_us` is steady-clock elapsed time. HRESULTs are signed decimal; empty HRESULT means a void API or timing scope. Key is present for acquire/release calls. Missing call rows mean that branch was not reached, not zero duration. Each duration series gets console median/p90/max and timeout count; nested player/API times must not be added to harness update time. The mean callback/outside split uses only frames whose following outside gap completed; the last incomplete frame is excluded. `update-to-draw` separately captures framework work between those callbacks; mean_frame_us includes that gap too. `dropped=0` confirms the row cap was not reached. Headless Linux checks output/limits only, not Windows pacing.

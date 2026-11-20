@@ -3,6 +3,7 @@
 #include <chrono>
 #include <fstream>
 #include <memory>
+#include <tc/video/internal/tcWinExperimentTrace.h>
 
 struct Options {
     std::vector<tc::fs::path> clips;
@@ -32,6 +33,11 @@ private:
     int drainFrames_ = 0;
     std::string privateWarm_, privateMid_, privateAfter_;
     bool liveDrawn_ = false;
+    Clock::time_point drawEnd_{}, updateEnd_{};
+    double finishElapsed_ = 0;
+    void updateBody();
+    void drawBody();
     bool openPlayers();
+    bool dumpTrace();
     void finish(double elapsed);
 };
