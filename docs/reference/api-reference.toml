@@ -42010,7 +42010,7 @@ void tcApp::update() {
     pixels = video.getPixels().clone();
 }
 ```
-- There is no API to lock a borrowed VideoPlayer pixel buffer; access adds no synchronization. `VideoPlayer` returns its CPU mirror without conversion or GPU readback. `HapPlayer` retains its existing lazy BC/DXT decode into its own Pixels storage; it is empty until a compressed frame is available.
+- There is no API to lock a borrowed VideoPlayer pixel buffer; access adds no synchronization. `VideoPlayer` returns its CPU mirror without conversion or GPU readback. `HapPlayer::getPixels()` is always empty; use the Fbo draw/readback route shown in this card.
 - Video getPixels is not available from Lua; use an Fbo readback.
 ```lua
 local fbo, pixels = Fbo(), Pixels()
@@ -42056,7 +42056,7 @@ void tcApp::update() {
     pixels = video.getPixels().clone();
 }
 ```
-- 借用した VideoPlayer のピクセルバッファをロックする API はなく、取得時に同期は追加しません。`VideoPlayer` は変換や GPU 読み戻しをせず CPU ミラーを返します。`HapPlayer` は従来どおり BC/DXT を必要時に自身の Pixels へデコードし、圧縮フレームが用意されるまでは空です。
+- 借用した VideoPlayer のピクセルバッファをロックする API はなく、取得時に同期は追加しません。`VideoPlayer` は変換や GPU 読み戻しをせず CPU ミラーを返します。`HapPlayer::getPixels()` は常に空です。このカードの Fbo 描画・読み戻しの手順を使用します。
 - 動画の getPixels は Lua では利用できません。Fbo からピクセルを読み戻します。
 ```lua
 local fbo, pixels = Fbo(), Pixels()
@@ -42102,7 +42102,7 @@ void tcApp::update() {
     pixels = video.getPixels().clone();
 }
 ```
-- 빌린 VideoPlayer 픽셀 버퍼를 잠그는 API는 없으며 접근 시 동기화를 추가하지 않습니다. `VideoPlayer`는 변환이나 GPU 읽기 없이 CPU 미러를 반환합니다. `HapPlayer`는 기존처럼 필요할 때 BC/DXT를 자체 Pixels로 디코드하며 압축 프레임이 준비될 때까지 비어 있습니다.
+- 빌린 VideoPlayer 픽셀 버퍼를 잠그는 API는 없으며 접근 시 동기화를 추가하지 않습니다. `VideoPlayer`는 변환이나 GPU 읽기 없이 CPU 미러를 반환합니다. `HapPlayer::getPixels()`는 항상 비어 있습니다. 이 카드의 Fbo 그리기/읽기 방식을 사용합니다.
 - 비디오 getPixels는 Lua에서 사용할 수 없습니다. Fbo에서 픽셀을 읽습니다.
 ```lua
 local fbo, pixels = Fbo(), Pixels()
@@ -59720,7 +59720,7 @@ void tcApp::update() {
     pixels = video.getPixels().clone();
 }
 ```
-- There is no API to lock a borrowed VideoPlayer pixel buffer; access adds no synchronization. `VideoPlayer` returns its CPU mirror without conversion or GPU readback. `HapPlayer` retains its existing lazy BC/DXT decode into its own Pixels storage; it is empty until a compressed frame is available.
+- There is no API to lock a borrowed VideoPlayer pixel buffer; access adds no synchronization. `VideoPlayer` returns its CPU mirror without conversion or GPU readback. `HapPlayer::getPixels()` is always empty; use the Fbo draw/readback route shown in this card.
 - Video getPixels is not available from Lua; use an Fbo readback.
 ```lua
 local fbo, pixels = Fbo(), Pixels()
@@ -59766,7 +59766,7 @@ void tcApp::update() {
     pixels = video.getPixels().clone();
 }
 ```
-- 借用した VideoPlayer のピクセルバッファをロックする API はなく、取得時に同期は追加しません。`VideoPlayer` は変換や GPU 読み戻しをせず CPU ミラーを返します。`HapPlayer` は従来どおり BC/DXT を必要時に自身の Pixels へデコードし、圧縮フレームが用意されるまでは空です。
+- 借用した VideoPlayer のピクセルバッファをロックする API はなく、取得時に同期は追加しません。`VideoPlayer` は変換や GPU 読み戻しをせず CPU ミラーを返します。`HapPlayer::getPixels()` は常に空です。このカードの Fbo 描画・読み戻しの手順を使用します。
 - 動画の getPixels は Lua では利用できません。Fbo からピクセルを読み戻します。
 ```lua
 local fbo, pixels = Fbo(), Pixels()
@@ -59812,7 +59812,7 @@ void tcApp::update() {
     pixels = video.getPixels().clone();
 }
 ```
-- 빌린 VideoPlayer 픽셀 버퍼를 잠그는 API는 없으며 접근 시 동기화를 추가하지 않습니다. `VideoPlayer`는 변환이나 GPU 읽기 없이 CPU 미러를 반환합니다. `HapPlayer`는 기존처럼 필요할 때 BC/DXT를 자체 Pixels로 디코드하며 압축 프레임이 준비될 때까지 비어 있습니다.
+- 빌린 VideoPlayer 픽셀 버퍼를 잠그는 API는 없으며 접근 시 동기화를 추가하지 않습니다. `VideoPlayer`는 변환이나 GPU 읽기 없이 CPU 미러를 반환합니다. `HapPlayer::getPixels()`는 항상 비어 있습니다. 이 카드의 Fbo 그리기/읽기 방식을 사용합니다.
 - 비디오 getPixels는 Lua에서 사용할 수 없습니다. Fbo에서 픽셀을 읽습니다.
 ```lua
 local fbo, pixels = Fbo(), Pixels()

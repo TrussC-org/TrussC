@@ -724,6 +724,19 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+`HapPlayer::getPixels()` is always empty. For pixels, draw the video into an
+Fbo and check the return value of `fbo.readPixels(pixels)`; see
+[tcxHap README › Read Hap frames as pixels](../../addons/tcxHap/README.md#read-hap-frames-as-pixels).
+
+```cpp
+fbo.begin();
+hap.draw(0, 0);
+fbo.end();
+if (fbo.readPixels(pixels)) {
+    // use pixels
+}
+```
+
 Playback requires GPU support for the movie's BC-compressed texture format.
 On iOS, TrussC's Metal backend enables BC texture formats when the GPU reports
 BC support (Hap1 and Hap Q playback checked on an iPhone 16 in the #645
