@@ -382,12 +382,14 @@ surface and typed text/drop/ImGui coverage.
 
 ### Injected input provenance and private MCP drag snapshot
 
-**Classification:** MOVE to TrussC (completed event 2).
+**Classification:** MOVE to TrussC (completed event 2 and event 4 #1404 A/B).
 
 **Historical code locations (removed in event 2):** `sapp_event_source`, `sapp_window_inject_event`, `sapp_event.source`, `sapp_event.button_snapshot`; `util/sokol_window_event.h` and Runtime converters.
 
 **Current code locations:** Runtime `injectWindowEvent` and `WindowEventContext`;
-`core/platform/tcNativeWindowEvent.h`; MCP `InputTarget` in `tcStandardTools.cpp`.
+`core/platform/tcNativeWindowEvent.h`; MCP `InputTarget` in `tcStandardTools.cpp`;
+public `tc/events/tcInputEvent.h`, `tc/events/tcEventArgs.h` and
+`Window::injectInput` in `tc/app/tcWindowRuntime.cpp`.
 
 **Completed slice:** event 2 Runtime injection/MCP. Runtime validates input,
 copies the raw event and carries an internal injected flag and MCP held-button
@@ -396,13 +398,15 @@ the existing native send gate, including admission, busy state and input wakes.
 Raw notification still precedes typed notification, so simgui receives the same
 DOWN/MOVE/UP. Raw `sapp_event` listeners no longer see source or snapshot fields.
 
-Provenance stays private in the Runtime. Public typed provenance is decided
-together with the #1404 A/B Window injection surface (event 4–5); typed arguments
-remain unchanged in event 2. The private MCP `tc_mouse_move(button)` drag-only
+Event 4 completes the #1404 A/B Window injection surface on the TrussC side.
+`InputEvent` builders feed `Window::injectInput` through the same Runtime gate.
+Typed key, mouse, scroll and touch arguments carry `injected` and `sourceTag`;
+native events keep false/empty defaults, public injection sets the supplied tag,
+and MCP sets `"mcp"`. Sokol carries no injection code or source markers. The private MCP `tc_mouse_move(button)` drag-only
 held-button snapshot remains available; full gestures still use
 press/move/release. Current scheduling stays, including the dev-tool wake
-limitation recorded with source admission. New public API usage goes to the
-owner before its later implementation.
+limitation recorded with source admission. The event 4 API follows the owner
+approved usage proposal; drag/drop, clipboard, Back and console args stay unchanged.
 
 ### Touch capacity
 
@@ -728,6 +732,24 @@ the EGL config supports both window and pbuffer surfaces. Cleanup-called gating
 prevents duplicate cleanup on destruction. The API 36 predictive-Back manifest requirement and the current
 API 35 template are documented in the en/ja/ko reference source.
 
+### Android default framebuffer stencil (2026-11-17)
+
+**Classification:** KEEP decided by owner (Android screen stencil).
+
+**Code locations:** `_sapp_tc_android_init_egl`, Android `sapp_depth_format`
+(`// [TrussC] Android screen stencil`, `// [TrussC] Report the chosen Android EGL attachment`).
+
+**Planned slice:** none; retain the current behavior.
+
+Deliberately diverge from upstream sokol_app's Android depth-16/stencil-0
+request: prefer depth-24/stencil-8, then the closest available stencil >= 8
+configuration, then the old depth-16/stencil-0 selection.
+Keep window and pbuffer support for cleanup. Warn through the existing Android
+sokol logger if the chosen config has no stencil. The Android depth-format
+query reports DEPTH_STENCIL only when the selected EGL config has stencil,
+otherwise DEPTH; existing environment/swapchain translation and screen
+RenderTarget metadata consume that value without a new fork API.
+
 ### Android display density
 
 **Classification:** KEEP decided by owner (density/160).
@@ -904,7 +926,7 @@ Mac display/Metal validation and post-implementation review remain required.
 
 Upstream fixes `sg_desc.uniform_buffer_size` at `sg_setup()` (4 MiB, ~8k draws);
 overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 growth makes
-`WindowSettings::reserveUniformBuffer` an optimization, not a correctness need.
+`RuntimeSettings::reserveUniformBuffer` an optimization, not a correctness need.
 
 - `_sg_mtl_grow_uniform_buffer()` doubles the current rotate slot, defers old
   storage release, resets `cur_ub_offset` and logs `METAL_UNIFORM_BUFFER_GROWN`

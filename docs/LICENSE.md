@@ -59,7 +59,7 @@ This is the one list of third-party code in TrussC and the version the build use
 | **pugixml** | 1.16 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
 | **cpp-httplib** | 0.66.0 | `core/include/impl/httplib.h` ([upstream checksum](../core/include/impl/HTTPLIB_PATCHES.md)) | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.11.1 (see [PROVENANCE.md](../core/include/lz4/PROVENANCE.md)) | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
-| **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
+| **Highway** | 1.4.0, commit `2607d3b5b0113992fe84d3848859eae13b3b52c1` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
 | **earcut.hpp** | commit `365be263bfed498f9d3d3bf065bcb39b0d0e4ba6` (2026-04-30, "Remove use of infinity (#129)"; unmodified, untagged master: 16 commits after v2.2.4 and 16 before v3.2.3; no matching tag); used for Path fills in `tc/graphics/tcPath.h` | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
 | **Bitmap ASCII glyph data** | version/commit not recorded; see [bitmap notice](#bitmap-font-data) for source and local changes | `core/include/tcBitmapFont.h` | https://github.com/freeglut/freeglut | See bitmap notice below; exact import notice not recorded | freeglut / X11 contributors |
 
@@ -87,7 +87,7 @@ These libraries are only included if you use the corresponding addon.
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
 |---------|---------|----------------------|----------|---------|---------------------|-------|
-| **Dear ImGui** | 1.92.9b (owned test engine configuration + TrussC widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
+| **Dear ImGui** | 1.93.0 (owned test engine configuration + TrussC widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | commit `93aa187b` (+ TrussC multi-context and GPU buffer growth patches) | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
 | **libcurl** | 8.23.0 (Windows; macOS/Linux use system libcurl; see [PROVENANCE.md](../addons/tcxCurl/PROVENANCE.md)) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
@@ -102,7 +102,7 @@ These libraries are only included if you use the corresponding addon.
 | **Lua** | 5.4.9 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
 | **LuaJIT** | 2.1 (rolling), commit not recorded (see [local changes](../addons/tcxLua/TRUSSC_MODIFICATIONS.md)) | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
-| **luajit-cmake** | commit `94444a6` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
+| **luajit-cmake** | commit `f0f1650` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
 | **ofxMidi helper ports** | version/commit not recorded (see [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports)) | `addons/tcxMidi/src/tcxMidiClock.h`, `addons/tcxMidi/src/tcxMidiTimecode.h` | https://github.com/danomatika/ofxMidi | BSD Simplified; [notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) | Dan Wilcox and contributors | tcxMidi |
 | **Mozilla/curl CA bundle** | snapshot 2026-02-11; source commit not recorded; payload unchanged since TrussC import `f59a10fd`; refresh via [update_ca_bundle.sh](../addons/tcxTls/scripts/update_ca_bundle.sh) | `addons/tcxTls/data/cacert.pem` | https://curl.se/ca/cacert.pem ([extraction/source](https://curl.se/docs/caextract.html)) | Mozilla source database: MPL-2.0; exact standalone redistribution terms not recorded; retain bundle notices | Mozilla / curl contributors | tcxTls |
 
@@ -205,9 +205,9 @@ SOFTWARE.
 
 ### Apache-2.0 / BSD-3-Clause (Highway)
 
-Highway's upstream license files are retained in
-[LICENSE](../core/3rdparty/highway/LICENSE) and
-[LICENSE-BSD3](../core/3rdparty/highway/LICENSE-BSD3).
+Highway's upstream combined license file is retained in
+[LICENSE](../core/3rdparty/highway/LICENSE), including both Apache-2.0 and
+BSD-3-Clause texts for the vendored subset.
 See each source file's SPDX identifiers for the applicable license.
 
 ### Apache-2.0 / GPL-2.0-or-later (mbedTLS)

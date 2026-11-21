@@ -156,65 +156,86 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::VideoPlayerBase::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::GlyphBatch
-            , trussc::GlyphBatch()
+        auto constructors = tcxLuaConstructors<trussc::Vec3
+            , trussc::Vec3()
+            , trussc::Vec3(float, float, float)
+            , trussc::Vec3(float)
+            , trussc::Vec3(const trussc::Vec2 &)
+            , trussc::Vec3(const trussc::Vec2 &, float)
         >();
-        sol::usertype<trussc::GlyphBatch> t = lua->new_usertype<trussc::GlyphBatch>("GlyphBatch", constructors, sol::call_constructor, constructors);
-        t["add"] = sol::overload([](trussc::GlyphBatch& self, uint32_t codepoint) { return self.add(codepoint); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix) { return self.add(codepoint, matrix); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Color & color) { return self.add(codepoint, color); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix, const trussc::Color & color) { return self.add(codepoint, matrix, color); }, [](trussc::GlyphBatch& self, const std::string & text) { return self.add(text); }, [](trussc::GlyphBatch& self, const std::string & text, const trussc::Color & color) { return self.add(text, color); });
-        t["clear"] = &trussc::GlyphBatch::clear;
-        t["draw"] = sol::overload([](trussc::GlyphBatch& self) { return self.draw(); }, [](trussc::GlyphBatch& self, const trussc::Mat4 & transform) { return self.draw(transform); });
-        t["getColor"] = &trussc::GlyphBatch::getColor;
-        t["getTransform"] = &trussc::GlyphBatch::getTransform;
-        t["resetColor"] = &trussc::GlyphBatch::resetColor;
-        t["resetTransform"] = &trussc::GlyphBatch::resetTransform;
-        t["setAlign"] = &trussc::GlyphBatch::setAlign;
-        t["setAlignToInk"] = &trussc::GlyphBatch::setAlignToInk;
-        t["setColor"] = &trussc::GlyphBatch::setColor;
-        t["setFont"] = &trussc::GlyphBatch::setFont;
-        t["setTransform"] = &trussc::GlyphBatch::setTransform;
-        t["setWritingMode"] = &trussc::GlyphBatch::setWritingMode;
+        sol::usertype<trussc::Vec3> t = lua->new_usertype<trussc::Vec3>("Vec3", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::Vec3& a, float b){ return a * b; }, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a * b; });
+        t[sol::meta_function::addition] = [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a - b; };
+        t[sol::meta_function::unary_minus] = [](const trussc::Vec3& a){ return -a; };
+        t[sol::meta_function::division] = sol::overload([](const trussc::Vec3& a, float b){ return a / b; }, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a / b; });
+        t[sol::meta_function::equal_to] = [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a == b; };
+        t[sol::meta_function::index] = [](const trussc::Vec3& a, int b){ return a[b]; };
+        t["x"] = &trussc::Vec3::x;
+        t["y"] = &trussc::Vec3::y;
+        t["z"] = &trussc::Vec3::z;
+        t["cross"] = &trussc::Vec3::cross;
+        t["distance"] = &trussc::Vec3::distance;
+        t["distanceSquared"] = &trussc::Vec3::distanceSquared;
+        t["dot"] = &trussc::Vec3::dot;
+        t["length"] = &trussc::Vec3::length;
+        t["lengthSquared"] = &trussc::Vec3::lengthSquared;
+        t["lerp"] = &trussc::Vec3::lerp;
+        t["limit"] = &trussc::Vec3::limit;
+        t["normalize"] = &trussc::Vec3::normalize;
+        t["normalized"] = &trussc::Vec3::normalized;
+        t["reflected"] = &trussc::Vec3::reflected;
+        t["set"] = sol::overload([](trussc::Vec3& self, float x_, float y_, float z_) -> decltype(auto) { return self.set(x_, y_, z_); }, [](trussc::Vec3& self, const trussc::Vec3 & v) -> decltype(auto) { return self.set(v); });
+        t["xy"] = &trussc::Vec3::xy;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
-            , trussc::ChipSoundNote()
-            , trussc::ChipSoundNote(trussc::Wave, float, float)
-            , trussc::ChipSoundNote(trussc::Wave, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::Logger
+            , trussc::Logger()
         >();
-        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote", constructors, sol::call_constructor, constructors);
-        t["attack"] = &trussc::ChipSoundNote::attack;
-        t["decay"] = &trussc::ChipSoundNote::decay;
-        t["duration"] = &trussc::ChipSoundNote::duration;
-        t["hz"] = &trussc::ChipSoundNote::hz;
-        t["release"] = &trussc::ChipSoundNote::release;
-        t["sustain"] = &trussc::ChipSoundNote::sustain;
-        t["volume"] = &trussc::ChipSoundNote::volume;
-        t["wave"] = &trussc::ChipSoundNote::wave;
-        t["build"] = &trussc::ChipSoundNote::build;
-        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
-        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
+        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
+        t["onLog"] = tcx_lua_detail::eventProperty<trussc::Logger>(&trussc::Logger::onLog);
+        t["closeFile"] = &trussc::Logger::closeFile;
+        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
+        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
+        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
+        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
+        t["isFileOpen"] = &trussc::Logger::isFileOpen;
+        t["log"] = &trussc::Logger::log;
+        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
+        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
+        t["setLogFile"] = &trussc::Logger::setLogFile;
+        t["setLogLevel"] = &trussc::Logger::setLogLevel;
+        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
     }
-    lua->new_usertype<trussc::TextureFormat>("TextureFormat",
-        sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
-        "RGBA8", sol::var(trussc::TextureFormat::RGBA8),
-        "RGBA16F", sol::var(trussc::TextureFormat::RGBA16F),
-        "RGBA32F", sol::var(trussc::TextureFormat::RGBA32F),
-        "R8", sol::var(trussc::TextureFormat::R8),
-        "R16F", sol::var(trussc::TextureFormat::R16F),
-        "R32F", sol::var(trussc::TextureFormat::R32F),
-        "RG8", sol::var(trussc::TextureFormat::RG8),
-        "RG16F", sol::var(trussc::TextureFormat::RG16F),
-        "RG32F", sol::var(trussc::TextureFormat::RG32F),
-        "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
-        "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
-    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
-        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
-        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
-        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
-        "Lines", sol::var(trussc::PrimitiveMode::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
-        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
-        "Points", sol::var(trussc::PrimitiveMode::Points));
+    {
+        auto constructors = tcxLuaConstructors<trussc::ColorOKLab
+            , trussc::ColorOKLab()
+            , trussc::ColorOKLab(float, float, float)
+            , trussc::ColorOKLab(float, float, float, float)
+        >();
+        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab", constructors, sol::call_constructor, constructors);
+        t["L"] = &trussc::ColorOKLab::L;
+        t["a"] = &trussc::ColorOKLab::a;
+        t["alpha"] = &trussc::ColorOKLab::alpha;
+        t["b"] = &trussc::ColorOKLab::b;
+        t["lerp"] = &trussc::ColorOKLab::lerp;
+        t["toHSB"] = &trussc::ColorOKLab::toHSB;
+        t["toLinear"] = &trussc::ColorOKLab::toLinear;
+        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
+        t["toRGB"] = &trussc::ColorOKLab::toRGB;
+    }
+    {
+        sol::usertype<trussc::CharEventArgs> t = lua->new_usertype<trussc::CharEventArgs>("CharEventArgs");
+        t["alt"] = &trussc::CharEventArgs::alt;
+        t["codepoint"] = &trussc::CharEventArgs::codepoint;
+        t["consumed"] = &trussc::CharEventArgs::consumed;
+        t["ctrl"] = &trussc::CharEventArgs::ctrl;
+        t["injected"] = &trussc::CharEventArgs::injected;
+        t["isRepeat"] = &trussc::CharEventArgs::isRepeat;
+        t["shift"] = &trussc::CharEventArgs::shift;
+        t["sourceTag"] = &trussc::CharEventArgs::sourceTag;
+        t["super"] = &trussc::CharEventArgs::super;
+    }
     {
         sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
         t["error"] = &trussc::SaveResult::error;
@@ -223,13 +244,14 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
         t["success"] = &trussc::SaveResult::success;
     }
-    lua->new_usertype<trussc::BlendOp>("BlendOp",
-        sol::meta_function::equal_to, [](trussc::BlendOp a, trussc::BlendOp b){ return a == b; },
-        "Add", sol::var(trussc::BlendOp::Add),
-        "Subtract", sol::var(trussc::BlendOp::Subtract),
-        "ReverseSubtract", sol::var(trussc::BlendOp::ReverseSubtract),
-        "Minimum", sol::var(trussc::BlendOp::Minimum),
-        "Maximum", sol::var(trussc::BlendOp::Maximum));
+    {
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
+    }
     {
         auto constructors = tcxLuaConstructors<trussc::LogStream
             , trussc::LogStream(trussc::LogLevel)
@@ -237,25 +259,20 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         >();
         sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
     }
-    lua->new_usertype<trussc::TcyMode>("TcyMode",
-        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
-        "Rotate", sol::var(trussc::TcyMode::Rotate),
-        "Upright", sol::var(trussc::TcyMode::Upright),
-        "Combine", sol::var(trussc::TcyMode::Combine));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     {
-        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
-        t["mode"] = &trussc::CurveStyle::mode;
-        t["resolution"] = &trussc::CurveStyle::resolution;
-        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
+        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
+        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
     }
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
-    }
-    {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
 #ifdef _MSC_VER

@@ -98,6 +98,7 @@ class VideoPlayer {
     fs::path sourcePath_;
     unsigned char* pixels_ = nullptr;
     int width_ = 0, height_ = 0;
+    int decodeThreads_ = 0;
     float volume_ = 1, speed_ = 1;
     bool loop_ = false, autoPoster_ = true, audioStreaming_ = true;
     LoadResult loadInternal(const fs::path& path) {

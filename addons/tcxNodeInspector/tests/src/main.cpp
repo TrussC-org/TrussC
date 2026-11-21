@@ -424,7 +424,7 @@ struct HeadlessInspectorApp : App {
     void update() override { exitApp(); }
     void exit() override {
         ++headlessExits;
-        check("headless inspector remains registered inside App exit", events().keyPressed.listenerCount() == keyListeners + 1);
+        check("App-owned key listener is already released inside App exit", events().keyPressed.listenerCount() == keyListeners);
         events().exit.clear();
     }
     void cleanup() override {

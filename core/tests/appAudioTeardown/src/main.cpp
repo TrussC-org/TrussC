@@ -37,7 +37,7 @@ struct Probe {
     std::atomic<bool> arm{false}, entered{false}, release{false};
     std::atomic<bool> finished{false}, cleanupStarted{false};
     bool exited = false;
-    bool hooksInExit = false;
+    bool hooksCanceledInExit = false;
     bool detachedInCleanup = false;
     bool finishedInCleanup = false;
     bool exitInCleanup = false;
@@ -65,8 +65,9 @@ struct BufferApp : App {
     void exit() override {
         probe.exited = true;
         auto& engine = AudioEngine::getInstance();
-        probe.hooksInExit = engine.audioOut.listenerCount() == 2 &&
-                            engine.audioIn.listenerCount() == 1;
+        // Ending invalidates eagerly; detach still joins admitted audio before cleanup.
+        probe.hooksCanceledInExit = engine.audioOut.listenerCount() == 1 &&
+                                   engine.audioIn.listenerCount() == 0;
     }
     void cleanup() override {
         probe.cleanupStarted = true;
@@ -174,7 +175,7 @@ void runPath(TeardownPath path, const char* name) {
     check("no audioOut after cleanup started", p.lateCalls == 0);
     check("cleanup ran once", p.cleanups == 1);
     if (path != TeardownPath::Child) {
-        check("exit precedes detachment and cleanup", p.hooksInExit && p.exitInCleanup);
+        check("ending cancels hooks before exit; exit precedes cleanup", p.hooksCanceledInExit && p.exitInCleanup);
     }
     monitor.disconnect();
     engine.waitForAudioCallbacks();

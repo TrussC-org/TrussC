@@ -281,13 +281,13 @@ public:
     // AV sync control
     // =========================================================================
 
-    /// Set the maximum allowed video/audio drift (in seconds) before a hard
-    /// re-sync (video seeks to the audio position). Set to 0 or negative to
-    /// disable hard re-sync. Affects the Linux (FFmpeg) backend and tcxHap's
-    /// HapPlayer, which slews wall-clock time toward playing audio and uses
-    /// this threshold for hard re-sync. Slewing remains enabled when <= 0.
-    /// Other platforms delegate sync to their native framework.
-    /// Default: 0.5s
+    /// Set how far Linux decoding may lag behind the playback clock before
+    /// considering a forward keyframe jump. Without a keyframe ahead of the
+    /// decoder and before the clock, decoding continues; update presents the
+    /// newest completed frame due at that clock. Default: 0.5 seconds.
+    /// Set <= 0 to disable automatic jumps. HapPlayer uses this threshold for
+    /// hard audio resynchronization; its gradual correction remains enabled.
+    /// Other platforms delegate synchronization to their native framework.
     virtual void setResyncThreshold(float seconds) { resyncThreshold_ = seconds; }
 
     /// Get the current resync threshold in seconds.

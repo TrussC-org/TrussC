@@ -18,6 +18,7 @@
 
 #include "internal/tcWindowRuntime.h"
 #include "tcExit.h"
+#include "../events/tcInputEvent.h"
 
 namespace trussc {
 
@@ -73,8 +74,12 @@ public:
     void setQuitOnClose(bool enabled) { if (!exitDelivered_) quitOnClose_ = enabled; }
     std::shared_ptr<App> getApp() const { return app_; }
 
-    // This window's event stream (mousePressed / keyPressed / draw / ...).
+    // This window's event stream (mousePressed / keyPressed / charInput / draw / ...).
     CoreEvents& events() { return events_; }
+
+    // Positions use this App's content coordinates (logical points, or pixels
+    // in pixelPerfect mode). Returns true when accepted, even if consumed.
+    bool injectInput(const InputEvent& event, const std::string& tag = {});
 
     // Request closure at the next safe boundary. Pending replacement is
     // canceled. App ending and owner retirement precede native/GPU disposal.
@@ -383,7 +388,10 @@ public:
         w.appEventState_ = std::move(state);
     }
     static void cancelClose(Window& w) noexcept { w.closeRequested_ = false; }
-    static void acceptCodeQuit(Window& w) noexcept { w.closeRequested_ = true; }
+    static void acceptCodeQuit(Window& w) noexcept {
+        w.closeRequested_ = true;
+        if (w.app_) invalidateAppListeners(appOwner(*w.app_), false);
+    }
     static void applyPendingApp(Window& w) { w.applyPendingApp(); }
     static void endApp(Window& w) noexcept { w.endApp(); }
     static void endForShutdown(Window& w) noexcept { w.closingApp_ = true; w.closeRequested_ = true; w.endApp(); }
@@ -531,7 +539,7 @@ inline void Window::applyPendingApp() {
 
 inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                                      const std::shared_ptr<AppEventState>& state) {
-    listeners.reserve(16);
+    listeners.reserve(17);
     auto bind = [&](auto& event, auto callback, bool exiting = false) {
         listeners.push_back(internal::FrameworkEventAccess::listen(event,
             [this, callback, state, exiting](auto&&... args) {
@@ -545,7 +553,9 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                 auto app = exiting ? exitingApp_.lock() : app_;
                 if (!app && exiting) app = app_;
                 if (app) {
-                    internal::AppCallbackScope owner(internal::appOwner(*app));
+                    auto owner = internal::appOwner(*app);
+                    if (!exiting && (owner->ended || owner->retiring || owner->callbacksClosing || !owner->token->load())) return;
+                    internal::AppCallbackScope scope(std::move(owner));
                     callback(*app, args...);
                 }
             }, EventPriority::App));
@@ -558,6 +568,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     bind(events_.draw, [this](App&) { drawTreeNow(); });
     bind(events_.exit, [](App& app) { internal::deliverAppExit(app); }, true);
 
+    bind(events_.charInput, [](App& app, auto& e) { app.charInput(e); });
     bind(events_.keyPressed, [](App& app, auto& e) { e.consumed = app.handleKeyPressed(e) || e.consumed; });
     bind(events_.keyReleased, [](App& app, auto& e) { e.consumed = app.handleKeyReleased(e) || e.consumed; });
     bind(events_.mousePressed, [](App& app, auto& e) { e.consumed = app.handleMousePressed(e) || e.consumed; });
@@ -570,7 +581,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     bind(events_.touchReleased, [](App& app, auto& e) { app.touchReleased(e); });
     bind(events_.windowResized, [](App& app, auto& e) { app.handleWindowResized(e.width, e.height); });
     bind(events_.focusChanged, [](App& app, auto& e) { app.windowFocusChanged(e.focused); });
-    bind(events_.filesDropped, [](App& app, auto& e) { app.filesDropped(e.files); });
+    bind(events_.filesDropped, [](App& app, auto& e) { app.filesDropped(e); });
 }
 
 inline void Window::endApp() noexcept {
@@ -657,7 +668,7 @@ inline Window::~Window() {
 inline void Window::close() {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
     if (internal::codeCloseExitsRuntime(*this)) return;
-    closeRequested_ = true;
+    internal::WindowRequestAccess::acceptCodeQuit(*this);
     if (binding_.handle.id) sapp_tc_window_request_close(binding_.handle);
     // Surface-only hosts drain this request at the outer host boundary.
 }
@@ -665,7 +676,7 @@ inline void Window::teardown() noexcept {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || exitDelivered_) return;
     auto keepAlive = hostOwner_.lock();
     exitDelivered_ = true;
-    closeRequested_ = true;
+    internal::WindowRequestAccess::acceptCodeQuit(*this);
     internal::WindowLifecycleScope lifecycle(*this);
     internal::TeardownSteps steps;
     auto* previous = internal::currentWindowCtx();
@@ -836,6 +847,10 @@ inline void Window::setPosition(int x, int y) {
     control(internal::WindowControl::Position, x, y, nullptr, internal::WindowGeometryCall::WindowPosition);
 }
 inline IVec2 Window::getPosition() const {
+    if (!isOpen()) {
+        logWarning("Platform") << "Window::getPosition() requires an open window; returning (-1, -1)";
+        return {-1, -1};
+    }
     return const_cast<Window*>(this)->control(internal::WindowControl::PositionQuery);
 }
 inline void Window::setFullscreen(bool full) {

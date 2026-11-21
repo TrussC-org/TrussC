@@ -345,6 +345,10 @@ bool onMouseDrag  (const MouseDragEventArgs& e) override; // + .delta + .button
 bool onMouseScroll(const ScrollEventArgs& e) override;    // .scroll
 ```
 
+Key, mouse, scroll and touch arguments include `injected` (false for input
+from a device) and `sourceTag` (empty for input from a device). `Window::injectInput` sets
+`injected = true` and the supplied tag; MCP input uses `"mcp"`.
+
 One struct per event kind (no meaningless fields); `button` is an `int`
 (compare with `MOUSE_BUTTON_*`). The legacy scalar mirrors
 (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY`) remain for source
@@ -755,7 +759,7 @@ Runtime strongly owns every open Window. Releasing the last external shared hand
 
 Construct content with `window->setApp<Scene>(args...)`, or use `runApp<T>()` / `runHeadlessApp<T>()` to launch an App. Runtime owns the App attachments as well as the Windows. Each construction has its own owner token from before the derived constructor begins; nested construction restores the previous owner. Constructor-owned listeners, tools and completions belong to that candidate. A failed construction or a superseded unpublished candidate retires its registrations without calling setup, exit or cleanup. Direct construction and attaching an existing shared App are rejected. An App must not contain another App as a member or an additional base class. Factories bypass class-specific allocation overrides. `destroyApp()` leaves the Window empty; replacement preserves its event slots, settings and clock.
 
-Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, deliver exit once, disconnect audio and wait, clean up the tree (children first, then the App), then retire subscriptions, tools, completions and weak references. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
+Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, remove ordinary listeners registered by the App, deliver exit once, disconnect audio and wait, clean up the tree (children first, then the App), then retire the remaining subscriptions, tools, completions and weak references. Exit listeners and addons' protected teardown hooks still run during the exit notification. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
 
 Runtime also owns OS session query/commit. Win32 uses a hidden top-level control HWND that outlives user windows; macOS forwards applicationShouldTerminate and NSWorkspaceWillPowerOff on the main queue. Busy means host/App code on the main stack, including native startup, constructor, callback and tick probes; workers alone do not count. Idle queries reuse Runtime-first exitRequested; busy queries accept without entering App callbacks. Commit is unvetoable and deduplicated. Busy commit invokes no App exit or cleanup and arms no watchdog. Windows returns from WM_ENDSESSION and lets the OS end the process; macOS calls _exit(0) before NSTerminateNow. Idle commit runs normal reverse ending and complete cleanup synchronously, closes the Logger file sink, flushes stdio, then calls std::exit with the application exit code on Windows and macOS. Like ordinary exit, it runs atexit handlers and C++ static destructors. Busy and OS-killed ends skip them; neither session path returns to frames.
 
@@ -785,9 +789,25 @@ Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window 
 
 Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Windowed and headless Apps share the update and cleanup tree entries: children, Mods, timers and destroyed-child removal run in both. Each scheduled update uses the same fixed-step and update-time scope. Drawing and hover updates are window-only; headless keeps its fixed rate, bounded catch-up and quit checks between steps.
 
-App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
+App audio callbacks attach after the first setup completes. Ending detaches the Window/root and removes ordinary listeners registered by the App before the exit notification. Exit listeners and addons' protected teardown hooks still run during that notification, around `App::exit()`. Ending then disconnects this App's audio callbacks and waits for callbacks already running, calls cleanup and retires its remaining owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
-Guest retirement cancels registered callbacks and releases their captures. Queued main-thread copies check owner liveness at execution and retain captures until the queue destroys them. Every successfully loaded module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
+Put shutdown work in `App::exit()` rather than relying on ordinary event listeners there:
+
+```cpp
+void tcApp::exit() {
+    logNotice() << "App stopped";
+}
+```
+
+App retirement cancels registered Event callbacks, including callbacks in outstanding synchronous snapshots and queued Main deliveries. Their captures remain alive until every retaining snapshot and queue item is released. Cancellation therefore does not imply immediate capture destruction. Release resources explicitly in the App's `cleanup()` instead of relying on a callback capture's destructor at retirement. For an App with a `Texture texture` member:
+
+```cpp
+void cleanup() override {
+    texture.clear();
+}
+```
+
+Queued Main deliveries check App liveness again before execution. Every successfully loaded guest module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
 
 Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
 
