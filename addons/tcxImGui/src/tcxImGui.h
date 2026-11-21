@@ -117,6 +117,7 @@ private:
     tc::EventListener mouseMoveConsume_;
     tc::EventListener mouseScrollConsume_;
     tc::EventListener keyPressConsume_;
+    tc::EventListener charConsume_;
     tc::EventListener keyReleaseConsume_;
 };
 

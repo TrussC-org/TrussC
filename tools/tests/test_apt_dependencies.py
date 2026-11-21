@@ -159,7 +159,16 @@ if args[0] == 'timeout':
     assert args[2] == '300s'
     sys.exit(int(os.environ['INSTALL_STATUS']))
 ''')
+                    # A runner-image Microsoft source is moved aside; Ubuntu sources stay.
+                    sources = directory / 'sources.list.d'
+                    sources.mkdir()
+                    (sources / 'microsoft-prod.list').write_text(
+                        'deb [arch=amd64] https://packages.microsoft.com/ubuntu/26.04/prod resolute main\n',
+                        encoding='utf-8')
+                    (sources / 'ubuntu.sources').write_text(
+                        'Types: deb\nURIs: http://azure.archive.ubuntu.com/ubuntu/\n', encoding='utf-8')
                     env = dict(os.environ, PATH=f'{directory}:{os.environ["PATH"]}',
+                               APT_SOURCES_DIR=str(sources),
                                HOME=scratch, APT_TEST_ROOT=scratch, FAILURES=str(failures),
                                INSTALL_STATUS=str(install_status), APT_PACKAGES='one\ntwo',
                                EXTRA_APT_PACKAGES='extra-one\nextra-two')
@@ -167,6 +176,10 @@ if args[0] == 'timeout':
                                             cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
                     self.assertEqual(result.returncode, expected, result.stderr)
                     calls = [json.loads(line) for line in (directory / 'calls').read_text(encoding="utf-8").splitlines()]
+                    moves = [c for c in calls if c[0] == 'mv']
+                    self.assertEqual(moves, [['mv', str(sources / 'microsoft-prod.list'), f'{sources}.disabled/']])
+                    self.assertLess(calls.index(moves[0]),
+                                    next(i for i, c in enumerate(calls) if c[-1] == 'update'))
                     self.assertEqual(int((directory / 'count').read_text(encoding="utf-8")), update_calls)
                     config = (directory / 'config').read_text(encoding="utf-8")
                     for option in ('Retries "3"', 'http::Timeout "30"',

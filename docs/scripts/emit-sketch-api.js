@@ -72,7 +72,7 @@ function snippetOf(name, args) {
 // form that is still recommended.
 function firstBindableSig(e) {
     for (const sig of (e.signatures || [])) {
-        if (sig.tmpl || sig.deprecated) continue;
+        if (sig.tmpl || sig.deprecated || sig.lua_skip) continue;
         const args = sig.args || [];
         if (args.every(argBindable)) return { sig, args };
     }

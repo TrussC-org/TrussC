@@ -57,6 +57,7 @@ static void cover_file() {
     (void)listDirectory(af::val<const fs::path>());
     (void)loadErrorName(af::val<LoadError>());
     (void)loadJson(af::val<const fs::path>());
+    (void)loadJson(af::val<const fs::path>(), af::val<Json>());
     (void)loadTextFile(af::val<const fs::path>());
     (void)loadXml(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
@@ -240,11 +241,12 @@ static void cover_graphics_shapes() {
     (void)getBitmapFontHeight();
     (void)getBitmapLineHeight();
     (void)getBitmapStringBBox(af::val<const std::string>());
-    (void)getBitmapStringBounds(af::val<const std::string>(), af::val<float>(), af::val<float>());
     (void)getBitmapStringHeight(af::val<const std::string>());
     (void)getBitmapStringWidth(af::val<const std::string>());
     (void)getTextAlignH();
     (void)getTextAlignV();
+    (void)scopedShape(af::val<bool>());
+    (void)scopedStroke(af::val<bool>());
     (void)setBitmapLineHeight(af::val<float>());
     (void)setFps(af::val<float>());
     (void)setTextAlign(af::val<Direction>(), af::val<Direction>());
@@ -668,6 +670,7 @@ static void cover_utility() {
     (void)logWarning(af::val<const std::string>());
     (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
     (void)parseJson(af::val<const std::string>());
+    (void)parseJson(af::val<const std::string>(), af::val<Json>());
     (void)parseXml(af::val<const std::string>());
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());
@@ -836,12 +839,14 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().cancelAsyncTimer(af::val<uint64_t>());
 #endif
         (void)af::val<App>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<App>().charInput(af::val<const CharEventArgs>());
         (void)af::val<App>().cleanup();
         (void)af::val<App>().destroy();
         (void)af::val<App>().disableEvents();
         (void)af::val<App>().draw();
         (void)af::val<App>().enableEvents();
         (void)af::val<App>().exit();
+        (void)af::val<App>().filesDropped(af::val<const DragDropEventArgs>());
         (void)af::val<App>().filesDropped(af::val<const std::vector<std::string>>());
         (void)af::val<App>().findByInstanceId(af::val<uint64_t>());
         (void)af::val<App>().findHitNode(af::val<const Ray>());
@@ -1150,6 +1155,21 @@ struct Cover_CameraContext : af::Scope<CameraContext> {
     }
 };
 
+struct Cover_CharEventArgs : af::Scope<CharEventArgs> {
+    ~Cover_CharEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<CharEventArgs>().alt;
+        (void)af::val<CharEventArgs>().codepoint;
+        (void)af::val<CharEventArgs>().consumed;
+        (void)af::val<CharEventArgs>().ctrl;
+        (void)af::val<CharEventArgs>().injected;
+        (void)af::val<CharEventArgs>().isRepeat;
+        (void)af::val<CharEventArgs>().shift;
+        (void)af::val<CharEventArgs>().sourceTag;
+        (void)af::val<CharEventArgs>().super;
+    }
+};
+
 struct Cover_ChipSoundBundle : af::Scope<ChipSoundBundle> {
     ~Cover_ChipSoundBundle(); // Never instantiated.
     static void run() {
@@ -1360,6 +1380,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
     static void run() {
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().backPressed;
+        (void)af::val<CoreEvents>().charInput;
         (void)af::val<CoreEvents>().clipboardPasted;
         (void)af::val<CoreEvents>().closeRequested;
         (void)af::val<CoreEvents>().deviceLost;
@@ -1547,14 +1568,18 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().lifetimeToken();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixels(af::val<unsigned char *>());
+        (void)af::val<const Fbo>().readPixels(af::val<Pixels>());
 #endif
 #if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
+        (void)af::val<const Fbo>().readPixelsFloat(af::val<Pixels>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readStencil(af::val<Pixels>());
 #endif
         (void)af::val<const Fbo>().save(af::val<const fs::path>());
+        (void)af::val<Fbo>().scoped();
+        (void)af::val<Fbo>().scoped(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
         (void)af::val<Fbo>().setFilter(af::val<TextureFilter>());
         (void)af::val<Fbo>().setMagFilter(af::val<TextureFilter>());
@@ -1724,6 +1749,7 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
         (void)af::val<FullscreenShader>().end();
         (void)af::val<const FullscreenShader>().isLoaded();
         (void)af::val<FullscreenShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<FullscreenShader>().scoped();
         (void)af::val<FullscreenShader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
@@ -1751,6 +1777,9 @@ struct Cover_GlyphBatch : af::Scope<GlyphBatch> {
         (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<float>(), af::val<float>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Mat4>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().clear();
         (void)af::val<GlyphBatch>().draw();
         (void)af::val<GlyphBatch>().draw(af::val<const Mat4>());
@@ -1928,6 +1957,39 @@ struct Cover_Image : af::Scope<Image> {
     }
 };
 
+struct Cover_InputEvent : af::Scope<InputEvent> {
+    ~Cover_InputEvent(); // Never instantiated.
+    static void run() {
+        (void)af::val<InputEvent>().charInput(af::val<uint32_t>(), af::val<InputModifiers>(), af::val<bool>());
+        (void)af::val<InputEvent>().charInput(af::val<const CharEventArgs>());
+        (void)af::val<InputEvent>().filesDropped(af::val<std::vector<std::string>>(), af::val<Vec2>());
+        (void)af::val<InputEvent>().filesDropped(af::val<const DragDropEventArgs>());
+        (void)af::val<InputEvent>().keyPressed(af::val<int>(), af::val<InputModifiers>(), af::val<bool>());
+        (void)af::val<InputEvent>().keyPressed(af::val<const KeyEventArgs>());
+        (void)af::val<InputEvent>().keyReleased(af::val<int>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().keyReleased(af::val<const KeyEventArgs>());
+        (void)af::val<InputEvent>().mouseMoved(af::val<Vec2>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().mousePressed(af::val<Vec2>(), af::val<MouseButton>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().mousePressed(af::val<const MouseEventArgs>());
+        (void)af::val<InputEvent>().mouseReleased(af::val<Vec2>(), af::val<MouseButton>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().mouseReleased(af::val<const MouseEventArgs>());
+        (void)af::val<InputEvent>().mouseScrolled(af::val<Vec2>(), af::val<InputModifiers>());
+        (void)af::val<InputEvent>().touchMoved(af::val<const TouchEventArgs>());
+        (void)af::val<InputEvent>().touchPressed(af::val<const TouchEventArgs>());
+        (void)af::val<InputEvent>().touchReleased(af::val<const TouchEventArgs>());
+    }
+};
+
+struct Cover_InputModifiers : af::Scope<InputModifiers> {
+    ~Cover_InputModifiers(); // Never instantiated.
+    static void run() {
+        (void)af::val<InputModifiers>().alt;
+        (void)af::val<InputModifiers>().ctrl;
+        (void)af::val<InputModifiers>().shift;
+        (void)af::val<InputModifiers>().super;
+    }
+};
+
 struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
     ~Cover_JsonReadReflector(); // Never instantiated.
     static void run() {
@@ -1988,9 +2050,11 @@ struct Cover_KeyEventArgs : af::Scope<KeyEventArgs> {
         (void)af::val<KeyEventArgs>().alt;
         (void)af::val<KeyEventArgs>().consumed;
         (void)af::val<KeyEventArgs>().ctrl;
+        (void)af::val<KeyEventArgs>().injected;
         (void)af::val<KeyEventArgs>().isRepeat;
         (void)af::val<KeyEventArgs>().key;
         (void)af::val<KeyEventArgs>().shift;
+        (void)af::val<KeyEventArgs>().sourceTag;
         (void)af::val<KeyEventArgs>().super;
     }
 };
@@ -2388,8 +2452,10 @@ struct Cover_MouseDragEventArgs : af::Scope<MouseDragEventArgs> {
         (void)af::val<MouseDragEventArgs>().deltaY;
         (void)af::val<MouseDragEventArgs>().globalDelta;
         (void)af::val<MouseDragEventArgs>().globalPos;
+        (void)af::val<MouseDragEventArgs>().injected;
         (void)af::val<MouseDragEventArgs>().pos;
         (void)af::val<MouseDragEventArgs>().shift;
+        (void)af::val<MouseDragEventArgs>().sourceTag;
         (void)af::val<MouseDragEventArgs>().super;
         (void)af::val<MouseDragEventArgs>().syncLegacy();
         (void)af::val<MouseDragEventArgs>().x;
@@ -2405,8 +2471,10 @@ struct Cover_MouseEventArgs : af::Scope<MouseEventArgs> {
         (void)af::val<MouseEventArgs>().consumed;
         (void)af::val<MouseEventArgs>().ctrl;
         (void)af::val<MouseEventArgs>().globalPos;
+        (void)af::val<MouseEventArgs>().injected;
         (void)af::val<MouseEventArgs>().pos;
         (void)af::val<MouseEventArgs>().shift;
+        (void)af::val<MouseEventArgs>().sourceTag;
         (void)af::val<MouseEventArgs>().super;
         (void)af::val<MouseEventArgs>().syncLegacy();
         (void)af::val<MouseEventArgs>().x;
@@ -2425,8 +2493,10 @@ struct Cover_MouseMoveEventArgs : af::Scope<MouseMoveEventArgs> {
         (void)af::val<MouseMoveEventArgs>().deltaY;
         (void)af::val<MouseMoveEventArgs>().globalDelta;
         (void)af::val<MouseMoveEventArgs>().globalPos;
+        (void)af::val<MouseMoveEventArgs>().injected;
         (void)af::val<MouseMoveEventArgs>().pos;
         (void)af::val<MouseMoveEventArgs>().shift;
+        (void)af::val<MouseMoveEventArgs>().sourceTag;
         (void)af::val<MouseMoveEventArgs>().super;
         (void)af::val<MouseMoveEventArgs>().syncLegacy();
         (void)af::val<MouseMoveEventArgs>().x;
@@ -3559,11 +3629,13 @@ struct Cover_ScrollEventArgs : af::Scope<ScrollEventArgs> {
         (void)af::val<ScrollEventArgs>().consumed;
         (void)af::val<ScrollEventArgs>().ctrl;
         (void)af::val<ScrollEventArgs>().globalPos;
+        (void)af::val<ScrollEventArgs>().injected;
         (void)af::val<ScrollEventArgs>().pos;
         (void)af::val<ScrollEventArgs>().scroll;
         (void)af::val<ScrollEventArgs>().scrollX;
         (void)af::val<ScrollEventArgs>().scrollY;
         (void)af::val<ScrollEventArgs>().shift;
+        (void)af::val<ScrollEventArgs>().sourceTag;
         (void)af::val<ScrollEventArgs>().super;
         (void)af::val<ScrollEventArgs>().syncLegacy();
     }
@@ -3667,6 +3739,7 @@ struct Cover_Shader : af::Scope<Shader> {
         (void)af::val<Shader>().end();
         (void)af::val<const Shader>().isLoaded();
         (void)af::val<Shader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<Shader>().scoped();
         (void)af::val<Shader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
@@ -4220,7 +4293,9 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
     static void run() {
         (void)af::val<TouchEventArgs>().cancelled;
         (void)af::val<const TouchEventArgs>().id();
+        (void)af::val<TouchEventArgs>().injected;
         (void)af::val<TouchEventArgs>().numTouches;
+        (void)af::val<TouchEventArgs>().sourceTag;
         (void)af::val<TouchEventArgs>().touches;
         (void)af::val<const TouchEventArgs>().x();
         (void)af::val<const TouchEventArgs>().y();
@@ -4765,6 +4840,9 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<const VideoPlayer>().getCurrentTime();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getDecodeThreads();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoPlayer>().getDuration();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4912,6 +4990,9 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().setCurrentTime(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setDecodeThreads(af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().setFilter(af::val<TextureFilter>());
@@ -5132,6 +5213,7 @@ struct Cover_Window : af::Scope<Window> {
 #endif
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
+        (void)af::val<Window>().injectInput(af::val<const InputEvent>(), af::val<const std::string>());
         (void)af::val<const Window>().isFocused();
         (void)af::val<const Window>().isFullscreen();
         (void)af::val<const Window>().isOccluded();
@@ -5333,6 +5415,7 @@ void af::coverGenerated() {
     af_generated::Cover_BlendDesc__Component::run();
     af_generated::Cover_BuildInfo::run();
     af_generated::Cover_CameraContext::run();
+    af_generated::Cover_CharEventArgs::run();
     af_generated::Cover_ChipSoundBundle::run();
     af_generated::Cover_ChipSoundBundle__Entry::run();
     af_generated::Cover_ChipSoundNote::run();
@@ -5374,6 +5457,8 @@ void af::coverGenerated() {
     af_generated::Cover_IVec3::run();
     af_generated::Cover_IesProfile::run();
     af_generated::Cover_Image::run();
+    af_generated::Cover_InputEvent::run();
+    af_generated::Cover_InputModifiers::run();
     af_generated::Cover_JsonReadReflector::run();
     af_generated::Cover_JsonWriteReflector::run();
     af_generated::Cover_KeyEventArgs::run();

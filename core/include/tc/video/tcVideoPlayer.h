@@ -114,6 +114,7 @@ public:
             prepared.loop_ = loop_;
             prepared.autoPoster_ = autoPoster_;
             prepared.audioStreaming_ = audioStreaming_;
+            prepared.decodeThreads_ = decodeThreads_;
             moveFrom(std::move(prepared));
             applyCachedStateToPlatform();
 #else
@@ -478,6 +479,20 @@ public:
         return useHwAccel_;
     }
 
+    /// Set decode threads for both hardware and software decoding.
+    /// Must be called **before** load(). Default: 0 (FFmpeg's automatic choice).
+    /// Changes after load() take effect at the next load(); fallback keeps the loaded value.
+    /// Negative values are clamped to 0.
+    /// Currently only affects the Linux backend.
+    void setDecodeThreads(int count) {
+        decodeThreads_ = count < 0 ? 0 : count;
+    }
+
+    /// Get the decode thread preference (not the active decoder's thread count).
+    int getDecodeThreads() const {
+        return decodeThreads_;
+    }
+
     // =========================================================================
     // Pixel access
     // =========================================================================
@@ -608,6 +623,7 @@ private:
 
     // HW decode preference (default on; Linux backend honors this)
     bool useHwAccel_ = true;
+    int decodeThreads_ = 0;
     bool audioStreaming_ = true;
     int rotationDeg_ = 0;
 
@@ -655,6 +671,7 @@ private:
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         audioStreaming_ = other.audioStreaming_;
+        decodeThreads_ = other.decodeThreads_;
         rotationDeg_ = other.rotationDeg_;
         other.rotationDeg_ = 0;
         platformHandle_  = other.platformHandle_;
@@ -741,7 +758,11 @@ private:
     // -------------------------------------------------------------------------
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
+#if defined(__linux__) && !defined(__ANDROID__)
+    bool loadPlatform(const fs::path& path, bool createShader = true);
+#else
     bool loadPlatform(const fs::path& path);
+#endif
 #ifdef __APPLE__
     static void prepareAsyncPlatform(const std::shared_ptr<AsyncState>& state);
     bool loadPreparedPlatform(const fs::path& path, void* asset);
@@ -927,9 +948,9 @@ public:
 #if defined(__linux__) && !defined(__ANDROID__)
     // Exercise the real Linux decoder/clock in headless regression tests,
     // without creating textures or uploading frames to a GPU.
-    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
-        player.setUseHwAccel(false);
-        if (!player.loadPlatform(path)) {
+    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path, bool useHwAccel = false) {
+        player.setUseHwAccel(useHwAccel);
+        if (!player.loadPlatform(path, false)) {
             if (player.decodeStatus_) player.decodeStatus_->warn();
             return false;
         }
@@ -945,6 +966,17 @@ public:
         player.dispatchPlaybackError();
         player.done_ = !player.hasError() && player.isFinishedPlatform();
     }
+    static void decodedBackendForTests(VideoPlayer& player, int format, bool framesContext, bool newLoad);
+    static int decodeThreadsForTests(const VideoPlayer& player);
+    struct PlaybackSnapshot {
+        double presentedPts, decodedPts, seekTarget, clockPts;
+        uint64_t seeks;
+        size_t queued;
+        bool presented, finished, seekPending;
+        double startTimeShift;
+    };
+    static PlaybackSnapshot stepPlaybackForTests(VideoPlayer& player, double clock, int decodeSteps,
+                                                 bool preparePlayback = false);
     static void stopAudioForTests(VideoPlayer& player);
     // Synthetic planes exercise VideoPlayer::draw -> drawNV12Platform without a
     // decoder/device. The supplied shader is borrowed only for this draw.

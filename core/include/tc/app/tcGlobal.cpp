@@ -1301,6 +1301,8 @@ void internal::endGpuFrame() {
     }
 
     sg_commit();
+    if (internal::textureUploadStaging)
+        internal::textureUploadStaging->retireIdle(internal::deviceFrameCount());
     // Only the committing owner completes immediate CPU work. Raw draws keep
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;

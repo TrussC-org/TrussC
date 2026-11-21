@@ -62,7 +62,7 @@ void ImGuiManager::setup(int initialVertices) {
     // capture follows the press: a gesture imgui claims on press stays
     // imgui's until release, so a drag begun on the canvas is never stolen
     // mid-way, and a press over a panel owns the whole gesture. Move/scroll
-    // and keys are stateless — consumed whenever imgui wants them.
+    // and keyboard input are stateless — consumed whenever imgui wants them.
     // Only while imgui is being drawn (see uiLive_): a panel the app stopped
     // drawing (closed, toggled off) must not keep swallowing input.
     mousePressConsume_ = tc::events().mousePressed.listen([this](tc::MouseEventArgs& e) {
@@ -79,6 +79,9 @@ void ImGuiManager::setup(int initialVertices) {
     }, -20);
     mouseScrollConsume_ = tc::events().mouseScrolled.listen([this](tc::ScrollEventArgs& e) {
         if (wantsMouse_()) e.consumed = true;
+    }, -20);
+    charConsume_ = tc::events().charInput.listen([this](tc::CharEventArgs& e) {
+        if (wantsKeyboard_()) e.consumed = true;
     }, -20);
     keyPressConsume_ = tc::events().keyPressed.listen([this](tc::KeyEventArgs& e) {
         if (wantsKeyboard_()) e.consumed = true;
@@ -114,6 +117,7 @@ void ImGuiManager::shutdown() {
     mouseMoveConsume_ = {};
     mouseScrollConsume_ = {};
     keyPressConsume_ = {};
+    charConsume_ = {};
     keyReleaseConsume_ = {};
     // The overlay queries are shared across windows and resolve per window
     // through the manager registry — they stay installed (no-op for

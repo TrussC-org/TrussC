@@ -445,7 +445,7 @@ struct InputTarget {
             ~PressOwnerScope() { ctx.pendingMousePressOwner = previous; }
         } ownerScope{ctx, ctx.pendingMousePressOwner};
         ctx.pendingMousePressOwner = pressOwner;
-        const bool delivered = trussc::internal::injectWindowEvent(window, &event, heldButtonSnapshot);
+        const bool delivered = trussc::internal::injectWindowEvent(window, &event, heldButtonSnapshot, "mcp");
         if (!delivered) throw InputArgumentError("target window rejected input");
     }
     void key(int key, bool down) {

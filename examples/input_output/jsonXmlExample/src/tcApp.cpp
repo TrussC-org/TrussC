@@ -75,8 +75,8 @@ void tcApp::testJson() {
     }
 
     // Load from file
-    Json loaded = loadJson(path);
-    if (!loaded.empty()) {
+    Json loaded;
+    if (loadJson(path, loaded)) {
         addMessage("Loaded back:");
         addMessage("  name: " + loaded["name"].get<string>());
         addMessage("  version: " + to_string(loaded["version"].get<double>()));

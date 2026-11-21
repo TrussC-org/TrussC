@@ -18,6 +18,7 @@ extern "C" {
 #include <libavutil/time.h>
 #include <libavutil/opt.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/pixdesc.h>
 }
 
 #include "tcVideoDecodeFFmpeg.h"
@@ -53,6 +54,10 @@ static AVHWDeviceType tryCreateHwDevice(AVBufferRef** outCtx) {
         }
     }
     return AV_HWDEVICE_TYPE_NONE;
+}
+
+namespace trussc::internal {
+    double videoPauseClockDriftForTests(VideoPlayer& player, double pausedSeconds);
 }
 
 // =============================================================================
@@ -101,12 +106,14 @@ public:
     int getAudioChannels() const { return audioChannels_; }
     std::vector<uint8_t> getAudioData() const;
 
-    bool        isUsingHwAccel() const { return hwType_ != AV_HWDEVICE_TYPE_NONE; }
+    bool        isUsingHwAccel() const { return hwType_ != AV_HWDEVICE_TYPE_NONE && !decodedInSoftware_; }
     std::string getHwAccelName() const {
-        if (hwType_ == AV_HWDEVICE_TYPE_NONE) return "software";
+        if (!isUsingHwAccel()) return "software";
         const char* n = av_hwdevice_get_type_name(hwType_);
         return n ? n : "unknown";
     }
+
+    int decodeThreads() const { return codecCtx_ ? codecCtx_->thread_count : 0; }
 
     Sound audioSound_;
     std::shared_ptr<SoundBuffer> audioBuffer_;
@@ -117,7 +124,13 @@ private:
 public:
     std::shared_ptr<internal::VideoDecodeStatus> status() const { return status_; }
 private:
+    friend class trussc::internal::VideoPlayerPlatformAccess;
+    friend double trussc::internal::videoPauseClockDriftForTests(VideoPlayer&, double);
+    double preparePlayback();
     void decodeThread();
+    void decodeStep(double clock, float threshold);
+    void presentDueFrames(VideoPlayer* player, double targetPts);
+    bool seekDecoder(int64_t timestamp);
     bool decodeNextFrame();
     internal::VideoErrorQueue playbackErrors_;
     // Both decode paths share a per-player status. Only the decoder accesses
@@ -143,11 +156,14 @@ private:
         else playbackErrors_.report(std::string(operation) + ": " + message, code);
     }
     void seekToTime(double seconds);
+    void requestSeek(double seconds); // mutex_ held; also resets the decode clock anchor.
     bool probeHwOutputFormat();
+    void confirmDecodedBackend(const AVFrame* frame);
 
     // FFmpeg context
     AVFormatContext* formatCtx_ = nullptr;
     AVCodecContext* codecCtx_ = nullptr;
+    int decodeThreads_ = 0; // Snapshot at load; also used when reopening in software.
     SwsContext* swsCtx_ = nullptr;
     AVFrame* frame_ = nullptr;
     AVPacket* packet_ = nullptr;
@@ -157,6 +173,8 @@ private:
     bool packetPending_ = false;
     AVBufferRef*   hwDeviceCtx_   = nullptr;
     AVHWDeviceType hwType_        = AV_HWDEVICE_TYPE_NONE;
+    std::atomic<bool> decodedInSoftware_{false}; // Published to reporting queries.
+    bool decodedBackendChecked_ = false; // Decoder only; reset for each load.
     AVPixelFormat  lastScalerFmt_ = AV_PIX_FMT_NONE;
     // Filled by probeHwOutputFormat() after opening the codec. For HW decode
     // this is the format the first transferred frame actually produced (e.g.
@@ -214,6 +232,12 @@ private:
 
     // Timing
     double currentPts_ = 0.0;
+    std::atomic<uint64_t> seekCount_{0};
+    double decodedPts_ = 0.0; // Decoder position, independent of the displayed frame.
+    double clockPts_ = 0.0;
+    double clockSampleTime_ = 0.0;
+    float resyncThreshold_ = 0.5f;
+    float clockRate_ = 1.0f;
     double playbackStartTime_ = 0.0;
     double pausedTime_ = 0.0;
 
@@ -235,6 +259,7 @@ public:
 
 bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     filePath_ = path;
+    decodeThreads_ = player ? player->getDecodeThreads() : 0;
 
     // Open file
     if (!internal::openVideoInput(&formatCtx_, path.c_str(), *status_)) {
@@ -328,7 +353,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     }
 
 
-    internal::configureVideoCodec(codecCtx_);
+    internal::configureVideoCodec(codecCtx_, decodeThreads_);
 
     // Open codec (fallback to SW on HW open failure)
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
@@ -336,7 +361,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
             logWarning("VideoPlayer") << "HW codec open failed, falling back to SW";
         }
         if (hwType_ == AV_HWDEVICE_TYPE_NONE ||
-            !internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_, codecPar)) {
+            !internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_, codecPar, decodeThreads_)) {
             logError("VideoPlayer") << "Failed to open codec";
             avcodec_free_context(&codecCtx_);
             avformat_close_input(&formatCtx_);
@@ -434,6 +459,8 @@ void TCVideoPlayerImpl::close() {
         hwDeviceCtx_ = nullptr;
     }
     hwType_        = AV_HWDEVICE_TYPE_NONE;
+    decodedBackendChecked_ = false;
+    decodedInSoftware_ = false;
     lastScalerFmt_ = AV_PIX_FMT_NONE;
 
     if (packet_) {
@@ -479,33 +506,36 @@ void TCVideoPlayerImpl::close() {
     filePath_.clear();
 }
 
-void TCVideoPlayerImpl::play() {
-    if (!isLoaded_) return;
-
-    // Reset state
+double TCVideoPlayerImpl::preparePlayback() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Keep a manual seek's requested clock even before its first image arrives.
+    // A completed player restarts at zero without relabeling its last image.
+    if (isFinished_ && !isPlaying_ && !seekRequested_) requestSeek(0.0);
     isFinished_ = false;
     shouldStop_ = false;
+    double now = av_gettime_relative() / 1000000.0;
+    playbackStartTime_ = now - clockPts_;
+    clockSampleTime_ = now;
+    return clockPts_;
+}
 
-    // Seek to beginning if finished
-    if (currentPts_ >= duration_ - 0.1) {
-        seekToTime(0.0);
-    }
+void TCVideoPlayerImpl::play() {
+    if (!isLoaded_) return;
+    double startPts = preparePlayback();
 
-    // Start decode thread if not running
     if (!decodeThread_.joinable()) {
         decodeThread_ = std::thread(&TCVideoPlayerImpl::decodeThread, this);
     }
 
-    playbackStartTime_ = av_gettime_relative() / 1000000.0 - currentPts_;
     isPlaying_ = true;
     isPaused_ = false;
     cv_.notify_all();
 
     if (audioSound_.isLoaded()) {
         audioSound_.play();
-        audioSound_.setPosition(static_cast<float>(currentPts_));
+        audioSound_.setPosition(static_cast<float>(startPts));
         audioSound_.setVolume(volume_);
-        lastAudioPts_ = currentPts_;
+        lastAudioPts_ = startPts;
     }
 }
 
@@ -529,6 +559,7 @@ void TCVideoPlayerImpl::stop() {
 }
 
 void TCVideoPlayerImpl::setPaused(bool paused) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (paused && !isPaused_) {
         // Pause: record current time
         pausedTime_ = av_gettime_relative() / 1000000.0;
@@ -537,6 +568,7 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
         // Resume: adjust start time
         double pauseDuration = av_gettime_relative() / 1000000.0 - pausedTime_;
         playbackStartTime_ += pauseDuration;
+        clockSampleTime_ += pauseDuration;
         isPaused_ = false;
         cv_.notify_all();
     }
@@ -564,7 +596,8 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     // Target PTS: use audio as master clock when available (no drift).
     // Fall back to wall clock when audio is absent or its voice has stopped.
     double targetPts;
-    if (audioSound_.isPlaying()) {
+    const bool audioPlaying = audioSound_.isPlaying();
+    if (audioPlaying) {
         targetPts = audioSound_.getPosition();
         // Keep a wall-clock anchor ready in case the audio voice stops.
         if (speed_ > 0.0f)
@@ -572,7 +605,7 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
         // The stream worker pre-fills across EOF; eager voices wrap in the
         // mixer. Follow their clock without resetting audio at video EOF.
         if (isLoop_ && targetPts < lastAudioPts_) {
-            seekToTime(targetPts);
+            requestSeek(targetPts);
             isFinished_ = false;
             lastAudioPts_ = targetPts;
             return;
@@ -580,50 +613,46 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
         lastAudioPts_ = targetPts;
     } else {
         double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
-        targetPts = elapsed * speed_;
+        targetPts = speed_ == 0.0f ? clockPts_ : elapsed * speed_;
     }
 
-    // Hard re-sync if drift exceeds threshold (e.g. window backgrounded on
-    // Wayland — compositor throttles frame callbacks while audio keeps
-    // playing; CPU spikes; decode stalls). Seeking is far cheaper than
-    // decoding every intermediate frame to catch up.
-    // Threshold configurable via VideoPlayer::setResyncThreshold();
-    // <= 0 disables the check.
-    float resyncThreshold = player ? player->getResyncThreshold() : 0.5f;
-    if (resyncThreshold > 0.0f &&
-        std::abs(targetPts - currentPts_) > resyncThreshold) {
-        seekToTime(targetPts);
-        return;  // next update() will pick up freshly decoded frames
+    // Publish the selected clock to the decoder. It advances this anchor
+    // between display polls, including when the display thread is busy.
+    clockPts_ = targetPts;
+    clockSampleTime_ = av_gettime_relative() / 1000000.0;
+    resyncThreshold_ = player ? player->getResyncThreshold() : 0.5f;
+    clockRate_ = audioPlaying ? 1.0f : speed_;
+    presentDueFrames(player, targetPts);
+}
+
+void TCVideoPlayerImpl::presentDueFrames(VideoPlayer* player, double targetPts) {
+    // Keep only the newest completed frame that is due. Move its storage,
+    // then copy exactly that frame into the player's presentation buffer.
+    FrameData newest;
+    bool found = false;
+    while (!frameQueue_.empty() && frameQueue_.front().pts <= targetPts) {
+        newest = std::move(frameQueue_.front());
+        frameQueue_.pop();
+        found = true;
     }
-
-    // Get frame from queue if available and PTS is right
-    while (!frameQueue_.empty()) {
-        FrameData& front = frameQueue_.front();
-
-        if (front.pts <= targetPts) {
-            if (player) {
-                if (front.isNV12) {
-                    unsigned char* yBuf  = player->getPixelsY();
-                    unsigned char* uvBuf = player->getPixelsUV();
-                    if (yBuf  && front.pixels.size()   == size_t(encodedWidth_) * encodedHeight_ &&
-                        uvBuf && front.pixelsUV.size() == size_t(encodedWidth_) * encodedHeight_ / 2) {
-                        memcpy(yBuf,  front.pixels.data(),   front.pixels.size());
-                        memcpy(uvBuf, front.pixelsUV.data(), front.pixelsUV.size());
-                        hasNewFrame_ = true;
-                        currentPts_  = front.pts;
-                    }
-                } else {
-                    unsigned char* playerPixels = player->getPixels();
-                    if (playerPixels && front.pixels.size() == size_t(width_) * height_ * 4) {
-                        memcpy(playerPixels, front.pixels.data(), front.pixels.size());
-                        hasNewFrame_ = true;
-                        currentPts_  = front.pts;
-                    }
-                }
+    if (found && player) {
+        if (newest.isNV12) {
+            auto* yBuf = player->getPixelsY();
+            auto* uvBuf = player->getPixelsUV();
+            if (yBuf && uvBuf && newest.pixels.size() == size_t(encodedWidth_) * encodedHeight_ &&
+                newest.pixelsUV.size() == size_t(encodedWidth_) * encodedHeight_ / 2) {
+                memcpy(yBuf, newest.pixels.data(), newest.pixels.size());
+                memcpy(uvBuf, newest.pixelsUV.data(), newest.pixelsUV.size());
+                hasNewFrame_ = true;
+                currentPts_ = newest.pts;
             }
-            frameQueue_.pop();
         } else {
-            break;
+            auto* pixels = player->getPixels();
+            if (pixels && newest.pixels.size() == size_t(width_) * height_ * 4) {
+                memcpy(pixels, newest.pixels.data(), newest.pixels.size());
+                hasNewFrame_ = true;
+                currentPts_ = newest.pts;
+            }
         }
     }
 
@@ -636,7 +665,7 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
                 cv_.notify_all();
                 return;
             }
-            seekToTime(0.0);
+            requestSeek(0.0);
             playbackStartTime_ = av_gettime_relative() / 1000000.0;
             if (audioSound_.isLoaded()) {
                 // Recover a stopped voice at the video loop boundary.
@@ -668,44 +697,110 @@ void TCVideoPlayerImpl::decodeThread() {
 
         if (shouldStop_) break;
 
-        // Handle seek request
+        double clock;
+        float threshold;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            clock = clockPts_ + (av_gettime_relative() / 1000000.0 - clockSampleTime_) * clockRate_;
+            threshold = resyncThreshold_;
+        }
+        decodeStep(clock, threshold);
+    }
+}
+
+bool TCVideoPlayerImpl::seekDecoder(int64_t timestamp) {
+    if (av_seek_frame(formatCtx_, videoStreamIndex_, timestamp, AVSEEK_FLAG_BACKWARD) < 0)
+        return false;
+    ++seekCount_;
+    avcodec_flush_buffers(codecCtx_);
+    decodedBackendChecked_ = false;
+    if (packetPending_) {
+        av_packet_unref(packet_);
+        packetPending_ = false;
+    }
+    decodedPts_ = timestamp * av_q2d(timeBase_);
+    isFinished_ = false;
+    return true;
+}
+
+void TCVideoPlayerImpl::decodeStep(double clock, float threshold) {
+    // Explicit seeks (including loop) may go backward and invalidate the queue.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (seekRequested_) {
             double target = seekTarget_;
             seekRequested_ = false;
-
-            int64_t timestamp = (int64_t)(target / av_q2d(timeBase_));
-            av_seek_frame(formatCtx_, videoStreamIndex_, timestamp, AVSEEK_FLAG_BACKWARD);
-            avcodec_flush_buffers(codecCtx_);
-            isFinished_ = false;
-
-            // Any packet held from a previous EAGAIN is invalidated by the seek.
-            if (packetPending_) {
-                av_packet_unref(packet_);
-                packetPending_ = false;
+            if (seekDecoder(static_cast<int64_t>(target / av_q2d(timeBase_)))) {
+                while (!frameQueue_.empty()) frameQueue_.pop();
             }
-
-            // Clear queue
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                while (!frameQueue_.empty()) {
-                    frameQueue_.pop();
-                }
-            }
-
-            currentPts_ = target;
-            isFinished_ = false;
-            continue;
-        }
-
-        // Decode next frame
-        bool decoded = false;
-        try { decoded = decodeNextFrame(); }
-        catch (const std::exception&) { decodeError("video frame allocation", AVERROR(ENOMEM)); }
-        if (!decoded) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            isFinished_ = true;
+            return;
         }
     }
+
+    // Audio voices own their loop boundary. update() observes their wrap and
+    // requests the video seek; an extrapolated clock must not loop first.
+    bool finishAtEnd = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (duration_ > 0.0 && clock >= duration_) {
+            if (isLoop_ && !audioSound_.isPlaying()) {
+                const double wrapped = std::fmod(clock, duration_);
+                const double skipped = clock - wrapped;
+                if (seekDecoder(static_cast<int64_t>(wrapped / av_q2d(timeBase_)))) {
+                    while (!frameQueue_.empty()) frameQueue_.pop();
+                    playbackStartTime_ += speed_ > 0.0f ? skipped / speed_ : skipped;
+                    clockPts_ -= skipped;
+                    clock = wrapped;
+                }
+            } else if (!isLoop_) {
+                // Decode the final GOP to retain the actual final image,
+                // rather than marking a stale image as the last frame.
+                clock = duration_;
+                finishAtEnd = true;
+            }
+        }
+    }
+
+    // Only jump to an indexed keyframe strictly ahead of decoding and strictly
+    // before the clock. With no such keyframe, keep decoding forward.
+    if (threshold > 0.0f && clock - decodedPts_ > threshold) {
+        AVStream* stream = formatCtx_->streams[videoStreamIndex_];
+        int64_t timestamp = static_cast<int64_t>(std::ceil(clock / av_q2d(timeBase_))) - 1;
+        int index = av_index_search_timestamp(stream, timestamp, AVSEEK_FLAG_BACKWARD);
+        const AVIndexEntry* entry = index >= 0 ? avformat_index_get_entry(stream, index) : nullptr;
+        if (entry && (entry->flags & AVINDEX_KEYFRAME)) {
+            double keyframePts = entry->timestamp * av_q2d(timeBase_);
+            if (keyframePts > decodedPts_ && keyframePts < clock)
+                seekDecoder(entry->timestamp);
+        }
+    }
+
+    bool decoded = false;
+    try {
+        do {
+            decoded = decodeNextFrame();
+            if (finishAtEnd && decoded) {
+                std::lock_guard<std::mutex> lock(mutex_);
+                while (frameQueue_.size() > 1) frameQueue_.pop();
+            }
+        } while (finishAtEnd && decoded);
+    }
+    catch (const std::exception&) { decodeError("video frame allocation", AVERROR(ENOMEM)); }
+    if (!decoded) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        isFinished_ = true;
+    }
+}
+
+void TCVideoPlayerImpl::confirmDecodedBackend(const AVFrame* frame) {
+    if (decodedBackendChecked_) return;
+    decodedBackendChecked_ = true;
+    if (hwType_ == AV_HWDEVICE_TYPE_NONE || decodedInSoftware_) return;
+    const AVPixFmtDescriptor* format = av_pix_fmt_desc_get(AVPixelFormat(frame->format));
+    if (frame->hw_frames_ctx || (format && (format->flags & AV_PIX_FMT_FLAG_HWACCEL))) return;
+    decodedInSoftware_ = true;
+    logWarning("VideoPlayer") << av_hwdevice_get_type_name(hwType_)
+        << " was requested but FFmpeg decodes in software; reporting software";
 }
 
 // Decodes a single frame up-front to learn the actual post-transfer pixel
@@ -746,6 +841,7 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
             if (ret < 0) { captured = false; break; }
 
+            confirmDecodedBackend(frame_);
             size_t bytes = 0;
             if (!internal::VideoDecodeLimits::rgba(frame_->width, frame_->height, bytes)) {
                 status_->reject(bytes, 0);
@@ -777,20 +873,21 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
         return false;
     }
     avcodec_flush_buffers(codecCtx_);
+    decodedBackendChecked_ = false;
     packetPending_ = false;
 
-    if (captured) {
+    if (captured && isUsingHwAccel()) {
         const char* name = av_get_pix_fmt_name(probedFormat_);
         logNotice("VideoPlayer") << "HW transfer format: "
                                   << (name ? name : "unknown");
     } else if (transferFailed) {
         logNotice("VideoPlayer") << "HW frame transfer failed; falling back to software decoding";
         if (!internal::reopenVideoCodecSoftware(codecCtx_, hwDeviceCtx_, hwType_,
-                formatCtx_->streams[videoStreamIndex_]->codecpar)) {
+                formatCtx_->streams[videoStreamIndex_]->codecpar, decodeThreads_)) {
             logError("VideoPlayer") << "Failed to open software codec after HW format probe";
             return false;
         }
-    } else {
+    } else if (!captured) {
         logWarning("VideoPlayer") << "HW format probe failed; using RGBA fallback";
     }
     return true;
@@ -897,6 +994,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             return false;
         }
 
+        confirmDecodedBackend(frame_);
         size_t sourceBytes = 0;
         if (!internal::VideoDecodeLimits::rgba(frame_->width, frame_->height, sourceBytes)) {
             status_->reject(sourceBytes, 0);
@@ -921,6 +1019,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             return false;
         }
         double pts = frame_->pts == AV_NOPTS_VALUE ? 0.0 : frame_->pts * av_q2d(timeBase_);
+        decodedPts_ = pts;
         // Keep the presentation dimensions stable across stream changes. Scale
         // the actual admitted input dimensions, rather than reading old rows.
         const size_t outputBytes = nv12Mode_ ? size_t(encodedWidth_) * encodedHeight_ * 3 / 2
@@ -1215,6 +1314,13 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
 }
 
 void TCVideoPlayerImpl::seekToTime(double seconds) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    requestSeek(seconds);
+}
+
+void TCVideoPlayerImpl::requestSeek(double seconds) {
+    clockPts_ = seconds;
+    clockSampleTime_ = av_gettime_relative() / 1000000.0;
     seekTarget_ = seconds;
     seekRequested_ = true;
     cv_.notify_all();
@@ -1245,10 +1351,13 @@ void TCVideoPlayerImpl::setVolume(float vol) {
 }
 
 void TCVideoPlayerImpl::setSpeed(float speed) {
+    std::lock_guard<std::mutex> lock(mutex_);
     speed_ = speed;
     // Adjust playback start time to maintain position
     double currentTime = av_gettime_relative() / 1000000.0;
-    playbackStartTime_ = currentTime - currentPts_ / speed_;
+    if (speed_ > 0.0f) playbackStartTime_ = currentTime - clockPts_ / speed_;
+    clockSampleTime_ = currentTime;
+    clockRate_ = audioSound_.isPlaying() ? 1.0f : speed_;
 }
 
 void TCVideoPlayerImpl::setLoop(bool loop) {
@@ -1297,12 +1406,75 @@ void TCVideoPlayerImpl::previousFrame() {
 
 namespace trussc {
 
+void internal::VideoPlayerPlatformAccess::decodedBackendForTests(VideoPlayer& player,
+        int format, bool framesContext, bool newLoad) {
+    auto* impl = static_cast<TCVideoPlayerImpl*>(player.platformHandle_);
+    if (newLoad) {
+        impl->hwType_ = AV_HWDEVICE_TYPE_CUDA;
+        impl->decodedBackendChecked_ = false;
+    }
+    AVFrame frame{};
+    frame.format = format;
+    frame.hw_frames_ctx = framesContext ? av_buffer_alloc(1) : nullptr;
+    impl->confirmDecodedBackend(&frame);
+    av_buffer_unref(&frame.hw_frames_ctx);
+}
+
+int internal::VideoPlayerPlatformAccess::decodeThreadsForTests(const VideoPlayer& player) {
+    return player.platformHandle_ ?
+        static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->decodeThreads() : 0;
+}
+
+internal::VideoPlayerPlatformAccess::PlaybackSnapshot
+internal::VideoPlayerPlatformAccess::stepPlaybackForTests(VideoPlayer& player, double clock,
+                                                         int decodeSteps, bool preparePlayback) {
+    auto* impl = static_cast<TCVideoPlayerImpl*>(player.platformHandle_);
+    // No worker is started: drive the same decoder and presentation operations
+    // synchronously, with a controlled clock instead of elapsed wall time.
+    if (preparePlayback) impl->preparePlayback();
+    impl->isPlaying_ = true;
+    const double startTime = impl->playbackStartTime_;
+    if (impl->speed_ == 0.0f && !impl->seekRequested_) clock = impl->clockPts_;
+    const double inputClock = clock;
+    if (decodeSteps && !impl->seekRequested_) impl->clockPts_ = clock;
+    for (int i = 0; i < decodeSteps && (!impl->isFinished_ || impl->seekRequested_); ++i)
+        impl->decodeStep(clock - (impl->playbackStartTime_ - startTime) * impl->speed_, player.getResyncThreshold());
+    clock = inputClock - (impl->playbackStartTime_ - startTime) * impl->speed_;
+    impl->hasNewFrame_ = false;
+    impl->presentDueFrames(&player, clock);
+    return {impl->currentPts_, impl->decodedPts_, impl->seekTarget_, impl->clockPts_, impl->seekCount_.load(),
+            impl->frameQueue_.size(), impl->hasNewFrame_, impl->isFinished_, impl->seekRequested_, impl->playbackStartTime_ - startTime};
+}
+
+double internal::videoPauseClockDriftForTests(VideoPlayer& player, double pausedSeconds) {
+    auto* impl = static_cast<TCVideoPlayerImpl*>(
+        internal::VideoPlayerPlatformAccess::getPlatformHandleRef(player));
+    // No worker is running. Move all wall-time anchors into the past to
+    // simulate a pause without sleeping, then exercise the real resume path.
+    impl->setPaused(true);
+    double wallBefore, sampleBefore;
+    {
+        std::lock_guard<std::mutex> lock(impl->mutex_);
+        impl->pausedTime_ -= pausedSeconds;
+        impl->playbackStartTime_ -= pausedSeconds;
+        impl->clockSampleTime_ -= pausedSeconds;
+        wallBefore = impl->playbackStartTime_;
+        sampleBefore = impl->clockSampleTime_;
+    }
+    impl->setPaused(false);
+    std::lock_guard<std::mutex> lock(impl->mutex_);
+    // Both clocks must remove the same paused interval. Their difference
+    // is independent of how much real time the test took to execute.
+    return impl->clockRate_ * ((impl->playbackStartTime_ - wallBefore) -
+                              (impl->clockSampleTime_ - sampleBefore));
+}
+
 void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player) {
     if (player.platformHandle_)
         static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->audioSound_.stop();
 }
 
-bool VideoPlayer::loadPlatform(const fs::path& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path, bool createShader) {
     auto owned = std::make_unique<TCVideoPlayerImpl>();
     auto* impl = owned.get();
 
@@ -1334,9 +1506,11 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             std::memset(pixelsY_,  0, size_t(nv12Width_) * nv12Height_);
             std::memset(pixelsUV_, 128, size_t(nv12Width_) * nv12Height_ / 2);  // 128 = neutral chroma in NV12
 
-            auto* shader = new internal::NV12VideoShader(impl->rotation_);
-            shader->loadShader();
-            nv12ShaderHandle_ = shader;
+            if (createShader) {
+                auto* shader = new internal::NV12VideoShader(impl->rotation_);
+                shader->loadShader();
+                nv12ShaderHandle_ = shader;
+            }
         } else {
             pixels_ = new (std::nothrow) unsigned char[size_t(width_) * height_ * 4];
             if (!pixels_) { closePlatform(); return false; }
@@ -1576,7 +1750,7 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
     if (!codecCtx || avcodec_parameters_to_context(codecCtx, par) < 0) {
         avcodec_free_context(&codecCtx); avformat_close_input(&fmtCtx); return false;
     }
-    internal::configureVideoCodec(codecCtx);
+    internal::configureVideoCodec(codecCtx, 0);
     if (avcodec_open2(codecCtx, codec, nullptr) < 0 || status->rejected() != previousRejections) {
         avcodec_free_context(&codecCtx);
         avformat_close_input(&fmtCtx);

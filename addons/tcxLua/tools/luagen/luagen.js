@@ -90,6 +90,7 @@ function emit(e) {
     const callName = e.provider === 'std' ? `std::${e.name}` : `trussc::${e.name}`;
     const lambdas = [];
     for (const sig of (e.signatures || [])) {
+        if (sig.lua_skip) continue;               // TC_LUA_SKIP on this overload only
         if (sig.tmpl) { skip.template++; continue; }   // template-derived phantom sig (e.g. typeName<T>())
         // No structured args[] — can't bind deterministically; skip + report.
         if (!sig.args) { skip.noargs++; noargsFns.push(e.name); continue; }

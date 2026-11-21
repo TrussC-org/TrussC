@@ -425,40 +425,37 @@ void tcApp::cleanup() {
 ["App::filesDropped"]
 category = "events"
 keywords = ["drop", "drag and drop", "dnd", "file drop", "dropped files", "ofApp::dragEvent", "ofDragInfo"]
-description.en = "Called when files are dropped onto this Window, with their paths."
-description.ja = "対象 Window にファイルがドロップされたときに、そのパスを受け取って呼ばれる。"
-description.ko = "대상 Window에 파일이 드롭되었을 때 그 경로를 받아 호출된다."
+description.en = "Receives dropped paths and position in this Window, while preserving path-only overrides."
+description.ja = "対象 Window のドロップのパスと位置を受け取り、パスだけの既存オーバーライドも保ちます。"
+description.ko = "대상 Window의 드롭 경로와 위치를 받으며 기존 경로 전용 재정의도 유지합니다."
 details.en = '''
-- Override `filesDropped(const vector<string>& files)` in your tcApp.
-- `events().filesDropped` listeners registered without a priority (`BeforeApp`) run before this function, and `AfterApp` listeners run after it. If an earlier listener changes the file list, this function receives the changed list. Unlike mouse events, a drop is not passed on to child nodes.
-- On desktop, each entry is a full (absolute) path in UTF-8 that you can load as is. On Linux, TrussC has already removed the `file://` prefix and decoded `%20` and similar escapes.
-- It is called on the main thread, so you can load images and other GPU objects right here. To check the file type, compare the extension, for example `toLower(getFileExtension(path)) == "png"`.
-- TrussC sets no limit on the number of files or on the length of each UTF-8 path (the file name on the web); memory is allocated to fit the drop. Only the limits of available memory and of the platform apply.
-- The drop position is not passed. `events().filesDropped` listeners receive `DragDropEventArgs` with x/y, but that is the last known mouse position, not the exact drop point.
-- It is called on the App of the window that received the drop. On macOS, Windows and Linux this includes secondary windows. A headless App never receives it.
+Override the rich form to receive paths and position. Its default calls filesDropped(const vector<string>&), preserving existing overrides. BeforeApp listener edits reach either callback; AfterApp runs afterward. Device drops use the last known mouse position; injected drops preserve the supplied App coordinates. There is no API for a more precise device drop position. Drops are not passed to child nodes. Desktop device paths are absolute UTF-8 paths; injected paths are passed as supplied. In tcApp:
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size() << e.x << e.y;
+}
+```
 '''
 details.ja = '''
-- tcApp で `filesDropped(const vector<string>& files)` をオーバーライドします。
-- 優先度を指定せずに（`BeforeApp` で）登録した `events().filesDropped` のリスナーはこの関数より前に、`AfterApp` のリスナーはあとに呼ばれます。前のリスナーがファイルの一覧を変えると、この関数には変更後の一覧が届きます。マウスのイベントと違い、ドロップは子ノードには渡されません。
-- デスクトップでは、それぞれが UTF-8 のフルパス（絶対パス）なので、そのまま読み込めます。Linux では、`file://` を取り除き、`%20` などの表記も元の文字に戻してあります。
-- メインスレッドで呼ばれるため、ここでそのまま画像や GPU オブジェクトを読み込めます。ファイルの種類は、`toLower(getFileExtension(path)) == "png"` のように拡張子で判定できます。
-- ファイルの数や、UTF-8 のパスの長さ（Web ではファイル名の長さ）に TrussC の上限はありません。ドロップの内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
-- ドロップした位置は渡されません。`events().filesDropped` のリスナーが受け取る `DragDropEventArgs` には x/y がありますが、これは最後に分かっているマウス位置であり、実際にドロップした位置ではありません。
-- ドロップを受けたウィンドウの App で呼ばれます。macOS、Windows、Linux では 2 つ目以降のウィンドウでも呼ばれます。ヘッドレス App では呼ばれません。
+パスと位置は引数付きの形式で受け取ります。既定の実装は filesDropped(const vector<string>&) を呼び、既存のオーバーライドを保ちます。BeforeApp の編集はどちらにも届き、AfterApp はあとで呼ばれます。デバイスのドロップ位置は最後に分かっているマウス位置で、注入では指定した App 座標を保ちます。より正確なデバイスのドロップ位置を取得する API はありません。子ノードには通知しません。デスクトップのデバイス入力は絶対 UTF-8 パス、注入は指定どおりのパスです。tcApp で使います。
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size() << e.x << e.y;
+}
+```
 '''
 details.ko = '''
-- tcApp에서 `filesDropped(const vector<string>& files)`를 오버라이드합니다.
-- 우선순위 없이(`BeforeApp`으로) 등록한 `events().filesDropped` 리스너는 이 함수보다 먼저, `AfterApp` 리스너는 나중에 호출됩니다. 앞선 리스너가 파일 목록을 바꾸면 이 함수에는 바뀐 목록이 전달됩니다. 마우스 이벤트와 달리 드롭은 자식 노드로 전달되지 않습니다.
-- 데스크톱에서는 각각이 UTF-8 전체 경로(절대 경로)이므로 그대로 로드할 수 있습니다. Linux에서는 `file://`를 제거하고 `%20` 같은 표기도 원래 문자로 되돌려 둡니다.
-- 메인 스레드에서 호출되므로 여기서 바로 이미지나 GPU 객체를 로드할 수 있습니다. 파일 종류는 `toLower(getFileExtension(path)) == "png"`처럼 확장자로 판별할 수 있습니다.
-- 파일 수나 UTF-8 경로 길이(웹에서는 파일 이름 길이)에 TrussC의 제한은 없습니다. 드롭 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
-- 드롭한 위치는 전달되지 않습니다. `events().filesDropped` 리스너가 받는 `DragDropEventArgs`에는 x/y가 있지만, 이것은 마지막으로 알려진 마우스 위치이며 실제로 드롭한 위치가 아닙니다.
-- 드롭을 받은 창의 App에서 호출됩니다. macOS, Windows, Linux에서는 두 번째 이후 창에서도 호출됩니다. 헤드리스 App에서는 호출되지 않습니다.
+경로와 위치를 받으려면 인자 형식을 재정의합니다. 기본 구현은 filesDropped(const vector<string>&)를 호출하여 기존 재정의를 유지합니다. BeforeApp 변경은 두 형식 모두에 전달되고 AfterApp은 나중에 호출됩니다. 장치 드롭은 마지막 마우스 위치를 사용하며 주입은 지정 App 좌표를 유지합니다. 더 정확한 장치 드롭 위치 API는 없습니다. 자식 노드에는 전달하지 않습니다. 데스크톱 장치 경로는 절대 UTF-8 경로이며 주입 경로는 지정한 그대로입니다. tcApp에서 사용합니다.
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size() << e.x << e.y;
+}
+```
 '''
 related = ["CoreEvents::filesDropped", "DragDropEventArgs", "getFileName", "getFileExtension", "Image::load"]
-platform_note.en = "Windows, macOS, Linux and Web only; it is never called on iOS or Android. On Web you receive the browser's file names, not paths that you can load, and TrussC has no helper for reading the contents of dropped files."
-platform_note.ja = "Windows / macOS / Linux / Web のみで、iOS / Android では呼ばれません。Web で届くのはブラウザ上のファイル名であり、読み込めるパスではありません。また、ドロップされたファイルの中身を読む仕組みは TrussC にはありません。"
-platform_note.ko = "Windows / macOS / Linux / Web에서만 호출되며 iOS / Android에서는 호출되지 않습니다. Web에서 전달되는 것은 브라우저의 파일 이름이므로 로드할 수 있는 경로가 아니며, 드롭된 파일 내용을 읽는 기능도 TrussC에는 없습니다."
+platform_note.en = "Drops from the OS arrive on Windows, macOS, Linux and Web only, never on iOS or Android. On Web those are the browser's file names, not paths that you can load, and TrussC has no helper for reading the contents of dropped files. A drop sent with injectInput arrives on every platform, with the paths exactly as given."
+platform_note.ja = "OS からのドロップが届くのは Windows / macOS / Linux / Web のみで、iOS / Android では届きません。Web で届くのはブラウザ上のファイル名であり、読み込めるパスではありません。また、ドロップされたファイルの中身を読む仕組みは TrussC にはありません。injectInput で送ったドロップはどのプラットフォームでも届き、パスは指定したとおりです。"
+platform_note.ko = "OS의 드롭은 Windows / macOS / Linux / Web에서만 전달되며 iOS / Android에서는 전달되지 않습니다. Web에서 전달되는 것은 브라우저의 파일 이름이므로 로드할 수 있는 경로가 아니며, 드롭된 파일 내용을 읽는 기능도 TrussC에는 없습니다. injectInput으로 보낸 드롭은 모든 플랫폼에서 전달되며 경로는 지정한 그대로입니다."
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 void filesDropped(const vector<string>& files) override;
@@ -6443,19 +6440,28 @@ description.en = "Fired when files are dropped onto the window."
 description.ja = "ウィンドウにファイルがドロップされたときに発生する。"
 description.ko = "윈도우에 파일을 놓으면 발생한다."
 details.en = '''
-- Delivers `DragDropEventArgs&` on the main thread before `App::filesDropped`.
-- `args.files` contains dropped file paths; on the Web, these are file names rather than local filesystem paths. `args.x` and `args.y` contain the last recorded mouse position, rather than a separately sampled drop position.
-- The arguments have neither `cancel` nor `consumed`, so listeners cannot cancel the drop or prevent the App callback.
+Delivers DragDropEventArgs on the receiving Window, in BeforeApp/App/AfterApp order by default. Listener edits reach the App callback. Device drops use the last known cursor position; injected drops preserve their supplied position. There is no API to obtain a more precise device drop position or identify the drop source. Drops have no consumed or cancel field; there is no cancellation API. In tcApp:
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size();
+}
+```
 '''
 details.ja = '''
-- `App::filesDropped` より前に、メインスレッドで `DragDropEventArgs&` を渡します。
-- `args.files` にはドロップされたファイルのパスが入ります。Web ではローカルファイルシステムのパスではなく、ファイル名になります。`args.x` と `args.y` はドロップ時に別途取得した座標ではなく、最後に記録したマウス位置です。
-- 引数に `cancel` と `consumed` はないため、リスナーからドロップをキャンセルしたり、App のコールバックを止めたりすることはできません。
+受信 Window に DragDropEventArgs を渡し、既定では BeforeApp/App/AfterApp の順に通知します。リスナーの変更は App に届きます。デバイスのドロップは最後のカーソル位置、注入は指定位置を使います。より正確なデバイスの位置や送信元を取得する API はありません。consumed、cancel、キャンセル API はありません。tcApp で受け取ります。
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size();
+}
+```
 '''
 details.ko = '''
-- `App::filesDropped`보다 먼저 메인 스레드에서 `DragDropEventArgs&`를 전달합니다.
-- `args.files`에는 드롭한 파일 경로가 들어갑니다. Web에서는 로컬 파일시스템 경로 대신 파일 이름이 들어갑니다. `args.x`와 `args.y`는 드롭 순간에 별도로 측정한 좌표가 아니라 마지막으로 기록한 마우스 위치입니다.
-- 인수에 `cancel`과 `consumed`가 없으므로 리스너에서 드롭을 취소하거나 App 콜백을 막을 수 없습니다.
+수신 Window에 DragDropEventArgs를 전달하며 기본 순서는 BeforeApp/App/AfterApp입니다. 리스너 변경은 App에 전달됩니다. 장치 드롭은 마지막 커서 위치, 주입은 지정 위치를 사용합니다. 더 정확한 장치 위치나 출처 조회 API는 없습니다. consumed, cancel 필드와 취소 API는 없습니다. tcApp에서 받습니다.
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size();
+}
+```
 '''
 related = ["DragDropEventArgs", "App::filesDropped", "CoreEvents::rawEvent"]
 
@@ -7138,19 +7144,28 @@ description.en = "Carries information about dropped files."
 description.ja = "ドロップされたファイルの情報を保持する。"
 description.ko = "드롭된 파일 정보를 담는다."
 details.en = '''
-- Passed to `events().filesDropped` with desktop file paths or Web file names in `files`.
-- `x` and `y` contain the last recorded mouse position, which can differ from the actual drop position; see `MouseEventArgs::pos` for coordinate conventions.
-- For listener registration, lifetime, and delivery threads, see `Event<T>`.
+Paths and App coordinates delivered through events().filesDropped and App::filesDropped. Device drops use the last known mouse position; injected drops preserve the supplied position. There is no API for a more precise device drop position. No injected, sourceTag, or consumed fields are available, and there is no drop-source query or cancellation API. In tcApp:
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size() << e.x << e.y;
+}
+```
 '''
 details.ja = '''
-- デスクトップではファイルのパスを、Web ではファイル名のみを `files` に格納して `events().filesDropped` に渡されます。
-- `x` と `y` は最後に記録されたマウス位置で、実際のドロップ位置と異なる場合があります。座標の規則については `MouseEventArgs::pos` を参照してください。
-- リスナーの登録、寿命、呼び出されるスレッドについては `Event<T>` を参照してください。
+events().filesDropped と App::filesDropped が渡すパスと App 座標です。デバイスでは最後に分かっているマウス位置、注入では指定位置です。より正確なデバイスのドロップ位置を得る API はありません。injected、sourceTag、consumed はなく、送信元の照会やキャンセルの API もありません。tcApp で受け取ります。
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size() << e.x << e.y;
+}
+```
 '''
 details.ko = '''
-- 데스크톱에서는 파일 경로를, Web에서는 파일 이름만 `files`에 담아 `events().filesDropped`에 전달됩니다.
-- `x`와 `y`는 마지막으로 기록된 마우스 위치이며 실제 드롭 위치와 다를 수 있습니다. 좌표 규칙은 `MouseEventArgs::pos`를 참조하세요.
-- 리스너 등록, 수명, 호출 스레드는 `Event<T>`를 참조하세요.
+events().filesDropped와 App::filesDropped가 전달하는 경로 및 App 좌표입니다. 장치 드롭은 마지막 마우스 위치, 주입은 지정 위치를 사용합니다. 더 정확한 장치 드롭 위치 API는 없습니다. injected, sourceTag, consumed 필드와 출처 조회 및 취소 API는 없습니다. tcApp에서 받습니다.
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.files.size() << e.x << e.y;
+}
+```
 '''
 related = ["ClipboardPastedEventArgs"]
 
@@ -7159,50 +7174,74 @@ description.en = "Stores desktop file paths or Web file names for dropped files.
 description.ja = "ドロップされたファイルのパス（デスクトップ）またはファイル名（Web）を保持する。"
 description.ko = "드롭된 파일의 경로(데스크톱) 또는 파일 이름(Web)을 저장한다."
 details.en = '''
-- A `vector<string>` containing copies of desktop file paths or Web file names only; it is empty by default.
+- A `vector<string>` containing copies of dropped paths, empty by default. Device drops use desktop file paths or Web file names; injected drops keep the supplied strings.
 - TrussC sets no limit on the number of files or on the length of each UTF-8 path (the file name on the web); memory is allocated to fit the drop. Only the limits of available memory and of the platform apply.
 '''
 details.ja = '''
-- デスクトップではファイルのパスのコピーを、Web ではファイル名のコピーのみを格納する `vector<string>` です。既定では空です。
+- パスのコピーを格納する `vector<string>` で、既定では空です。デバイスのドロップではデスクトップのパスや Web のファイル名を、注入では指定された文字列を保ちます。
 - ファイルの数や、UTF-8 のパスの長さ（Web ではファイル名の長さ）に TrussC の上限はありません。ドロップの内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
 '''
 details.ko = '''
-- 데스크톱에서는 파일 경로의 복사본을, Web에서는 파일 이름의 복사본만 담는 `vector<string>`입니다. 기본값은 비어 있습니다.
+- 드롭 경로의 복사본을 담는 `vector<string>`이며 기본값은 비어 있습니다. 장치 드롭은 데스크톱 경로나 Web 파일 이름을 사용하고 주입 드롭은 지정 문자열을 유지합니다.
 - 파일 수나 UTF-8 경로 길이(웹에서는 파일 이름 길이)에 TrussC의 제한은 없습니다. 드롭 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
 '''
 
 ["DragDropEventArgs::x"]
-description.en = "Stores the last recorded mouse x coordinate."
-description.ja = "最後に記録されたマウスの x 座標を保持する。"
-description.ko = "마지막으로 기록된 마우스 x 좌표를 저장한다."
+description.en = "The drop x coordinate in App content space."
+description.ja = "App のコンテンツ空間でのドロップ x 座標です。"
+description.ko = "App 콘텐츠 공간의 드롭 x 좌표입니다."
 details.en = '''
-- A `float`, defaulting to `0.0f`, copied from the window's recorded mouse position when files are dropped; it is not taken from the drop event's position.
-- See `MouseEventArgs::pos` for coordinate units and origin.
+The drop x coordinate in destination App content space: logical points, or framebuffer pixels with pixelPerfect. Device drops use the last known mouse position; injection preserves the supplied position. There is no API for a more precise device drop position. In tcApp:
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.x;
+}
+```
 '''
 details.ja = '''
-- 既定値が `0.0f` の `float` です。ファイルのドロップ時にウィンドウが記録しているマウス位置からコピーされ、ドロップイベントの位置からは取得しません。
-- 座標の単位と原点については `MouseEventArgs::pos` を参照してください。
+宛先 App の x 座標です。論理ポイント、pixelPerfect ではフレームバッファのピクセルです。デバイスでは最後のマウス位置、注入では指定位置を保ちます。より正確なデバイスの位置を得る API はありません。tcApp で読みます。
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.x;
+}
+```
 '''
 details.ko = '''
-- 기본값이 `0.0f`인 `float`입니다. 파일을 드롭할 때 창에 기록된 마우스 위치에서 복사하며, 드롭 이벤트의 위치에서 가져오지 않습니다.
-- 좌표의 단위와 원점은 `MouseEventArgs::pos`를 참조하세요.
+대상 App의 x 좌표입니다. 논리 포인트이며 pixelPerfect에서는 프레임버퍼 픽셀입니다. 장치 드롭은 마지막 마우스 위치, 주입은 지정 위치를 유지합니다. 더 정확한 장치 위치 API는 없습니다. tcApp에서 읽습니다.
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.x;
+}
+```
 '''
 
 ["DragDropEventArgs::y"]
-description.en = "Stores the last recorded mouse y coordinate."
-description.ja = "最後に記録されたマウスの y 座標を保持する。"
-description.ko = "마지막으로 기록된 마우스 y 좌표를 저장한다."
+description.en = "The drop y coordinate in App content space."
+description.ja = "App のコンテンツ空間でのドロップ y 座標です。"
+description.ko = "App 콘텐츠 공간의 드롭 y 좌표입니다."
 details.en = '''
-- A `float`, defaulting to `0.0f`, copied from the window's recorded mouse position when files are dropped; it is not taken from the drop event's position.
-- See `MouseEventArgs::pos` for coordinate units and origin.
+The drop y coordinate in destination App content space: logical points, or framebuffer pixels with pixelPerfect. Device drops use the last known mouse position; injection preserves the supplied position. There is no API for a more precise device drop position. In tcApp:
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.y;
+}
+```
 '''
 details.ja = '''
-- 既定値が `0.0f` の `float` です。ファイルのドロップ時にウィンドウが記録しているマウス位置からコピーされ、ドロップイベントの位置からは取得しません。
-- 座標の単位と原点については `MouseEventArgs::pos` を参照してください。
+宛先 App の y 座標です。論理ポイント、pixelPerfect ではフレームバッファのピクセルです。デバイスでは最後のマウス位置、注入では指定位置を保ちます。より正確なデバイスの位置を得る API はありません。tcApp で読みます。
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.y;
+}
+```
 '''
 details.ko = '''
-- 기본값이 `0.0f`인 `float`입니다. 파일을 드롭할 때 창에 기록된 마우스 위치에서 복사하며, 드롭 이벤트의 위치에서 가져오지 않습니다.
-- 좌표의 단위와 원점은 `MouseEventArgs::pos`를 참조하세요.
+대상 App의 y 좌표입니다. 논리 포인트이며 pixelPerfect에서는 프레임버퍼 픽셀입니다. 장치 드롭은 마지막 마우스 위치, 주입은 지정 위치를 유지합니다. 더 정확한 장치 위치 API는 없습니다. tcApp에서 읽습니다.
+```cpp
+void filesDropped(const DragDropEventArgs& e) override {
+    logNotice() << e.y;
+}
+```
 '''
 
 ["EVENT_DRIVEN"]
@@ -7213,14 +7252,17 @@ description.ko = "요청에 따른 그리기를 지정한다."
 details.en = '''
 - This float constant is 0. With `setFps(EVENT_DRIVEN)`, the current window updates and draws together when `redraw()` requests a frame.
 - With `setIndependentFps`, an `EVENT_DRIVEN` draw rate waits for `redraw()`, while an `EVENT_DRIVEN` update rate disables independent updates.
+- Besides `redraw()`, the window also draws once when it is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame.
 '''
 details.ja = '''
 - 値が 0 の float 定数です。`setFps(EVENT_DRIVEN)` を指定すると、現在のウィンドウは `redraw()` でフレームを要求したときに更新と描画を一緒に行います。
 - `setIndependentFps` では、描画レートを `EVENT_DRIVEN` にすると `redraw()` を待ち、更新レートを `EVENT_DRIVEN` にすると独立した更新を行わなくなります。
+- `redraw()` のほかに、ウィンドウが最初に表示されたとき（1 回）、大きさが変わったとき（2 回）、スクリーンショットや MCP の取り込みでフレームが必要なときにも描画します。
 '''
 details.ko = '''
 - 값이 0인 float 상수입니다. `setFps(EVENT_DRIVEN)`을 지정하면 현재 윈도우는 `redraw()`로 프레임을 요청했을 때 업데이트와 그리기를 함께 수행합니다.
 - `setIndependentFps`에서 그리기 레이트를 `EVENT_DRIVEN`으로 지정하면 `redraw()`를 기다리며, 업데이트 레이트를 `EVENT_DRIVEN`으로 지정하면 독립 업데이트를 수행하지 않습니다.
+- `redraw()` 외에도 윈도우가 처음 표시될 때(1회), 크기가 바뀐 뒤(2회), 스크린샷이나 MCP 캡처에 프레임이 필요할 때도 그립니다.
 '''
 
 ["EaseMode"]
@@ -9078,6 +9120,12 @@ description.en = "Begins rendering into the framebuffer."
 description.ja = "フレームバッファへの描画を開始する。"
 description.ko = "프레임버퍼로 렌더링을 시작한다."
 details.en = '''
+- Use `Fbo::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - Draw between `begin()` and the matching `end()`. `begin()` preserves existing color with LOAD, while `begin(r, g, b, a = 1.0f)` clears color to the supplied components, conventionally 0–1. Both forms clear depth to 1 at the start of a new activation.
 - Every activation starts with an identity model matrix, empty matrix/camera/scissor stacks, no scissor, a viewport covering the whole attachment, and a perspective camera with a `TAU / 8` field of view. Coordinates use attachment pixels with the origin at the top left.
 - Inherits the parent's logical blend mode and depth-test flag. On `end()`, these flags pass back to the parent, and the returned blend mode takes effect immediately.
@@ -9089,6 +9137,12 @@ details.en = '''
 - Does nothing when unallocated or in headless mode.
 '''
 details.ja = '''
+- `Fbo::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - `begin()` と対応する `end()` の間で描画します。`begin()` は LOAD で既存の色を保持し、`begin(r, g, b, a = 1.0f)` は指定した成分で色をクリアします。色成分は通常 0〜1 で指定します。どちらも新しい描画開始時に深度を 1 にクリアします。
 - 毎回、モデル行列は単位行列、行列・カメラ・シザースタックは空、シザーは無効、ビューポートは添付画像全体、透視投影カメラの視野角は `TAU / 8` で開始します。座標は添付画像のピクセル単位で、左上が原点です。
 - 親の論理ブレンドモードと深度テストの有効状態を引き継ぎます。`end()` ではこれらの状態を親へ渡し、戻されたブレンドモードは直ちに描画へ反映されます。
@@ -9100,6 +9154,12 @@ details.ja = '''
 - 未確保の場合やヘッドレスモードでは何もしません。
 '''
 details.ko = '''
+- `Fbo::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - `begin()`과 대응하는 `end()` 사이에서 그립니다. `begin()`은 LOAD로 기존 색상을 유지하며 `begin(r, g, b, a = 1.0f)`는 지정한 성분으로 색상을 지웁니다. 색상 성분은 일반적으로 0–1로 지정합니다. 두 형태 모두 새 활성화가 시작될 때 깊이를 1로 지웁니다.
 - 매번 모델 행렬은 단위 행렬, 행렬·카메라·시저 스택은 빈 상태, 시저는 비활성 상태, 뷰포트는 전체 첨부 이미지, 원근 카메라의 시야각은 `TAU / 8`로 시작합니다. 좌표는 첨부 이미지 픽셀 단위이며 왼쪽 위가 원점입니다.
 - 부모의 논리 블렌드 모드와 깊이 테스트 활성 상태를 상속합니다. `end()`에서 이 상태를 부모에 전달하며 반환된 블렌드 모드는 즉시 그리기에 적용됩니다.
@@ -9346,16 +9406,34 @@ description.en = "Finishes framebuffer rendering and returns to the parent targe
 description.ja = "フレームバッファへの描画を終了して親の描画先へ戻る。"
 description.ko = "프레임버퍼 렌더링을 끝내고 부모 타깃으로 돌아간다."
 details.en = '''
+- Use `Fbo::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - Flushes pending drawing, ends the pass, resolves MSAA when enabled, and refreshes mipmaps when requested at allocation.
 - Returns to the parent target and immediately applies the returned logical blend mode. See `Fbo::begin` for nesting, state, and scope-balancing rules.
 - Does nothing when inactive. An active Fbo must be ended in reverse nesting order in its originating window; invalid calls log a warning and leave the activation unchanged.
 '''
 details.ja = '''
+- `Fbo::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - 保留中の描画を実行してパスを終了し、MSAA が有効なら解決処理を行い、確保時に指定していればミップマップを更新します。
 - 親の描画先へ戻り、戻された論理ブレンドモードを直ちに適用します。入れ子、描画状態、スコープの対応に関する規則は `Fbo::begin` を参照してください。
 - 非アクティブな場合は何もしません。アクティブな Fbo は開始したウィンドウで入れ子の逆順に終了する必要があり、不正な呼び出しは警告を記録してアクティブ状態を維持します。
 '''
 details.ko = '''
+- `Fbo::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = fbo.scoped(0, 0, 0);
+}
+```
 - 대기 중인 그리기를 실행하고 패스를 종료하며 MSAA가 활성화되어 있으면 리졸브하고 할당 시 요청했다면 밉맵을 갱신합니다.
 - 부모 타깃으로 돌아가 반환된 논리 블렌드 모드를 즉시 적용합니다. 중첩, 그리기 상태, 스코프 대응 규칙은 `Fbo::begin`을 참조하세요.
 - 비활성 상태이면 아무 작업도 하지 않습니다. 활성 Fbo는 시작한 윈도우에서 중첩의 역순으로 종료해야 하며 잘못된 호출은 경고를 기록하고 활성 상태를 유지합니다.
@@ -9536,104 +9614,232 @@ details.ko = '''
 
 ["Fbo::readPixels"]
 category = "graphics_fbo"
-keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a top-first CPU RGBA8 buffer."
-description.ja = "フレームバッファの内容を、上の行から並ぶ CPU RGBA8 バッファに読み出します。"
-description.ko = "프레임버퍼 내용을 위쪽 행부터 배치한 CPU RGBA8 버퍼로 읽습니다."
+keywords = ["download", "cpu", "Pixels"]
+description.en = "Reads an ended Fbo as RGBA8 into Pixels with automatic sizing or a byte buffer allocated by the caller."
+description.ja = "end 後の Fbo を RGBA8 として、自動サイズ調整する Pixels または呼び出し側で確保したバイト配列に読み出します。"
+description.ko = "종료된 Fbo를 RGBA8로 자동 크기 조정 Pixels 또는 호출자가 할당한 바이트 버퍼에 읽습니다."
 details.en = '''
-- `readPixels(unsigned char* pixels)` requires space for `getWidth() * getHeight() * 4` bytes. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
+- Use the Pixels overload for CPU RGBA8 pixels without calculating buffer capacity. It returns bool, resizes on success and leaves the output unchanged on failure. Call after ending every active Fbo.
 
-Read the completed Fbo:
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- Call after `end()`, outside every Fbo rendering scope in the current window. Calling inside any such scope logs an error and returns `false`, even when reading a different Fbo.
-- Reads mip level 0 of the current color texture, using the resolved result for MSAA. Output is tightly packed RGBA with the top row first and pixels ordered left to right; native GL rows are reversed only where needed, so no additional vertical flip is needed.
-- Always converts to RGBA8 regardless of the attachment format: values are clamped to 0–1 and quantized to 8 bits, missing G/B components in R/RG formats become 0, and missing alpha becomes 1. BGRA is reordered to RGBA; see `TextureFormat` for source formats.
-- Conversion rounds to nearest. CPU conversion rounds halfway cases up, while native desktop GL conversion may differ by at most one byte value. Use `readPixelsFloat()` to avoid the RGBA8 conversion.
-- Readback is synchronous: GPU work must complete before CPU pixels are available, which can stall rendering and require staging memory. See `Texture` for main-thread GPU resource rules.
-- Window drawing can continue after readback; an open window pass resumes with its color and depth preserved.
-- WebGL2 supports synchronous readback. WebGPU does not support it and returns `false` with a warning.
+- Reads resolved mip level 0, tightly packed with the top row first. Readback synchronizes GPU work. Unallocated sources, active Fbo passes and backend failures return false.
+- Output is four-channel U8 RGBA regardless of source format: clamp to 0–1, quantize to 8 bits; missing G/B become 0 and alpha becomes 1. BGRA is reordered. Rounding is to nearest; CPU ties round up and native desktop GL can differ by one byte value.
+
+Use F32 to retain precision:
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- Window drawing can continue after readback; an open window pass resumes with color and depth preserved.
+
+The pointer overload remains supported without deprecation; allocate enough storage before calling it:
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
 '''
 details.ja = '''
-- `readPixels(unsigned char* pixels)` には `getWidth() * getHeight() * 4` バイト分の領域が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
+- バッファ容量を計算せず CPU の RGBA8 ピクセルを取得するには Pixels 版を使います。bool を返し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
 
-描画を終えた Fbo を読み出します。
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- `end()` のあと、現在のウィンドウのすべての Fbo 描画スコープの外で呼んでください。読み出し対象が別の Fbo でも、そのようなスコープ内ではエラーを記録して `false` を返します。
-- 現在のカラーテクスチャのミップレベル 0 を読み出し、MSAA では解決済みの結果を使います。出力は隙間のない RGBA 配列で、上の行から順に、各行は左から右へ並びます。ネイティブ GL の行は必要な場合だけ反転するため、追加の上下反転は不要です。
-- 添付画像の形式にかかわらず RGBA8 に変換します。値は 0〜1 にクランプして 8 ビットに量子化し、R/RG 形式で不足する G/B は 0、アルファは 1 にします。BGRA は RGBA 順に並べ替えます。元の形式は `TextureFormat` を参照してください。
-- 最も近い値に丸めます。CPU 変換では中間値を切り上げ、デスクトップ GL のネイティブ変換との差は最大で 1 バイト値です。RGBA8 への変換を避けるには `readPixelsFloat()` を使ってください。
-- 読み出しは同期処理です。CPU ピクセルが利用可能になる前に GPU 処理の完了を待つため、描画を停止させたり作業用メモリを必要としたりします。メインスレッドでの GPU リソースの扱いは `Texture` を参照してください。
-- 読み出し後もウィンドウへの描画を続けられます。開いていたウィンドウのパスは色と深度を保持して再開します。
-- WebGL2 は同期読み出しに対応しています。WebGPU は対応しておらず、警告を記録して `false` を返します。
+- 解決済みのミップレベル 0 を、上の行から隙間なく読み出します。GPU と同期します。未確保の描画元、アクティブな Fbo パス、バックエンドの失敗では false を返します。
+- 元の形式にかかわらず 4 チャンネル U8 RGBA です。0〜1 にクランプして 8 ビットに量子化し、不足する G/B は 0、アルファは 1 にします。BGRA は並べ替えます。最も近い値に丸め、CPU は中間値を切り上げます。デスクトップ GL との差は最大 1 バイト値です。
+
+精度を保つには F32 を使います。
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 読み出し後もウィンドウへ描画できます。開いていたウィンドウのパスは色と深度を保持して再開します。
+
+ポインター版も非推奨にせず維持します。呼ぶ前に十分な領域を確保します。
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
 '''
 details.ko = '''
-- `readPixels(unsigned char* pixels)`에는 `getWidth() * getHeight() * 4`바이트의 공간이 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
+- 버퍼 용량을 계산하지 않고 CPU RGBA8 픽셀을 얻으려면 Pixels 오버로드를 사용합니다. bool을 반환하며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
 
-그리기를 마친 Fbo를 읽습니다.
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- `end()` 이후 현재 윈도우의 모든 Fbo 렌더링 스코프 밖에서 호출해야 합니다. 다른 Fbo를 읽는 경우에도 이러한 스코프 안에서는 오류를 기록하고 `false`를 반환합니다.
-- 현재 컬러 텍스처의 밉 레벨 0을 읽으며 MSAA에서는 리졸브된 결과를 사용합니다. 출력은 빈틈없이 배치된 RGBA 배열이며 위쪽 행부터 각 행의 왼쪽에서 오른쪽 순서로 저장합니다. 네이티브 GL 행은 필요한 경우에만 뒤집으므로 추가 상하 반전이 필요하지 않습니다.
-- 첨부 이미지 형식과 관계없이 항상 RGBA8로 변환합니다. 값을 0–1로 제한하고 8비트로 양자화하며 R/RG 형식에 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 RGBA 순서로 재배열하며 원본 형식은 `TextureFormat`을 참조하십시오.
-- 가장 가까운 값으로 반올림합니다. CPU 변환은 중간값을 올림하며 데스크톱 GL의 네이티브 변환과는 최대 한 바이트 값만큼 차이가 날 수 있습니다. RGBA8 변환을 피하려면 `readPixelsFloat()`를 사용합니다.
-- 읽기는 동기식입니다. CPU 픽셀을 사용할 수 있으려면 GPU 작업이 완료되어야 하므로 렌더링을 멈추게 하거나 작업용 메모리가 필요할 수 있습니다. 메인 스레드의 GPU 리소스 규칙은 `Texture`를 참조하십시오.
-- 읽기 이후에도 윈도우에 계속 그릴 수 있으며 열려 있던 윈도우 패스는 색상과 깊이를 유지하여 재개합니다.
-- WebGL2는 동기 읽기를 지원합니다. WebGPU는 지원하지 않으며 경고를 기록하고 `false`를 반환합니다.
+- 리졸브된 밉 레벨 0을 위쪽 행부터 빈틈없이 읽습니다. GPU 작업과 동기화합니다. 미할당 소스, 활성 Fbo 패스 및 백엔드 실패는 false를 반환합니다.
+- 원본 형식과 관계없이 4채널 U8 RGBA입니다. 0–1로 제한하고 8비트로 양자화하며 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 재배열합니다. 가장 가까운 값으로 반올림하며 CPU는 중간값을 올리고 데스크톱 GL과 최대 한 바이트 값만큼 다를 수 있습니다.
+
+정밀도를 유지하려면 F32를 사용합니다.
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 읽기 후에도 윈도우에 그릴 수 있으며 열린 윈도우 패스는 색상과 깊이를 유지하며 재개합니다.
+
+포인터 오버로드도 사용 중단 없이 유지합니다. 호출 전에 충분한 공간을 할당합니다.
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
 category = "graphics_fbo"
-keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a CPU float buffer."
-description.ja = "フレームバッファの内容を CPU の float バッファに読み出す。"
-description.ko = "프레임버퍼 내용을 CPU float 버퍼로 읽는다."
+keywords = ["download", "cpu", "Pixels"]
+description.en = "Reads an ended Fbo as F32 into Pixels with automatic sizing or a float buffer allocated by the caller, using the source channel count."
+description.ja = "end 後の Fbo を元のチャンネル数の F32 として、自動サイズ調整する Pixels または呼び出し側で確保した float 配列に読み出します。"
+description.ko = "종료된 Fbo를 원본 채널 수의 F32로 자동 크기 조정 Pixels 또는 호출자가 할당한 float 버퍼에 읽습니다."
 details.en = '''
-- `readPixelsFloat(float* pixels)` requires `getWidth() * getHeight() * channelCount(getTextureFormat())` float elements. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
-- Outputs 32-bit floats using the source format's channel count without adding missing channels. Float formats retain their values without 0–1 clamping; half-floats are expanded to float, normalized integer formats become 0–1 values, and BGRA components are reordered to RGBA. See `TextureFormat` for format definitions.
-- On GL ES 3 and WebGL2, non-float formats pass through 8-bit readback, including `RGBA16`. Desktop GL, Metal, and D3D11 convert `RGBA16` using its 16-bit normalized values.
-- Call after `end()`, outside every Fbo scope in the current window; otherwise an error is logged and `false` is returned. See `Fbo::readPixels` for synchronous readback cost, top-left row order, MSAA resolution, continued window drawing, and WebGPU restrictions.
+- Use the Pixels overload for full-precision CPU readback without calculating buffer capacity. It produces F32 Pixels with the source channel count (RGBA for RGBA attachments), resizes on success and preserves output on failure. Call after ending every active Fbo.
+
+```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
+void tcApp::draw() {
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- Reads resolved mip level 0, tightly packed with the top row first. Readback synchronizes GPU work. Unallocated sources, active Fbo passes and backend failures return false.
+- F32 preserves float attachment values without clamping; half-floats expand to float and normalized integer formats become 0–1. Missing channels are not added; BGRA is reordered to RGBA.
+- GL ES 3 and WebGL2 read non-float formats (including RGBA16) through 8-bit data; desktop GL, Metal and D3D11 retain RGBA16 normalization precision. Allocate a float attachment to retain floating-point precision:
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+The pointer overload remains supported without deprecation; allocate enough storage before calling it:
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
 '''
 details.ja = '''
-- `readPixelsFloat(float* pixels)` には `getWidth() * getHeight() * channelCount(getTextureFormat())` 個の float 要素が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
-- 元の形式のチャンネル数で 32 ビット float を出力し、不足するチャンネルは追加しません。浮動小数点形式の値は 0〜1 にクランプせずに保持し、半精度浮動小数点は float に展開し、正規化整数形式は 0〜1 の値に変換し、BGRA 成分は RGBA 順に並べ替えます。形式の定義は `TextureFormat` を参照してください。
-- GL ES 3 と WebGL2 では、`RGBA16` を含む非浮動小数点形式は 8 ビットの読み出しを経由します。デスクトップ GL、Metal、D3D11 は `RGBA16` を 16 ビットの正規化値から変換します。
-- `end()` のあと、現在のウィンドウのすべての Fbo スコープの外で呼んでください。それ以外ではエラーを記録して `false` を返します。同期読み出しの負荷、左上からの行順、MSAA の解決処理、ウィンドウ描画の継続、WebGPU の制限は `Fbo::readPixels` を参照してください。
+- バッファ容量を計算せず精度を保って CPU に読み出すには Pixels 版を使います。元のチャンネル数（RGBA 添付画像では RGBA）の F32 Pixels を生成し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
+
+```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
+void tcApp::draw() {
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 解決済みのミップレベル 0 を、上の行から隙間なく読み出します。GPU と同期します。未確保の描画元、アクティブな Fbo パス、バックエンドの失敗では false を返します。
+- F32 は浮動小数点添付画像の値をクランプせず保持します。半精度は float に展開し、正規化整数形式は 0〜1 に変換します。不足するチャンネルは追加せず、BGRA は RGBA に並べ替えます。
+- GL ES 3 と WebGL2 は RGBA16 を含む非浮動小数点形式を 8 ビット経由で読み出します。デスクトップ GL、Metal、D3D11 は RGBA16 の正規化精度を保持します。浮動小数点の精度を保持するには浮動小数点添付画像を確保します。
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+ポインター版も非推奨にせず維持します。呼ぶ前に十分な領域を確保します。
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
 '''
 details.ko = '''
-- `readPixelsFloat(float* pixels)`에는 `getWidth() * getHeight() * channelCount(getTextureFormat())`개의 float 요소가 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
-- 원본 형식의 채널 수로 32비트 float를 출력하며 없는 채널을 추가하지 않습니다. 부동소수점 형식의 값은 0–1로 제한하지 않고 유지하며 반정밀도 값은 float로 확장하고 정규화 정수 형식은 0–1 값으로 변환하며 BGRA 성분은 RGBA 순서로 재배열합니다. 형식 정의는 `TextureFormat`을 참조하세요.
-- GL ES 3와 WebGL2에서 `RGBA16`을 포함한 비부동소수점 형식은 8비트 읽기를 거칩니다. 데스크톱 GL, Metal, D3D11은 `RGBA16`을 16비트 정규화 값으로 변환합니다.
-- `end()` 이후 현재 윈도우의 모든 Fbo 스코프 밖에서 호출해야 하며 그렇지 않으면 오류를 기록하고 `false`를 반환합니다. 동기 읽기 비용, 왼쪽 위부터의 행 순서, MSAA 리졸브, 윈도우 그리기 지속, WebGPU 제한은 `Fbo::readPixels`를 참조하세요.
-'''
-related = ["Fbo::readPixels"]
-snippet = '''
+- 버퍼 용량을 계산하지 않고 정밀도를 유지한 CPU 읽기에는 Pixels 오버로드를 사용합니다. 원본 채널 수(RGBA 어태치먼트는 RGBA)의 F32 Pixels를 만들며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
+
+```cpp
 // tcApp.h: Fbo fbo;
-void tcApp::setup() { fbo.allocate(64, 64, 1, TextureFormat::RGBA32F); }
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    fbo.begin(0.2f, 0.4f, 0.6f);
+    fbo.begin();
+    drawCircle(16, 16, 8);
     fbo.end();
-    vector<float> pixels(64 * 64 * channelCount(fbo.getTextureFormat()));
-    bool ok = fbo.readPixelsFloat(pixels.data());
+    fbo.readPixelsFloat(pixels);
 }
+```
+
+- 리졸브된 밉 레벨 0을 위쪽 행부터 빈틈없이 읽습니다. GPU 작업과 동기화합니다. 미할당 소스, 활성 Fbo 패스 및 백엔드 실패는 false를 반환합니다.
+- F32는 부동소수점 어태치먼트 값을 제한 없이 보존합니다. 반정밀도는 float로 확장하고 정규화 정수 형식은 0–1로 변환합니다. 없는 채널은 추가하지 않으며 BGRA는 RGBA로 재배열합니다.
+- GL ES 3와 WebGL2는 RGBA16을 포함한 비부동소수점 형식을 8비트 데이터로 읽습니다. 데스크톱 GL, Metal, D3D11은 RGBA16 정규화 정밀도를 유지합니다. 부동소수점 정밀도를 유지하려면 부동소수점 어태치먼트를 할당합니다.
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+포인터 오버로드도 사용 중단 없이 유지합니다. 호출 전에 충분한 공간을 할당합니다.
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
 '''
+related = ["Fbo::readPixels", "Pixels"]
 
 ["Fbo::save"]
 description.en = "Saves framebuffer contents to an image file."
@@ -29055,18 +29261,36 @@ description.en = "Starts a scope for drawing with this shader."
 description.ja = "このシェーダーで描画するスコープを開始する。"
 description.ko = "이 셰이더로 그리는 범위를 시작한다."
 details.en = '''
+- Use `Shader::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - Pushes this shader onto the current window's shader stack so drawing functions that use the shader vertex writer submit through it; this does not immediately bind a GPU pipeline.
 - Pair every `begin()` with `end()` in reverse nesting order, within the same window and render-target activation. Switching to another target temporarily suspends the scope until the original activation is restored.
 - Calls the protected `onBegin()` hook after pushing the shader; an unloaded shader is ignored.
 - End the scope before clearing, moving, or destroying the shader, because the active stack stores its address. Resource lifetime after submission is described in `Shader::clear`.
 '''
 details.ja = '''
+- `Shader::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 現在のウィンドウのシェーダースタックにこのシェーダーを追加し、シェーダー用の頂点出力を使う描画関数の送信先にします。この時点では GPU パイプラインをバインドしません。
 - `begin()` ごとに、入れ子の逆順で `end()` を呼んでください。同じウィンドウと同じ描画ターゲットの有効化区間内で対応させます。別のターゲットに切り替えると、元の有効化区間に戻るまでスコープは一時的に使われなくなります。
 - スタックへの追加後に protected の `onBegin()` フックを呼びます。未ロードの場合は何もしません。
 - 有効なスタックにはシェーダーのアドレスが保存されるため、クリア・ムーブ・破棄の前にスコープを終了してください。送信後のリソースの寿命は `Shader::clear` を参照してください。
 '''
 details.ko = '''
+- `Shader::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 이 셰이더를 현재 창의 셰이더 스택에 추가하여 셰이더용 정점 출력을 사용하는 그리기 함수가 이 셰이더로 제출되도록 합니다. 이 시점에는 GPU 파이프라인을 바인딩하지 않습니다.
 - 모든 `begin()`마다 중첩의 역순으로 `end()`를 호출하세요. 같은 창과 같은 렌더 타깃 활성화 구간 안에서 짝을 맞춰야 합니다. 다른 타깃으로 전환하면 원래 활성화 구간으로 돌아올 때까지 범위가 일시적으로 사용되지 않습니다.
 - 스택에 추가한 뒤 protected 훅인 `onBegin()`을 호출합니다. 로드되지 않았으면 아무 작업도 하지 않습니다.
@@ -29087,16 +29311,34 @@ description.en = "Ends this shader's active drawing scope."
 description.ja = "このシェーダーの有効な描画スコープを終了する。"
 description.ko = "이 셰이더의 활성 그리기 범위를 종료한다."
 details.en = '''
+- Use `Shader::scoped` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - Calls `onEnd()` before removing this shader from the current window's stack, restoring the previous shader; removing the last shader resets the sokol GPU state cache.
 - Does nothing when unloaded or when the stack is empty. If another shader is on top, or the current target activation differs from the one recorded by `begin()`, logs a warning and leaves the scope open.
 - Pair every `begin()` with `end()`; see `Shader::begin` for scope and object lifetime rules. This call does not flush deferred draws.
 '''
 details.ja = '''
+- `Shader::scoped` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 現在のウィンドウのスタックからこのシェーダーを取り除く前に `onEnd()` を呼び、前のシェーダーに戻します。最後のシェーダーを取り除くと、sokol の GPU 状態キャッシュをリセットします。
 - 未ロードの場合やスタックが空の場合は何もしません。別のシェーダーが先頭にある場合や、現在のターゲットの有効化区間が `begin()` 時と異なる場合は、警告をログに出してスコープを開いたままにします。
 - `begin()` ごとに `end()` を呼んでください。スコープの対応とオブジェクトの寿命は `Shader::begin` を参照してください。この呼び出しでは遅延描画を実行しません。
 '''
 details.ko = '''
+- `Shader::scoped`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = shader.scoped();
+}
+```
 - 현재 창의 스택에서 이 셰이더를 제거하기 전에 `onEnd()`를 호출하고 이전 셰이더로 돌아갑니다. 마지막 셰이더를 제거하면 sokol의 GPU 상태 캐시를 초기화합니다.
 - 로드되지 않았거나 스택이 비어 있으면 아무 작업도 하지 않습니다. 다른 셰이더가 맨 위에 있거나 현재 타깃의 활성화 구간이 `begin()` 시점과 다르면 경고를 기록하고 범위를 열린 상태로 유지합니다.
 - 모든 `begin()`마다 `end()`를 호출하세요. 범위의 짝과 객체 수명 규칙은 `Shader::begin`을 참조하세요. 이 호출은 지연된 그리기를 실행하지 않습니다.
@@ -40904,15 +41146,27 @@ description.en = "Returns the reported video decoding backend name."
 description.ja = "報告される動画デコードバックエンド名を返す。"
 description.ko = "보고되는 비디오 디코딩 백엔드 이름을 반환한다."
 details.en = '''
-- Linux returns an FFmpeg hardware device name such as `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, or `"drm"`, `"software"` without a hardware device, or `"unknown"` if its name is unavailable; an unloaded player returns `"none"`.
+On Linux, this reports what is actually decoding, including FFmpeg falling back to software.
+```cpp
+void tcApp::update() { logNotice() << player.getHwAccelName(); }
+```
+- Linux returns an FFmpeg hardware device name such as `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, or `"drm"`, `"software"` when decoding in software, or `"unknown"` if its name is unavailable; an unloaded player returns `"none"`.
 - Loaded macOS and iOS players report `"videotoolbox"`, and Windows reports `"mediafoundation"`. Web currently reports `"none"`. See `VideoPlayer::isUsingHwAccel` for the limits of these reports.
 '''
 details.ja = '''
-- Linux は `"cuda"`、`"vaapi"`、`"vdpau"`、`"v4l2m2m"`、`"drm"` などの FFmpeg のハードウェアデバイス名を返します。ハードウェアデバイスがなければ `"software"`、名前を取得できなければ `"unknown"` を返します。未ロード時は `"none"` を返します。
+Linux では、FFmpeg 内部でのソフトウェアへのフォールバックも含め、実際のデコード状態を報告します。
+```cpp
+void tcApp::update() { logNotice() << player.getHwAccelName(); }
+```
+- Linux は `"cuda"`、`"vaapi"`、`"vdpau"`、`"v4l2m2m"`、`"drm"` などの FFmpeg のハードウェアデバイス名を返します。ソフトウェアでデコードしていれば `"software"`、名前を取得できなければ `"unknown"` を返します。未ロード時は `"none"` を返します。
 - ロード済みの macOS と iOS は `"videotoolbox"`、Windows は `"mediafoundation"` を返します。Web は現在 `"none"` を返します。これらの報告の制約は `VideoPlayer::isUsingHwAccel` を参照してください。
 '''
 details.ko = '''
-- Linux는 `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, `"drm"` 등의 FFmpeg 하드웨어 장치 이름을 반환합니다. 하드웨어 장치가 없으면 `"software"`, 이름을 구할 수 없으면 `"unknown"`을 반환합니다. 로드되지 않았으면 `"none"`을 반환합니다.
+Linux에서는 FFmpeg 내부의 소프트웨어 폴백을 포함하여 실제 디코딩 상태를 보고합니다.
+```cpp
+void tcApp::update() { logNotice() << player.getHwAccelName(); }
+```
+- Linux는 `"cuda"`, `"vaapi"`, `"vdpau"`, `"v4l2m2m"`, `"drm"` 등의 FFmpeg 하드웨어 장치 이름을 반환합니다. 소프트웨어로 디코딩하면 `"software"`, 이름을 구할 수 없으면 `"unknown"`을 반환합니다. 로드되지 않았으면 `"none"`을 반환합니다.
 - 로드된 macOS와 iOS 플레이어는 `"videotoolbox"`, Windows는 `"mediafoundation"`을 반환합니다. Web은 현재 `"none"`을 반환합니다. 이러한 보고의 한계는 `VideoPlayer::isUsingHwAccel`을 참조하세요.
 '''
 
@@ -41070,17 +41324,29 @@ description.en = "Returns the reported hardware decoding state."
 description.ja = "報告されるハードウェアデコードの状態を返す。"
 description.ko = "보고되는 하드웨어 디코딩 상태를 반환한다."
 details.en = '''
-- On Linux, returns whether the decoder has an active FFmpeg hardware device; query after `load()` to distinguish the result from the `getUseHwAccel()` preference.
+On Linux, this reports what is actually decoding, including FFmpeg falling back to software.
+```cpp
+void tcApp::update() { logNotice() << player.isUsingHwAccel(); }
+```
+- On Linux, returns whether decoded frames use FFmpeg hardware acceleration; query after `load()` to distinguish the result from the `getUseHwAccel()` preference.
 - macOS, iOS, and Windows return `true` whenever a platform player is loaded; they do not verify hardware use for the individual clip, and the native framework may fall back internally.
 - Returns `false` when unloaded. Web currently also returns `false` after loading because it does not set the platform handle used by this query.
 '''
 details.ja = '''
-- Linux では、デコーダに有効な FFmpeg のハードウェアデバイスがあるかを返します。`getUseHwAccel()` の設定値と区別するため、`load()` の後に確認してください。
+Linux では、FFmpeg 内部でのソフトウェアへのフォールバックも含め、実際のデコード状態を報告します。
+```cpp
+void tcApp::update() { logNotice() << player.isUsingHwAccel(); }
+```
+- Linux では、デコードされたフレームが FFmpeg のハードウェアアクセラレーションを使用しているかを返します。`getUseHwAccel()` の設定値と区別するため、`load()` の後に確認してください。
 - macOS、iOS、Windows はプラットフォームのプレイヤーがロードされていれば `true` を返します。個々の動画でのハードウェア使用を検証するものではなく、ネイティブのフレームワーク内部でフォールバックする場合があります。
 - 未ロード時は `false` を返します。Web はこの取得処理が使用するプラットフォームのハンドルを設定しないため、現在はロード後も `false` を返します。
 '''
 details.ko = '''
-- Linux에서는 디코더에 활성 FFmpeg 하드웨어 장치가 있는지 반환합니다. `getUseHwAccel()` 설정값과 구분하려면 `load()` 후에 확인하세요.
+Linux에서는 FFmpeg 내부의 소프트웨어 폴백을 포함하여 실제 디코딩 상태를 보고합니다.
+```cpp
+void tcApp::update() { logNotice() << player.isUsingHwAccel(); }
+```
+- Linux에서는 디코딩된 프레임이 FFmpeg 하드웨어 가속을 사용하는지 반환합니다. `getUseHwAccel()` 설정값과 구분하려면 `load()` 후에 확인하세요.
 - macOS, iOS, Windows는 플랫폼 플레이어가 로드되어 있으면 `true`를 반환합니다. 개별 비디오의 하드웨어 사용을 검증하지 않으며 네이티브 프레임워크 내부에서 폴백할 수 있습니다.
 - 로드되지 않았으면 `false`를 반환합니다. Web은 이 조회에 사용하는 플랫폼 핸들을 설정하지 않으므로 현재는 로드 후에도 `false`를 반환합니다.
 '''
@@ -41235,6 +41501,71 @@ details.ko = '''
 '''
 related = ["VideoPlayer::getGammaCorrection"]
 
+["VideoPlayer::setDecodeThreads"]
+category = "video"
+keywords = ["decode", "threads", "ffmpeg", "memory", "linux"]
+description.en = "Sets the decoder thread preference for the next load."
+description.ja = "次の読み込みで使うデコードスレッド数を設定します。"
+description.ko = "다음 로드에 사용할 디코더 스레드 수를 설정합니다."
+details.en = '''
+- Call before `load()`. The default `0` requests FFmpeg's automatic choice and preserves existing behavior; negative values are clamped to `0`.
+- Currently only affects the Linux backend; other platforms ignore it. The snippet sets the preference before loading.
+- One value applies to hardware and software decoding, including software fallback. Changes after loading take effect at the next `load()` and do not reconfigure the loaded decoder, even on fallback.
+- In software decoding measurements on a 20-thread i5-13500 (auto opened 16 threads), choosing `4` instead of `0` cut peak memory to about a third and decode speed by about 40% across 1080p/4K H.264 and 8K H.265. Automatic (`0`) was fastest; choose based on memory and playback needs.
+'''
+details.ja = '''
+- `load()` の前に呼びます。既定値の `0` は FFmpeg の自動選択で、従来の動作を維持します。負の値は `0` に丸められます。
+- この設定を反映するのは Linux バックエンドだけです。他のプラットフォームでは無視されます。スニペットのように読み込み前に設定します。
+- ハードウェアとソフトウェアのデコード、およびソフトウェアへのフォールバックで同じ値を使います。読み込み後の変更は次の `load()` で適用され、フォールバック時もロード済みのデコーダは再設定されません。
+- 20 スレッドの i5-13500（自動選択では 16 スレッド）でのソフトウェアデコード測定では、1080p/4K H.264 と 8K H.265 で `0` から `4` にするとピークメモリが約 3 分の 1 になり、デコード速度は約 40% 低下しました。自動選択（`0`）が最速でした。メモリと再生の要件に合わせて選びます。
+'''
+details.ko = '''
+- `load()` 전에 호출합니다. 기본값 `0`은 FFmpeg의 자동 선택으로 기존 동작을 유지합니다. 음수는 `0`으로 조정합니다.
+- 현재 Linux 백엔드에만 적용하며 다른 플랫폼에서는 무시합니다. 스니펫처럼 로드 전에 설정합니다.
+- 하드웨어 및 소프트웨어 디코딩과 소프트웨어 폴백에 같은 값을 사용합니다. 로드 후 변경은 다음 `load()`에 적용하며 폴백 시에도 로드된 디코더를 다시 설정하지 않습니다.
+- 20스레드 i5-13500(자동 선택 시 16스레드)에서 소프트웨어 디코딩을 측정한 결과, 1080p/4K H.264 및 8K H.265에서 `0` 대신 `4`를 선택하면 최대 메모리는 약 3분의 1로 줄고 디코딩 속도는 약 40% 감소했습니다. 자동 선택(`0`)이 가장 빨랐습니다. 메모리와 재생 요구에 맞게 선택합니다.
+'''
+related = ["VideoPlayer::getDecodeThreads", "VideoPlayer::setUseHwAccel"]
+snippet = '''
+class tcApp : public App {
+    VideoPlayer player;
+    void setup() override {
+        player.setDecodeThreads(4);
+        player.load("movie.mp4");
+    }
+};
+'''
+
+["VideoPlayer::getDecodeThreads"]
+category = "video"
+keywords = ["decode", "threads", "ffmpeg", "preference"]
+description.en = "Returns the stored decoder thread preference."
+description.ja = "保存されているデコードスレッド数の設定を返します。"
+description.ko = "저장된 디코더 스레드 수 설정을 반환합니다."
+details.en = '''
+- Returns the stored preference, default `0` (FFmpeg automatic), rather than the active decoder's thread count. Negative input to the setter is stored as `0`.
+- Currently only affects the Linux backend. Set the preference before loading as in the snippet; changes after loading apply at the next `load()`. See `setDecodeThreads()` for the measured memory/speed trade-off.
+'''
+details.ja = '''
+- 動作中のデコーダのスレッド数ではなく、保存された設定を返します。既定値は `0`（FFmpeg の自動選択）で、設定時の負の値は `0` になります。
+- この設定を反映するのは Linux バックエンドだけです。スニペットのように読み込み前に設定し、読み込み後の変更は次の `load()` で適用されます。測定されたメモリと速度の関係は `setDecodeThreads()` を参照してください。
+'''
+details.ko = '''
+- 활성 디코더의 스레드 수가 아닌 저장된 설정을 반환합니다. 기본값은 `0`(FFmpeg 자동 선택)이며 설정 시 음수는 `0`으로 저장합니다.
+- 현재 Linux 백엔드에만 적용합니다. 스니펫처럼 로드 전에 설정하며 로드 후 변경은 다음 `load()`에 적용합니다. 측정한 메모리와 속도의 관계는 `setDecodeThreads()`를 참조합니다.
+'''
+related = ["VideoPlayer::setDecodeThreads"]
+snippet = '''
+class tcApp : public App {
+    VideoPlayer player;
+    void setup() override {
+        player.setDecodeThreads(4);
+        player.load("movie.mp4");
+        logNotice("VideoPlayer") << player.getDecodeThreads();
+    }
+};
+'''
+
 ["VideoPlayer::setUseHwAccel"]
 category = "video"
 keywords = ["hardware", "gpu decode", "vaapi", "cuda", "acceleration"]
@@ -41368,20 +41699,20 @@ details.ko = '''
 ["VideoPlayerBase::getResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Returns the hard resynchronization threshold."
-description.ja = "強制的な同期補正の閾値を返す。"
-description.ko = "강제 동기화 보정 임계값을 반환한다."
+description.en = "Returns the playback catch-up threshold in seconds."
+description.ja = "再生の遅れを補正し始める閾値を秒単位で返します。"
+description.ko = "재생 지연 보정을 시작할 임계값을 초 단위로 반환합니다."
 details.en = '''
-- Returns the stored threshold in seconds; the default is `0.5`, and values of `0` or less disable hard resynchronization.
+- Returns the stored threshold in seconds; the default is `0.5`, and values of `0` or less disable automatic Linux keyframe jumps and HapPlayer hard resynchronization.
 - See `VideoPlayerBase::setResyncThreshold` for the affected players and synchronization behavior.
 '''
 details.ja = '''
-- 保存されている閾値を秒単位で返します。既定値は `0.5` で、`0` 以下は強制的な同期補正を無効にします。
+- 保存されている閾値を秒単位で返します。既定値は `0.5` で、`0` 以下は Linux の自動キーフレームジャンプと HapPlayer の強制同期補正を無効にします。
 - 対象のプレイヤーと同期の動作は `VideoPlayerBase::setResyncThreshold` を参照してください。
 '''
 details.ko = '''
-- 저장된 임계값을 초 단위로 반환합니다. 기본값은 `0.5`이며 `0` 이하는 강제 동기화 보정을 비활성화합니다.
-- 적용되는 플레이어와 동기화 동작은 `VideoPlayerBase::setResyncThreshold`를 참조하세요.
+- 저장된 임계값을 초 단위로 반환합니다. 기본값은 `0.5`이며 `0` 이하는 Linux의 자동 키프레임 점프와 HapPlayer의 강제 동기화 보정을 비활성화합니다.
+- 적용되는 플레이어와 동기화 동작은 `VideoPlayerBase::setResyncThreshold`를 참조합니다.
 '''
 related = ["VideoPlayerBase::setResyncThreshold"]
 
@@ -41778,29 +42109,104 @@ details.ko = '''
 ["VideoPlayerBase::setResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Sets the threshold for hard playback resynchronization."
-description.ja = "再生位置を強制的に同期補正する閾値を設定する。"
-description.ko = "재생 위치를 강제로 동기화 보정하는 임계값을 설정한다."
+description.en = "Sets the Linux playback lag threshold for trying to catch up (default 0.5 seconds), not a maximum lag; keyframe spacing and decoding speed determine the lag. HapPlayer uses it for hard audio resynchronization."
+description.ja = "Linux の再生の遅れを補正し始める閾値（既定値0.5秒）を設定します。遅れの上限ではなく、実際の遅れはキーフレーム間隔とデコード速度で決まります。HapPlayer では音声への強制同期補正に使います。"
+description.ko = "Linux 재생 지연 보정을 시작할 임계값(기본값 0.5초)을 설정합니다. 지연의 상한이 아니며 실제 지연은 키프레임 간격과 디코딩 속도에 따라 달라집니다. HapPlayer는 오디오 강제 동기화 보정에 사용합니다."
 details.en = '''
-- Stores a threshold in seconds without clamping; the default is `0.5`, and `0` or negative values disable hard resynchronization.
-- Linux `VideoPlayer` seeks when the difference between the current video position and its target clock exceeds the threshold; the target follows playing audio, or wall-clock time when audio is not playing.
-- HapPlayer advances by wall-clock elapsed time multiplied by speed and, while audio is playing at positive speed, gradually corrects toward the audio position with a `0.25`-second time constant.
-- HapPlayer jumps directly to the audio position when the difference exceeds a positive threshold; gradual correction remains enabled when hard resynchronization is disabled.
-- Other `VideoPlayer` platforms do not use this threshold and leave synchronization to their native player.
+- Linux `VideoPlayer` starts trying to catch up after this many seconds of lag (default `0.5`); this is not a maximum lag. Keyframe spacing and decoding speed determine the lag. `0` or less disables automatic catch-up jumps and HapPlayer hard resynchronization.
+
+```cpp
+void tcApp::setup() {
+    player.setResyncThreshold(0.5f);
+}
+```
+
+When decoding cannot keep up, lag is bounded by the keyframe interval and by how far decoding falls behind; under heavy load it can reach a few times the interval. Encoding with shorter keyframe intervals keeps lag smaller:
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+Forward catch-up jumps use the container's seek index. A file without one (for example some Matroska files) is only decoded forward, without jumps. Remux it to MP4 without re-encoding:
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
+When recording with `VideoWriter`, set `VideoRecordSettings::keyframeInterval` in `tcApp::setup()` before passing the settings to `open()` (in frames; `30` is one second at 30 fps):
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```
+
+- Linux playback shows the newest available picture for the playback time, skipping older pictures. It follows playing audio, or elapsed time when audio is not playing.
+- HapPlayer uses this value for hard audio resynchronization; gradual correction remains enabled even when hard resynchronization is disabled.
+- Other `VideoPlayer` platforms leave synchronization to their native player. No equivalent threshold API exists on those backends.
 '''
 details.ja = '''
-- 秒単位の閾値を制限せずに保存します。既定値は `0.5` で、`0` 以下にすると強制的な同期補正を無効にします。
-- Linux の `VideoPlayer` は、現在の映像位置と基準となる時間の差が閾値を超えるとシークします。基準には再生中の音声位置を使い、音声が再生されていない場合は実時間を使います。
-- HapPlayer は実時間の経過に再生速度を掛けて進み、正の速度で音声が再生されている間は、時定数 `0.25` 秒で音声位置へ徐々に補正します。
-- HapPlayer は位置の差が正の閾値を超えると音声位置へ直接移動します。強制的な同期補正を無効にしても、徐々に行う補正は有効です。
-- その他の `VideoPlayer` プラットフォームではこの閾値を使わず、ネイティブプレイヤーに同期を任せます。
+- Linux の `VideoPlayer` は遅れがこの秒数（既定値 `0.5`）を超えると補正を試みます。遅れの上限ではなく、実際の遅れはキーフレーム間隔とデコード速度で決まります。`0` 以下では自動ジャンプと HapPlayer の強制同期補正を無効にします。
+
+```cpp
+void tcApp::setup() {
+    player.setResyncThreshold(0.5f);
+}
+```
+
+デコードが再生に追いつかない場合、遅れの上限はキーフレーム間隔とデコードがどれだけ遅れるかで決まります。高負荷時には間隔の数倍に達することがあります。キーフレーム間隔を短くしてエンコードすると、遅れを小さくできます。
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+先へのジャンプはコンテナのシーク用インデックスを使います。インデックスのないファイル（一部の Matroska など）ではジャンプせず、先へデコードするだけになります。再エンコードせずに MP4 へ入れ替えてください。
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
+`VideoWriter` で録画する場合は、`tcApp::setup()` で `open()` に設定を渡す前に `VideoRecordSettings::keyframeInterval` を指定します。単位はフレームで、30 fps の場合、`30` は1秒です。
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```
+
+- Linux では、再生時刻に合う最新の準備済み映像を表示し、古い映像を飛ばします。音声の再生中は音声時刻に、それ以外は経過時間に従います。
+- HapPlayer では音声への強制同期補正に使います。強制補正を無効にしても、徐々に行う補正は有効です。
+- その他の `VideoPlayer` プラットフォームではネイティブプレイヤーに同期を任せます。対応する閾値 API はありません。
 '''
 details.ko = '''
-- 초 단위 임계값을 제한 없이 저장합니다. 기본값은 `0.5`이며 `0` 또는 음수로 설정하면 강제 동기화 보정을 비활성화합니다.
-- Linux의 `VideoPlayer`는 현재 영상 위치와 기준 시간의 차이가 임계값을 초과하면 탐색합니다. 기준은 재생 중인 오디오 위치를 따르며 오디오가 재생 중이 아니면 실제 경과 시간을 따릅니다.
-- HapPlayer는 실제 경과 시간에 재생 속도를 곱하여 진행하고, 양의 속도에서 오디오가 재생되는 동안 시정수 `0.25`초로 오디오 위치를 향해 점진적으로 보정합니다.
-- HapPlayer는 위치 차이가 양의 임계값을 초과하면 오디오 위치로 직접 이동합니다. 강제 동기화 보정을 비활성화해도 점진적인 보정은 유지합니다.
-- 다른 `VideoPlayer` 플랫폼은 이 임계값을 사용하지 않고 네이티브 플레이어에 동기화를 맡깁니다.
+- Linux의 `VideoPlayer`는 지연이 이 초 수(기본값 `0.5`)를 초과하면 보정을 시도합니다. 지연의 상한이 아니며 실제 지연은 키프레임 간격과 디코딩 속도에 따라 달라집니다. `0` 이하는 자동 점프와 HapPlayer의 강제 동기화 보정을 비활성화합니다.
+
+```cpp
+void tcApp::setup() {
+    player.setResyncThreshold(0.5f);
+}
+```
+
+디코딩이 재생을 따라가지 못하면 지연의 상한은 키프레임 간격과 디코딩이 뒤처진 정도에 따라 결정됩니다. 부하가 높으면 간격의 몇 배에 이를 수 있습니다. 키프레임 간격을 짧게 인코딩하면 지연을 줄일 수 있습니다.
+
+```sh
+ffmpeg -i in.mp4 -c:v libx264 -g 30 out.mp4
+```
+
+앞으로의 점프는 컨테이너의 탐색 인덱스를 사용합니다. 인덱스가 없는 파일(일부 Matroska 등)에서는 점프하지 않고 앞으로 디코딩만 합니다. 재인코딩 없이 MP4로 바꿉니다.
+
+```sh
+ffmpeg -i in.mkv -c copy out.mp4
+```
+
+`VideoWriter`로 녹화할 때는 `tcApp::setup()`에서 `open()`에 설정을 전달하기 전에 `VideoRecordSettings::keyframeInterval`을 지정합니다. 단위는 프레임이며 30 fps에서 `30`은 1초입니다.
+
+```cpp
+VideoRecordSettings settings;
+settings.keyframeInterval = 30;
+```
+
+- Linux에서는 재생 시각에 맞는 최신 준비된 영상을 표시하고 오래된 영상은 건너뜁니다. 오디오가 재생 중이면 오디오 시각을 따르고 그 외에는 경과 시간을 따릅니다.
+- HapPlayer에서는 오디오 강제 동기화 보정에 사용합니다. 강제 보정을 비활성화해도 점진적인 보정은 유지합니다.
+- 다른 `VideoPlayer` 플랫폼은 네이티브 플레이어에 동기화를 맡깁니다. 해당 임계값 API는 없습니다.
 '''
 related = ["VideoPlayerBase::getResyncThreshold"]
 
@@ -43099,9 +43505,45 @@ details.ko = '''
 
 ["Window::getPosition"]
 keywords = ["position", "screen", "monitor", "display", "location"]
-description.en = "This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone"
-description.ja = "setPosition と同じスクリーン座標系での、このウィンドウの現在位置。ネイティブウィンドウが存在しない場合は (-1, -1)"
-description.ko = "setPosition과 같은 스크린 좌표계에서의 이 윈도우의 현재 위치. 네이티브 윈도우가 없으면 (-1, -1)"
+description.en = "Reads this window’s position in OS screen coordinates; use it on desktop when you need the decorated frame location. Returns (-1, -1) when unavailable."
+description.ja = "デスクトップで装飾込みの外枠位置が必要なときに使う、OS スクリーン座標での現在位置です。取得できない場合は (-1, -1) を返します。"
+description.ko = "데스크톱에서 장식을 포함한 외곽 프레임 위치가 필요할 때 OS 스크린 좌표로 현재 위치를 읽습니다. 조회할 수 없으면 (-1, -1)을 반환합니다."
+details.en = '''
+- Web, iOS and Android always return `(-1, -1)`, and so does a closed or not-yet-open Window. After checking `Platform::isDesktop()` and `isOpen()`, `(-1, -1)` comes back only on Linux without X11 or when the OS call fails, and then a warning is logged:
+```cpp
+void tcApp::setup() {
+    Window* window = getWindow();
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = window->getPosition();
+    }
+}
+```
+- No public API tells a failed query apart from a real position at `(-1, -1)`, so don't use that value alone as a success check.
+'''
+details.ja = '''
+- Web・iOS・Android は常に `(-1, -1)` を返し、閉じた、またはまだ開いていない Window も同じです。`Platform::isDesktop()` と `isOpen()` を確かめれば、`(-1, -1)` が返るのは X11 のない Linux と、OS の呼び出しが失敗したときだけです。そのときは警告が出ます：
+```cpp
+void tcApp::setup() {
+    Window* window = getWindow();
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = window->getPosition();
+    }
+}
+```
+- 取得の失敗と実際の位置 `(-1, -1)` を区別する公開 API はないため、この値だけで成功を判定しないでください。
+'''
+details.ko = '''
+- Web, iOS, Android는 항상 `(-1, -1)`을 반환하며, 닫혔거나 아직 열리지 않은 Window도 마찬가지입니다. `Platform::isDesktop()`과 `isOpen()`을 확인하면 `(-1, -1)`이 반환되는 경우는 X11이 없는 Linux와 OS 호출이 실패한 경우뿐입니다. 이때는 경고가 출력됩니다:
+```cpp
+void tcApp::setup() {
+    Window* window = getWindow();
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = window->getPosition();
+    }
+}
+```
+- 조회 실패와 실제 위치 `(-1, -1)`을 구별하는 공개 API가 없으므로 이 값만으로 성공 여부를 판단하지 마세요.
+'''
 related = ["Window::setPosition"]
 
 ["Window::setDrawWhileHidden"]
@@ -45000,6 +45442,12 @@ description.ja = "自作ポリゴン用の頂点バッファを開く。endShape
 description.ko = "직접 만드는 폴리곤용 정점 버퍼를 연다. endShape()로 닫는다."
 related = ["vertex", "endShape", "fill", "noFill", "beginLines", "beginStroke"]
 details.en = '''
+- Use `scopedShape` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - Use it to draw your own polygon. Call `beginShape()`, add points with `vertex()`, and finish with `endShape()`. `endShape()` draws the polygon and empties the buffer.
 - Coordinates and units are the same as for `drawRect`.
 - You can add any number of points. You can also add curved parts with `appendArc` and `appendCurve`.
@@ -45015,6 +45463,12 @@ endShape(true);   // true closes the outline back to the first vertex
 - Shapes cannot be nested. If you call `beginShape()` again before `endShape()`, the points added so far are discarded.
 '''
 details.ja = '''
+- `scopedShape` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - 自分で形を決めたポリゴンを描くときに使います。`beginShape()` を呼び、`vertex()` で点を追加し、`endShape()` で終わります。`endShape()` がポリゴンを描画し、バッファを空にします。
 - 座標と単位の考え方は `drawRect` と同じです。
 - 点はいくつでも追加できます。`appendArc` や `appendCurve` で曲線の部分を追加することもできます。
@@ -45030,6 +45484,12 @@ endShape(true);   // true closes the outline back to the first vertex
 - 入れ子にはできません。`endShape()` の前にもう一度 `beginShape()` を呼ぶと、それまでに追加した点は破棄されます。
 '''
 details.ko = '''
+- `scopedShape`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - 직접 모양을 정한 폴리곤을 그릴 때 사용합니다. `beginShape()`를 호출하고 `vertex()`로 점을 추가한 뒤 `endShape()`로 마칩니다. `endShape()`가 폴리곤을 그리고 버퍼를 비웁니다.
 - 좌표와 단위 개념은 `drawRect`와 같습니다.
 - 점은 몇 개든 추가할 수 있습니다. `appendArc`나 `appendCurve`로 곡선 부분을 추가할 수도 있습니다.
@@ -45053,6 +45513,12 @@ description.ja = "ストローク描画を開始する。"
 description.ko = "stroke 그리기를 시작한다."
 related = ["endStroke", "vertex", "beginShape", "setStrokeWeight", "setStrokeCap", "setStrokeJoin"]
 details.en = '''
+- Use `scopedStroke` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Draws a connected line with **width, end caps and corner joins**. The outline of `beginShape` is always a thin 1px line, but this one follows the stroke settings.
 - Set the look with `setStrokeWeight`, `setStrokeCap` and `setStrokeJoin`, add points with `vertex()`, and finish with `endStroke()`.
@@ -45073,6 +45539,12 @@ endStroke();        // open line; pass true to close it into a loop
 - Internally it builds a `StrokeMesh`.
 '''
 details.ja = '''
+- `scopedStroke` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - **太さ・端の cap・角の join** を持つ、つながった線を描きます。`beginShape` の輪郭は常に細い 1px の線ですが、こちらは線の設定に従います。
 - 見た目を `setStrokeWeight`、`setStrokeCap`、`setStrokeJoin` で設定し、`vertex()` で点を追加して、`endStroke()` で終わります。
@@ -45093,6 +45565,12 @@ endStroke();        // open line; pass true to close it into a loop
 - 内部では `StrokeMesh` を作って描画します。
 '''
 details.ko = '''
+- `scopedStroke`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - **두께, 끝의 cap, 모서리의 join**을 가진 이어진 선을 그립니다. `beginShape`의 윤곽은 항상 가는 1px 선이지만, 이 함수는 선 설정을 따릅니다.
 - 모양을 `setStrokeWeight`, `setStrokeCap`, `setStrokeJoin`으로 설정하고, `vertex()`로 점을 추가한 뒤 `endStroke()`로 마칩니다.
@@ -47335,6 +47813,12 @@ description.ja = "現在の図形の描画を終了する。"
 description.ko = "현재 도형 그리기를 종료한다."
 related = ["beginShape", "fill", "noFill"]
 details.en = '''
+- Use `scopedShape` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - Draws the points added since `beginShape()` and then empties the buffer. See `beginShape` for the full pattern and a code example.
 - `endShape(true)` closes the outline by connecting the last point back to the first. The default is `false`, which leaves the outline open.
 - With `fill()` (the default), the shape is filled when it has 3 or more points. The `close` argument does not affect the fill.
@@ -47343,6 +47827,12 @@ details.en = '''
 - The fill is made of triangles that all start from the first point. It is correct only for **convex** shapes. A concave polygon may be filled incorrectly.
 '''
 details.ja = '''
+- `scopedShape` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - `beginShape()` 以降に追加した点を描画し、バッファを空にします。全体の書き方とコード例は `beginShape` を参照してください。
 - `endShape(true)` にすると、最後の点を最初の点につないで輪郭を閉じます。省略時は `false` で、輪郭は開いたままです。
 - `fill()`（初期状態）のときは、点が 3 個以上あれば塗りつぶします。`close` の値は塗りつぶしには影響しません。
@@ -47351,6 +47841,12 @@ details.ja = '''
 - 塗りつぶしは、最初の点を共有する三角形を並べて作ります。そのため正しく塗れるのは**凸形**だけで、凹形のポリゴンでは塗りつぶしが崩れることがあります。
 '''
 details.ko = '''
+- `scopedShape`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedShape(true);
+}
+```
 - `beginShape()` 이후에 추가한 점을 그리고 버퍼를 비웁니다. 전체 작성법과 코드 예시는 `beginShape`를 참고하세요.
 - `endShape(true)`로 하면 마지막 점을 첫 점에 이어 윤곽을 닫습니다. 생략하면 `false`이며 윤곽은 열린 상태로 남습니다.
 - `fill()`(초기 상태)일 때는 점이 3개 이상이면 채워서 그립니다. `close` 값은 채우기에 영향을 주지 않습니다.
@@ -47367,6 +47863,12 @@ description.ja = "現在のストローク描画を終了する。"
 description.ko = "현재 stroke 그리기를 종료한다."
 related = ["beginStroke"]
 details.en = '''
+- Use `scopedStroke` to end this pair automatically at scope exit.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Joints and caps use their vertex's stored color; segments blend between endpoint colors. A closed stroke also blends from the last vertex's color back to the first vertex's color.
 - Draws the points added since `beginStroke()` as a thick line with the stroke width, caps and joins, and then empties the buffer. At least 2 points are needed. See `beginStroke` for the full pattern and a code example.
@@ -47374,6 +47876,12 @@ details.en = '''
 - When you close the loop, a last point placed at the same position as the first point is removed automatically. This prevents a small spike at the closing corner.
 '''
 details.ja = '''
+- `scopedStroke` を使うと、スコープを抜けると自動でペアを終了します。
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - 接合部とキャップには、その頂点に記録した色を使い、線分では両端の色を補間します。閉じたストロークでは、最後の頂点から最初の頂点への線分でも色を補間します。
 - `beginStroke()` 以降に追加した点を、線の太さ・cap・join を使った太い線として描画し、バッファを空にします。最低 2 点が必要です。全体の書き方とコード例は `beginStroke` を参照してください。
@@ -47381,6 +47889,12 @@ details.ja = '''
 - ループを閉じるとき、最後の点が最初の点と同じ位置にあれば、その点は自動的に取り除かれます。これにより、閉じた角に小さなとげが出ることを防ぎます。
 '''
 details.ko = '''
+- `scopedStroke`를 사용하면 스코프를 벗어날 때 자동으로 쌍을 종료합니다.
+```cpp
+void tcApp::draw() {
+    auto s = scopedStroke();
+}
+```
 - 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - 조인과 캡에는 해당 정점에 기록된 색상을 사용하고 선분에서는 양 끝의 색상을 보간합니다. 닫힌 스트로크에서는 마지막 정점에서 첫 정점으로 이어지는 선분의 색상도 보간합니다.
 - `beginStroke()` 이후에 추가한 점을 선 두께, cap, join을 적용한 굵은 선으로 그리고 버퍼를 비웁니다. 최소 2개의 점이 필요합니다. 전체 작성법과 코드 예시는 `beginStroke`를 참고하세요.
@@ -48079,23 +48593,44 @@ details.ja = '''
 details.ko = '''
 - `width`/`height`가 `getBitmapStringWidth()` / `getBitmapStringHeight()`와 같은 값인 `Rect`를 반환합니다. `x`와 `y`는 항상 0입니다. 이는 텍스트 자신의 좌상단을 기준으로 한 로컬 사각형이며, 현재 `setTextAlign()`의 기준점에 맞춰 이동하지 않습니다.
 '''
-related = ["getBitmapStringWidth", "getBitmapStringHeight", "getBitmapStringBounds"]
+related = ["getBitmapStringWidth", "getBitmapStringHeight"]
 
 ["getBitmapStringBounds"]
 category = "graphics_shapes"
-keywords = ["text size", "bounding box", "measure", "extent"]
-description.en = "Get a bitmap string's width and height through output parameters."
-description.ja = "ビットマップ文字列の幅と高さを出力引数で取得する。"
-description.ko = "비트맵 문자열의 너비와 높이를 출력 매개변수로 얻는다."
+keywords = ["text size", "bounding box", "measure", "extent", "deprecated"]
+description.en = "Deprecated: use getBitmapStringBBox() for bitmap text size; removed in v1.0.0."
+description.ja = "非推奨。ビットマップ文字列のサイズには getBitmapStringBBox() を使用。v1.0.0 で削除予定。"
+description.ko = "사용 중단 예정: 비트맵 텍스트 크기는 getBitmapStringBBox()를 사용. v1.0.0에서 제거 예정."
 details.en = '''
+- Use `getBitmapStringBBox()` instead; this compatibility API is scheduled for removal in v1.0.0.
+```cpp
+void tcApp::setup() {
+    Rect box = getBitmapStringBBox("hello");
+    float w = box.width;
+}
+```
 - Writes the measured width and height of `text` into the `width`/`height` reference arguments (UTF-8 and full-width character aware), the same measurement `getBitmapStringWidth()` uses for width.
 - The height is the same as `getBitmapStringHeight()`: `getBitmapFontHeight()` for one line, plus `getBitmapLineHeight()` for each additional line, so it reflects a custom line height set with `setBitmapLineHeight()`.
 '''
 details.ja = '''
+- 代わりに `getBitmapStringBBox()` を使用してください。この互換 API は v1.0.0 で削除予定です。
+```cpp
+void tcApp::setup() {
+    Rect box = getBitmapStringBBox("hello");
+    float w = box.width;
+}
+```
 - `text` の幅と高さを測定し、`width`/`height` の参照引数に書き込みます（UTF-8 と全角文字に対応しており、幅の測定方法は `getBitmapStringWidth()` と同じです）。
 - 高さは `getBitmapStringHeight()` と同じ値です。1行目の高さは `getBitmapFontHeight()` で、2行目以降はその行数分だけ `getBitmapLineHeight()` が加算されます。そのため `setBitmapLineHeight()` で設定した行間が反映されます。
 '''
 details.ko = '''
+- 대신 `getBitmapStringBBox()`를 사용하세요. 이 호환 API는 v1.0.0에서 제거될 예정입니다.
+```cpp
+void tcApp::setup() {
+    Rect box = getBitmapStringBBox("hello");
+    float w = box.width;
+}
+```
 - `text`의 너비와 높이를 측정해 `width`/`height` 참조 인자에 기록합니다(UTF-8과 전각 문자를 인식하며, 너비 측정 방식은 `getBitmapStringWidth()`와 같습니다).
 - 높이는 `getBitmapStringHeight()`와 같은 값입니다. 첫 줄의 높이는 `getBitmapFontHeight()`이고, 둘째 줄부터는 그 줄 수만큼 `getBitmapLineHeight()`가 더해집니다. 따라서 `setBitmapLineHeight()`로 설정한 줄 간격이 반영됩니다.
 '''
@@ -50558,34 +51093,55 @@ void tcApp::draw() {
 ["getWindowPosition"]
 category = "window_system"
 keywords = ["location", "screen", "coordinates", "offset", "x y"]
-description.en = "Returns the window position on the screen."
-description.ja = "画面上のウィンドウ位置を返す。"
-description.ko = "화면에서 윈도우의 위치를 반환한다."
+description.en = "Returns the current window’s position in OS screen coordinates; returns (-1, -1) when unavailable."
+description.ja = "現在のウィンドウ位置を OS スクリーン座標で返します。取得できない場合は (-1, -1) を返します。"
+description.ko = "현재 윈도우 위치를 OS 스크린 좌표로 반환합니다. 조회할 수 없으면 (-1, -1)을 반환합니다."
 details.en = '''
+- Web, iOS and Android always return `(-1, -1)`, and so does a closed or not-yet-open Window. After checking `Platform::isDesktop()` and `isOpen()`, `(-1, -1)` comes back only on Linux without X11 or when the OS call fails, and then a warning is logged:
+```cpp
+void tcApp::setup() {
+    Window* window = getWindow();
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = getWindowPosition();
+    }
+}
+```
+- No public API tells a failed query apart from a real position at `(-1, -1)`, so don't use that value alone as a success check.
 - Position is the decorated frame top-left in OS screen coordinates relative to the primary screen top-left; negative coordinates are allowed. macOS uses screen points, Windows native screen coordinates, and X11 device coordinates. These are separate from logical content sizes and framebuffer pixels.
 - Move first, then enter fullscreen on that screen. The getter reports the real WM position, including clamping.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and returns 0 (see `events`).
 '''
 details.ja = '''
+- Web・iOS・Android は常に `(-1, -1)` を返し、閉じた、またはまだ開いていない Window も同じです。`Platform::isDesktop()` と `isOpen()` を確かめれば、`(-1, -1)` が返るのは X11 のない Linux と、OS の呼び出しが失敗したときだけです。そのときは警告が出ます：
+```cpp
+void tcApp::setup() {
+    Window* window = getWindow();
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = getWindowPosition();
+    }
+}
+```
+- 取得の失敗と実際の位置 `(-1, -1)` を区別する公開 API はないため、この値だけで成功を判定しないでください。
 - 位置はプライマリ画面左上を原点とする OS 画面座標で、装飾込み外枠の左上です。負座標も指定できます。macOS は画面のポイント、Windows はネイティブ画面座標、X11 はデバイス座標です。内容の論理サイズやフレームバッファのピクセルとは別です。
 - 移動してから fullscreen にすると移動先の画面を使います。取得値は WM の丸めも含む実位置です。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して 0 を返します（`events` を参照）。
 '''
 details.ko = '''
+- Web, iOS, Android는 항상 `(-1, -1)`을 반환하며, 닫혔거나 아직 열리지 않은 Window도 마찬가지입니다. `Platform::isDesktop()`과 `isOpen()`을 확인하면 `(-1, -1)`이 반환되는 경우는 X11이 없는 Linux와 OS 호출이 실패한 경우뿐입니다. 이때는 경고가 출력됩니다:
+```cpp
+void tcApp::setup() {
+    Window* window = getWindow();
+    if (Platform::isDesktop() && window && window->isOpen()) {
+        IVec2 position = getWindowPosition();
+    }
+}
+```
+- 조회 실패와 실제 위치 `(-1, -1)`을 구별하는 공개 API가 없으므로 이 값만으로 성공 여부를 판단하지 마세요.
 - 위치는 기본 화면 왼쪽 위를 원점으로 하는 OS 화면 좌표이며 장식을 포함한 외곽 프레임의 왼쪽 위입니다. 음수 좌표도 허용합니다. macOS는 화면 포인트, Windows는 네이티브 화면 좌표, X11은 장치 좌표를 사용합니다. 논리 콘텐츠 크기 및 프레임버퍼 픽셀과 별개입니다.
 - 먼저 이동한 뒤 fullscreen을 켜면 이동한 화면을 사용합니다. 조회는 WM의 위치 제한을 포함한 실제 위치를 반환합니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 0을 반환합니다(`events` 참조).
 '''
 related = ["setWindowPosition", "getDisplayScaleFactor"]
-platform_note.en = '''
-- Position and size work on macOS, Windows and Linux X11 (desktop GLX and Pi X11/EGL). Headless KMS, Web, iOS and Android do not support position and log a Warning; the getter returns `IVec2(-1, -1)`.
-'''
-platform_note.ja = '''
-- 位置とサイズは macOS・Windows・Linux X11（desktop GLX、Pi X11/EGL）で対応します。headless KMS・Web・iOS・Android は位置操作に非対応で Warning を出し、取得は `IVec2(-1, -1)` を返します。
-'''
-platform_note.ko = '''
-- 위치와 크기는 macOS, Windows, Linux X11(desktop GLX, Pi X11/EGL)에서 지원합니다. headless KMS, Web, iOS, Android는 위치를 지원하지 않아 Warning을 출력하고 조회는 `IVec2(-1, -1)`을 반환합니다.
-'''
 
 ["getWindowSize"]
 category = "window_input"
@@ -51775,37 +52331,117 @@ void tcApp::setup() {
 ["loadJson"]
 category = "file"
 keywords = ["read", "open", "parse"]
-description.en = "Loads a JSON value from a file."
-description.ja = "ファイルから JSON 値を読み込む。"
-description.ko = "파일에서 JSON 값을 읽는다."
+description.en = "Loads a JSON file; use the LoadResult overload to distinguish failure from valid null."
+description.ja = "JSON ファイルを読み込み、LoadResult を返す形式で失敗と正常な null を区別する。"
+description.ko = "JSON 파일을 읽고 LoadResult 형식으로 실패와 유효한 null을 구분한다."
 details.en = '''
-- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
-- Local files have no byte-size cap. Files above 16 MiB produce a Notice. Caught allocation exceptions log an Error and return `Json()`; recovery during JSON DOM cleanup is not guaranteed.
-- Accepts a file path and returns the parsed `Json` value. Relative paths resolve through `getDataPath()`; absolute paths are used directly.
-- A missing, unreadable, or non-regular file, or a JSON parse error, logs an Error and returns `Json()`, which holds JSON `null`.
-- A valid file containing `null` returns the same value as these failures. Caught parsing and allocation exceptions are reported as failures.
-'''
-details.ja = '''
-- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
-- ローカルファイルのバイト数に上限はありません。16 MiB を超えるファイルは Notice を出力します。捕捉したメモリ確保の例外は Error を出力して `Json()` を返しますが、JSON DOM の破棄中の復旧は保証しません。
-- ファイルパスを受け取り、解析した `Json` 値を返します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使用します。
-- ファイルが存在しない場合、読み取れない場合、通常のファイルではない場合、JSON の解析に失敗した場合は、Error をログに出力して JSON の `null` を保持する `Json()` を返します。
-- 正常なファイルに `null` が入っている場合も、これらの失敗時と同じ値になります。捕捉した解析とメモリ確保の例外は失敗として報告します。
-'''
-details.ko = '''
-- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
-- 로컬 파일의 바이트 크기 제한은 없습니다. 16 MiB가 넘는 파일은 Notice를 기록합니다. 처리한 메모리 할당 예외는 Error를 기록하고 `Json()`을 반환하지만 JSON DOM 소멸 중의 복구는 보장하지 않습니다.
-- 파일 경로를 받아 파싱한 `Json` 값을 반환합니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
-- 파일이 없거나 읽을 수 없거나 일반 파일이 아닌 경우, 또는 JSON 파싱에 실패하면 Error 로그를 출력하고 JSON `null`을 보유하는 `Json()`을 반환합니다.
-- 정상적인 파일에 `null`이 들어 있어도 이러한 실패 시와 같은 값을 반환합니다. 처리한 파싱과 메모리 할당 예외는 실패로 보고합니다.
-'''
-related = ["Json", "saveJson", "parseJson", "loadTextFile"]
-snippet = '''
+- Use `loadJson(input, out)` to check success separately from the JSON value; failure leaves `out` unchanged. Valid JSON `null` is success.
+- The quick one-argument `loadJson(input)` returns `Json()` on failure, indistinguishable from a valid `null`. Check failures with the overload:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
+}
+```
+For quick value-only loading:
+```cpp
 void tcApp::setup() {
     Json settings = loadJson("settings.json");
-    if (!settings.is_null()) {
-        logNotice() << toJsonString(settings);
-    }
+}
+```
+
+- Failures log one Error. `LoadResult.message` includes the file path and, for invalid JSON, the one-based parse byte position when available. Missing or unreadable files return `FileNotFound`; invalid JSON returns `DecodeFailed`.
+- Empty input and raw NUL bytes fail; escaped NUL is valid. Relative paths resolve through `getDataPath()`; absolute paths are used directly. Documents above 16 MiB produce a Notice; there is no byte-size cap for sized documents.
+Use a JSON escape for a NUL character:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- Caught allocation exceptions are reported as failures. No API guarantees recovery during JSON DOM cleanup.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result. Inspect top-level data without recursive traversal:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
+'''
+details.ja = '''
+- `loadJson(input, out)` は JSON 値と別に成否を返し、失敗時は `out` を保持します。正常な JSON `null` は成功です。
+- 手軽な一引数形式 `loadJson(input)` は失敗時に `Json()` を返すため、正常な `null` と区別できません。成否の確認にはオーバーロードを使います：
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
+}
+```
+値だけを手軽に読み込む場合：
+```cpp
+void tcApp::setup() {
+    Json settings = loadJson("settings.json");
+}
+```
+
+- 失敗時は Error を一度記録します。`LoadResult.message` はファイルパスと、不正な JSON の場合は取得できるときに 1 始まりの解析バイト位置を含みます。存在しない、または開けないファイルは `FileNotFound`、不正な JSON は `DecodeFailed` です。
+- 空の入力と生の NUL バイトは失敗し、エスケープした NUL は有効です。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使用します。16 MiB を超える文書は Notice を出力し、サイズが既知の文書にはバイト数の上限がありません。
+NUL 文字には JSON のエスケープを使います：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 捕捉したメモリ確保の例外は失敗として報告します。JSON DOM の破棄中の復旧を保証する API はありません。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。例えば、再帰せずに最上位のデータを確認します：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
+'''
+details.ko = '''
+- `loadJson(input, out)`은 JSON 값과 별도로 성공 여부를 반환하며 실패 시 `out`을 유지합니다. 유효한 JSON `null`은 성공입니다.
+- 간편한 단일 인수 `loadJson(input)`은 실패 시 `Json()`을 반환하므로 유효한 `null`과 구분할 수 없습니다. 실패 확인에는 오버로드를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
+}
+```
+값만 간편하게 읽는 경우:
+```cpp
+void tcApp::setup() {
+    Json settings = loadJson("settings.json");
+}
+```
+
+- 실패 시 Error를 한 번 기록합니다. `LoadResult.message`에는 파일 경로와 잘못된 JSON의 파싱 바이트 위치를 알 수 있으면 1부터 시작하는 위치가 포함됩니다. 없거나 열 수 없는 파일은 `FileNotFound`, 잘못된 JSON은 `DecodeFailed`를 반환합니다.
+- 빈 입력과 원시 NUL 바이트는 실패하며 이스케이프한 NUL은 유효합니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다. 16 MiB가 넘는 문서는 Notice를 기록하며 크기가 알려진 문서에는 바이트 크기 제한이 없습니다.
+NUL 문자에는 JSON 이스케이프를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 처리한 메모리 할당 예외는 실패로 보고합니다. JSON DOM 소멸 중의 복구를 보장하는 API는 없습니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다. 예를 들어 재귀 없이 최상위 데이터를 확인하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
+'''
+related = ["Json", "saveJson", "parseJson", "loadTextFile", "LoadResult"]
+snippet = '''
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
 }
 '''
 
@@ -52399,36 +53035,117 @@ details.ko = '''
 ["parseJson"]
 category = "utility"
 keywords = ["deserialize", "decode"]
-description.en = "Parses a JSON string into a Json value."
-description.ja = "JSON 文字列を解析して Json 値に変換する。"
-description.ko = "JSON 문자열을 파싱하여 Json 값으로 변환한다."
+description.en = "Parses JSON text; use the LoadResult overload to distinguish failure from valid null."
+description.ja = "JSON 文字列を解析し、LoadResult を返す形式で失敗と正常な null を区別する。"
+description.ko = "JSON 문자열을 파싱하고 LoadResult 형식으로 실패와 유효한 null을 구분한다."
 details.en = '''
-- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
-- Input has no byte-size cap; documents above 16 MiB produce a Notice.
-- Accepts a `const string&` and returns its parsed JSON value without accessing a file.
-- Syntax failures, raw NUL bytes, and caught allocation exceptions log an Error and return `Json()`, which holds JSON `null`. Recovery during JSON DOM cleanup is not guaranteed.
-- Valid input `"null"` returns the same value as a parse failure, so `is_null()` alone cannot distinguish them.
+- Use `parseJson(input, out)` to check success separately from the JSON value; failure leaves `out` unchanged. Valid JSON `null` is success.
+- The quick one-argument `parseJson(input)` returns `Json()` on failure, indistinguishable from a valid `null`. Check failures with the overload:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
+}
+```
+For quick value-only loading:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("null");
+}
+```
+
+- Failures log one Error. `LoadResult.message` includes the one-based parse byte position when available; invalid JSON returns `DecodeFailed`.
+- Empty input and raw NUL bytes fail; escaped NUL is valid. Documents above 16 MiB produce a Notice; there is no byte-size cap for sized documents.
+Use a JSON escape for a NUL character:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- Caught allocation exceptions are reported as failures. No API guarantees recovery during JSON DOM cleanup.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result. Inspect top-level data without recursive traversal:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
 '''
 details.ja = '''
-- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
-- 入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。
-- `const string&` を受け取り、ファイルへアクセスせずに解析した JSON 値を返します。
-- 構文エラー、生の NUL バイト、捕捉したメモリ確保の例外は Error を出力し、JSON の `null` を保持する `Json()` を返します。JSON DOM の破棄中の復旧は保証しません。
-- 正常な入力 `"null"` も解析失敗時と同じ値になるため、`is_null()` だけでは区別できません。
+- `parseJson(input, out)` は JSON 値と別に成否を返し、失敗時は `out` を保持します。正常な JSON `null` は成功です。
+- 手軽な一引数形式 `parseJson(input)` は失敗時に `Json()` を返すため、正常な `null` と区別できません。成否の確認にはオーバーロードを使います：
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
+}
+```
+値だけを手軽に読み込む場合：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("null");
+}
+```
+
+- 失敗時は Error を一度記録します。`LoadResult.message` は取得できるときに 1 始まりの解析バイト位置を含み、不正な JSON は `DecodeFailed` です。
+- 空の入力と生の NUL バイトは失敗し、エスケープした NUL は有効です。16 MiB を超える文書は Notice を出力し、サイズが既知の文書にはバイト数の上限がありません。
+NUL 文字には JSON のエスケープを使います：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 捕捉したメモリ確保の例外は失敗として報告します。JSON DOM の破棄中の復旧を保証する API はありません。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。例えば、再帰せずに最上位のデータを確認します：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
 '''
 details.ko = '''
-- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
-- 입력 바이트 크기에 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다.
-- `const string&`를 받아 파일에 접근하지 않고 파싱한 JSON 값을 반환합니다.
-- 구문 오류, 원시 NUL 바이트, 처리한 메모리 할당 예외는 Error를 기록하고 JSON `null`을 보유하는 `Json()`을 반환합니다. JSON DOM 소멸 중의 복구는 보장하지 않습니다.
-- 정상적인 입력 `"null"`도 파싱 실패 시와 같은 값을 반환하므로 `is_null()`만으로는 구분할 수 없습니다.
+- `parseJson(input, out)`은 JSON 값과 별도로 성공 여부를 반환하며 실패 시 `out`을 유지합니다. 유효한 JSON `null`은 성공입니다.
+- 간편한 단일 인수 `parseJson(input)`은 실패 시 `Json()`을 반환하므로 유효한 `null`과 구분할 수 없습니다. 실패 확인에는 오버로드를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
+}
+```
+값만 간편하게 읽는 경우:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("null");
+}
+```
+
+- 실패 시 Error를 한 번 기록합니다. `LoadResult.message`에는 파싱 바이트 위치를 알 수 있으면 1부터 시작하는 위치가 포함되며 잘못된 JSON은 `DecodeFailed`를 반환합니다.
+- 빈 입력과 원시 NUL 바이트는 실패하며 이스케이프한 NUL은 유효합니다. 16 MiB가 넘는 문서는 Notice를 기록하며 크기가 알려진 문서에는 바이트 크기 제한이 없습니다.
+NUL 문자에는 JSON 이스케이프를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 처리한 메모리 할당 예외는 실패로 보고합니다. JSON DOM 소멸 중의 복구를 보장하는 API는 없습니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다. 예를 들어 재귀 없이 최상위 데이터를 확인하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
 '''
-related = ["Json", "toJsonString", "loadJson"]
+related = ["Json", "toJsonString", "loadJson", "LoadResult"]
 snippet = '''
 void tcApp::setup() {
-    auto limit = [](int depth, Json::parse_event_t, Json&) { if (depth > 64) throw runtime_error("JSON nesting too deep"); return true; };
-    try { settings = Json::parse(loadTextFile("settings.json"), limit); }
-    catch (const exception& e) { logWarning() << "settings.json: " << e.what(); }
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
 }
 '''
 
@@ -52986,18 +53703,21 @@ description.ko = "이벤트 기반 렌더링에서 추가 프레임을 요청한
 details.en = '''
 - Acts on the current window, including secondary setup, event, update and draw callbacks. Each window has its own scheduler; tick-source rate and visibility follow the OS.
 - With `setFps(EVENT_DRIVEN)`, requests `count` draws, defaulting to `1`; the usual synchronized update also runs for each drawn frame.
+- TrussC also draws on its own in this mode: once when the window is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame. Call `redraw()` for every change of your own that should appear on screen.
 - Sets the remaining draw count to the larger of its current value and `count`, rather than adding counts. Zero or negative values do not cancel pending draws, and continuous rendering modes keep their normal pacing.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
 - 副窓の setup・event・update・draw 内も含め、現在のウィンドウを対象にします。各窓は個別のスケジューラを持ち、tick の頻度と可視性は OS に従います。
 - `setFps(EVENT_DRIVEN)` のときに、`count` 回の描画を要求します。既定値は `1` で、通常の同期更新も描画フレームごとに実行します。
+- このモードでも、ウィンドウが最初に表示されたとき（1 回）、大きさが変わったとき（2 回）、スクリーンショットや MCP の取り込みでフレームが必要なときは、自動で描画します。画面に出したい自分の変更には、毎回 `redraw()` を呼んでください。
 - 残りの描画回数は加算せず、現在値と `count` の大きい方にします。`0` や負の値では保留中の描画を取り消せず、連続描画モードでは通常の描画間隔を維持します。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
-- `getDrawCount()`는 각 윈도우의 실제 그리기를 셉니다. 동작 변경: 이 모드에서 메인의 `getDrawCount() % N` 주기는 이전 장치 프레임 기준 주기와 다릅니다.
+- 보조 창의 setup·event·update·draw 안을 포함해 현재 윈도우를 대상으로 합니다. 각 창은 개별 스케줄러를 가지며 tick 빈도와 가시성은 OS를 따릅니다.
 - `setFps(EVENT_DRIVEN)` 상태에서 `count`회의 그리기를 요청합니다. 기본값은 `1`이며 일반적인 동기 갱신도 그리는 프레임마다 실행합니다.
+- 이 모드에서도 윈도우가 처음 표시될 때(1회), 크기가 바뀐 뒤(2회), 스크린샷이나 MCP 캡처에 프레임이 필요할 때는 자동으로 그립니다. 화면에 반영할 변경에는 매번 `redraw()`를 호출하세요.
 - 남은 그리기 횟수에 더하지 않고 현재 값과 `count` 중 큰 값을 설정합니다. `0`이나 음수로 대기 중인 그리기를 취소할 수 없으며 연속 렌더링 모드에서는 기존 그리기 간격을 유지합니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 '''
@@ -54040,15 +54760,15 @@ description.en = "Set the line spacing used for newlines in bitmap text."
 description.ja = "ビットマップテキストの改行で使う行間を設定する。"
 description.ko = "비트맵 텍스트의 줄바꿈에 사용할 줄 간격을 설정한다."
 details.en = '''
-- Changes the pixel distance between lines for every `\n` in `drawBitmapString` from then on, and for the height returned by `getBitmapStringHeight()`. `getBitmapStringBounds()` and `getBitmapStringBBox()` follow it too, as does the `Center` and `Bottom` vertical alignment of `setTextAlign()`.
+- Changes the pixel distance between lines for every `\n` in `drawBitmapString` from then on, and for the height returned by `getBitmapStringHeight()`. `getBitmapStringBBox()` follows it too, as does the `Center` and `Bottom` vertical alignment of `setTextAlign()`.
 - Takes effect immediately and stays in effect until changed again or restored by `popStyle()` (it is saved and restored together with color and other style state by `pushStyle()`/`popStyle()`).
 '''
 details.ja = '''
-- それ以降の `drawBitmapString` の `\n` による行間（ピクセル単位）と、`getBitmapStringHeight()` が返す高さを変更します。`getBitmapStringBounds()` と `getBitmapStringBBox()` の高さ、`setTextAlign()` の垂直方向の `Center` と `Bottom` の基準にも反映されます。
+- それ以降の `drawBitmapString` の `\n` による行間（ピクセル単位）と、`getBitmapStringHeight()` が返す高さを変更します。`getBitmapStringBBox()` の高さ、`setTextAlign()` の垂直方向の `Center` と `Bottom` の基準にも反映されます。
 - 設定はすぐに反映され、再度変更するか `popStyle()` で復元されるまで有効です（色など他のスタイル状態と合わせて `pushStyle()` / `popStyle()` で保存・復元されます）。
 '''
 details.ko = '''
-- 이후의 `drawBitmapString`에서 `\n`에 의한 줄 간격(픽셀 단위)과 `getBitmapStringHeight()`가 반환하는 높이를 변경합니다. `getBitmapStringBounds()`와 `getBitmapStringBBox()`의 높이, `setTextAlign()`의 수직 `Center`와 `Bottom` 기준에도 반영됩니다.
+- 이후의 `drawBitmapString`에서 `\n`에 의한 줄 간격(픽셀 단위)과 `getBitmapStringHeight()`가 반환하는 높이를 변경합니다. `getBitmapStringBBox()`의 높이, `setTextAlign()`의 수직 `Center`와 `Bottom` 기준에도 반영됩니다.
 - 설정은 즉시 적용되며, 다시 변경하거나 `popStyle()`로 복원될 때까지 유지됩니다(색상 등 다른 스타일 상태와 함께 `pushStyle()` / `popStyle()`로 저장·복원됩니다).
 '''
 related = ["getBitmapLineHeight"]
@@ -55465,7 +56185,7 @@ details.ko = '''
 - `Baseline`을 지정하면 (x, y)가 첫 줄의 베이스라인(높이 13픽셀 글리프의 하단이며, 그 아래에 셀 여백 3픽셀이 이어짐)에 맞춰집니다. 줄 수나 `setBitmapLineHeight()`의 영향을 받지 않습니다. 이는 대부분의 텍스트 편집기나 다른 폰트 API의 베이스라인 개념과 같습니다.
 - 이 값은 드로잉 스타일의 일부로 저장되므로, `pushStyle()` / `popStyle()`로 저장·복원됩니다.
 '''
-related = ["drawBitmapString", "getBitmapStringBounds"]
+related = ["drawBitmapString", "getBitmapStringBBox"]
 snippet = '''
 void tcApp::draw() {
     setTextAlign(Center, Center);
@@ -68098,13 +68818,97 @@ related = ["GlyphBatch::setColor"]
 
 ["GlyphBatch::add"]
 category = "font"
-description.en = "Appends a glyph or UTF-8 string, using batch settings for omitted arguments."
-description.ja = "グリフまたは UTF-8 文字列を追加します。省略した引数にはバッチ設定を使います。"
-description.ko = "글리프 또는 UTF-8 문자열을 추가하며 생략한 인수에는 배치 설정을 사용합니다."
-details.en = "The codepoint overload adds one independent glyph without cursor advance or vertical substitution. add(cp), add(cp, color), add(text), and add(text, color) use current matrix × batch transform. add(cp, M) and add(cp, M, color) use only M. An omitted color uses the batch color; a supplied color replaces it for that add. The Mat4 overload replaces both current and batch matrices; the active camera view/projection is applied once at draw time. The UTF-8 string overload uses the retained Font's drawString layout, including wrapping, vertical forms, and TCY. Color floats are copied without clamping. Additions mark GPU geometry dirty; existing recorded draws retain their previous buffers. Empty ink emits no quad. Call on the main thread."
-details.ja = "コードポイント版は、カーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。add(cp)、add(cp, color)、add(text)、add(text, color) は現在の行列 × バッチ変換を使います。add(cp, M)、add(cp, M, color) は M だけを使います。色を省略するとバッチ色を使い、指定するとその追加だけ置き換えます。Mat4 版は現在とバッチの両行列を置き換えます。現在のカメラの view/projection は draw 時に一度適用します。UTF-8 文字列版は、保持した Font の drawString と同じ配置を使い、折り返し、縦書き字形、縦中横を反映します。色の float 値は制限せずにコピーします。追加後は GPU 形状を更新対象にしますが、記録済みの描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。メインスレッドで呼び出してください。"
-details.ko = "코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. add(cp), add(cp, color), add(text), add(text, color)는 현재 행렬 × 배치 변환을 사용합니다. add(cp, M), add(cp, M, color)는 M만 사용합니다. 색상을 생략하면 배치 색상을 사용하고 지정하면 해당 추가에서만 대체합니다. Mat4 버전은 현재 행렬과 배치 행렬을 모두 대체합니다. 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. UTF-8 문자열 버전은 유지한 Font의 drawString 배치를 사용하며 자동 줄바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다. 색상의 float 값은 제한 없이 복사합니다. 추가하면 GPU 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다. 메인 스레드에서 호출합니다."
-related = ["GlyphBatch::draw", "Font::forEachGlyph"]
+description.en = "Appends retained text at a position or with a matrix, avoiding per-string matrix-stack changes."
+details.en = """
+- Use positioned strings to build labels once and draw them repeatedly. Set the batch Font first; omitted colors use the batch color. String layout follows Font::drawString, including wrapping, vertical forms and TCY.
+
+With a GlyphBatch member named batch configured with setFont(), add positioned text on the main thread in tcApp::setup, then call batch.draw() from draw():
+```cpp
+void setup() {
+    batch.add("abc", 20, 40);
+}
+```
+
+- add(text, x, y) and add(text, x, y, color) lay out at (x, y), then apply current matrix × batch transform. Existing add(text) and add(text, color) use the same product at (0, 0). clear() preserves the batch transform and color.
+- An explicit matrix replaces both current and batch transforms. Supply the complete model matrix:
+```cpp
+void setup() {
+    batch.add("abc", Mat4::translate(20, 40, 0), Color(1));
+}
+```
+
+- add(cp) and add(cp, color) use current matrix × batch transform; add(cp, M) and add(cp, M, color) use only M. Codepoints add independent glyphs without cursor advance or vertical substitution. A supplied color replaces the batch color for that add; color floats are copied without clamping.
+Supply a color for a positioned string:
+
+```cpp
+void setup() {
+    batch.add("abc", 20, 40, Color(0.2f, 0.7f, 1));
+}
+```
+
+- The active camera view/projection applies once at draw time. Additions mark geometry dirty; recorded draws keep their previous buffers. Empty ink emits no quad.
+"""
+description.ja = "文字列ごとの行列スタック操作を省き、位置または行列を指定して保持するテキストを追加します。"
+details.ja = """
+- 位置付きの文字列でラベルを一度構築し、繰り返し描画します。先にバッチの Font を設定します。色を省略するとバッチ色を使います。文字列の配置は Font::drawString と同じで、折り返し、縦書き字形、縦中横を反映します。
+
+setFont() で設定済みの GlyphBatch メンバー batch を使い、メインスレッドの tcApp::setup で位置付きテキストを追加し、draw() で batch.draw() を呼びます。
+```cpp
+void setup() {
+    batch.add("abc", 20, 40);
+}
+```
+
+- add(text, x, y) と add(text, x, y, color) は (x, y) に配置し、現在の行列 × バッチ変換を適用します。既存の add(text) と add(text, color) は (0, 0) で同じ積を使います。clear() はバッチ変換と色を保持します。
+- 明示した行列は現在とバッチの両変換を置き換えます。必要なモデル行列全体を渡します。
+```cpp
+void setup() {
+    batch.add("abc", Mat4::translate(20, 40, 0), Color(1));
+}
+```
+
+- add(cp) と add(cp, color) は現在の行列 × バッチ変換を使い、add(cp, M) と add(cp, M, color) は M だけを使います。コードポイント版はカーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。指定した色はその追加だけバッチ色を置き換えます。色の float 値は制限せずにコピーします。
+位置付き文字列に色を指定します。
+
+```cpp
+void setup() {
+    batch.add("abc", 20, 40, Color(0.2f, 0.7f, 1));
+}
+```
+
+- 現在のカメラの view/projection は draw 時に一度適用します。追加後は形状を更新対象にしますが、記録済み描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。
+"""
+description.ko = "문자열마다 행렬 스택을 조작하지 않고 위치 또는 행렬을 지정하여 유지할 텍스트를 추가합니다."
+details.ko = """
+- 위치를 지정한 문자열로 레이블을 한 번 구성하고 반복해서 그립니다. 먼저 배치의 Font를 설정합니다. 색상을 생략하면 배치 색상을 사용합니다. 문자열 배치는 Font::drawString과 같으며 줄 바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다.
+
+setFont()로 설정한 GlyphBatch 멤버 batch를 사용하여 메인 스레드의 tcApp::setup에서 위치를 지정한 텍스트를 추가하고 draw()에서 batch.draw()를 호출합니다.
+```cpp
+void setup() {
+    batch.add("abc", 20, 40);
+}
+```
+
+- add(text, x, y)와 add(text, x, y, color)는 (x, y)에 배치한 후 현재 행렬 × 배치 변환을 적용합니다. 기존 add(text)와 add(text, color)는 (0, 0)에서 같은 곱을 사용합니다. clear()는 배치 변환과 색상을 유지합니다.
+- 명시한 행렬은 현재 변환과 배치 변환을 모두 대체합니다. 필요한 전체 모델 행렬을 전달합니다.
+```cpp
+void setup() {
+    batch.add("abc", Mat4::translate(20, 40, 0), Color(1));
+}
+```
+
+- add(cp)와 add(cp, color)는 현재 행렬 × 배치 변환을 사용하며 add(cp, M)과 add(cp, M, color)는 M만 사용합니다. 코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. 지정한 색상은 해당 추가에서만 배치 색상을 대체합니다. 색상의 float 값은 제한 없이 복사합니다.
+위치를 지정한 문자열에 색상을 지정합니다.
+
+```cpp
+void setup() {
+    batch.add("abc", 20, 40, Color(0.2f, 0.7f, 1));
+}
+```
+
+- 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. 추가하면 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다.
+"""
+related = ["GlyphBatch", "GlyphBatch::setFont", "GlyphBatch::setTransform", "GlyphBatch::draw", "Font::forEachGlyph"]
 
 ["GlyphBatch::draw"]
 category = "font"
@@ -69023,4 +69827,1525 @@ snippet = '''
 std::vector<float> values{1.0f, 2.0f, 3.0f};
 std::vector<float> target{1.0f, 2.0f, 4.0f};
 float error = mse(values, target); // about 0.333333
+'''
+
+["InputEvent"]
+description.en = "Copies input to send to a Window with Window::injectInput."
+description.ja = "Window::injectInput で Window に送る入力をコピーして保持します。"
+description.ko = "Window::injectInput으로 Window에 보낼 입력을 복사하여 보관합니다."
+details.en = '''
+Use InputEvent to feed external controllers or relay App input to another Window. Builders copy the input values. Key, character, mouse, and touch delivery starts with consumed=false and fresh injected/sourceTag. Drops carry paths and position only. A move while pressed becomes a drag. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio");
+getWindow()->injectInput(InputEvent::mouseMoved({80, 30}), "tuio");
+getWindow()->injectInput(InputEvent::mouseReleased({80, 30}, MouseButton::Left), "tuio");
+```
+'''
+details.ja = '''
+InputEvent は外部コントローラーの入力や App 入力の別 Window への中継に使います。builder は入力値をコピーします。キー・文字・マウス・タッチの送信先では consumed=false から始まり、injectInput が injected と sourceTag を新しく設定します。ドロップはパスと位置だけを持ちます。ボタンを押したまま移動するとドラッグになります。tcApp::setup() 内で次のように使います。
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio");
+getWindow()->injectInput(InputEvent::mouseMoved({80, 30}), "tuio");
+getWindow()->injectInput(InputEvent::mouseReleased({80, 30}, MouseButton::Left), "tuio");
+```
+'''
+details.ko = '''
+InputEvent는 외부 컨트롤러 입력이나 App 입력을 다른 Window로 중계할 때 사용합니다. builder는 입력값을 복사합니다. 키·문자·마우스·터치는 consumed=false로 시작하며 injectInput이 injected와 sourceTag를 새로 설정합니다. 드롭은 경로와 위치만 가집니다. 버튼을 누른 채 이동하면 드래그가 됩니다. tcApp::setup() 안에서 다음과 같이 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "tuio");
+getWindow()->injectInput(InputEvent::mouseMoved({80, 30}), "tuio");
+getWindow()->injectInput(InputEvent::mouseReleased({80, 30}, MouseButton::Left), "tuio");
+```
+'''
+related = ["Window::injectInput", "InputModifiers"]
+
+["InputModifiers"]
+description.en = "Modifier flags copied into an injected key, mouse or scroll event."
+description.ja = "注入するキー・マウス・スクロール入力にコピーする修飾キーのフラグです。"
+description.ko = "주입할 키, 마우스 또는 스크롤 이벤트에 복사하는 수식 키 플래그입니다."
+details.en = '''
+shift, ctrl, alt and super default to false. Set flags on the builder; this describes that event. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+shift、ctrl、alt、super の既定値は false です。builder でそのイベントの修飾キーを指定します。tcApp::setup() 内で次のように使います。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+shift, ctrl, alt, super의 기본값은 false입니다. builder에서 해당 이벤트의 수식 키를 지정합니다. tcApp::setup() 안에서 다음과 같이 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputEvent"]
+
+["Window::injectInput"]
+description.en = "Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values)."
+description.ja = "入力イベントをデバイスからの入力と同じようにこの Window に送ります。Window が受け取れない場合（閉じている場合や値が不正な場合）は false を返します。"
+description.ko = "입력 이벤트를 장치에서 받은 입력처럼 이 Window에 보냅니다. Window가 받을 수 없으면(닫혀 있거나 값이 잘못된 경우) false를 반환합니다."
+details.en = '''
+Positions use the destination App content coordinates: top-left origin, logical points by default or framebuffer pixels with pixelPerfect. The current destination DPI converts positions exactly once; Window::getWidth/getHeight stay logical. Scroll retains wheel units and the current cursor position; movement deltas use the destination pointer history. Accepted key, character, mouse, and touch events carry injected=true and the supplied tag (empty by default); MCP uses "mcp". Input from a device carries false and an empty tag. In tcApp::setup():
+```cpp
+bool accepted = getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+logNotice("input") << accepted;
+```
+- injectInput returns false when the Window cannot receive input or the values are invalid. For optional use on an unattached/headless App or during teardown, getWindow() can be null:
+```cpp
+if (auto* window = getWindow()) window->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+- Relay App callbacks in window content space. Node callbacks use local pos; pass globalPos to a tcApp helper for node-origin positions:
+```cpp
+void forwardNodePress(const MouseEventArgs& e) {
+    getWindow()->injectInput(InputEvent::mousePressed(e.globalPos, static_cast<MouseButton>(e.button)), "relay");
+}
+```
+- Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh.
+'''
+details.ja = '''
+位置は宛先 App のコンテンツ座標です。左上を原点とし、既定では論理ポイント、pixelPerfect ではフレームバッファのピクセルです。宛先の現在の DPI で一度だけ変換し、Window::getWidth/getHeight は論理ポイントのままです。スクロールはホイールの単位と現在のカーソル位置を保ち、移動量は宛先のポインター履歴から求めます。受け入れたキー・文字・マウス・タッチ入力には injected=true と指定タグ（既定は空）を設定し、MCP は "mcp" を使います。デバイスからの入力は false と空タグです。tcApp::setup() 内で次のように使います。
+```cpp
+bool accepted = getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+logNotice("input") << accepted;
+```
+- 宛先が利用できない場合や入力が不正な場合は false を返します。未接続・ヘッドレスの App や終了処理中では getWindow() が null になることがあるため、任意の送信では確認します。
+```cpp
+if (auto* window = getWindow()) window->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+- App コールバックはウィンドウのコンテンツ座標です。Node の pos はローカル座標なので、Node からの位置を tcApp のヘルパーに渡す場合は globalPos を使います。
+```cpp
+void forwardNodePress(const MouseEventArgs& e) {
+    getWindow()->injectInput(InputEvent::mousePressed(e.globalPos, static_cast<MouseButton>(e.button)), "relay");
+}
+```
+- 受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。
+'''
+details.ko = '''
+위치는 대상 App의 콘텐츠 좌표입니다. 왼쪽 위가 원점이며 기본적으로 논리 포인트, pixelPerfect에서는 프레임버퍼 픽셀입니다. 대상의 현재 DPI로 한 번만 변환하며 Window::getWidth/getHeight는 논리 포인트를 유지합니다. 스크롤은 휠 단위와 현재 커서 위치를 유지하고 이동량은 대상의 포인터 이력에서 계산합니다. 수락한 키·문자·마우스·터치 입력에는 injected=true와 지정 태그(기본값은 빈 문자열)를 설정하며 MCP는 "mcp"를 사용합니다. 장치에서 받은 입력은 false와 빈 태그를 사용합니다. tcApp::setup() 안에서 다음과 같이 사용합니다.
+```cpp
+bool accepted = getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+logNotice("input") << accepted;
+```
+- 대상을 사용할 수 없거나 입력이 잘못되면 false를 반환합니다. 연결되지 않은 App, 헤드리스 App 또는 종료 처리 중에는 getWindow()가 null일 수 있으므로 선택적으로 전송할 때 확인합니다.
+```cpp
+if (auto* window = getWindow()) window->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+- App 콜백은 윈도 콘텐츠 좌표를 사용합니다. Node의 pos는 로컬 좌표이므로 Node에서 받은 위치를 tcApp 헬퍼에 전달할 때는 globalPos를 사용합니다.
+```cpp
+void forwardNodePress(const MouseEventArgs& e) {
+    getWindow()->injectInput(InputEvent::mousePressed(e.globalPos, static_cast<MouseButton>(e.button)), "relay");
+}
+```
+- 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다.
+'''
+related = ["InputEvent", "InputModifiers", "App::getWindow"]
+
+["InputModifiers::shift"]
+description.en = "The injected event’s shift modifier flag."
+description.ja = "注入するイベントの shift 修飾フラグです。"
+description.ko = "주입할 이벤트의 shift 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.shift = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.shift = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.shift = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputModifiers::ctrl"]
+description.en = "The injected event’s ctrl modifier flag."
+description.ja = "注入するイベントの ctrl 修飾フラグです。"
+description.ko = "주입할 이벤트의 ctrl 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputModifiers::alt"]
+description.en = "The injected event’s alt modifier flag."
+description.ja = "注入するイベントの alt 修飾フラグです。"
+description.ko = "주입할 이벤트의 alt 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.alt = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.alt = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.alt = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputModifiers::super"]
+description.en = "The injected event’s super modifier flag."
+description.ja = "注入するイベントの super 修飾フラグです。"
+description.ko = "주입할 이벤트의 super 수식 플래그입니다."
+details.en = '''
+Defaults to false. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.super = true}), "osc");
+```
+'''
+details.ja = '''
+既定値は false です。tcApp::setup() 内で指定します。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.super = true}), "osc");
+```
+'''
+details.ko = '''
+기본값은 false입니다. tcApp::setup() 안에서 지정합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.super = true}), "osc");
+```
+'''
+related = ["InputModifiers"]
+
+["InputEvent::keyPressed"]
+description.en = "Builds a keyPressed input from values or received arguments."
+description.ja = "値または受信した引数から keyPressed 入力を作ります。"
+description.ko = "값 또는 받은 인자로 keyPressed 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyPressed('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::keyReleased"]
+description.en = "Builds a keyReleased input from values or received arguments."
+description.ja = "値または受信した引数から keyReleased 入力を作ります。"
+description.ko = "값 또는 받은 인자로 keyReleased 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::keyReleased('A', {.ctrl = true}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mousePressed"]
+description.en = "Builds a mousePressed input from values or received arguments."
+description.ja = "値または受信した引数から mousePressed 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mousePressed 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "osc");
+```
+
+Relay received App arguments to an open shared_ptr<Window> otherWindow member:
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::mousePressed(e), "relay");
+}
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "osc");
+```
+
+受信した App の引数を、開いている shared_ptr<Window> 型の otherWindow メンバーへ中継します。
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::mousePressed(e), "relay");
+}
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mousePressed({20, 30}, MouseButton::Left), "osc");
+```
+
+받은 App 인자를 열려 있는 shared_ptr<Window> 형식의 otherWindow 멤버로 중계합니다.
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::mousePressed(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseReleased"]
+description.en = "Builds a mouseReleased input from values or received arguments."
+description.ja = "値または受信した引数から mouseReleased 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mouseReleased 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mouseReleased({20, 30}, MouseButton::Left), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseMoved"]
+description.en = "Builds a mouseMoved input from values or received arguments."
+description.ja = "値または受信した引数から mouseMoved 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mouseMoved 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseScrolled"]
+description.en = "Builds a mouseScrolled input from values or received arguments."
+description.ja = "値または受信した引数から mouseScrolled 入力を作ります。"
+description.ko = "값 또는 받은 인자로 mouseScrolled 입력을 만듭니다."
+details.en = '''
+Copies input values and modifier flags. Received arguments can be passed back in; the delivered copy starts with consumed=false, and injected/sourceTag are set fresh. In tcApp::setup():
+```cpp
+getWindow()->injectInput(InputEvent::mouseScrolled({0, -1}), "osc");
+```
+'''
+details.ja = '''
+入力値と修飾キーをコピーします。受信した引数を再送できます。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp::setup() 内で使います。
+```cpp
+getWindow()->injectInput(InputEvent::mouseScrolled({0, -1}), "osc");
+```
+'''
+details.ko = '''
+입력값과 수식 키를 복사합니다. 받은 인자를 다시 보낼 수 있습니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp::setup() 안에서 사용합니다.
+```cpp
+getWindow()->injectInput(InputEvent::mouseScrolled({0, -1}), "osc");
+```
+'''
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::touchPressed"]
+description.en = "Builds a touchPressed input from received touch arguments."
+description.ja = "受信したタッチ引数から touchPressed 入力を作ります。"
+description.ko = "받은 터치 인자로 touchPressed 입력을 만듭니다."
+details.en = '''
+Copies touch count, IDs, positions, pressure and changed flags; touchReleased also copies cancellation. The delivered copy starts with consumed=false, and injected/sourceTag are set fresh. Relay from a tcApp callback to an open otherWindow member:
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchPressed(e), "relay");
+}
+```
+'''
+details.ja = '''
+タッチ数、ID、位置、圧力、changed をコピーします。touchReleased はキャンセル状態もコピーします。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp のコールバックから開いている otherWindow メンバーに中継します。
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchPressed(e), "relay");
+}
+```
+'''
+details.ko = '''
+터치 수, ID, 위치, 압력, changed를 복사합니다. touchReleased는 취소 상태도 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp 콜백에서 열려 있는 otherWindow 멤버로 중계합니다.
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchPressed(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "TouchEventArgs"]
+
+["InputEvent::touchMoved"]
+description.en = "Builds a touchMoved input from received touch arguments."
+description.ja = "受信したタッチ引数から touchMoved 入力を作ります。"
+description.ko = "받은 터치 인자로 touchMoved 입력을 만듭니다."
+details.en = '''
+Copies touch count, IDs, positions, pressure and changed flags; touchReleased also copies cancellation. The delivered copy starts with consumed=false, and injected/sourceTag are set fresh. Relay from a tcApp callback to an open otherWindow member:
+```cpp
+void touchMoved(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchMoved(e), "relay");
+}
+```
+'''
+details.ja = '''
+タッチ数、ID、位置、圧力、changed をコピーします。touchReleased はキャンセル状態もコピーします。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp のコールバックから開いている otherWindow メンバーに中継します。
+```cpp
+void touchMoved(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchMoved(e), "relay");
+}
+```
+'''
+details.ko = '''
+터치 수, ID, 위치, 압력, changed를 복사합니다. touchReleased는 취소 상태도 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp 콜백에서 열려 있는 otherWindow 멤버로 중계합니다.
+```cpp
+void touchMoved(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchMoved(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "TouchEventArgs"]
+
+["InputEvent::touchReleased"]
+description.en = "Builds a touchReleased input from received touch arguments."
+description.ja = "受信したタッチ引数から touchReleased 入力を作ります。"
+description.ko = "받은 터치 인자로 touchReleased 입력을 만듭니다."
+details.en = '''
+Copies touch count, IDs, positions, pressure and changed flags; touchReleased also copies cancellation. The delivered copy starts with consumed=false, and injected/sourceTag are set fresh. Relay from a tcApp callback to an open otherWindow member:
+```cpp
+void touchReleased(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchReleased(e), "relay");
+}
+```
+'''
+details.ja = '''
+タッチ数、ID、位置、圧力、changed をコピーします。touchReleased はキャンセル状態もコピーします。送信先では consumed=false から始まり、injected と sourceTag が新しく設定されます。tcApp のコールバックから開いている otherWindow メンバーに中継します。
+```cpp
+void touchReleased(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchReleased(e), "relay");
+}
+```
+'''
+details.ko = '''
+터치 수, ID, 위치, 압력, changed를 복사합니다. touchReleased는 취소 상태도 복사합니다. 전달된 복사본은 consumed=false로 시작하며 injected와 sourceTag가 새로 설정됩니다. tcApp 콜백에서 열려 있는 otherWindow 멤버로 중계합니다.
+```cpp
+void touchReleased(const TouchEventArgs& e) override {
+    otherWindow->injectInput(InputEvent::touchReleased(e), "relay");
+}
+```
+'''
+related = ["InputEvent", "TouchEventArgs"]
+
+["KeyEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["KeyEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void keyPressed(const KeyEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseMoveEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseMoveEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseDragEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["MouseDragEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["ScrollEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["ScrollEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void mouseScrolled(const ScrollEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["TouchEventArgs::injected"]
+description.en = "True for input sent by injectInput; false for input from a device."
+description.ja = "injectInput で送った入力では true、デバイスからの入力では false です。"
+description.ko = "injectInput으로 보낸 입력은 true, 장치에서 받은 입력은 false입니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["TouchEventArgs::sourceTag"]
+description.en = "The free-form tag supplied to Window::injectInput; MCP uses mcp."
+description.ja = "Window::injectInput で指定した自由なタグです。MCP は mcp を使います。"
+description.ko = "Window::injectInput에 지정한 자유 형식 태그입니다. MCP는 mcp를 사용합니다."
+details.en = '''
+Input from a device has injected=false and an empty sourceTag; injectInput sets both fields. Sending a received event again sets the new tag. Read in a tcApp callback:
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+デバイスからの入力は injected=false と空の sourceTag を持ちます。injectInput が両方のフィールドを設定します。受信したイベントを再送すると新しいタグが設定されます。tcApp のコールバックで読み取ります。
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+장치에서 받은 입력은 injected=false와 빈 sourceTag를 가집니다. injectInput이 두 필드를 설정합니다. 받은 이벤트를 다시 보내면 새 태그가 설정됩니다. tcApp 콜백에서 읽습니다.
+```cpp
+void touchPressed(const TouchEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
+```
+'''
+related = ["Window::injectInput", "InputEvent"]
+
+["CharEventArgs"]
+category = "events"
+description.en = "One typed Unicode scalar, with repeat, modifier, and injection information."
+description.ja = "入力された Unicode スカラー 1 文字とリピート・修飾キー・注入情報です。"
+description.ko = "입력된 Unicode 스칼라 하나와 반복, 수식 키, 주입 정보입니다."
+details.en = '''
+Text input is separate from key presses and clipboard paste. Device characters have injected=false and an empty sourceTag. One event carries one codepoint; there is no IME composition API. Read it in tcApp:
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+details.ja = '''
+文字入力はキー押下やクリップボード貼り付けとは別です。デバイスからの文字は injected=false と空の sourceTag を持ちます。1 イベントは 1 codepoint です。IME 変換中の文字列を扱う API はありません。tcApp で受け取ります。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+details.ko = '''
+문자 입력은 키 누름 및 클립보드 붙여넣기와 별개입니다. 장치 문자는 injected=false와 빈 sourceTag를 가집니다. 이벤트 하나는 codepoint 하나를 전달하며 IME 조합 API는 없습니다. tcApp에서 받습니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+
+["App::charInput"]
+category = "events"
+description.en = "Called for one typed character in this Window."
+description.ja = "この Window に入力された 1 文字を受け取ります。"
+description.ko = "이 Window에 입력된 문자 하나를 받습니다."
+details.en = '''
+BeforeApp listeners run first, then this callback, then AfterApp listeners. A consumed event stops before later listeners. ImGui keyboard capture consumes it before ordinary listeners and App. There is no Node character callback. In tcApp:
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+details.ja = '''
+BeforeApp リスナー、このコールバック、AfterApp リスナーの順です。consumed は後続への通知を止めます。ImGui がキーボードを捕捉している間は通常のリスナーと App の前で消費されます。Node の文字コールバックはありません。tcApp で使います。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+details.ko = '''
+BeforeApp 리스너, 이 콜백, AfterApp 리스너 순서입니다. consumed는 이후 전달을 멈춥니다. ImGui 키보드 캡처 중에는 일반 리스너와 App 전에 소비됩니다. Node 문자 콜백은 없습니다. tcApp에서 사용합니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+
+["CoreEvents::charInput"]
+category = "events"
+description.en = "Delivers typed characters to listeners for the receiving Window."
+description.ja = "受信 Window のリスナーに文字入力を通知します。"
+description.ko = "수신 Window의 리스너에 문자 입력을 전달합니다."
+details.en = '''
+The default priority is BeforeApp. Store the EventListener to keep listening. In tcApp, with member EventListener textListener:
+```cpp
+void setup() override {
+    textListener = events().charInput.listen([](CharEventArgs& e) { logNotice() << e.codepoint; });
+}
+```
+'''
+details.ja = '''
+既定の優先度は BeforeApp です。購読を続けるには EventListener を保持します。メンバー EventListener textListener を持つ tcApp で使います。
+```cpp
+void setup() override {
+    textListener = events().charInput.listen([](CharEventArgs& e) { logNotice() << e.codepoint; });
+}
+```
+'''
+details.ko = '''
+기본 우선순위는 BeforeApp입니다. 수신을 유지하려면 EventListener를 보관합니다. EventListener textListener 멤버를 가진 tcApp에서 사용합니다.
+```cpp
+void setup() override {
+    textListener = events().charInput.listen([](CharEventArgs& e) { logNotice() << e.codepoint; });
+}
+```
+'''
+
+["InputEvent::charInput"]
+category = "events"
+description.en = "Builds one character input from a Unicode scalar or received CharEventArgs."
+description.ja = "Unicode スカラーまたは受信した CharEventArgs から 1 文字の入力を作ります。"
+description.ko = "Unicode 스칼라 또는 받은 CharEventArgs로 문자 입력 하나를 만듭니다."
+details.en = '''
+Copies codepoint, isRepeat, and modifiers; delivery resets consumed and sets injected=true and the new tag. Invalid Unicode scalars return false from injectInput. Key presses alone produce no text; send characters explicitly. In a live windowed tcApp:
+```cpp
+void setup() override {
+    getWindow()->injectInput(InputEvent::charInput(U'é'), "test");
+}
+```
+'''
+details.ja = '''
+codepoint、isRepeat、修飾キーをコピーします。送信先では consumed をリセットし injected=true と新しいタグを設定します。不正な Unicode スカラーでは injectInput が false を返します。キー押下だけでは文字を入力しません。文字を明示的に送ります。Window のある tcApp で使います。
+```cpp
+void setup() override {
+    getWindow()->injectInput(InputEvent::charInput(U'é'), "test");
+}
+```
+'''
+details.ko = '''
+codepoint, isRepeat, 수식 키를 복사합니다. 전달 시 consumed를 초기화하고 injected=true와 새 태그를 설정합니다. 잘못된 Unicode 스칼라는 injectInput에서 false를 반환합니다. 키 누름만으로 문자가 입력되지 않으므로 명시적으로 보냅니다. Window가 있는 tcApp에서 사용합니다.
+```cpp
+void setup() override {
+    getWindow()->injectInput(InputEvent::charInput(U'é'), "test");
+}
+```
+'''
+
+["InputEvent::filesDropped"]
+category = "events"
+description.en = "Builds an owned file-path drop at a destination App position."
+description.ja = "宛先 App の指定位置に送るファイルパスを所有して保持します。"
+description.ko = "대상 App 위치로 보낼 파일 경로를 소유하여 보관합니다."
+details.en = '''
+Copies paths from DragDropEventArgs or takes a vector of paths and Vec2. Coordinates are logical points, or framebuffer pixels with pixelPerfect; the supplied position is preserved without moving the cursor. Delivery uses events().filesDropped and App callbacks only. Drops have no injected/sourceTag fields and no drop-source query API; replay tools manage their own recording state. Injection passes paths as data; it creates no files or browser file handles, and no API recreates those handles. In a live windowed tcApp:
+```cpp
+void setup() override {
+    getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
+}
+```
+'''
+details.ja = '''
+DragDropEventArgs からパスをコピーするか、パスの vector と Vec2 を受け取ります。座標は論理ポイント、pixelPerfect ではフレームバッファのピクセルです。カーソルを動かさず指定位置を保ちます。events().filesDropped と App コールバックだけに通知します。ドロップに injected/sourceTag や送信元を調べる API はなく、再生ツールは記録状態を自分で管理します。パスはデータとして渡すだけでファイルやブラウザのファイルハンドルは作りません。ハンドルを再現する API はありません。Window のある tcApp で使います。
+```cpp
+void setup() override {
+    getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
+}
+```
+'''
+details.ko = '''
+DragDropEventArgs의 경로를 복사하거나 경로 vector와 Vec2를 받습니다. 좌표는 논리 포인트이며 pixelPerfect에서는 프레임버퍼 픽셀입니다. 커서를 움직이지 않고 지정 위치를 유지합니다. events().filesDropped와 App 콜백에만 전달합니다. 드롭에는 injected/sourceTag나 출처 조회 API가 없으므로 재생 도구가 기록 상태를 관리합니다. 경로는 데이터로 전달되며 파일이나 브라우저 파일 핸들을 만들지 않습니다. 핸들을 재현하는 API는 없습니다. Window가 있는 tcApp에서 사용합니다.
+```cpp
+void setup() override {
+    getWindow()->injectInput(InputEvent::filesDropped({"image.png"}, {20, 30}));
+}
+```
+'''
+
+["CharEventArgs::codepoint"]
+category = "events"
+description.en = "The typed Unicode scalar."
+description.ja = "入力された Unicode スカラーです。"
+description.ko = "입력된 Unicode 스칼라입니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.codepoint;
+}
+```
+'''
+
+["CharEventArgs::isRepeat"]
+category = "events"
+description.en = "Whether this character repeats a held key."
+description.ja = "キーを押し続けたリピート入力かを示します。"
+description.ko = "키를 누르고 있어 반복된 문자인지 나타냅니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.isRepeat;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.isRepeat;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.isRepeat;
+}
+```
+'''
+
+["CharEventArgs::shift"]
+category = "events"
+description.en = "Whether Shift was held."
+description.ja = "Shift の押下状態です。"
+description.ko = "Shift를 누른 상태입니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.shift;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.shift;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.shift;
+}
+```
+'''
+
+["CharEventArgs::ctrl"]
+category = "events"
+description.en = "Whether Control was held."
+description.ja = "Control の押下状態です。"
+description.ko = "Control을 누른 상태입니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.ctrl;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.ctrl;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.ctrl;
+}
+```
+'''
+
+["CharEventArgs::alt"]
+category = "events"
+description.en = "Whether Alt was held."
+description.ja = "Alt の押下状態です。"
+description.ko = "Alt를 누른 상태입니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.alt;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.alt;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.alt;
+}
+```
+'''
+
+["CharEventArgs::super"]
+category = "events"
+description.en = "Whether Super/Command was held."
+description.ja = "Super/Command の押下状態です。"
+description.ko = "Super/Command를 누른 상태입니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.super;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.super;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.super;
+}
+```
+'''
+
+["CharEventArgs::consumed"]
+category = "events"
+description.en = "Stops delivery to later listeners and App when true."
+description.ja = "true で後続リスナーと App への通知を止めます。"
+description.ko = "true이면 이후 리스너와 App 전달을 멈춥니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.consumed;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.consumed;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.consumed;
+}
+```
+'''
+
+["CharEventArgs::injected"]
+category = "events"
+description.en = "True for injectInput characters, false for device characters."
+description.ja = "injectInput の文字は true、デバイスの文字は false です。"
+description.ko = "injectInput 문자는 true, 장치 문자는 false입니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.injected;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.injected;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.injected;
+}
+```
+'''
+
+["CharEventArgs::sourceTag"]
+category = "events"
+description.en = "The tag supplied to injectInput, empty for device characters."
+description.ja = "injectInput に指定したタグです。デバイスの文字では空です。"
+description.ko = "injectInput에 지정한 태그이며 장치 문자에서는 비어 있습니다."
+details.en = '''
+Read this field in tcApp::charInput. Fields default to zero, false, or empty.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.sourceTag;
+}
+```
+'''
+details.ja = '''
+tcApp::charInput で読みます。既定値は 0、false、空文字列です。
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.sourceTag;
+}
+```
+'''
+details.ko = '''
+tcApp::charInput에서 읽습니다. 기본값은 0, false 또는 빈 문자열입니다.
+```cpp
+void charInput(const CharEventArgs& e) override {
+    logNotice() << e.sourceTag;
+}
+```
+'''
+
+["FboScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["ShaderScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["ShapeScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["StrokeScope"]
+hide = true
+keywords = ["raii", "guard", "scope"]
+
+["Fbo::scoped"]
+category = "graphics_fbo"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return."
+description.ja = "`Fbo::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Fbo::end()` を呼びます。"
+description.ko = "`Fbo::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Fbo::end()`를 호출합니다."
+related = ["Fbo::begin", "Fbo::end"]
+details.en = '''
+- Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    Fbo fbo;
+    void setup() override { fbo.allocate(256, 256); }
+    void draw() override {
+        {
+            auto f = fbo.scoped(0, 0, 0);
+            drawCircle(100, 100, 50);
+        }   // fbo.end()
+        fbo.draw(0, 0);
+    }
+};
+```
+
+- An early return still calls end(). scoped() keeps previous content. scoped(r, g, b, a = 1.0f) clears at begin.
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `Fbo::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Fbo::end()` を呼びます。
+
+```cpp
+struct tcApp : App {
+    Fbo fbo;
+    void setup() override { fbo.allocate(256, 256); }
+    void draw() override {
+        {
+            auto f = fbo.scoped(0, 0, 0);
+            drawCircle(100, 100, 50);
+        }   // fbo.end()
+        fbo.draw(0, 0);
+    }
+};
+```
+
+- 早期 return でも end() を呼び出します。scoped() は既存の内容を保持します。scoped(r, g, b, a = 1.0f) は開始時にクリアします。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `Fbo::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Fbo::end()`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    Fbo fbo;
+    void setup() override { fbo.allocate(256, 256); }
+    void draw() override {
+        {
+            auto f = fbo.scoped(0, 0, 0);
+            drawCircle(100, 100, 50);
+        }   // fbo.end()
+        fbo.draw(0, 0);
+    }
+};
+```
+
+- 조기 return에서도 end()를 호출합니다. scoped()는 기존 내용을 유지합니다. scoped(r, g, b, a = 1.0f)는 시작할 때 지웁니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["Shader::scoped"]
+category = "graphics_shader"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return."
+description.ja = "`Shader::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Shader::end()` を呼びます。"
+description.ko = "`Shader::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Shader::end()`를 호출합니다."
+related = ["Shader::begin", "Shader::end"]
+details.en = '''
+- Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    Shader shader;
+    void draw() override {
+        {
+            auto s = shader.scoped();
+            drawRect(0, 0, 200, 200);
+        }   // shader.end()
+    }
+};
+```
+
+- An early return still calls end().
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `Shader::begin()` を呼び、早期 return の場合もスコープを抜けると自動で `Shader::end()` を呼びます。
+
+```cpp
+struct tcApp : App {
+    Shader shader;
+    void draw() override {
+        {
+            auto s = shader.scoped();
+            drawRect(0, 0, 200, 200);
+        }   // shader.end()
+    }
+};
+```
+
+- 早期 return でも end() を呼び出します。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `Shader::begin()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `Shader::end()`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    Shader shader;
+    void draw() override {
+        {
+            auto s = shader.scoped();
+            drawRect(0, 0, 200, 200);
+        }   // shader.end()
+    }
+};
+```
+
+- 조기 return에서도 end()를 호출합니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["scopedShape"]
+category = "graphics_shapes"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return."
+description.ja = "`beginShape()` を呼び、早期 return の場合もスコープを抜けると自動で `endShape(close)` を呼びます。"
+description.ko = "`beginShape()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endShape(close)`를 호출합니다."
+related = ["beginShape", "endShape"]
+details.en = '''
+- Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedShape(true);
+            vertex(0, 0);
+            vertex(100, 0);
+            vertex(50, 80);
+        }   // endShape(true)
+    }
+};
+```
+
+- An early return ends the pair with the vertices added so far. The close argument defaults to false; true connects the last vertex to the first.
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `beginShape()` を呼び、早期 return の場合もスコープを抜けると自動で `endShape(close)` を呼びます。
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedShape(true);
+            vertex(0, 0);
+            vertex(100, 0);
+            vertex(50, 80);
+        }   // endShape(true)
+    }
+};
+```
+
+- 早期 return でも、それまでに追加した頂点でペアを終了します。close の既定値は false で、true は最後の頂点を最初の頂点につなぎます。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `beginShape()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endShape(close)`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedShape(true);
+            vertex(0, 0);
+            vertex(100, 0);
+            vertex(50, 80);
+        }   // endShape(true)
+    }
+};
+```
+
+- 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["scopedStroke"]
+category = "graphics_shapes"
+keywords = ["raii", "scope", "guard", "early return"]
+description.en = "Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return."
+description.ja = "`beginStroke()` を呼び、早期 return の場合もスコープを抜けると自動で `endStroke(close)` を呼びます。"
+description.ko = "`beginStroke()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endStroke(close)`를 호출합니다."
+related = ["beginStroke", "endStroke"]
+details.en = '''
+- Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedStroke();
+            vertex(0, 0);
+            vertex(100, 50);
+        }   // endStroke()
+    }
+};
+```
+
+- An early return ends the pair with the vertices added so far. The close argument defaults to false; true connects the last vertex to the first.
+- Store the guard in a named variable; it cannot be copied or moved. The explicit begin/end pair remains the main form. This is C++ only; Lua has no scope-bound guard API.
+'''
+details.ja = '''
+- `beginStroke()` を呼び、早期 return の場合もスコープを抜けると自動で `endStroke(close)` を呼びます。
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedStroke();
+            vertex(0, 0);
+            vertex(100, 50);
+        }   // endStroke()
+    }
+};
+```
+
+- 早期 return でも、それまでに追加した頂点でペアを終了します。close の既定値は false で、true は最後の頂点を最初の頂点につなぎます。
+- ガードは名前付き変数に受け取ります。コピーもムーブもできません。明示的な begin/end ペアが引き続き基本の形です。C++ 専用で、Lua にはスコープで閉じるガード API はありません。
+'''
+details.ko = '''
+- `beginStroke()`를 호출하고 조기 return에서도 스코프를 벗어나면 자동으로 `endStroke(close)`를 호출합니다.
+
+```cpp
+struct tcApp : App {
+    void draw() override {
+        {
+            auto s = scopedStroke();
+            vertex(0, 0);
+            vertex(100, 50);
+        }   // endStroke()
+    }
+};
+```
+
+- 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
+- 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
 '''

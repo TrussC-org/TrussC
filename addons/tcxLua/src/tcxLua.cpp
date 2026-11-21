@@ -358,8 +358,14 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     fbo_type["clearColor"] = &Fbo::clearColor;
     fbo_type["end"] = &Fbo::end;
     fbo_type["end_fbo"] = &Fbo::end;
-    fbo_type["readPixels"] = &Fbo::readPixels;
-    fbo_type["readPixelsFloat"] = &Fbo::readPixelsFloat;
+    fbo_type["readPixels"] = sol::overload(
+        sol::resolve<bool(unsigned char*) const>(&Fbo::readPixels),
+        sol::resolve<bool(Pixels&) const>(&Fbo::readPixels)
+    );
+    fbo_type["readPixelsFloat"] = sol::overload(
+        sol::resolve<bool(float*) const>(&Fbo::readPixelsFloat),
+        sol::resolve<bool(Pixels&) const>(&Fbo::readPixelsFloat)
+    );
     fbo_type["readStencil"] = &Fbo::readStencil;
     fbo_type["copyTo"] = &Fbo::copyTo;
     fbo_type["getWidth"] = &Fbo::getWidth;

@@ -240,7 +240,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::beginFrameworkLifetime();
     struct EndFrameworkLifetime {
         ~EndFrameworkLifetime() {
-            if (auto token = internal::appRunToken()) token->store(false);
+            internal::endCurrentAppRun();
             headless::active = false;
             internal::endFrameworkLifetime();
         }
