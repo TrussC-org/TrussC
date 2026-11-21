@@ -85,19 +85,17 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
 
     # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
     # GLSL 4.30 (Linux desktop, SOKOL_GLCORE), GLSL ES3 (Android/RasPi/
-    # WebGL2), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
-    # iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
+    # WebGL2), WGSL (Web/WebGPU), SPIR-V (Vulkan). metal_sim keeps apps runnable
+    # on the iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
     # there; without it shader lookup returns null sources and crashes in
     # sg_make_shader).
     # glsl430 is required for GLCORE — without it every custom shader on
     # Linux desktop fails with "Failed to get shader desc" (issue #193).
-    set(_TC_GRAPHICS_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
-    set(_TC_COMPUTE_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl310es:wgsl")
-
-    if(TC_GFX_BACKEND STREQUAL "vulkan")
-        string(APPEND _TC_GRAPHICS_SLANG ":spirv_vk")
-        string(APPEND _TC_COMPUTE_SLANG ":spirv_vk")
-    endif()
+    # Headers are shared in-source across build trees. Always emit every backend
+    # so a GL build cannot leave a later Vulkan build with missing shader code.
+    # sokol-shdc's --ifdef keeps unused backends out of compiled consumers.
+    set(_TC_GRAPHICS_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl:spirv_vk")
+    set(_TC_COMPUTE_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl310es:wgsl:spirv_vk")
 
     if(_TC_SHADERS_OUTPUT_DIR)
         file(MAKE_DIRECTORY "${_TC_SHADERS_OUTPUT_DIR}")
@@ -156,6 +154,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_shader_name}.h ${_shader_out}
                 WORKING_DIRECTORY ${_shader_tmp_dir}
                 DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
+                    "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
             )
         else()
@@ -164,6 +163,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
                 WORKING_DIRECTORY ${_shader_out_dir}
                 DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
+                    "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
             )
         endif()
