@@ -100,7 +100,11 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const
         ++presents;
         if (presents == 16) std::fputs("VK_PROBE successful presents=16\n", stderr);
     }
-    if (inject() && presents == 18 && result == VK_SUCCESS) {
+    // Drivers may already return SUBOPTIMAL right after a resize; inject on
+    // the first VK_SUCCESS from the 18th present on.
+    static bool presentInjected = false;
+    if (inject() && !presentInjected && presents >= 18 && result == VK_SUCCESS) {
+        presentInjected = true;
         std::fputs("VK_PROBE injected present SUBOPTIMAL\n", stderr);
         return VK_SUBOPTIMAL_KHR;
     }
