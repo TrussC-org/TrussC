@@ -5843,10 +5843,10 @@ Sound sfx = bundle.build();
     }
     ```
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
-19. **EasyCam button bindings use `MouseButton`.** Select the orbit button with the typed setter and read its binding with `getOrbitMouseButton()`.
+19. **EasyCam button bindings use `MouseButton`.** Select the orbit button with `setOrbitMouseButton()` and read its binding with `getOrbitMouseButton()`.
     ```cpp
     void tcApp::setup() {
-        cam.setOrbitButton(MouseButton::Right);
+        cam.setOrbitMouseButton(MouseButton::Right);
     }
     ```
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth testing (LESS_EQUAL) for all subsequent draws. `Add`, `Screen`, `Multiply` and `Subtract` test without writing depth; `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing it. Translucent `Alpha` also writes depth, so draw opaque objects first and translucent ones back to front; TrussC does not sort draws. The setting persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
