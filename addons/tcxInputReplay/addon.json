@@ -1,0 +1,7 @@
+{
+  "description": "Single-window input recording and replay with scene marks",
+  "author": "tettou771",
+  "license": "MIT",
+  "category": "utilities",
+  "keywords": ["input", "record", "replay", "debug", "testing"]
+}

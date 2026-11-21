@@ -105,6 +105,7 @@ addons/*
 !addons/tcxMidi
 !addons/tcxCurl
 !addons/tcxImGui
+!addons/tcxInputReplay
 !addons/tcxNodeInspector
 !addons/tcxHap
 !addons/tcxLua
