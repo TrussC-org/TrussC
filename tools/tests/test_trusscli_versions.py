@@ -3,6 +3,8 @@
 Run through tcbuild.sh: one check configures and builds a tiny fixture app.
 All Git writes are confined to temporary fake repositories, never this checkout.
 """
+import io
+import tarfile
 import json
 import os
 from pathlib import Path
@@ -38,6 +40,9 @@ class VersionTests(unittest.TestCase):
         template = self.source / "examples/templates/emptyExample/src"
         template.mkdir(parents=True)
         (template / "main.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
+        (self.source / ".git_archival.txt").write_text(
+            "describe: $Format:%(describe:tags,match=v[0-9]*)$\n", encoding="utf-8")
+        (self.source / ".gitattributes").write_text(".git_archival.txt export-subst\n", encoding="utf-8")
         self.git("init", "-b", "main", self.source)
         self.git("-C", self.source, "add", ".")
         self.git("-C", self.source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -292,6 +297,207 @@ class VersionTests(unittest.TestCase):
         self.cli("new", self.base / "local-app", "--ide", "cmake", "--tc-root", self.source)
         data = json.loads((self.base / "local-app/CMakePresets.json").read_text(encoding="utf-8"))
         self.assertEqual(data["vendor"]["trussc"]["localPath"], self.source.as_posix())
+
+
+@unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
+class TarballTests(unittest.TestCase):
+    git = VersionTests.git
+    advance = VersionTests.advance
+    cli = VersionTests.cli
+    root = VersionTests.root
+
+    def setUp(self):
+        VersionTests.setUp(self)
+        self.env["TRUSSC_FETCH"] = "tarball"
+        self.env["TRUSSC_GITHUB_BASE_URL"] = (self.base / "archives").as_uri()
+        self.archives = self.base / "archives"
+        for owner in ("TrussC-org", "tettou771"):
+            self.archive("v1", owner=owner)
+        for ref in ("main", self.initial, "feature/version+test"):
+            self.archive(ref)
+        self.archive("shared", revision="refs/tags/shared", path="refs/tags/shared")
+        # A short URL pointing at the branch must not override the qualified tag.
+        self.archive("shared", revision="refs/heads/shared")
+
+    def archive_path(self, ref, owner="TrussC-org"):
+        return self.archives / owner / "TrussC/archive" / (ref + ".tar.gz")
+
+    def archive(self, ref, owner="TrussC-org", revision=None, path=None):
+        target = self.archive_path(path or ref, owner)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        prefix = "TrussC-" + ref.replace("/", "-") + "/"
+        self.git("-C", self.source, "archive", "--format=tar.gz", "--prefix=" + prefix,
+                 "--output=" + str(target), revision or ref)
+        with tarfile.open(target) as archive:
+            return archive.extractfile(prefix + ".git_archival.txt").read().decode().strip()[10:]
+
+    def test_tags_branches_commits_forks_and_tag_priority(self):
+        for spec, owner, ref, revision in (
+                ("v1", "TrussC-org", "v1", "refs/tags/v1"),
+                ("main", "TrussC-org", "main", "refs/heads/main"),
+                (self.initial, "TrussC-org", self.initial, self.initial),
+                ("tettou771/TrussC@v1", "tettou771", "v1", "refs/tags/v1"),
+                ("shared", "TrussC-org", "shared", "refs/tags/shared"),
+                ("feature/version+test", "TrussC-org", "feature/version+test", "refs/heads/feature/version+test")):
+            with self.subTest(spec=spec):
+                expected = self.git("-C", self.source, "describe", "--tags", "--match=v[0-9]*", revision).strip()
+                self.cli("use", spec)
+                root = self.cache / "versions" / owner / "TrussC" / ref
+                self.assertEqual(self.root(), root)
+                self.assertFalse((root / ".git").exists())
+                self.assertFalse((self.cache / "repos").exists())
+                output = self.cli("build", "--dry-run")
+                self.assertIn("(" + expected + ")", output)
+                self.assertIn("-DTRUSSC_DIR=" + str(root / "core"), output)
+
+    def test_branch_refresh_and_failed_update_preserves_previous_tree(self):
+        original = self.archive("main")
+        self.cli("use", "main")
+        self.advance()
+        latest = self.archive("main")
+        self.assertNotEqual(original, latest)
+        self.assertIn("(" + original + ")", self.cli("build", "--dry-run"))
+        self.cli("update")
+        self.assertIn("(" + latest + ")", self.cli("build"))
+        root = self.root()
+        before = (root / "revision").read_bytes()
+        self.archive_path("main").write_bytes(b"truncated")
+        self.cli("update", success=False)
+        self.assertEqual((root / "revision").read_bytes(), before)
+        self.assertIn("(" + latest + ")", self.cli("build", "--dry-run"))
+        self.assertEqual(sorted(p.name for p in root.parent.iterdir()), ["main"])
+
+    def test_missing_and_truncated_archives_leave_no_version(self):
+        for ref in ("missing", "truncated"):
+            with self.subTest(ref=ref):
+                if ref == "truncated":
+                    data = self.archive_path("v1").read_bytes()
+                    self.archive_path(ref).write_bytes(data[:len(data) // 2])
+                self.cli("use", ref, success=False)
+                root = self.cache / "versions/TrussC-org/TrussC" / ref
+                self.assertFalse(root.exists())
+                self.assertEqual(list(root.parent.iterdir()), [])
+                self.assertIn("run `trusscli update`", self.cli("build", "--dry-run", success=False))
+
+    def test_unsafe_archive_entries_are_rejected_before_extraction(self):
+        for entry, target in (("TrussC-fixture/../outside", None), ("/absolute", None),
+                              ("TrussC-fixture/link", "../../outside"),
+                              ("TrussC-fixture/link", "/absolute"),
+                              ("TrussC-fixture/link", "C:/outside"),
+                              ("TrussC-fixture/link", "..\\outside")):
+            with self.subTest(entry=entry, target=target):
+                path = self.archive_path("unsafe")
+                with tarfile.open(path, "w:gz") as archive:
+                    info = tarfile.TarInfo(entry)
+                    if target:
+                        info.type = tarfile.SYMTYPE
+                        info.linkname = target
+                        archive.addfile(info)
+                    else:
+                        info.size = 1
+                        archive.addfile(info, io.BytesIO(b"x"))
+                self.cli("use", "unsafe", success=False)
+                root = self.cache / "versions/TrussC-org/TrussC"
+                self.assertEqual(list(root.iterdir()), [])
+                self.assertFalse((self.base / "outside").exists())
+
+    @unittest.skipUnless(sys.platform == "linux", "tiny sparse archive fixture uses GNU tar")
+    def test_expanded_member_total_is_bounded_before_extraction(self):
+        fixture = self.base / "TrussC-large"
+        (fixture / "core/cmake").mkdir(parents=True)
+        (fixture / "core/cmake/trussc_app.cmake").write_text("# fixture\n", encoding="utf-8")
+        (fixture / ".git_archival.txt").write_text("describe: v1\n", encoding="utf-8")
+        # Each member fits the limit; their sum exceeds it. Sparse zeros keep the fixture tiny.
+        for name in ("first", "second"):
+            with (fixture / name).open("wb") as file:
+                file.truncate(1024 ** 3 + 1)
+        archive = self.archive_path("large")
+        subprocess.run(["tar", "-czSf", str(archive), "-C", str(self.base), fixture.name], check=True)
+        self.assertLess(archive.stat().st_size, 65536)
+        self.assertIn("expanded size exceeds 2 GiB", self.cli("use", "large", success=False))
+        self.assertEqual(list((self.cache / "versions/TrussC-org/TrussC").iterdir()), [])
+
+    def test_oversized_archival_metadata_reports_unknown(self):
+        self.cli("use", "v1")
+        with (self.root() / ".git_archival.txt").open("wb") as file:
+            file.seek(64 * 1024 * 1024)
+            file.write(b"\ndescribe: v1\n")
+        output = self.cli("build", "--dry-run")
+        self.assertIn("(unknown)", output)
+        self.assertLess(len(output), 16384)
+
+    @unittest.skipIf(sys.platform == "win32", "fixture needs an executable script and POSIX process checks")
+    def test_listing_output_limit_terminates_child(self):
+        tools = self.base / "listing-tools"
+        tools.mkdir()
+        pidfile = self.base / "tar.pid"
+        tool = tools / "tar"
+        tool.write_text(
+            "#!" + sys.executable + "\nimport os, time\n"
+            "from pathlib import Path\n"
+            "Path(" + repr(str(pidfile)) + ").write_text(str(os.getpid()), encoding='utf-8')\n"
+            "os.write(1, b'x' * (17 * 1024 * 1024))\ntime.sleep(60)\n", encoding="utf-8")
+        tool.chmod(0o755)
+        self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
+        try:
+            self.assertIn("listing is too large", self.cli("use", "v1", success=False))
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pidfile.read_text(encoding="utf-8")), 0)
+            self.assertEqual(list((self.cache / "versions/TrussC-org/TrussC").iterdir()), [])
+        finally:
+            if pidfile.exists():
+                try:
+                    os.kill(int(pidfile.read_text(encoding="utf-8")), 9)
+                except ProcessLookupError:
+                    pass
+
+    @unittest.skipIf(sys.platform == "win32", "fixture needs directory symlinks")
+    def test_internal_symlink_is_supported(self):
+        (self.source / "alias").symlink_to("core", target_is_directory=True)
+        self.advance()
+        self.archive("main")
+        self.cli("use", "main")
+        self.assertTrue((self.root() / "alias/cmake/trussc_app.cmake").is_file())
+
+    def test_colliding_ref_paths_preserve_cached_tree(self):
+        self.archive("v1/core", revision="main")
+        for first, second in (("v1", "v1/core"), ("v1/core", "v1")):
+            with self.subTest(first=first):
+                self.env["TRUSSC_CACHE_DIR"] = str(self.cache / first.replace("/", "-"))
+                self.cli("use", first)
+                root = self.root()
+                before = (root / ".git_archival.txt").read_bytes()
+                self.assertIn("conflicts", self.cli("use", second, success=False))
+                self.assertEqual((root / ".git_archival.txt").read_bytes(), before)
+
+    @unittest.skipIf(sys.platform == "win32", "fixture needs directory symlinks")
+    def test_destination_containment_check_rejects_symlink(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        versions = self.cache / "versions"
+        versions.mkdir(parents=True)
+        (versions / "TrussC-org").symlink_to(outside, target_is_directory=True)
+        self.assertIn("only real directories", self.cli("use", "v1", success=False))
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_build_missing_cache_never_fetches(self):
+        (self.project / ".trussc-version").write_text("v1\n", encoding="utf-8")
+        self.assertIn("run `trusscli update`", self.cli("build", "--dry-run", success=False))
+        self.assertFalse(self.cache.exists())
+        self.cli("update", "--ide", "cmake")
+        self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/v1")
+
+    @unittest.skipIf(sys.platform == "win32", "fixture uses executable symlinks in PATH")
+    def test_git_unavailable_selects_tarball_automatically(self):
+        path = self.base / "no-git-bin"
+        path.mkdir()
+        for tool in ("curl", "tar", "gzip"):
+            (path / tool).symlink_to(shutil.which(tool))
+        self.env.pop("TRUSSC_FETCH")
+        self.env["PATH"] = str(path)
+        self.assertNotIn("Error:", self.cli("use", "v1"))
+        self.assertFalse((self.cache / "repos").exists())
+        self.assertIn("(v1)", self.cli("build", "--dry-run"))
 
 
 if __name__ == "__main__":
