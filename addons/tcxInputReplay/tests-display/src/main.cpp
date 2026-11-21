@@ -20,6 +20,31 @@ class Smoke : public App {
     bool completed_ = false;
     int updates_ = 0;
     std::filesystem::path path_, ownPath_;
+#ifndef TCX_INPUTREPLAY_MOCK_WINDOW
+    std::shared_ptr<Window> preview_;
+    void checkRingWindows() {
+        auto& state = detail::state();
+        int mainCount = 0, previewCount = 0;
+        auto mainListener = getWindow()->events().mouseMoved.listen([&](const MouseMoveEventArgs& e) {
+            if (e.sourceTag == "replayed") ++mainCount;
+        });
+        auto previewListener = preview_->events().mouseMoved.listen([&](const MouseMoveEventArgs& e) {
+            if (e.sourceTag == "replayed") ++previewCount;
+        });
+        check(replay::startRecording(RecordingMode::Ring, std::chrono::minutes(1), 2), "display ring starts");
+        replay::mark("evicted");
+        check(getWindow()->injectInput(InputEvent::mouseMoved({10, 20}), "script"), "display main ring input");
+        check(preview_->injectInput(InputEvent::mouseMoved({30, 40}), "script"), "display second ring input");
+        check(replay::flush(path_), "display ring flush");
+        std::ifstream file(path_);
+        auto session = detail::load(file);
+        check(session.windows.size() == 2 && session.records.front().type == "mouseMoved", "display ring evicts initial mark");
+        check(replay::play(path_), "display ring playback starts");
+        state.timeline.start(std::move(session), 0);
+        state.update();
+        check(mainCount == 1 && previewCount == 1 && !state.timeline.active, "display two-window replay destinations");
+    }
+#endif
     void checkRecordingLimits() {
         auto& state = detail::state();
         int replayed = 0;
@@ -73,7 +98,17 @@ public:
     void setup() override {
         path_ = std::filesystem::current_path() / "inputreplay-smoke.jsonl";
         ownPath_ = std::filesystem::current_path() / "inputreplay-own.jsonl";
+#ifndef TCX_INPUTREPLAY_MOCK_WINDOW
+        WindowSettings previewSettings;
+        previewSettings.setSize(160, 100);
+        preview_ = createWindow(previewSettings);
+        check(bool(preview_), "second display window created");
+        if (!preview_) { finishSmoke(); return; }
+        replay::setup({{"main", getWindow()}, {"preview", preview_.get()}});
+        checkRingWindows();
+#else
         replay::setup();
+#endif
         checkRecordingLimits();
         auto& e = events();
         auto moved = [this](const auto& v) {

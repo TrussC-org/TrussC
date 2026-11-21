@@ -1,5 +1,5 @@
 {
-  "description": "Single-window input recording and replay with scene marks",
+  "description": "Input recording and replay with ring capture, window mapping and scene marks",
   "author": "tettou771",
   "license": "MIT",
   "category": "utilities",

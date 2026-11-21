@@ -80,7 +80,7 @@ void validation() {
     check(accepts(encode({bad, e}), "dimensions"), "zero dimensions");
     bad = h;
     bad["windows"].push_back(h["windows"][0]);
-    check(accepts(encode({bad, e}), "one window"), "single window only");
+    check(accepts(encode({bad, e}), "duplicate"), "duplicate window key");
     check(accepts(encode({h, m, end(9, 1)}), "nonmonotonic"), "time ordering");
     check(accepts(encode({h, m, end(10, 0)}), "nonmonotonic"), "frame ordering");
     check(accepts(encode({h, end(timeLimit, UINT64_MAX)})), "time and frame at bound");
@@ -287,11 +287,16 @@ void timing() {
 }
 } // namespace
 int runInputReplayWindowChecks();
+int runInputReplayRingChecks();
+int runInputReplayB1WindowChecks();
 int main() {
     validation();
     scaling();
     timing();
     largeLimits();
     std::printf("%d checks, %d failures\n", checks, failures);
-    return failures || runInputReplayWindowChecks() ? 1 : 0;
+    const int ringFailures = runInputReplayRingChecks();
+    const int windowFailures = runInputReplayWindowChecks();
+    const int b1Failures = runInputReplayB1WindowChecks();
+    return failures || ringFailures || windowFailures || b1Failures ? 1 : 0;
 }

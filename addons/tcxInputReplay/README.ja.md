@@ -2,7 +2,7 @@
 
 [English](README.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
-TrussCの1つのウィンドウへの入力を記録し、コード変更後に同じ操作をリアルタイムで再生するデバッグ用アドオンです。場面のタイミングが変わっても、markでアプリの到着を待てます。入力だけではアプリの状態を決定論的に再現できません。状態全体のスナップショットAPIはありません。
+TrussCのウィンドウへの入力を記録し、コード変更後に同じ操作をリアルタイムで再生するデバッグ用アドオンです。場面のタイミングが変わっても、markでアプリの到着を待てます。入力だけではアプリの状態を決定論的に再現できません。状態全体のスナップショットAPIはありません。
 
 `addons.make`に`tcxInputReplay`を追加し、`<tcxInputReplay.h>`をincludeします。すべてのAPIはメインスレッドで呼びます。`tcApp::setup()`で一度`setup()`を呼ぶと、そのウィンドウを選び、アプリの終了処理でスコープ付きリスナーを解放します。
 
@@ -46,6 +46,106 @@ void tcApp::keyPressed(int key) {
 マウス移動、ドラッグ（移動として1回）、ボタン、スクロール、リピートを含むキー、文字、修飾キー、タッチのID・キャンセル・筆圧、ファイルドロップのパスを記録します。注入入力は`injected`と`tag`を保持し、このアドオン自身の同期的な再生入力は除外します。タッチから合成したマウス入力は、タッチの再注入で作られるため記録しません。ImGuiが型付き入力を消費する前に記録します。
 
 ファイルドロップはパスだけを保存し、ファイル自体は再作成しません。アドオンにファイルの復元APIはありません。coreのドロップ引数には出どころを取得するAPIがないため、記録では`injected: false`と空のtagになります。同期的な再生ガードにより再記録は防ぎます。スクロール位置はデータとして保存しますが、注入APIは再生先の現在のポインター位置を使います。スクロール位置を直接渡すAPIはありません。
+
+## 最近の入力をリングに保持する
+
+リング記録は障害の調査用に直近N分の入力をメモリに保持し、レコード数とJSONLのバイト上限でも制限します。flushまではファイルを開きません。時間と件数の両方が適用され、次のコードは最大5分、100,000件の入力・markを保持します。
+
+```cpp
+void tcApp::beginCapture() {
+    tcx::inputreplay::startRecording(tcx::inputreplay::RecordingMode::Ring, std::chrono::minutes(5), 100000);
+}
+```
+
+時間は`std::chrono::milliseconds`で1ミリ秒から7日まで指定でき、chronoのminutesやsecondsからも変換できます。件数はheader/endを含まず、既定値は999,998、範囲は1〜999,998です。時間・件数・バイト上限に達すると古い完全なレコードを取り除きます。1行の上限を超える入力ではErrorを出して記録を停止します。上限を超える行を保存するAPIはありません。
+
+`flush(path)`は保持区間を書き出し、ファイルエラーの場合も記録を停止します。親フォルダを作成し、ダイアログは開きません。次の障害も記録する場合は明示的に再開します。
+
+```cpp
+void tcApp::saveIncident() {
+    tcx::inputreplay::flush("incidents/session.jsonl");
+}
+```
+
+`flush()`はdataフォルダ内の`input-replay`にUnixマイクロ秒の時刻を使った名前で保存します。setup後にフォルダを変更できます。
+
+```cpp
+void tcApp::configureCapture() {
+    tcx::inputreplay::setFlushDirectory("incidents");
+}
+```
+
+自動の名前で保存します。
+
+```cpp
+void tcApp::saveIncident() {
+    tcx::inputreplay::flush();
+}
+```
+
+flushは有効なheader/endを書き、時刻とフレームを最初の保持レコードに合わせ直します。先頭のmarkが取り除かれた場合、再生は保持区間から始まり、以前の場面は復元できません。アプリの状態を復元するAPIはありません。`stopRecording()`はリングを破棄します。保存する場合は`flush()`を使います。
+
+```cpp
+void tcApp::saveIncident() {
+    tcx::inputreplay::flush();
+}
+```
+
+停止中のflushは毎回Warningを出します。ファイル記録には引き続き`startRecording(path)`と`stopRecording()`を使い、flushはリング記録に使います。flushの前にリング記録を開始します。
+
+```cpp
+void tcApp::beginCapture() {
+    tcx::inputreplay::startRecording(tcx::inputreplay::RecordingMode::Ring, std::chrono::minutes(5), 100000);
+}
+```
+
+## 複数ウィンドウを明示的に対応付ける
+
+引数なしの`setup()`は現在のウィンドウを`main`に対応付けます。複数のウィンドウを記録する場合は先に作成し、安定したキーとWindowポインターをsetupに渡します。tcAppに`std::shared_ptr<tc::Window> preview;`を宣言し、次のsetupの前に`tc::createWindow(settings)`の戻り値を代入します。
+
+```cpp
+void tcApp::setup() {
+    tcx::inputreplay::setup({{"main", getWindow()}, {"preview", preview.get()}});
+}
+```
+
+対応付けたウィンドウだけを記録します。作成順やタイトルが変わっても再生時には同じキーを使います。欠けた・閉じた・重複したキーや保存先ではsetup/playが失敗します。対応付けたウィンドウが閉じると、markの待機中もErrorを出して再生を停止します。記録・再生の前に、開いている各保存先を一度ずつ対応付けます。
+
+```cpp
+void tcApp::setup() {
+    tcx::inputreplay::setup({{"main", getWindow()}, {"preview", preview.get()}});
+}
+```
+
+対応付けはアプリの終了処理まで固定です。実行中に対応を変更するAPIはありません。座標とスケーリングは各キーの記録時と現在の寸法を使います。coreの開いているウィンドウ一覧で寿命を確認し、一時的なネイティブIDやタイトルをキーとして保存しません。
+
+## MCPから入力の記録と再生を操作する
+
+setupは5つのツールを`Control`レベルで登録します。登録だけでは権限の付与やサーバーの起動はしません。デバッグ用アプリで既存のMCP Control権限を有効にして使います。
+
+```cpp
+void tcApp::enableRemoteDebugging() {
+    if (debugBuild) tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
+}
+```
+
+| ツール | 引数 |
+| --- | --- |
+| `tcx_inputreplay_start_recording` | ファイルには`path`、省略するとリングです。任意の`durationMs`（既定300000）と`capacity`（既定999998）を指定できます |
+| `tcx_inputreplay_stop_recording` | なし。リングは破棄します |
+| `tcx_inputreplay_play` | `path`、任意の`scale`: `none`、`stretch`、`fit` |
+| `tcx_inputreplay_stop_playback` | なし |
+| `tcx_inputreplay_flush` | 任意の`path`。省略時は設定したフォルダを使います |
+
+操作関数は`bool`を返し、ツールは`status: "ok"`またはエラーの文章を返します。MCP呼び出し自体は記録しません。デバッグ用なので、配布アプリでは有効にしないことを勧めます。setupとControl権限はデバッグビルドでだけ有効にします。
+
+```cpp
+void tcApp::setup() {
+    if (debugBuild) tcx::inputreplay::setup();
+}
+```
+
+ビルド設定に従う`bool debugBuild`メンバーを宣言し、`enableRemoteDebugging()`もデバッグビルドでだけ呼びます。
 
 ## markで場面を同期する
 
@@ -94,9 +194,9 @@ void tcApp::beforePasswordEntry() {
 
 ## JSON Linesバージョン1
 
-UTF-8で1行に1つのオブジェクトを保存します。先頭のヘッダーは`type: "header"`、`version: 1`、`app`、`trussc`、`started`（Unixミリ秒の文字列）、`fps`と、1件の`windows`要素を持ちます。ウィンドウ要素は`key: "main"`、`width`、`height`、`dpi`、`pixelPerfect`です。widthとheightは記録時のApp座標の大きさです。
+UTF-8で1行に1つのオブジェクトを保存します。先頭のヘッダーは`type: "header"`、`version: 1`、`app`、`trussc`、`started`（Unixミリ秒の文字列）、`fps`と、一意のキーを持つ`windows`配列を持ちます。ウィンドウ要素は`key`（既定は`"main"`）、`width`、`height`、`dpi`、`pixelPerfect`です。widthとheightは記録時のApp座標の大きさです。
 
-以降の全レコードは`type`、経過`ms`、相対`frame`を持ちます。入力は`window: "main"`、`injected`、`tag`も持ちます。マウスは`x`、`y`、`mods`（shift=1、ctrl=2、alt=4、super=8）、ボタンは`button`（0〜2）、スクロールは`scrollX`と`scrollY`を追加します。キーは`key`、`mods`、`repeat`、文字は`codepoint`、`mods`、`repeat`です。タッチは`canceled`と`touches`（`id`、`x`、`y`、`pressure`、`changed`）、ドロップは`x`、`y`、`files`、markは`name`、最後のレコードは`type: "end"`です。
+以降の全レコードは`type`、経過`ms`、相対`frame`を持ちます。入力は対応付けた`window`キー（既定は`"main"`）、`injected`、`tag`も持ちます。マウスは`x`、`y`、`mods`（shift=1、ctrl=2、alt=4、super=8）、ボタンは`button`（0〜2）、スクロールは`scrollX`と`scrollY`を追加します。キーは`key`、`mods`、`repeat`、文字は`codepoint`、`mods`、`repeat`です。タッチは`canceled`と`touches`（`id`、`x`、`y`、`pressure`、`changed`）、ドロップは`x`、`y`、`files`、markは`name`、最後のレコードは`type: "end"`です。
 
 再生はファイル全体を検証してから注入し、エラーに行番号を付けます。上限はLFを除く1行64 KiB、改行を含むファイル128 MiB、headerとendを含む1,000,000オブジェクト、`ms`は7日です。時刻とフレーム番号は非減少です。不正・不足フィールド、非有限値や範囲外の値、未知のバージョン・イベント、endの欠落やend後のレコードは拒否します。失敗・中断した記録は不完全な場合があります。復旧APIはありません。
 
@@ -104,4 +204,4 @@ UTF-8で1行に1つのオブジェクトを保存します。先頭のヘッダ�
 
 `example-inputReplay`はRで記録、Sで記録停止、Pで再生、Mでmarkを示します。`tests`は画面なしで、ファイル検証・上限の境界値・往復変換・座標変換・仮の時計によるmark同期を確認します。`tests-display --display-check`は注入入力を記録し、画面上で再生時のイベントを比較します。LinuxではXvfbを使えます。
 
-ツールバー、ホットキー、リングバッファ、ファイルダイアログ、複数ウィンドウの対応付け、MCP操作はstage Bです。
+ツールバー、ホットキー、ファイルダイアログはstage B2です。
