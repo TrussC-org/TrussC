@@ -10,6 +10,7 @@
 #include "ProcessCapture.h"
 #include "Dist.h"
 #include "TrussCVersion.h"
+#include "AddonVersions.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -41,6 +42,8 @@
 using namespace std;
 using namespace tc;
 namespace fs = std::filesystem;
+
+static addonVersions::Paths resolveAddonVersions(const string& project, const string& root, bool fetch, const vector<string>* selection = nullptr);
 
 // =============================================================================
 // Helpers
@@ -1404,6 +1407,13 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true) {
         }
     }
 
+    const string checkedProject = projectPath.empty() ? autoDetectProjectRoot("") : projectPath;
+    if (!checkedProject.empty()) {
+        if (auto error = ProjectGenerator::validateProject(checkedProject); !error.empty()) {
+            cerr << "Error: " << error << "\n";
+            return 1;
+        }
+    }
     string resolvedProjectPath;
     string resolvedTcRoot;
     if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot, fetchVersion)) {
@@ -1412,8 +1422,13 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true) {
     projectPath = resolvedProjectPath;
     tcRoot = resolvedTcRoot;
 
+    auto addonPaths = resolveAddonVersions(projectPath, tcRoot, fetchVersion);
+    addonVersions::saveResolved(projectPath, addonPaths);
     vector<string> availableAddons;
     scanAddons(tcRoot, availableAddons);
+    for (const auto& spec : readProjectAddons(projectPath)) {
+        if (find(availableAddons.begin(), availableAddons.end(), spec) == availableAddons.end()) availableAddons.push_back(spec);
+    }
 
     vector<int> addonSelected;
     parseAddonsMake(projectPath, availableAddons, addonSelected);
@@ -1651,6 +1666,9 @@ static void printAddHelp() {
          << "Add one or more addons to the TrussC project in the current directory.\n"
          << "The project is detected by walking up from CWD. The addons.make file\n"
          << "is updated and the build files are regenerated.\n"
+         << "External addons accept [owner/]name[@ref] and are fetched into the cache.\n"
+         << "Without @ref, update refreshes the remote default branch.\n"
+         << "Bundled addons follow TrussC and cannot use @ref.\n"
          << "The IDE and the Web / Android / iOS targets are kept from the\n"
          << "project's CMakePresets.json (change them with 'trusscli update').\n"
          << "A kept target that fails to configure is reported as a warning.\n"
@@ -1678,10 +1696,8 @@ static void collectAddonDependencies(const string& tcRoot,
     if (!fs::exists(jsonPath)) return;
     Json meta;
     try {
-        ifstream f(jsonPath);
-        stringstream ss;
-        ss << f.rdbuf();
-        meta = Json::parse(ss.str());
+        // Bound (installed addon dependencies): cap each manifest at 16 MiB.
+        meta = Json::parse(trusscVersion::readBounded(jsonPath, 16 * 1024 * 1024));
     } catch (...) {
         return;
     }
@@ -1689,8 +1705,13 @@ static void collectAddonDependencies(const string& tcRoot,
     for (const auto& d : meta["dependencies"]) {
         string dep;
         if (d.is_string()) dep = d.get<string>();
-        else if (d.is_object()) dep = d.value("name", "");
-        if (dep.empty() || seen.count(dep)) continue;
+        else if (d.is_object()) {
+            // Version pins remain dependency selections, not project overrides.
+            if (d.contains("commit") || d.contains("tag") || d.contains("branch")) continue;
+            dep = d.value("name", "");
+        }
+        if (dep.empty() || dep.find('@') != string::npos || seen.count(dep) ||
+            !fs::is_directory(fs::path(tcRoot) / "addons" / dep)) continue;
         seen.insert(dep);
         out.push_back(dep);
         collectAddonDependencies(tcRoot, dep, seen, out);  // transitive
@@ -1741,83 +1762,30 @@ static int cmdAdd(const vector<string>& args) {
         return rc;
     }
 
-    vector<string> availableAddons;
-    scanAddons(resolvedTcRoot, availableAddons);
-
-    // Validate requested addons against the available set
-    for (const string& want : requestedAddons) {
-        if (find(availableAddons.begin(), availableAddons.end(), want) == availableAddons.end()) {
-            cerr << "Error: addon '" << want << "' is not available locally.\n"
-                 << "Clone it first:  trusscli addon clone " << want << "\n"
-                 << "Or list remote addons:  trusscli addon list --remote\n";
-            return 1;
-        }
+    // Keep project pins separate from dependency selections: the project wins
+    // when a dependency asks for another ref.
+    auto selected = readProjectAddons(projectPath);
+    for (const auto& want : requestedAddons) {
+        auto spec = addonVersions::parse(want);
+        auto existing = find_if(selected.begin(), selected.end(), [&](const string& line) {
+            return addonVersions::parse(line).name == spec.name;
+        });
+        if (existing == selected.end()) selected.push_back(want);
+        else *existing = want;
     }
-
-    // Expand with transitive dependencies so addons.make records everything the
-    // build needs — no addon gets pulled in implicitly without appearing here.
-    vector<string> depAddons;
-    {
-        set<string> seen(requestedAddons.begin(), requestedAddons.end());
-        for (const string& want : requestedAddons) {
-            collectAddonDependencies(resolvedTcRoot, want, seen, depAddons);
-        }
+    // Preserve the existing bundled-addon convenience of listing dependencies.
+    vector<string> dependencies;
+    set<string> seen;
+    for (const auto& line : selected) seen.insert(addonVersions::parse(line).name);
+    for (const auto& want : requestedAddons) {
+        auto spec = addonVersions::parse(want);
+        if (spec.owner.empty() && spec.ref.empty()) collectAddonDependencies(resolvedTcRoot, spec.name, seen, dependencies);
     }
-    for (const string& dep : depAddons) {
-        if (find(availableAddons.begin(), availableAddons.end(), dep) == availableAddons.end()) {
-            cerr << "Error: dependency '" << dep << "' is required but not available locally.\n"
-                 << "Clone it first:  trusscli addon clone " << dep << "\n";
-            return 1;
-        }
-    }
-
-    // Read current selection, add requested + dependency addons (idempotent).
-    vector<int> addonSelected;
-    parseAddonsMake(projectPath, availableAddons, addonSelected);
-
-    vector<string> toAdd = requestedAddons;
-    toAdd.insert(toAdd.end(), depAddons.begin(), depAddons.end());
-    set<string> depSet(depAddons.begin(), depAddons.end());
-
-    vector<string> addedNow;
-    for (const string& want : toAdd) {
-        for (size_t i = 0; i < availableAddons.size(); ++i) {
-            if (availableAddons[i] == want) {
-                if (addonSelected[i]) {
-                    cout << "  (already present) " << want << "\n";
-                } else {
-                    addonSelected[i] = 1;
-                    addedNow.push_back(want);
-                    if (depSet.count(want)) {
-                        cout << "  + dependency " << want << "\n";
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    // Build the new addons list in the order they appear in availableAddons
-    vector<string> selectedNames;
-    for (size_t i = 0; i < availableAddons.size(); ++i) {
-        if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
-    }
-
-    writeAddonsMake(projectPath, selectedNames);
-
-    if (addedNow.empty()) {
-        cout << "No changes to addons.make. Regenerating build files anyway...\n";
-    } else {
-        cout << "Added " << addedNow.size() << " addon(s): ";
-        for (size_t i = 0; i < addedNow.size(); ++i) {
-            if (i > 0) cout << ", ";
-            cout << addedNow[i];
-        }
-        cout << "\n";
-    }
-
-    return regenerateProject(projectPath, resolvedTcRoot, availableAddons, addonSelected,
-                             GenerationFlags());
+    selected.insert(selected.end(), dependencies.begin(), dependencies.end());
+    auto paths = resolveAddonVersions(projectPath, resolvedTcRoot, true, &selected);
+    addonVersions::saveResolved(projectPath, paths);
+    writeAddonsMake(projectPath, selected);
+    return cmdUpdate({"-p", projectPath}, false);
 }
 
 // =============================================================================
@@ -1890,6 +1858,9 @@ static int cmdRemove(const vector<string>& args) {
 
     vector<string> availableAddons;
     scanAddons(resolvedTcRoot, availableAddons);
+    for (const auto& line : readProjectAddons(projectPath)) {
+        if (find(availableAddons.begin(), availableAddons.end(), line) == availableAddons.end()) availableAddons.push_back(line);
+    }
 
     // Read current selection
     vector<int> addonSelected;
@@ -1899,15 +1870,15 @@ static int cmdRemove(const vector<string>& args) {
     for (const string& want : requestedAddons) {
         bool found = false;
         for (size_t i = 0; i < availableAddons.size(); ++i) {
-            if (availableAddons[i] == want) {
+            if (addonVersions::parse(availableAddons[i]).name == addonVersions::parse(want).name) {
                 found = true;
                 if (addonSelected[i]) {
                     addonSelected[i] = 0;
                     removedNow.push_back(want);
-                } else {
-                    cout << "  (not present) " << want << "\n";
+                    break;
                 }
-                break;
+                // A decorated selection with the same name may appear later.
+                continue;
             }
         }
         if (!found) {
@@ -1935,8 +1906,7 @@ static int cmdRemove(const vector<string>& args) {
         cout << "\n";
     }
 
-    return regenerateProject(projectPath, resolvedTcRoot, availableAddons, addonSelected,
-                             GenerationFlags());
+    return cmdUpdate({"-p", projectPath}, false);
 }
 
 // =============================================================================
@@ -2074,12 +2044,43 @@ static string readRegistryCache() {
     string path = registryCachePath();
     if (path.empty() || !fs::exists(path)) return "";
     try {
-        ifstream f(path, ios::binary);
-        stringstream ss;
-        ss << f.rdbuf();
-        return ss.str();
+        // Bound (cached registry): cap registry metadata at 16 MiB.
+        return trusscVersion::readBounded(path, 16 * 1024 * 1024);
     } catch (...) {
         return "";
+    }
+}
+
+static vector<AddonInfo> parseRegistry(const string& out) {
+    try {
+        Json data = Json::parse(out);
+        vector<AddonInfo> result;
+        for (const auto& a : data["addons"]) {
+            AddonInfo info;
+            info.name        = a.value("name", "");
+            info.owner       = a.value("owner", "");
+            info.url         = a.value("url", "");
+            info.bundled     = a.value("bundled", false);
+            info.version     = a.value("version", "unknown");
+            info.description = a.value("description", "");
+            info.author      = a.value("author", "");
+            info.license     = a.value("license", "");
+            info.demoUrl     = a.value("demo_url", "");
+            info.stars       = a.value("stars", 0);
+            if (a.contains("platforms") && a["platforms"].is_array()) {
+                for (const auto& p : a["platforms"]) {
+                    if (p.is_string()) info.platforms.push_back(p.get<string>());
+                }
+            }
+            if (a.contains("dependencies")) {
+                info.dependencies = parseDependencies(a["dependencies"]);
+            }
+            result.push_back(std::move(info));
+        }
+        return result;
+    } catch (...) {
+        cerr << "Error: failed to parse registry JSON.\n";
+        return {};
     }
 }
 
@@ -2115,36 +2116,7 @@ static vector<AddonInfo> fetchRegistry(bool allowStaleCache = false) {
         }
         return {};
     }
-    try {
-        Json data = Json::parse(out);
-        vector<AddonInfo> result;
-        for (const auto& a : data["addons"]) {
-            AddonInfo info;
-            info.name        = a.value("name", "");
-            info.owner       = a.value("owner", "");
-            info.url         = a.value("url", "");
-            info.bundled     = a.value("bundled", false);
-            info.version     = a.value("version", "unknown");
-            info.description = a.value("description", "");
-            info.author      = a.value("author", "");
-            info.license     = a.value("license", "");
-            info.demoUrl     = a.value("demo_url", "");
-            info.stars       = a.value("stars", 0);
-            if (a.contains("platforms") && a["platforms"].is_array()) {
-                for (const auto& p : a["platforms"]) {
-                    if (p.is_string()) info.platforms.push_back(p.get<string>());
-                }
-            }
-            if (a.contains("dependencies")) {
-                info.dependencies = parseDependencies(a["dependencies"]);
-            }
-            result.push_back(std::move(info));
-        }
-        return result;
-    } catch (...) {
-        cerr << "Error: failed to parse registry JSON.\n";
-        return {};
-    }
+    return parseRegistry(out);
 }
 
 // =============================================================================
@@ -2326,6 +2298,73 @@ static vector<const AddonInfo*> findCandidates(
         }
     }
     return result;
+}
+
+static string addonOwnerFromURL(const string& url) {
+    const string prefix = "https://github.com/";
+    if (url.compare(0, prefix.size(), prefix) != 0) return "";
+    auto identity = url.substr(prefix.size());
+    if (identity.size() >= 4 && identity.substr(identity.size() - 4) == ".git") identity.resize(identity.size() - 4);
+    return addonVersions::parse(identity).owner;
+}
+
+static addonVersions::Paths resolveAddonVersions(const string& project, const string& root, bool fetch, const vector<string>* selection) {
+    vector<AddonInfo> registry;
+    bool loaded = false;
+    return addonVersions::resolve(project, root, fetch, [&](const addonVersions::Spec& spec, bool mayFetch) {
+        addonVersions::Source source;
+        // An installed external addon's metadata can identify its source even
+        // when the registry is unavailable. Bundled addons never enter here.
+        auto installed = fs::path(root) / "addons" / spec.name / "addon.json";
+        if (spec.owner.empty() && fs::exists(installed)) {
+            // Bound (installed addon metadata): cap each manifest at 16 MiB.
+            auto meta = Json::parse(trusscVersion::readBounded(installed, 16 * 1024 * 1024));
+            source.owner = meta.value("owner", "");
+            source.url = meta.value("url", "");
+            if (source.owner.empty()) source.owner = addonOwnerFromURL(source.url);
+            if (!source.owner.empty()) return source;
+        }
+        // Builds read the existing registry cache only. They never consult the network.
+        if (!loaded) {
+            auto cached = readRegistryCache();
+            if (!cached.empty()) { registry = parseRegistry(cached); loaded = true; }
+            else if (mayFetch && spec.owner.empty()) { registry = fetchRegistry(); loaded = true; }
+        }
+        auto candidates = findCandidates(registry, spec.owner.empty() ? spec.name : spec.owner + "/" + spec.name);
+        if (candidates.size() > 1) throw runtime_error("ambiguous addon " + spec.name + "; specify owner/name");
+        if (candidates.size() == 1) {
+            source.owner = candidates[0]->owner;
+            source.url = candidates[0]->url;
+        }
+        if (source.owner.empty()) source.owner = addonOwnerFromURL(source.url);
+        return source;
+    }, selection);
+}
+
+static int cmdAddonAddLocal(const vector<string>& args) {
+    if (args.size() == 1 && (args[0] == "--help" || args[0] == "-h")) {
+        cout << "Usage: trusscli addon add-local <name> <path|--clear> [-p <project>]\n";
+        return 0;
+    }
+    if (args.size() != 2 && args.size() != 4) throw runtime_error("usage: trusscli addon add-local <name> <path|--clear> [-p <project>]");
+    string explicitPath;
+    if (args.size() == 4) {
+        if (args[2] != "-p" && args[2] != "--path") throw runtime_error("expected -p <project>");
+        explicitPath = args[3];
+    }
+    string project, root;
+    if (int rc = resolveProjectAndTcRoot(explicitPath, "", project, root)) return rc;
+    addonVersions::setLocal(project, args[0], args[1] == "--clear" ? "" : args[1]);
+    if (args[1] != "--clear") {
+        auto selected = readProjectAddons(project);
+        if (none_of(selected.begin(), selected.end(), [&](const string& line) {
+            return addonVersions::parse(line).name == args[0];
+        })) {
+            selected.push_back(args[0]);
+            writeAddonsMake(project, selected);
+        }
+    }
+    return cmdUpdate({"-p", project}, false);
 }
 
 static bool promptYesNo(const string& msg, bool defaultYes) {
@@ -2849,6 +2888,7 @@ static void printAddonHelp() {
          << "  list                       List addons (local + optionally remote)\n"
          << "  add <addon>...             Add addons to the project\n"
          << "  remove <addon>...          Remove addons from the project\n"
+         << "  add-local <name> <path>    Save a local addon path (--clear removes it)\n"
          << "  clone <addon>...           Clone addons from the registry\n"
          << "  pull [<addon>...] [--all]  Update addons via git pull\n"
          << "  search <query>             Search the addon registry\n"
@@ -2869,6 +2909,7 @@ static int cmdAddon(const vector<string>& args) {
     vector<string> subArgs(args.begin() + 1, args.end());
     if (sub == "list")   return cmdAddonList(subArgs);
     if (sub == "add")    return cmdAdd(subArgs);
+    if (sub == "add-local") return cmdAddonAddLocal(subArgs);
     if (sub == "remove") return cmdRemove(subArgs);
     if (sub == "clone")  return cmdAddonClone(subArgs);
     if (sub == "pull")   return cmdAddonPull(subArgs);
@@ -3754,7 +3795,7 @@ static int cmdBuild(const vector<string>& args) {
 
     if (!explicitTcRoot.empty()) {
         if (dryRun) { cerr << "Error: save --tc-root with use-local before --dry-run\n"; return 1; }
-        if (int rc = cmdUpdate({"-p", projectPath, "--tc-root", explicitTcRoot})) return rc;
+        if (int rc = cmdUpdate({"-p", projectPath, "--tc-root", explicitTcRoot}, false)) return rc;
     }
     // Validate before the automatic update: build must never fetch a missing version.
     string selectedRoot = trusscVersion::resolve(projectPath, false);
@@ -3765,6 +3806,7 @@ static int cmdBuild(const vector<string>& args) {
             fs::exists(fs::path(selectedRoot) / ".git_archival.txt")) cout << " (" << trusscVersion::commitAt(selectedRoot) << ")";
         cout << "\n";
     }
+
 
     if (targetPreset.empty()) {
         if (!kNativePreset) {
@@ -3802,6 +3844,46 @@ static int cmdBuild(const vector<string>& args) {
         cerr << "Error: no CMakePresets.json in " << projectPath << "\n"
              << "Run 'trusscli update' first to generate build files.\n";
         return 1;
+    }
+
+    addonVersions::Paths resolvedAddonPaths;
+    // Bound (project presets): cap addon-selection metadata at 16 MiB.
+    const auto presetData = Json::parse(trusscVersion::readBounded(presetsFile, 16 * 1024 * 1024), nullptr, false);
+    string addonRoot = selectedRoot;
+    if (addonRoot.empty() && presetData.is_object() && presetData.contains("configurePresets")) {
+        for (const auto& preset : presetData["configurePresets"]) {
+            if (preset.value("name", "") != targetPreset || !preset.contains("cacheVariables")) continue;
+            auto core = preset["cacheVariables"].value("TRUSSC_DIR", Json());
+            if (core.is_object()) core = core.value("value", Json());
+            if (!core.is_string()) continue;
+            string path = core.get<string>();
+            const string macro = "${sourceDir}";
+            if (path.compare(0, macro.size(), macro) == 0) path.replace(0, macro.size(), fs::absolute(projectPath).generic_string());
+            if (path.find('$') != string::npos) continue;
+            fs::path corePath(path);
+            if (corePath.is_relative()) corePath = fs::path(projectPath) / corePath;
+            addonRoot = fs::absolute(corePath).lexically_normal().parent_path().string();
+        }
+    }
+    // Legacy projects leave lookup to CMake, including its preset's core.
+    bool resolveAddons = !selectedRoot.empty();
+    Json addonVendor = Json::object();
+    if (presetData.is_object() && presetData.contains("vendor")) {
+        const auto& vendors = presetData["vendor"];
+        if (vendors.is_object() && vendors.contains("trussc") && vendors["trussc"].is_object()) addonVendor = vendors["trussc"];
+    }
+    const auto localAddons = addonVendor.value("addonLocalPaths", Json::object());
+    const auto savedAddons = addonVendor.value("addonPaths", Json::object());
+    for (const auto& line : readProjectAddons(projectPath)) {
+        auto spec = addonVersions::parse(line);
+        resolveAddons |= !spec.owner.empty() || !spec.ref.empty() || localAddons.contains(spec.name);
+        // An unqualified external addon acquired by add/update still uses HEAD.
+        resolveAddons |= savedAddons.contains(spec.name) &&
+            !fs::is_directory(fs::path(addonRoot) / "addons" / spec.name);
+    }
+    if (resolveAddons) {
+        if (addonRoot.empty()) throw runtime_error("addon resolution needs a concrete preset TRUSSC_DIR");
+        resolvedAddonPaths = resolveAddonVersions(projectPath, addonRoot, false);
     }
 
     // Windows: the presets pin the Visual Studio toolchain found when they were
@@ -3890,6 +3972,21 @@ static int cmdBuild(const vector<string>& args) {
     vector<string> cfg = {cmake, "--preset", targetPreset};
     cfg.insert(cfg.end(), plan.defines.begin(), plan.defines.end());
     bool needConfigure = plan.configure;
+    const string addonPathsJson = Json(resolvedAddonPaths).dump();
+    const string cachedAddonPaths = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_PATHS");
+    bool presetAddonPaths = false;
+    if (presetData.is_object() && presetData.contains("configurePresets")) {
+        for (const auto& preset : presetData["configurePresets"]) {
+            if (preset.contains("cacheVariables") && preset["cacheVariables"].contains("TRUSSC_ADDON_PATHS")) presetAddonPaths = true;
+        }
+    }
+    if (resolveAddons || !cachedAddonPaths.empty() || presetAddonPaths) {
+        cfg.push_back("-DTRUSSC_ADDON_PATHS=" + addonPathsJson);
+        cfg.push_back("-DTRUSSC_ADDON_ORDER=" + resolvedAddonPaths.order);
+        const string cachedOrder = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_ORDER");
+        needConfigure = needConfigure || cachedOrder != resolvedAddonPaths.order;
+        needConfigure = needConfigure || cachedAddonPaths != addonPathsJson;
+    }
     if (!selectedRoot.empty()) {
         string coreDir = selectedRoot + "/core";
         cfg.push_back("-DTRUSSC_DIR=" + coreDir);
@@ -5381,7 +5478,7 @@ static void printTopHelp() {
          << "  use-local <path>               Select a local TrussC checkout\n"
          << "  update                         Regenerate build files for the project in CWD\n"
          << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
-         << "  addon <command>                Manage addons: list, add, remove, clone, pull, search\n"
+         << "  addon <command>                Manage addons: list, add, add-local, remove, clone, pull, search\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
          << "  clean                          Delete build directories\n"

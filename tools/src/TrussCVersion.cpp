@@ -195,12 +195,12 @@ static void checkCachePath(const fs::path& path) {
     }
 }
 
-static void checkExistingWorktree(const Spec& spec, const fs::path& bare, const fs::path& destination) {
+static void checkExistingWorktree(const Spec& spec, const fs::path& bare, const fs::path& destination, bool addon) {
     auto listing = checkedGit({"--git-dir=" + bare.string(), "worktree", "list", "--porcelain", "-z"});
     std::istringstream fields(listing);
     std::string field;
     std::string otherRef = "unregistered directory";
-    auto versionRoot = cacheRoot() / "versions" / spec.owner / spec.repo;
+    auto versionRoot = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo;
     while (std::getline(fields, field, '\0')) {
         if (field.compare(0, 9, "worktree ") != 0) continue;
         auto worktree = fs::path(field.substr(9));
@@ -240,10 +240,15 @@ static bool useTarball() {
     return !available;
 }
 
+static bool addonDirectory(const fs::path& root) {
+    return fs::is_regular_file(root / "addon.json") || fs::is_regular_file(root / "CMakeLists.txt") ||
+           fs::is_directory(root / "src");
+}
+
 // All curl/tar execution stays in this transport seam. No shell is involved.
-static void fetchTarball(const Spec& spec, const fs::path& destination, const std::string& base) {
+static void fetchTarball(const Spec& spec, const fs::path& destination, const std::string& base, bool addon) {
     checkCachePath(destination);
-    auto versionRoot = cacheRoot() / "versions" / spec.owner / spec.repo;
+    auto versionRoot = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo;
     // A slash ref must not replace a different ref's tree (or its parent).
     for (auto parent = destination.parent_path(); parent != versionRoot.parent_path(); parent = parent.parent_path()) {
         if (fs::exists(parent / ".git_archival.txt") || fs::exists(parent / ".git")) {
@@ -295,7 +300,7 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
         // Bound (remote acquisition): cap transfer size and duration for update/use.
         return run({"curl", "--location", "--fail", "--silent", "--show-error",
                     "--max-filesize", "1073741824", "--max-time", "300", "--output", archive.string(),
-                    "--url", base + "/" + spec.owner + "/" + spec.repo + "/archive/" + encode(ref) + ".tar.gz"});
+                    "--url", base + "/archive/" + encode(ref) + ".tar.gz"});
     };
     // Explicit tag URL wins even when a branch has the same name. The short URL
     // is also used by file:// fixtures and resolves branches/commits on GitHub.
@@ -368,7 +373,14 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
     if (top.empty() || std::getline(detailLines, detail)) throw std::runtime_error("invalid TrussC archive listing");
     auto extracted = run({"tar", "-xzf", archive.string(), "--strip-components=1", "-C", tree.string()});
     if (extracted.first != 0) throw std::runtime_error("TrussC archive extraction failed: " + extracted.second);
-    if (!fs::is_regular_file(tree / "core/cmake/trussc_app.cmake") ||
+    if (addon) {
+        if (!addonDirectory(tree)) {
+            throw std::runtime_error("addon archive is missing addon.json, CMakeLists.txt or src/");
+        }
+        // GitHub addon archives need not carry TrussC's export-subst metadata.
+        std::ofstream marker(tree / ".git_archival.txt");
+        marker << "describe: " << spec.ref << "\n";
+    } else if (!fs::is_regular_file(tree / "core/cmake/trussc_app.cmake") ||
         !fs::is_regular_file(tree / ".git_archival.txt")) {
         throw std::runtime_error("TrussC archive is missing core/cmake/trussc_app.cmake or .git_archival.txt");
     }
@@ -383,13 +395,24 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
 }
 
 // All transport and worktree mutations enter here. The URL override supports file://.
-static void fetchVersion(const Spec& spec, const fs::path& destination) {
+static void fetchVersion(const Spec& spec, const fs::path& destination, bool addon, const std::string& sourceUrl) {
     auto bare = cacheRoot() / "repos" / spec.owner / (spec.repo + ".git");
     const char* baseOverride = std::getenv("TRUSSC_GITHUB_BASE_URL");
     std::string base = baseOverride ? baseOverride : "https://github.com";
     while (!base.empty() && base.back() == '/') base.pop_back();
-    if (useTarball()) { fetchTarball(spec, destination, base); return; }
-    auto url = base + "/" + spec.owner + "/" + spec.repo + ".git";
+    if (useTarball()) {
+        auto archiveSource = base + "/" + spec.owner + "/" + spec.repo;
+        if (!baseOverride && !sourceUrl.empty()) {
+            archiveSource = sourceUrl;
+            while (!archiveSource.empty() && archiveSource.back() == '/') archiveSource.pop_back();
+            if (archiveSource.size() >= 4 && archiveSource.substr(archiveSource.size() - 4) == ".git") {
+                archiveSource.resize(archiveSource.size() - 4);
+            }
+        }
+        fetchTarball(spec, destination, archiveSource, addon);
+        return;
+    }
+    auto url = !baseOverride && !sourceUrl.empty() ? sourceUrl : base + "/" + spec.owner + "/" + spec.repo + ".git";
     checkCachePath(destination);
     checkCachePath(bare);
     fs::create_directories(bare.parent_path());
@@ -398,7 +421,10 @@ static void fetchVersion(const Spec& spec, const fs::path& destination) {
     checkedGit({"--git-dir=" + bare.string(), "fetch", "--force", "--prune", url,
                 "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"});
     std::string revision = spec.ref;
-    if (!spec.commit) {
+    if (addon && spec.ref == "HEAD") {
+        checkedGit({"--git-dir=" + bare.string(), "fetch", url, "HEAD"});
+        revision = "FETCH_HEAD";
+    } else if (!spec.commit) {
         auto tag = git({"--git-dir=" + bare.string(), "rev-parse", "--verify",
                         "refs/tags/" + spec.ref + "^{commit}"});
         revision = tag.first == 0 ? "refs/tags/" + spec.ref : "refs/heads/" + spec.ref;
@@ -409,13 +435,51 @@ static void fetchVersion(const Spec& spec, const fs::path& destination) {
     }
     auto commit = checkedGit({"--git-dir=" + bare.string(), "rev-parse", "--verify", revision + "^{commit}"}, true);
     if (fs::exists(destination)) {
-        checkExistingWorktree(spec, bare, destination);
+        checkExistingWorktree(spec, bare, destination, addon);
         checkedGit({"-C", destination.string(), "checkout", "--detach", commit});
     } else {
         fs::create_directories(destination.parent_path());
         checkedGit({"--git-dir=" + bare.string(), "worktree", "prune"});
         checkedGit({"--git-dir=" + bare.string(), "worktree", "add", "--detach", destination.string(), commit});
     }
+}
+
+std::string readBounded(const fs::path& path, size_t limit) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file || !fs::is_regular_file(path)) throw std::runtime_error("cannot read " + path.string());
+    std::string text(limit + 1, '\0');
+    file.read(text.data(), static_cast<std::streamsize>(text.size()));
+    if (static_cast<size_t>(file.gcount()) > limit) throw std::runtime_error(path.filename().string() + " exceeds the " + std::to_string(limit) + "-byte limit");
+    text.resize(static_cast<size_t>(file.gcount()));
+    return text;
+}
+
+std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string& sourceUrl) {
+    // Validate at the shared boundary, including specs assembled from registry metadata.
+    parse(spec.owner + "/" + spec.repo + "@" + spec.ref);
+    if (!sourceUrl.empty() && sourceUrl.front() == '-') throw std::runtime_error("invalid addon repository URL");
+    auto root = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo / spec.ref;
+    checkCachePath(root);
+    if (fetch) fetchVersion(spec, root, addon, sourceUrl);
+    else if (fs::exists(root)) {
+        if (fs::exists(root / ".git")) {
+            checkExistingWorktree(spec, cacheRoot() / "repos" / spec.owner / (spec.repo + ".git"), root, addon);
+        } else {
+            if (!fs::is_regular_file(root / ".git_archival.txt")) {
+                throw std::runtime_error("version is unavailable; run `trusscli update`: " + spec.ref);
+            }
+            auto versionRoot = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo;
+            for (auto parent = root.parent_path(); parent != versionRoot.parent_path(); parent = parent.parent_path()) {
+                if (fs::exists(parent / ".git") || fs::exists(parent / ".git_archival.txt")) {
+                    throw std::runtime_error("version is not an exact acquired archive root; run `trusscli update`: " + spec.ref);
+                }
+            }
+        }
+    }
+    if (addon ? !addonDirectory(root) : !fs::is_regular_file(root / "core/cmake/trussc_app.cmake")) {
+        throw std::runtime_error(std::string(addon ? "addon" : "TrussC") + " version is unavailable; run `trusscli update`: " + spec.owner + "/" + spec.repo + "@" + spec.ref);
+    }
+    return root.string();
 }
 
 std::string resolve(const fs::path& project, bool fetch) {
@@ -433,25 +497,11 @@ std::string resolve(const fs::path& project, bool fetch) {
     if (!fs::is_regular_file(versionFile)) {
         throw std::runtime_error(".trussc-version must be a regular file");
     }
-    // Bound (project input): version specs must fit in a small manifest before parsing.
-    constexpr size_t versionLimit = 4096;
-    std::ifstream file(versionFile, std::ios::binary);
-    if (!file) throw std::runtime_error("cannot read .trussc-version");
-    char buffer[versionLimit + 1];
-    file.read(buffer, sizeof(buffer));
-    if (file.gcount() > static_cast<std::streamsize>(versionLimit)) {
-        throw std::runtime_error(".trussc-version exceeds the 4096-byte limit");
-    }
-    auto text = std::string(buffer, static_cast<size_t>(file.gcount()));
+    // Bound (project version): cap the version selection at 4 KiB.
+    auto text = readBounded(versionFile, 4096);
     auto begin = text.find_first_not_of(" \t\r\n");
     auto end = text.find_last_not_of(" \t\r\n");
     auto spec = parse(begin == std::string::npos ? "" : text.substr(begin, end - begin + 1));
-    auto root = cacheRoot() / "versions" / spec.owner / spec.repo / spec.ref;
-    checkCachePath(root);
-    if (fetch) fetchVersion(spec, root);
-    if (!fs::exists(root / "core/cmake/trussc_app.cmake")) {
-        throw std::runtime_error("TrussC version is unavailable; run `trusscli update`: " + text);
-    }
-    return root.string();
+    return acquire(spec, fetch);
 }
 }

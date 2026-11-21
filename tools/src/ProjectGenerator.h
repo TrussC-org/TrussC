@@ -84,6 +84,9 @@ public:
     // Returns empty string on success, error message on failure
     std::string generate();
 
+    // Check the existing project signature before any update writes.
+    static std::string validateProject(const std::string& projectPath);
+
     // Update existing project
     std::string update(const std::string& projectPath);
 
