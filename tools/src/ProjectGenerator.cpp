@@ -592,6 +592,14 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         presets["vendor"]["trussc"] = Json::object();
     }
     presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
+    const auto& vendor = presets["vendor"]["trussc"];
+    if (vendor.contains("addonPaths")) {
+        for (auto& preset : presets["configurePresets"]) {
+            preset["cacheVariables"]["TRUSSC_ADDON_PATHS"] = vendor["addonPaths"].dump();
+            preset["cacheVariables"]["TRUSSC_ADDON_ORDER"] = vendor.value("addonOrder", "");
+        }
+    }
+
 
     writeGeneratedFile(destPath + "/CMakePresets.json", presets.dump(2));
 }
@@ -759,29 +767,35 @@ string ProjectGenerator::generate() {
     }
 }
 
+string ProjectGenerator::validateProject(const string& projectPath) {
+    // Safety check: if an existing CMakeLists.txt is present, verify it's
+    // actually a TrussC project before overwriting. This guards against
+    // accidentally clobbering an unrelated project whose directory just
+    // happened to contain a src/ folder.
+    string cmakeListsPath = projectPath + "/CMakeLists.txt";
+    if (fs::exists(cmakeListsPath)) {
+        ifstream in(cmakeListsPath);
+        stringstream ss;
+        ss << in.rdbuf();
+        string content = ss.str();
+        if (content.find("trussc_app(") == string::npos &&
+            content.find("TRUSSC_DIR") == string::npos) {
+            return "'" + cmakeListsPath + "' exists but does not look like "
+                   "a TrussC project (no trussc_app() or TRUSSC_DIR). "
+                   "Refusing to overwrite.";
+        }
+    }
+
+    return "";
+}
+
 string ProjectGenerator::update(const string& projectPath_) {
     warnings_.clear();
     // Resolve project paths against the CLI working directory.
     string projectPath = fs::absolute(projectPath_).string();
     try {
         checkWebNinja(settings_);
-        // Safety check: if an existing CMakeLists.txt is present, verify it's
-        // actually a TrussC project before overwriting. This guards against
-        // accidentally clobbering an unrelated project whose directory just
-        // happened to contain a src/ folder.
-        string cmakeListsPath = projectPath + "/CMakeLists.txt";
-        if (fs::exists(cmakeListsPath)) {
-            ifstream in(cmakeListsPath);
-            stringstream ss;
-            ss << in.rdbuf();
-            string content = ss.str();
-            if (content.find("trussc_app(") == string::npos &&
-                content.find("TRUSSC_DIR") == string::npos) {
-                return "'" + cmakeListsPath + "' exists but does not look like "
-                       "a TrussC project (no trussc_app() or TRUSSC_DIR). "
-                       "Refusing to overwrite.";
-            }
-        }
+        if (auto error = validateProject(projectPath); !error.empty()) return error;
 
         log("Updating project...");
 
