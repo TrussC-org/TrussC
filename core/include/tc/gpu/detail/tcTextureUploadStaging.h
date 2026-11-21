@@ -14,6 +14,7 @@ public:
     static constexpr size_t slotsPerFrame = 4;
     static constexpr size_t frameSets = SG_NUM_INFLIGHT_FRAMES + 1;
     static constexpr uint64_t idleFrames = 120;
+    static_assert(idleFrames >= frameSets, "Idle eviction must preserve in-flight frame sets");
 
     struct Upload {
         sg_buffer buffer = {};
@@ -29,16 +30,21 @@ public:
         }
     }
 
+    // Also run at device-frame completion, when there may be no new uploads.
+    void retireIdle(uint64_t deviceFrame) {
+        for (auto& slot : slots_) {
+            if (slot.buffer.id && deviceFrame - slot.lastUsed >= idleFrames) {
+                sg_destroy_buffer(slot.buffer);
+                slot = {};
+            }
+        }
+    }
+
     Upload acquire(size_t bytes, bool gpuStaging, uint64_t deviceFrame) {
         if (frame_ != deviceFrame) {
             frame_ = deviceFrame;
             cursor_ = 0;
-            for (auto& slot : slots_) {
-                if (slot.buffer.id && deviceFrame - slot.lastUsed >= idleFrames) {
-                    sg_destroy_buffer(slot.buffer);
-                    slot = {};
-                }
-            }
+            retireIdle(deviceFrame);
         }
         const size_t ordinal = cursor_++;
         Slot temporary;
