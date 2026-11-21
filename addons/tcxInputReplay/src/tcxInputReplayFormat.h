@@ -4,6 +4,8 @@
 #include <fstream>
 #include <optional>
 #include <climits>
+#include <deque>
+#include <map>
 
 namespace tcx::inputreplay {
 
@@ -89,7 +91,8 @@ struct Record {
 };
 struct Session {
     Json header;
-    Size size;
+    Size size; // First window, retained for single-window callers.
+    std::map<std::string, Size> windows;
     std::vector<Record> records;
 };
 
@@ -142,12 +145,15 @@ inline void validateHeader(const Json& j, Session& out) {
     string(j, "started");
     if (number(j, "fps") < 0) throw std::runtime_error("invalid fps");
     const auto& windows = j.at("windows");
-    if (!windows.is_array() || windows.size() != 1) throw std::runtime_error("expected one window");
-    const auto& w = windows.at(0);
-    if (string(w, "key") != "main") throw std::runtime_error("unknown window key");
-    out.size = {number(w, "width"), number(w, "height")};
-    if (out.size.width <= 0 || out.size.height <= 0 || number(w, "dpi") <= 0) throw std::runtime_error("invalid window dimensions/DPI");
-    boolean(w, "pixelPerfect");
+    if (!windows.is_array() || windows.empty()) throw std::runtime_error("expected windows");
+    for (const auto& w : windows) {
+        const auto key = string(w, "key");
+        const Size size{number(w, "width"), number(w, "height")};
+        if (key.empty() || !out.windows.emplace(key, size).second) throw std::runtime_error("duplicate or empty window key");
+        if (size.width <= 0 || size.height <= 0 || number(w, "dpi") <= 0) throw std::runtime_error("invalid window dimensions/DPI");
+        boolean(w, "pixelPerfect");
+    }
+    out.size = out.windows.at(string(windows.at(0), "key"));
     out.header = j;
 }
 
@@ -155,7 +161,7 @@ inline Record validateRecord(Json j) {
     Record r{string(j, "type"), unsignedValue(j, "ms", timeLimit), unsignedValue(j, "frame"), {}};
     if (r.type == "mark") { string(j, "name"); }
     else if (r.type != "end") {
-        if (string(j, "window") != "main") throw std::runtime_error("unknown window key");
+        if (string(j, "window").empty()) throw std::runtime_error("empty window key");
         boolean(j, "injected");
         string(j, "tag");
         const auto& t = r.type;
@@ -229,6 +235,8 @@ inline Session load(std::istream& stream) {
                 validateHeader(j, result);
             } else {
                 auto r = validateRecord(std::move(j));
+                if (r.type != "mark" && r.type != "end" && !result.windows.count(string(r.data, "window")))
+                    throw std::runtime_error("unknown window key");
                 if (!result.records.empty() && (r.ms < result.records.back().ms || r.frame < result.records.back().frame))
                     throw std::runtime_error("nonmonotonic time/frame");
                 ended = r.type == "end";
@@ -245,6 +253,63 @@ inline Session load(std::istream& stream) {
     }
     return result;
 }
+
+// Store complete records, reserving the header and a worst-case end line.
+// Original offsets can span a long-running installation; export rebases them.
+class Ring {
+public:
+    struct Entry { Json data; size_t bytes; };
+    std::deque<Entry> records;
+    Json header;
+    uint64_t duration = 0;
+    size_t capacity = 0, bytes = 0, headerBytes = 0;
+    void start(Json value, uint64_t milliseconds, size_t count) {
+        if (!milliseconds || milliseconds > timeLimit || !count || count > recordLimit - 2)
+            throw std::runtime_error("ring duration/capacity exceeds recording limits");
+        Session metadata;
+        validateHeader(value, metadata);
+        const auto length = value.dump().size();
+        if (length > lineLimit || length + 1 + 128 > fileLimit) throw std::runtime_error("ring header exceeds limits");
+        *this = {};
+        header = std::move(value);
+        headerBytes = length + 1;
+        duration = milliseconds;
+        capacity = count;
+    }
+    void trim(uint64_t now) {
+        while (!records.empty() && (records.size() > capacity || bytes + headerBytes + 128 > fileLimit ||
+            (now > duration && unsignedValue(records.front().data, "ms") < now - duration))) {
+            bytes -= records.front().bytes;
+            records.pop_front();
+        }
+    }
+    void push(Json value) {
+        auto checked = value;
+        checked["ms"] = 0; // The exported offsets, rather than uptime, have the seven-day bound.
+        validateRecord(std::move(checked));
+        const auto length = value.dump().size();
+        if (length > lineLimit || length + 1 + headerBytes + 128 > fileLimit)
+            throw std::runtime_error("ring record exceeds JSONL limits");
+        const auto now = unsignedValue(value, "ms");
+        records.push_back({std::move(value), length + 1});
+        bytes += length + 1;
+        trim(now);
+    }
+    void save(std::ostream& stream, uint64_t now, uint64_t frame) {
+        trim(now);
+        const uint64_t baseMs = records.empty() ? now : unsignedValue(records.front().data, "ms");
+        const uint64_t baseFrame = records.empty() ? frame : unsignedValue(records.front().data, "frame");
+        stream << header.dump() << '\n';
+        for (const auto& entry : records) {
+            auto value = entry.data;
+            value["ms"] = unsignedValue(value, "ms") - baseMs;
+            value["frame"] = unsignedValue(value, "frame") - baseFrame;
+            stream << value.dump() << '\n';
+        }
+        stream << Json({{"type", "end"}, {"ms", now - baseMs}, {"frame", frame - baseFrame}}).dump() << '\n';
+        if (!stream) throw std::runtime_error("ring write failed");
+    }
+};
 
 // A clock supplied by the caller makes scene synchronization independently testable.
 class Timeline {
