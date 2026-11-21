@@ -58,8 +58,10 @@ return {
         assert(cam:getOrbitButton() == 0 and cam:getPanButton() == 2)
         assert(cam:getOrbitMouseButton() == MouseButton.Left and cam:getPanMouseButton() == MouseButton.Middle)
         assert(rawequal(cam:setOrbitButton(0):setPanButton(2), cam))
+        assert(rawequal(cam:setOrbitButton(MouseButton.Right):setPanButton(MouseButton.Left), cam))
+        assert(cam:getOrbitMouseButton() == MouseButton.Right and cam:getPanMouseButton() == MouseButton.Left)
         assert(cam:getDragModifier() == EasyCamModifier.None)
-        local chained = cam:setOrbitButton(MouseButton.Right):setPanButton(MouseButton.Left):setDragModifier(EasyCamModifier.Shift)
+        local chained = cam:setOrbitMouseButton(MouseButton.Right):setPanMouseButton(MouseButton.Left):setDragModifier(EasyCamModifier.Shift)
         assert(chained:getOrbitButton() == 1 and cam:getOrbitButton() == 1)
         assert(cam:getPanButton() == 0 and cam:getDragModifier() == EasyCamModifier.Shift)
         return true
@@ -142,6 +144,8 @@ return {
     end},
     {'EasyCam fluent methods return the owning Lua self through GC', function()
         for _, control in ipairs({
+            {'setOrbitMouseButton', 'getOrbitMouseButton', MouseButton.Right},
+            {'setPanMouseButton', 'getPanMouseButton', MouseButton.Left},
             {'setOrbitButton', 'getOrbitMouseButton', MouseButton.Right},
             {'setPanButton', 'getPanMouseButton', MouseButton.Left},
             {'setDragModifier', 'getDragModifier', EasyCamModifier.Shift}
@@ -160,7 +164,7 @@ return {
             collectTwice()
             assert(weak.cam == nil)
         end
-        local cam = EasyCam():setOrbitButton(MouseButton.Right):setPanButton(MouseButton.Left):setDragModifier(EasyCamModifier.Shift)
+        local cam = EasyCam():setOrbitMouseButton(MouseButton.Right):setPanMouseButton(MouseButton.Left):setDragModifier(EasyCamModifier.Shift)
         collectTwice()
         assert(cam:getOrbitButton() == 1 and cam:getPanButton() == 0)
         assert(cam:getDragModifier() == EasyCamModifier.Shift)
