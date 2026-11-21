@@ -174,6 +174,95 @@ void helpers() {
         check(mse(values, span<const float>{}) == 0.0f, "mse mismatch returns zero");
     check(warnings == 1, "mse repeated mismatches warn once per process");
 }
+void scalarStatistics() {
+    const float nan = numeric_limits<float>::quiet_NaN();
+    const float inf = numeric_limits<float>::infinity();
+    const vector<float> empty, one{7}, equal{7, 7, 7}, values{9, 1, 5, 3};
+    const auto original = values;
+    check(!median(empty) && !percentile(empty, 0.5), "selection empty");
+    check(median(one) == 7 && median(equal) == 7, "selection singleton and equal");
+    check(median(values) == 4 && median(vector<float>{9, 1, 5}) == 5, "even and odd median");
+    check(percentile(values, 0) == 1 && percentile(values, 1) == 9 &&
+          percentile(values, 0.25) == 2.5f, "percentile endpoints and interpolation");
+    check(values == original, "selection preserves input order");
+    check(!percentile(values, -0.1) && !percentile(values, 1.1) &&
+          !percentile(values, nan) && !percentile(values, inf), "invalid percentile");
+    check(median(vector<float>{nan, 9, nan, 1}) == 5 && !median(vector<float>{nan}),
+          "selection ignores NaN");
+    check(median(vector<float>{inf, inf}) == inf && median(vector<float>{-inf, 1}) == -inf &&
+          !median(vector<float>{-inf, inf}), "selection infinity interpolation");
+    const float largest = numeric_limits<float>::max();
+    check(median(vector<float>{largest, largest}) == largest &&
+          median(vector<float>{-largest, largest}) == 0, "median avoids float overflow");
+
+    check(histogram(empty, 3, 0, 1) == optional<vector<size_t>>(vector<size_t>{0, 0, 0}), "histogram empty");
+    const vector<float> edges{-1, 0, 0.25f, 0.5f, nextafter(1.0f, 0.0f), 1, 2, nan, inf, -inf};
+    check(histogram(edges, 4, 0, 1) == optional<vector<size_t>>(vector<size_t>{1, 1, 1, 1}),
+          "histogram half-open edges and skipped values");
+    check(histogram(one, 1, 0, 8) == optional<vector<size_t>>(vector<size_t>{1}) &&
+          histogram(equal, 2, 0, 8) == optional<vector<size_t>>(vector<size_t>{0, 3}), "histogram singleton and equal");
+    check(!histogram(values, 0, 0, 1) && !histogram(values, 2, 1, 1) &&
+          !histogram(values, 2, 2, 1) && !histogram(values, 2, nan, 1) &&
+          !histogram(values, 2, 0, inf), "histogram invalid parameters");
+    vector<size_t> expected22(22, 0), expected49(49, 0);
+    expected22[15] = 1;
+    expected49[1] = 1;
+    check(histogram(vector<float>{15}, 22, 0, 22) == optional<vector<size_t>>(expected22),
+          "histogram exact edge 15 in 22 bins");
+    check(histogram(vector<float>{1}, 49, 0, 49) == optional<vector<size_t>>(expected49),
+          "histogram exact edge 1 in 49 bins");
+    check(histogram(vector<float>{-1e-20f}, 2, -1, 1) == optional<vector<size_t>>(vector<size_t>{1, 0}),
+          "histogram just below internal edge");
+    bool integerEdges = true;
+    for (size_t bins = 2; bins <= 512 && integerEdges; ++bins) {
+        vector<size_t> expected(bins, 0);
+        for (size_t i = 0; i < bins; ++i) {
+            expected[i] = 1;
+            if (histogram(array<float, 1>{float(i)}, bins, 0, float(bins)) !=
+                optional<vector<size_t>>(expected)) {
+                std::printf("Histogram first integer-edge mismatch: bins=%zu, value=%zu\n", bins, i);
+                integerEdges = false;
+                break;
+            }
+            expected[i] = 0;
+        }
+    }
+    check(integerEdges, "histogram integer edges for bins 2..512");
+
+    check(!correlation(empty, empty) && !fitLine(empty, empty), "paired empty");
+    check(!correlation(one, one) && !fitLine(one, one), "paired singleton");
+    check(!correlation(values, one) && !fitLine(values, one), "paired mismatch");
+    check(!correlation(equal, equal) && !fitLine(equal, equal), "paired constant x");
+    const vector<float> x{0, 1, 2}, y{3, 5, 7}, negative{3, 1, -1}, flat{3, 3, 3};
+    const auto line = fitLine(x, y);
+    check(line && line->slope == 2 && line->intercept == 3, "exact line");
+    check(correlation(x, y) == 1 && correlation(x, negative) == -1, "perfect correlations");
+    const auto horizontal = fitLine(x, flat);
+    check(!correlation(x, flat) && horizontal && horizontal->slope == 0 && horizontal->intercept == 3,
+          "constant y fits horizontal line");
+    const vector<float> offsetX{1000000, 1000001, 1000002, 1000003};
+    const vector<float> offsetY{1000000, 1000003, 1000006, 1000009};
+    const auto offsetLine = fitLine(offsetX, offsetY);
+    check(offsetLine && abs(offsetLine->slope - 3) < 1e-12 &&
+          abs(offsetLine->intercept + 2000000) < 1e-9 &&
+          abs(correlation(offsetX, offsetY).value_or(0) - 1) < 1e-12, "centered large-offset accuracy");
+    const vector<float> noisy{1, 2, 2};
+    const auto noisyLine = fitLine(x, noisy);
+    check(noisyLine && abs(noisyLine->slope - 0.5) < 1e-12 &&
+          abs(noisyLine->intercept - 7.0 / 6.0) < 1e-12 &&
+          abs(correlation(x, noisy).value_or(0) - sqrt(0.75)) < 1e-12, "hand-computed noisy fit");
+    for (float invalid : {nan, inf, -inf}) {
+        for (size_t index = 0; index < x.size(); ++index) {
+            auto mixed = x;
+            mixed[index] = invalid;
+            check(!correlation(mixed, y) && !correlation(x, mixed) &&
+                  !fitLine(mixed, y) && !fitLine(x, mixed), "paired rejects nonfinite input");
+        }
+    }
+    // std::ranges is present without importing its names; tc::simd stays qualified.
+    check(std::ranges::is_sorted(x) && simd::scalar::sum(x.data(), x.size()) == 3,
+          "app names coexist with ranges and simd");
+}
 volatile float benchSink = 0.0f;
 template <typename F> double measure(F fn) {
     constexpr int iterations = 100;
@@ -208,6 +297,7 @@ void benchmark() {
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     helpers();
+    scalarStatistics();
     minMaxSpecialValues();
     // Covers float/double lanes and four-vector boundaries for scalar, SSE,
     // AVX2, AVX512 and NEON (double lanes = 1, 2, 4, 8), including 8*lanes+3.
