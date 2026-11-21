@@ -647,7 +647,7 @@ inline void App::setSize(float w, float h) {
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
-#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)))
+#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN)))
 namespace internal {
 // Keep the capability check and the single-window stubs under one platform rule.
 inline constexpr bool supportsSecondaryWindows() { return false; }
@@ -926,6 +926,14 @@ inline sapp_tc_window resolveParentWindow(const WindowSettings& settings) {
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
+#if defined(SOKOL_VULKAN)
+    // createWindow is the secondary-window API; the launch window is prepared
+    // separately. Warn for every rejected request, including hidden windows.
+    if (sapp_isvalid() || !internal::openWindows().empty()) {
+        logWarning("Window") << "Vulkan backend supports one window for now; this window was not created";
+        return nullptr;
+    }
+#endif
     if (internal::runtimeEnding()) return nullptr;
     if constexpr (!internal::supportsSecondaryWindows()) {
         logError("Window") << "createWindow(): secondary windows are supported on "

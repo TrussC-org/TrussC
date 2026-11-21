@@ -235,13 +235,18 @@ bool TCVideoPlayerImpl::createD3D11Device() {
     D3D_FEATURE_LEVEL featureLevel;
 
     // Try progressively relaxed flags until one succeeds
+    // Match sokol's device: SOKOL_DEBUG is explicit or defaults on when NDEBUG is absent.
     struct { UINT flags; const char* desc; } attempts[] = {
+#if defined(SOKOL_DEBUG) || !defined(NDEBUG)
         { D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG,
           "VIDEO_SUPPORT + DEBUG" },
+#endif
         { D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
           "VIDEO_SUPPORT" },
+#if defined(SOKOL_DEBUG) || !defined(NDEBUG)
         { D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG,
           "BGRA + DEBUG" },
+#endif
         { D3D11_CREATE_DEVICE_BGRA_SUPPORT,
           "BGRA only" },
     };

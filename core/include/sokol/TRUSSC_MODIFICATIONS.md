@@ -69,6 +69,44 @@ follow the settled event boundary. R1/R2/R4 rollback slices and iOS BC removal
 are canceled. V3D has only the conditional future removal stated below.
 Each implementation slice must fit 1–2 days; stop if it needs a new engine.
 
+## Linux Vulkan host (step 2a, 2026-11-17)
+
+`sokol_app_tc.h` ports the Vulkan device, Xlib surface, swapchain, depth/MSAA,
+acquire and present code from upstream `93aa187b`. The existing Vulkan gfx
+backend submits rendering; `sapp_get_environment()` and `sapp_acquire_swapchain()`
+provide its real device, images, views and semaphores through sokol glue.
+
+TrussC shares its X11 window/event loop and native metadata with GL. Vulkan
+surface operations replace only the GL context/drawable operations; the Runtime
+uses glue for the launch window. Acquisition is cached within a frame, and
+resize/out-of-date/suboptimal results recreate the swapchain. Shutdown waits
+for the device before releasing swapchain resources. Bound images are destroyed
+before their memory is freed. The step 2b host enables `VK_EXT_debug_utils` in
+debug builds, as required by sokol-gfx's object naming function lookup. Validation
+layers can be enabled with `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`.
+
+Limits: one native window. The production Runtime smoke now links and passes
+16 frames on lavapipe/Xvfb at 1 sample and 4x MSAA, including second-window
+refusal; emptyExample presents for three seconds and exits cleanly on a
+scripted close.
+The Linux X11 adapter and class metadata guards include Vulkan, with matching
+adapter/stub selection. GL readback includes remain selected only for GL/GLES.
+
+Not supported on Vulkan yet (step 4): StorageBuffer readback, byte/float
+Fbo readback and screenshot/window capture, including dependent MCP capture,
+recording and image analysis. No API enables these features yet. StorageBuffer
+retains its synchronous failure and deferred asynchronous failure. Linux Fbo
+readback and window capture warn on every call and return false; recording
+stops at the first readback failure. Default GL/GLES paths are retained.
+
+The existing #1543 guard refuses additional windows. Step 2b adds a test-only
+Vulkan loader observer and extends `vulkanSingleWindow` with 24 resizes, stable
+sokol resource counts, stencil references 1/73/255, and WM_DELETE/exitApp close.
+The observer forwards real calls and can inject acquire OUT_OF_DATE/SUBOPTIMAL
+and present SUBOPTIMAL; it checks native references and object teardown through
+device destruction. Pixel-level stencil verification still needs Vulkan readback
+(step 4). Real GPUs/displays use the step 2b run sheet; multiwindow is deferred.
+
 ## Files and platform scope
 
 | File | Ownership |
@@ -926,7 +964,7 @@ Mac display/Metal validation and post-implementation review remain required.
 
 Upstream fixes `sg_desc.uniform_buffer_size` at `sg_setup()` (4 MiB, ~8k draws);
 overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 growth makes
-`WindowSettings::reserveUniformBuffer` an optimization, not a correctness need.
+`RuntimeSettings::reserveUniformBuffer` an optimization, not a correctness need.
 
 - `_sg_mtl_grow_uniform_buffer()` doubles the current rotate slot, defers old
   storage release, resets `cur_ub_offset` and logs `METAL_UNIFORM_BUFFER_GROWN`

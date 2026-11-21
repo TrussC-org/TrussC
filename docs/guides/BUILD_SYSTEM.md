@@ -511,6 +511,54 @@ Generated shader headers reach consumers through the `<name>_shaders` INTERFACE 
 
 Shader files using compute features (dispatch or storage buffers) use the suffix `*.compute.glsl` under `src/`, whether they contain `@cs`, `@vs`/`@fs`, or both. CMake rejects storage-buffer declarations in plain `.glsl` files and reports the required `.compute.glsl` filename. They have a separate sokol-shdc target set with `glsl310es` for GLES compute; ordinary `.glsl` graphics sources keep `glsl300es` for WebGL2. Include the resulting `*.compute.glsl.h` and pass its descriptor function to `ComputeShader::load()` or `Shader::load()` for its program. Both 300ES graphics and 310ES compute require a GLES 3.1 or later context when used together.
 
+### Experimental Vulkan build (Linux)
+
+The experimental Linux Vulkan backend builds and presents a single X11 window
+with depth and MSAA. The production Runtime clear-color smoke passes 16 frames
+on lavapipe under Xvfb at 1 sample and 4x MSAA; emptyExample also presents and
+exits cleanly. Configure an existing Linux CMake project to select Vulkan and
+generate SPIR-V with the pinned sokol-shdc:
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
+
+StorageBuffer readback, byte/float Fbo readback and screenshot/window capture
+are not supported on Vulkan yet (step 4). There is no API to enable them.
+StorageBuffer asynchronous reads deliver deferred failure; synchronous reads
+return failure. Fbo readback and window capture warn on every call and return
+false. MCP capture and image analysis report the failure; Fbo/window recording
+stops at its first readback failure. Use the default GL backend when these
+features are needed:
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
+
+The Vulkan backend allows one native window. Every additional `createWindow()`
+request returns `nullptr` and logs a Warning. Use the launch window in your tcApp:
+
+```cpp
+void tcApp::setup() {
+    getWindow()->setTitle("Vulkan single window");
+}
+```
+
+Debug Vulkan builds enable the debug-utils extension required by sokol-gfx.
+Enable the installed validation layer when running an app:
+
+```bash
+VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ./bin/emptyExample
+```
+
+The `vulkanSingleWindow` test exercises 24 resizes, WM_DELETE/exitApp close,
+stable resource counts, and native stencil references on lavapipe/Xvfb with
+validation enabled. Stencil reference commands are checked without pixel
+readback; there is no Vulkan pixel readback API yet. Real GPUs and real display
+sessions still need verification; multiwindow remains deferred.
+
 ### macOS Deployment Target
 
 TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.

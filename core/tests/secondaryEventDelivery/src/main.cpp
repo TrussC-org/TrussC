@@ -228,33 +228,38 @@ struct SwapApp : App {
 void closeOrderChecks() {
     secondary = createWindow(); check("close-order secondary created", bool(secondary));
     if (!secondary) return;
-    auto observer = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(*secondary));
-    internal::AppOwnerScope observation(internal::appOwner(*observer));
-    order.clear(); stages(true);
     struct ExitOrderApp : App {
         void exit() override { order["exit"] += 'a'; check("close uses secondary context", internal::currentWindowContext().hostWindow && !getWindow()); }
     };
-    auto app = internal::makeConstructedAppAt<ExitOrderApp>(&trussc::internal::WindowRequestAccess::context(*secondary)); std::weak_ptr<App> outgoing = app;
-    internal::WindowRequestAccess::attachCandidate(*secondary, app); internal::applyPendingAppForTests(*secondary); stages(false); app.reset();
-    std::string quitOrder;
-    auto processQuit = runtime().events().exitRequested.listen([&](ExitRequestEventArgs& e) {
-        quitOrder += 'R'; e.cancel = true; e.reason = "secondary unsaved";
-    });
-    auto appQuit = secondary->events().exitRequested.listen([&](ExitRequestEventArgs& e) {
-        check("secondary quit fresh payload after Runtime veto", !e.cancel && e.reason.empty());
-        quitOrder += 'S'; e.cancel = false;
-    });
-    check("secondary process veto retains Runtime reason", !internal::dispatchExitRequested() && internal::exitBlockReason() == "secondary unsaved");
-    check("secondary process Runtime then App slot", quitOrder == "RS");
-    auto closeVeto = secondary->events().closeRequested.listen([](CloseRequestEventArgs& e) { e.cancel = true; });
-    auto closeFalse = secondary->events().closeRequested.listen([](CloseRequestEventArgs& e) {
-        check("secondary close later false begins fresh", !e.cancel); e.cancel = false;
-    });
-    const auto handle = internal::WindowRequestAccess::binding(*secondary).handle;
-    check("secondary OS close veto with later false", !internal::allowWindowClose(handle, secondary.get()) && secondary->isOpen());
-    closeVeto.disconnect(); closeFalse.disconnect(); processQuit.disconnect(); appQuit.disconnect();
-    auto held = source().exit.listen([&] { check("outgoing App held through AfterApp", !outgoing.expired()); }, EventPriority::AfterApp);
-    internal::WindowRequestAccess::teardown(*secondary);
+    // The observer owner scope must end before its window is released:
+    // an unattached App keeps pointing at that window's context.
+    std::weak_ptr<App> outgoing;
+    {
+        auto observer = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(*secondary));
+        internal::AppOwnerScope observation(internal::appOwner(*observer));
+        order.clear(); stages(true);
+        auto app = internal::makeConstructedAppAt<ExitOrderApp>(&trussc::internal::WindowRequestAccess::context(*secondary)); outgoing = app;
+        internal::WindowRequestAccess::attachCandidate(*secondary, app); internal::applyPendingAppForTests(*secondary); stages(false); app.reset();
+        std::string quitOrder;
+        auto processQuit = runtime().events().exitRequested.listen([&](ExitRequestEventArgs& e) {
+            quitOrder += 'R'; e.cancel = true; e.reason = "secondary unsaved";
+        });
+        auto appQuit = secondary->events().exitRequested.listen([&](ExitRequestEventArgs& e) {
+            check("secondary quit fresh payload after Runtime veto", !e.cancel && e.reason.empty());
+            quitOrder += 'S'; e.cancel = false;
+        });
+        check("secondary process veto retains Runtime reason", !internal::dispatchExitRequested() && internal::exitBlockReason() == "secondary unsaved");
+        check("secondary process Runtime then App slot", quitOrder == "RS");
+        auto closeVeto = secondary->events().closeRequested.listen([](CloseRequestEventArgs& e) { e.cancel = true; });
+        auto closeFalse = secondary->events().closeRequested.listen([](CloseRequestEventArgs& e) {
+            check("secondary close later false begins fresh", !e.cancel); e.cancel = false;
+        });
+        const auto handle = internal::WindowRequestAccess::binding(*secondary).handle;
+        check("secondary OS close veto with later false", !internal::allowWindowClose(handle, secondary.get()) && secondary->isOpen());
+        closeVeto.disconnect(); closeFalse.disconnect(); processQuit.disconnect(); appQuit.disconnect();
+        auto held = source().exit.listen([&] { check("outgoing App held through AfterApp", !outgoing.expired()); }, EventPriority::AfterApp);
+        internal::WindowRequestAccess::teardown(*secondary);
+    }
     secondary.reset(); // Runtime retention requires an explicit close
     expect("exit", "cdpablz");
     check("outgoing released after complete exit delivery", outgoing.expired());

@@ -87,7 +87,7 @@ These libraries are only included if you use the corresponding addon.
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
 |---------|---------|----------------------|----------|---------|---------------------|-------|
-| **Dear ImGui** | 1.92.9b (owned test engine configuration + TrussC widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
+| **Dear ImGui** | 1.93.0 (owned test engine configuration + TrussC widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | commit `93aa187b` (+ TrussC multi-context and GPU buffer growth patches) | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
 | **libcurl** | 8.23.0 (Windows; macOS/Linux use system libcurl; see [PROVENANCE.md](../addons/tcxCurl/PROVENANCE.md)) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
@@ -101,7 +101,7 @@ These libraries are only included if you use the corresponding addon.
 | **Lua** | 5.4.9 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
 | **LuaJIT** | 2.1 (rolling), commit not recorded (see [local changes](../addons/tcxLua/TRUSSC_MODIFICATIONS.md)) | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
-| **luajit-cmake** | commit `94444a6` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
+| **luajit-cmake** | commit `f0f1650` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
 | **ofxMidi helper ports** | version/commit not recorded (see [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports)) | `addons/tcxMidi/src/tcxMidiClock.h`, `addons/tcxMidi/src/tcxMidiTimecode.h` | https://github.com/danomatika/ofxMidi | BSD Simplified; [notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) | Dan Wilcox and contributors | tcxMidi |
 | **Mozilla/curl CA bundle** | snapshot 2026-02-11; source commit not recorded; payload unchanged since TrussC import `f59a10fd`; refresh via [update_ca_bundle.sh](../addons/tcxTls/scripts/update_ca_bundle.sh) | `addons/tcxTls/data/cacert.pem` | https://curl.se/ca/cacert.pem ([extraction/source](https://curl.se/docs/caextract.html)) | Mozilla source database: MPL-2.0; exact standalone redistribution terms not recorded; retain bundle notices | Mozilla / curl contributors | tcxTls |
 

@@ -1193,6 +1193,10 @@ sg_swapchain acquireSwapchain(sapp_tc_window handle, void*) {
     if (!sc.metal.current_drawable) return {};
     sc.metal.depth_stencil_texture = sapp_tc_window_metal_depth_stencil_texture(handle);
     sc.metal.msaa_color_texture = sapp_tc_window_metal_msaa_color_texture(handle);
+#elif defined(SOKOL_VULKAN)
+    // Step 2a has one native window; glue acquires its Vulkan image and semaphores.
+    sc = sglue_swapchain();
+    if (sc.invalid) return sc;
 #elif defined(SOKOL_D3D11)
     sc.d3d11.render_view = sapp_tc_window_d3d11_render_view(handle);
     if (!sc.d3d11.render_view) return {};
@@ -1319,7 +1323,7 @@ bool bindNativeWindow(uint32_t id, void* user) noexcept {
     try {
         auto& window = *static_cast<Window*>(user);
         if (!bindWindow(window, {id}, productionWindowOperations(), nullptr)) return false;
-#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN))
         nativeWindowSetClass(id);
 #endif
         // Preserve native first-tick admission, but admit new hidden windows

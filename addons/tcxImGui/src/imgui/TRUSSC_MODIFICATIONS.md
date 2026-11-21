@@ -6,7 +6,7 @@ When updating from upstream, these changes need to be re-applied.
 
 Search for `[TrussC]` to find all modified sections.
 
-**Upstream base:** https://github.com/ocornut/imgui tag `v1.92.9b`, commit `f1cc2ae` (2026-07-31) — the latest stable release, not `master` (see the Dear ImGui row in [docs/ROADMAP.md](../../../../docs/ROADMAP.md): "Use stable versions"). Not the docking branch.
+**Upstream base:** https://github.com/ocornut/imgui tag `v1.93.0`, commit `c1aaac65e896a45f81f47a4d68f9959e0f86c859` (2026-10-14) — the latest stable release, not `master` (see the Dear ImGui row in [docs/ROADMAP.md](../../../../docs/ROADMAP.md): "Use stable versions"). Not the docking branch.
 
 ---
 
@@ -127,7 +127,7 @@ value pointer, hence this patch.
 **Purpose:** Declare `IMGUI_TC_ITEM_VALUE(...)` once in each value widget,
 where the pointer to the caller's variable and its type are in hand.
 
-**Changes:** 19 inserted lines, and 24 upstream `return` lines wrapped in
+**Changes (re-applied unchanged on v1.93.0):** 19 inserted lines, and 24 upstream `return` lines wrapped in
 `IMGUI_TC_RETURN(...)`, each ending in `// [TrussC]`. No other upstream line
 is modified.
 
@@ -367,7 +367,7 @@ copying patches by hand. Every other file is overwritten from the new tag.
 
 ```bash
 git clone https://github.com/ocornut/imgui.git /tmp/imgui
-OLD=v1.92.9b                 # the upstream base recorded above
+OLD=v1.93.0                 # the upstream base recorded above
 NEW=<new stable tag>
 for f in imconfig.h imgui_widgets.cpp; do
   git -C /tmp/imgui show $OLD:$f > /tmp/BASE_$f      # upstream, pre-patch
@@ -451,7 +451,7 @@ files.
 
 ## Ini and font imports
 
-Ini and font imports use unmodified Dear ImGui 1.92.9b code. The former I3
+Ini and font imports use unmodified Dear ImGui 1.93.0 code. The former I3
 (ini preflight) and I4 (font import checks/shared framework backend) patches
 were removed in #1073. Invalid ini data and malformed font files now receive
 upstream handling, without TrussC import diagnostics or recovery guarantees.

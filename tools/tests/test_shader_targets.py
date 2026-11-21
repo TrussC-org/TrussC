@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -24,6 +25,64 @@ def probe_directory(prefix):
 
 
 class ShaderTargetTests(unittest.TestCase):
+    def test_shared_headers_survive_gl_vulkan_gl_builds(self):
+        module = ROOT / 'core/cmake/trussc_shaders.cmake'
+        source = module.read_text(encoding='utf-8')
+        # Keep the real compiler and acquisition helper when copying the rule.
+        source = source.replace('${CMAKE_CURRENT_LIST_DIR}/tc_acquire_shdc.cmake',
+                                (module.parent / 'tc_acquire_shdc.cmake').as_posix())
+        source = source.replace('${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/sokol-shdc',
+                                (ROOT / 'core/tools/sokol-shdc').as_posix())
+        for generator in (None, 'Ninja'):
+            if generator == 'Ninja' and not shutil.which('ninja'):
+                continue
+            with self.subTest(generator=generator), probe_directory('tc backends ') as temporary:
+                project = Path(temporary)
+                shaders = project / 'src'
+                shaders.mkdir()
+                for original in ('core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl',
+                                 'examples/compute/computeTextureExample/src/texture.compute.glsl'):
+                    shutil.copyfile(ROOT / original, shaders / Path(original).name)
+                rule = project / 'shaders.cmake'
+                # Reproduce headers left by a GL build before this fix.
+                rule.write_text(source.replace(':spirv_vk', ''), encoding='utf-8')
+                (project / 'CMakeLists.txt').write_text('''
+cmake_minimum_required(VERSION 3.20)
+project(shared_headers NONE)
+message(STATUS "Requested backend: ${TC_GFX_BACKEND}")
+include("${CMAKE_CURRENT_SOURCE_DIR}/shaders.cmake")
+trussc_compile_shaders(fixture "${CMAKE_CURRENT_SOURCE_DIR}/src")
+''', encoding='utf-8')
+
+                def configure(backend):
+                    command = ['cmake', '-S', str(project), '-B', str(project / backend),
+                               '-DTC_GFX_BACKEND=' + ('vulkan' if backend == 'vk' else '')]
+                    if generator:
+                        command += ['-G', generator]
+                    run_build(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+                def build(backend):
+                    run_build(['cmake', '--build', str(project / backend), '--target',
+                               'fixture_shaders_gen', '--config', 'Release'], check=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    return {p.name: p.read_bytes() for p in shaders.glob('*.glsl.h')}
+
+                configure('gl')
+                legacy = build('gl')
+                self.assertEqual(len(legacy), 2)
+                self.assertTrue(all(b'SOKOL_VULKAN' not in data for data in legacy.values()))
+                # A rule edit must invalidate existing Makefile outputs as well
+                # as Ninja outputs, without touching either shader source.
+                # Allow for generators/filesystems with one-second timestamps.
+                time.sleep(1.1)
+                rule.write_text(source, encoding='utf-8')
+                updated = build('gl')
+                self.assertTrue(all(b'SOKOL_VULKAN' in data for data in updated.values()))
+                configure('vk')
+                self.assertEqual(build('vk'), updated)
+                configure('gl')
+                self.assertEqual(build('gl'), updated)
+
     def test_plain_glsl_storage_requires_compute_suffix(self):
         module = ROOT / 'core/cmake/trussc_shaders.cmake'
         storage = (ROOT / 'examples/compute/computeParticlesExample/src/particles.compute.glsl').read_text(encoding='utf-8')

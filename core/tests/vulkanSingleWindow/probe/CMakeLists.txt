@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(vulkanHostProbe LANGUAGES CXX)
+add_library(vulkanHostProbe SHARED probe.cpp)
+target_compile_features(vulkanHostProbe PRIVATE cxx_std_17)
+target_compile_options(vulkanHostProbe PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(vulkanHostProbe PRIVATE dl)
