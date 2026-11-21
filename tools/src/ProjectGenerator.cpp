@@ -580,6 +580,17 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
     // Remember the IDE (CMake and CMake Tools ignore vendor data). Targets and
     // the web backend need no entry: they are the presets above.
+    // Keep local selection and other vendor data across update's regeneration.
+    ifstream existingPresets(destPath + "/CMakePresets.json");
+    if (existingPresets) {
+        Json existing = Json::parse(existingPresets, nullptr, false);
+        if (existing.is_object() && existing.contains("vendor") && existing["vendor"].is_object()) {
+            presets["vendor"] = existing["vendor"];
+        }
+    }
+    if (!presets["vendor"]["trussc"].is_object()) {
+        presets["vendor"]["trussc"] = Json::object();
+    }
     presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
 
     writeGeneratedFile(destPath + "/CMakePresets.json", presets.dump(2));

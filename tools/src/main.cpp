@@ -9,6 +9,7 @@
 #include "BuildOutputFilter.h"
 #include "ProcessCapture.h"
 #include "Dist.h"
+#include "TrussCVersion.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -141,6 +142,13 @@ static string autoDetectProjectRoot(const string& startPath) {
         searchPath = searchPath.parent_path();
     }
     return "";
+}
+
+// Read-only commands share the project selection without acquiring versions.
+static string projectTcRoot(const string& projectPath, const string& explicitRoot = "") {
+    if (!explicitRoot.empty()) return explicitRoot;
+    string root = projectPath.empty() ? "" : trusscVersion::resolve(projectPath, false);
+    return root.empty() ? autoDetectTcRoot() : root;
 }
 
 // Map IDE name string to enum. Returns true on success.
@@ -625,7 +633,7 @@ static void printVersion() {
     cout << "trusscli " << built
          << " (built " << TRUSSCLI_BUILD_DATE << ")\n";
 
-    const string tcRoot = autoDetectTcRoot();
+    const string tcRoot = projectTcRoot(autoDetectProjectRoot(""));
     if (tcRoot.empty()) {
         cout << "TrussC   (not found)\n";
         return;
@@ -678,7 +686,7 @@ static void warnIfVersionDrift(const string& tcRoot) {
 static int resolveProjectAndTcRoot(const string& explicitPath,
                                    const string& explicitTcRoot,
                                    string& outProjectPath,
-                                   string& outTcRoot) {
+                                   string& outTcRoot, bool fetchVersion = false) {
     if (explicitPath.empty()) {
         outProjectPath = autoDetectProjectRoot("");
         if (outProjectPath.empty()) {
@@ -694,7 +702,9 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
         outProjectPath = explicitPath;
     }
 
-    outTcRoot = explicitTcRoot.empty() ? autoDetectTcRoot() : explicitTcRoot;
+    if (!explicitTcRoot.empty()) trusscVersion::setLocalPath(outProjectPath, explicitTcRoot);
+    outTcRoot = trusscVersion::resolve(outProjectPath, fetchVersion);
+    if (outTcRoot.empty()) outTcRoot = autoDetectTcRoot();
     if (outTcRoot.empty()) {
         cerr << "Error: could not detect TrussC root. "
              << "Use --tc-root <path> or set TRUSSC_DIR.\n";
@@ -862,6 +872,7 @@ static int cmdNew(const vector<string>& args) {
         return 1;
     }
 
+    bool localOverride = !tcRoot.empty();
     if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
     if (tcRoot.empty()) {
         cerr << "Error: could not detect TrussC root. "
@@ -933,6 +944,7 @@ static int cmdNew(const vector<string>& args) {
         cerr << "Error: " << err << "\n";
         return 1;
     }
+    if (localOverride) trusscVersion::setLocalPath(projPath, tcRoot);
     cout << "Project created: " << projPath.string() << "\n";
     return 0;
 }
@@ -1119,7 +1131,8 @@ static int cmdCp(const vector<string>& args) {
         }
     }
 
-    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    bool localOverride = !tcRoot.empty();
+    if (tcRoot.empty()) tcRoot = projectTcRoot(srcPath.string());
     if (tcRoot.empty()) {
         cerr << "Error: could not detect TrussC root. "
              << "Use --tc-root <path> or set TRUSSC_DIR.\n";
@@ -1294,6 +1307,7 @@ static int cmdCp(const vector<string>& args) {
         return 1;
     }
 
+    if (localOverride) trusscVersion::setLocalPath(dstPath, tcRoot);
     cout << "Project copied: " << dstPath.string() << "\n";
     return 0;
 }
@@ -1333,7 +1347,7 @@ static void printUpdateHelp() {
          << "      --no-android           Disable Android build\n"
          << "      --no-ios               Disable iOS build\n"
          << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
-         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "      --tc-root <path>       Save a local TrussC path (like use-local)\n"
          << "      --verbose              Show the full CMake configure output\n"
          << "  -h, --help                 Show this help\n"
          << "\n"
@@ -1341,7 +1355,7 @@ static void printUpdateHelp() {
          << "hidden; errors still show) and saved to <build folder>/build.log.\n";
 }
 
-static int cmdUpdate(const vector<string>& args) {
+static int cmdUpdate(const vector<string>& args, bool fetchVersion = true) {
     string projectPath;
     GenerationFlags flags;
     string tcRoot;
@@ -1392,7 +1406,7 @@ static int cmdUpdate(const vector<string>& args) {
 
     string resolvedProjectPath;
     string resolvedTcRoot;
-    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot)) {
+    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot, fetchVersion)) {
         return rc;
     }
     projectPath = resolvedProjectPath;
@@ -1405,6 +1419,39 @@ static int cmdUpdate(const vector<string>& args) {
     parseAddonsMake(projectPath, availableAddons, addonSelected);
     return regenerateProject(projectPath, tcRoot, availableAddons, addonSelected, flags,
                              /*shortConfigureOutput=*/!verbose);
+}
+
+// =============================================================================
+static int cmdUse(const vector<string>& args, bool local) {
+    string value, projectPath;
+    for (size_t i = 0; i < args.size(); ++i) {
+        const auto& arg = args[i];
+        if (arg == "--help" || arg == "-h") {
+            cout << "Usage: trusscli " << (local ? "use-local <path>" : "use [owner/repo@]ref")
+                 << " [-p <project>]\n"
+                 << "       trusscli " << (local ? "use-local" : "use") << " --clear [-p <project>]\n"
+                 << "Save the selection, then run update. "
+                 << (local ? "--clear removes only the local path.\n" : "--clear removes both selections.\n");
+            return 0;
+        }
+        if ((arg == "-p" || arg == "--path") && i + 1 < args.size()) projectPath = args[++i];
+        else if (value.empty() && (arg == "--clear" || arg.empty() || arg[0] != '-')) value = arg;
+        else { cerr << "Error: expected one selection or --clear\n"; return 1; }
+    }
+    if (value.empty()) { cerr << "Error: a selection or --clear is required\n"; return 1; }
+    if (projectPath.empty()) projectPath = autoDetectProjectRoot("");
+    if (projectPath.empty() || !fs::is_directory(fs::path(projectPath) / "src")) {
+        cerr << "Error: not inside a TrussC project\n"; return 1;
+    }
+    auto versionFile = fs::path(projectPath) / ".trussc-version";
+    if (local) trusscVersion::setLocalPath(projectPath, value == "--clear" ? "" : value);
+    else {
+        if (value != "--clear") trusscVersion::parse(value);
+        if (value == "--clear") fs::remove(versionFile);
+        else writeGeneratedFile(versionFile.string(), value + "\n");
+        trusscVersion::setLocalPath(projectPath, "");
+    }
+    return cmdUpdate({"-p", projectPath});
 }
 
 // =============================================================================
@@ -1610,7 +1657,7 @@ static void printAddHelp() {
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
-         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "      --tc-root <path>       Save a local TrussC path (like use-local)\n"
          << "  -h, --help                 Show this help\n"
          << "\n"
          << "Examples:\n"
@@ -1789,7 +1836,7 @@ static void printRemoveHelp() {
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
-         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "      --tc-root <path>       Save a local TrussC path (like use-local)\n"
          << "  -h, --help                 Show this help\n"
          << "\n"
          << "Examples:\n"
@@ -2147,7 +2194,8 @@ static int cmdAddonList(const vector<string>& args) {
         }
     }
 
-    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    tcRoot = projectTcRoot(projectPath, tcRoot);
     if (tcRoot.empty()) {
         if (namesOnly) return 0;  // silent for completion path
         cerr << "Error: could not detect TrussC root.\n";
@@ -2182,7 +2230,6 @@ static int cmdAddonList(const vector<string>& args) {
     scanAddons(tcRoot, localAddons);
 
     // Check which are installed in the current project
-    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
     vector<string> installedAddons;
     if (!projectPath.empty()) {
         installedAddons = readProjectAddons(projectPath);
@@ -2858,7 +2905,7 @@ static void printInfoHelp() {
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
-         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "      --tc-root <path>       Save a local TrussC path (like use-local)\n"
          << "      --json                 Machine-readable JSON output\n"
          << "      --format <fmt>         Output format: human, plain, json (default: human)\n"
          << "  -h, --help                 Show this help\n"
@@ -2998,7 +3045,7 @@ static int cmdInfo(const vector<string>& args) {
     }
 
     // Resolve TC_ROOT.
-    string resolvedTcRoot = tcRoot.empty() ? autoDetectTcRoot() : tcRoot;
+    string resolvedTcRoot = projectTcRoot(projectPath, tcRoot);
     if (resolvedTcRoot.empty()) {
         cerr << "Error: could not detect TrussC root. Use --tc-root <path> or set TRUSSC_DIR.\n";
         return 1;
@@ -3160,7 +3207,7 @@ static void printDoctorHelp() {
          << "      --verbose              Show all checks (including OK / optional / skipped)\n"
          << "      --json                 Machine-readable JSON output\n"
          << "  -p, --path <path>          Check against a specific project's target list\n"
-         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "      --tc-root <path>       Save a local TrussC path (like use-local)\n"
          << "  -h, --help                 Show this help\n";
 }
 
@@ -3197,9 +3244,6 @@ static int cmdDoctor(const vector<string>& args) {
         }
     }
 
-    // Resolve TC_ROOT (best-effort for doctor — we still check even if missing)
-    string resolvedTcRoot = tcRoot.empty() ? autoDetectTcRoot() : tcRoot;
-
     // Detect project targets (if inside a project)
     string projectPath;
     if (!explicitPath.empty()) {
@@ -3207,6 +3251,8 @@ static int cmdDoctor(const vector<string>& args) {
     } else {
         projectPath = autoDetectProjectRoot("");
     }
+
+    string resolvedTcRoot = projectTcRoot(projectPath, tcRoot);
 
     vector<string> targets;
     if (!projectPath.empty()) {
@@ -3399,6 +3445,7 @@ static void printBuildHelp() {
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
          << "      --verbose              Show the full build output on screen\n"
+         << "      --tc-root <path>       Save a local TrussC path, then update\n"
          << "      --dry-run              Print the cmake commands instead of running them\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n"
@@ -3640,6 +3687,7 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
 
 static int cmdBuild(const vector<string>& args) {
     string explicitPath;
+    string explicitTcRoot;
     string targetPreset;
     string buildType;       // "" = default (RelWithDebInfo); else Debug/Release/RelWithDebInfo
     bool clean = false;
@@ -3664,6 +3712,9 @@ static int cmdBuild(const vector<string>& args) {
         if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printBuildHelp(); return 0; }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, explicitTcRoot)) return 1;
+        }
         else if (a == "--dry-run") dryRun = true;
         else if (a == "--verbose") verbose = true;
         else if (a == "--web")     targetPreset = "web";
@@ -3701,6 +3752,19 @@ static int cmdBuild(const vector<string>& args) {
         return 1;
     }
 
+    if (!explicitTcRoot.empty()) {
+        if (dryRun) { cerr << "Error: save --tc-root with use-local before --dry-run\n"; return 1; }
+        if (int rc = cmdUpdate({"-p", projectPath, "--tc-root", explicitTcRoot})) return rc;
+    }
+    // Validate before the automatic update: build must never fetch a missing version.
+    string selectedRoot = trusscVersion::resolve(projectPath, false);
+    if (!selectedRoot.empty()) {
+        selectedRoot = fs::absolute(selectedRoot).generic_string();
+        cout << "TrussC: " << selectedRoot;
+        if (fs::exists(fs::path(selectedRoot) / ".git")) cout << " (" << trusscVersion::commitAt(selectedRoot) << ")";
+        cout << "\n";
+    }
+
     if (targetPreset.empty()) {
         if (!kNativePreset) {
             cerr << "Error: cannot detect native platform. Use --web, --android, or --ios.\n";
@@ -3727,7 +3791,7 @@ static int cmdBuild(const vector<string>& args) {
         if (verbose) updateArgs.push_back("--verbose");
         updateArgs.push_back("-p");
         updateArgs.push_back(projectPath);
-        if (int urc = cmdUpdate(updateArgs)) return urc;
+        if (int urc = cmdUpdate(updateArgs, false)) return urc;
         cout << "\n";
     }
 
@@ -3825,6 +3889,20 @@ static int cmdBuild(const vector<string>& args) {
     vector<string> cfg = {cmake, "--preset", targetPreset};
     cfg.insert(cfg.end(), plan.defines.begin(), plan.defines.end());
     bool needConfigure = plan.configure;
+    if (!selectedRoot.empty()) {
+        string coreDir = selectedRoot + "/core";
+        cfg.push_back("-DTRUSSC_DIR=" + coreDir);
+        ifstream cache(fs::path(cfgIn.buildDir) / "CMakeCache.txt");
+        string line;
+        bool sameRoot = false;
+        while (getline(cache, line)) {
+            if (line.rfind("TRUSSC_DIR:", 0) == 0) {
+                auto equals = line.find('=');
+                if (equals != string::npos) sameRoot = fs::path(line.substr(equals + 1)) == fs::path(coreDir);
+            }
+        }
+        needConfigure = needConfigure || !sameRoot;
+    }
 
     if (dryRun) {
         // Print the commands instead of running them (one line each).
@@ -4735,7 +4813,7 @@ static int cmdDist(const vector<string>& args) {
         cerr << "Error: cannot detect the native platform.\n";
         return 1;
     }
-    const string tcRoot = autoDetectTcRoot();
+    const string tcRoot = projectTcRoot(projectPath);
     if (tcRoot.empty()) {
         cerr << "Error: could not detect the TrussC root.\n";
         return 1;
@@ -5298,6 +5376,8 @@ static void printTopHelp() {
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
          << "  cp <src> <dst>                 Copy an existing project to <dst>\n"
+         << "  use <spec>                     Select a shared TrussC version\n"
+         << "  use-local <path>               Select a local TrussC checkout\n"
          << "  update                         Regenerate build files for the project in CWD\n"
          << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
          << "  addon <command>                Manage addons: list, add, remove, clone, pull, search\n"
@@ -5404,9 +5484,30 @@ int main(int argc, char* argv[]) try {
 
     // Dispatch
     vector<string> subArgs(args.begin() + 1, args.end());
+    if ((first == "info" || first == "doctor" || first == "addon") &&
+        find(subArgs.begin(), subArgs.end(), "--help") == subArgs.end() &&
+        find(subArgs.begin(), subArgs.end(), "-h") == subArgs.end()) {
+        auto flag = find(subArgs.begin(), subArgs.end(), "--tc-root");
+        if (flag != subArgs.end() && flag + 1 != subArgs.end()) {
+            string project = autoDetectProjectRoot("");
+            for (size_t i = 0; i + 1 < subArgs.size(); ++i) {
+                if (subArgs[i] == "-p" || subArgs[i] == "--path") project = subArgs[i + 1];
+            }
+            if (!project.empty()) {
+                auto* savedOutput = cout.rdbuf(cerr.rdbuf());
+                int rc = cmdUse({*(flag + 1), "-p", project}, true);
+                cout.rdbuf(savedOutput);
+                if (rc) return rc;
+                // Legacy addon clone/pull still consume the explicit root.
+                if (first != "addon") subArgs.erase(flag, flag + 2);
+            }
+        }
+    }
     if (first == "new")     return cmdNew(subArgs);
     if (first == "cp")      return cmdCp(subArgs);
     if (first == "update")  return cmdUpdate(subArgs);
+    if (first == "use") return cmdUse(subArgs, false);
+    if (first == "use-local") return cmdUse(subArgs, true);
     if (first == "upgrade") return cmdUpgrade(subArgs);
     if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
