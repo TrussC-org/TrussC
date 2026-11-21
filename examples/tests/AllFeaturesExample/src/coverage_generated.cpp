@@ -1473,10 +1473,10 @@ struct Cover_EasyCam : af::Scope<EasyCam> {
         (void)af::val<EasyCam>().setFov(af::val<float>());
         (void)af::val<EasyCam>().setFovDeg(af::val<float>());
         (void)af::val<EasyCam>().setNearClip(af::val<float>());
-        (void)af::val<EasyCam>().setOrbitButton(af::val<MouseButton>());
+        (void)af::val<EasyCam>().setOrbitMouseButton(af::val<MouseButton>());
         (void)af::val<EasyCam>().setOrientation(af::val<const Quaternion>());
         (void)af::val<EasyCam>().setOrtho(af::val<bool>());
-        (void)af::val<EasyCam>().setPanButton(af::val<MouseButton>());
+        (void)af::val<EasyCam>().setPanMouseButton(af::val<MouseButton>());
         (void)af::val<EasyCam>().setPanSensitivity(af::val<float>());
         (void)af::val<EasyCam>().setSensitivity(af::val<float>());
         (void)af::val<EasyCam>().setTarget(af::val<float>(), af::val<float>(), af::val<float>());

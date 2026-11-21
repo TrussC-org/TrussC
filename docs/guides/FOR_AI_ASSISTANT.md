@@ -3288,10 +3288,12 @@ void EasyCam::setFarClip(float farClip)  // Sets the camera's far clipping dista
 void EasyCam::setFov(float fov)  // Sets the camera's vertical field of view.
 void EasyCam::setFovDeg(float degrees)  // Sets the camera's vertical field of view in degrees.
 void EasyCam::setNearClip(float nearClip)  // Sets the camera's near clipping distance.
-EasyCam & EasyCam::setOrbitButton(MouseButton button) [+1]  // Sets the mouse button used to orbit the camera.
+EasyCam & EasyCam::setOrbitButton(int button) ⚠️deprecated  // Deprecated int setter for the orbit mouse button; use setOrbitMouseButton(MouseButton).
+EasyCam & EasyCam::setOrbitMouseButton(MouseButton button)  // Sets the mouse button used to orbit the camera.
 void EasyCam::setOrientation(const Quaternion & q)  // Sets the camera's orientation quaternion.
 void EasyCam::setOrtho(bool ortho)  // Selects orthographic or perspective projection.
-EasyCam & EasyCam::setPanButton(MouseButton button) [+1]  // Sets the mouse button used to pan the camera.
+EasyCam & EasyCam::setPanButton(int button) ⚠️deprecated  // Deprecated int setter for the pan mouse button; use setPanMouseButton(MouseButton).
+EasyCam & EasyCam::setPanMouseButton(MouseButton button)  // Sets the mouse button used to pan the camera.
 void EasyCam::setPanSensitivity(float s)  // Sets the sensitivity of mouse panning.
 void EasyCam::setSensitivity(float s)  // Sets the sensitivity of mouse orbit rotation.
 void EasyCam::setTarget(float x, float y, float z) [+1]  // Sets the camera's look-at target.
