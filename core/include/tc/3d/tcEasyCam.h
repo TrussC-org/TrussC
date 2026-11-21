@@ -255,17 +255,17 @@ public:
     // ---------------------------------------------------------------------------
 
     // Mouse button that orbits (default: left)
-    EasyCam& setOrbitButton(MouseButton button) { orbitButton_ = static_cast<int>(button); return *this; }
+    EasyCam& setOrbitMouseButton(MouseButton button) { orbitButton_ = static_cast<int>(button); return *this; }
     MouseButton getOrbitMouseButton() const { return static_cast<MouseButton>(orbitButton_); }
-    [[deprecated("Use setOrbitButton(MouseButton). Will be removed in v1.0.")]]
+    [[deprecated("Use setOrbitMouseButton(MouseButton). Will be removed in v1.0.")]]
     EasyCam& setOrbitButton(int button) { orbitButton_ = button; return *this; }
     [[deprecated("Use getOrbitMouseButton(). Will be removed in v1.0.")]]
     int getOrbitButton() const { return orbitButton_; }
 
     // Mouse button that pans (default: middle)
-    EasyCam& setPanButton(MouseButton button) { panButton_ = static_cast<int>(button); return *this; }
+    EasyCam& setPanMouseButton(MouseButton button) { panButton_ = static_cast<int>(button); return *this; }
     MouseButton getPanMouseButton() const { return static_cast<MouseButton>(panButton_); }
-    [[deprecated("Use setPanButton(MouseButton). Will be removed in v1.0.")]]
+    [[deprecated("Use setPanMouseButton(MouseButton). Will be removed in v1.0.")]]
     EasyCam& setPanButton(int button) { panButton_ = button; return *this; }
     [[deprecated("Use getPanMouseButton(). Will be removed in v1.0.")]]
     int getPanButton() const { return panButton_; }
@@ -539,7 +539,7 @@ private:
     float lastMouseX_;
     float lastMouseY_;
 
-    // Mouse bindings (see setOrbitButton / setPanButton / setDragModifier)
+    // Mouse bindings (see setOrbitMouseButton / setPanMouseButton / setDragModifier)
     int orbitButton_ = static_cast<int>(MouseButton::Left);
     int panButton_ = static_cast<int>(MouseButton::Middle);
     Modifier dragModifier_ = Modifier::None;

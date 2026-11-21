@@ -155,8 +155,10 @@ TC_CORE_TEST_MAIN() {
 
     EasyCam camera;
     check("typed camera defaults", camera.getOrbitMouseButton() == MouseButton::Left && camera.getPanMouseButton() == MouseButton::Middle);
-    check("typed setters chain and store buttons", &camera.setOrbitButton(MouseButton::Right).setPanButton(MouseButton::Left) == &camera &&
+    check("typed setters chain and store buttons", &camera.setOrbitMouseButton(MouseButton::Right).setPanMouseButton(MouseButton::Left) == &camera &&
           camera.getOrbitMouseButton() == MouseButton::Right && camera.getPanMouseButton() == MouseButton::Left);
+    camera.setOrbitMouseButton(MouseButton::Left);
+    check("typed orbit setter accepts Left", camera.getOrbitMouseButton() == MouseButton::Left);
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable: 4996)

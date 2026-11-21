@@ -38,7 +38,8 @@ Mat3.set and Mat4.set now preserve floating-point values.
   keeps its SoundBuffer alive; `numSamples` is the samples-per-channel
   field. Keep sample edits on the main thread and stop playback before editing,
   as in C++. `load` and `loadFlac` return `LoadResult`; check `result:ok()`.
-- EasyCam's `setOrbitButton`, `setPanButton` and `setDragModifier` return the
+- Use EasyCam's `setOrbitMouseButton` and `setPanMouseButton`; the old Lua names remain available.
+- EasyCam's `setOrbitMouseButton`, `setPanMouseButton` and `setDragModifier` return the
   original Lua camera, so constructor chains retain ownership.
 - `AudioEngine:getPlayingSounds()` returns a 1-based Lua table of independently
   owned `PlayingSoundInfo` copies. Entries remain valid after the table is collected.
