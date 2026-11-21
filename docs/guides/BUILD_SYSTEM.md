@@ -525,7 +525,7 @@ cmake --build --preset linux
 ```
 
 StorageBuffer readback, byte/float Fbo readback and screenshot/window capture
-are not supported on Vulkan yet (2b or later). There is no API to enable them.
+are not supported on Vulkan yet (step 4). There is no API to enable them.
 StorageBuffer asynchronous reads deliver deferred failure; synchronous reads
 return failure. Fbo readback and window capture warn on every call and return
 false. MCP capture and image analysis report the failure; Fbo/window recording
@@ -546,9 +546,18 @@ void tcApp::setup() {
 }
 ```
 
-Validation layers, stencil reference, multiwindow, real GPUs and comprehensive
-live resize/close verification remain for step 2b. These need later
-implementation or testing on the target hardware.
+Debug Vulkan builds enable the debug-utils extension required by sokol-gfx.
+Enable the installed validation layer when running an app:
+
+```bash
+VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ./bin/emptyExample
+```
+
+The `vulkanSingleWindow` test exercises 24 resizes, WM_DELETE/exitApp close,
+stable resource counts, and native stencil references on lavapipe/Xvfb with
+validation enabled. Stencil reference commands are checked without pixel
+readback; there is no Vulkan pixel readback API yet. Real GPUs and real display
+sessions still need verification; multiwindow remains deferred.
 
 ### macOS Deployment Target
 

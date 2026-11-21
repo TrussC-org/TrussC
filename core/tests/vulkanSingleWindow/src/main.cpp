@@ -14,8 +14,16 @@ namespace {
 int failures = 0;
 int draws = 0;
 int expectedSamples = 1;
-enum class Mode { Smoke, HiddenDraws, HideInDraw };
+enum class Mode { Smoke, HiddenDraws, HideInDraw, Resize };
 Mode mode = Mode::Smoke;
+bool wmClose = false;
+bool stencil = false;
+int resizes = 0;
+int resizeFrame = 0;
+sg_total_stats resourcesBefore{};
+bool resourcesSampled = false;
+bool resizeChecked = false;
+constexpr int resizeCount = 24;
 constexpr int phaseFrames = 16;
 int hiddenDraws = 0;
 int shownDraws = 0;
@@ -27,6 +35,8 @@ void check(const char* label, bool okay) {
 }
 struct GuardApp : App {
     void setup() override {
+        getWindow()->setTitle("TrussC Vulkan validation");
+        sg_enable_stats();
         const auto before = internal::openWindows();
         check("launch window exists", before.size() == 1 && getWindow());
         int warnings = 0;
@@ -56,7 +66,36 @@ struct GuardApp : App {
     }
     void update() override {
         // Exit on the following tick, after every counted draw was submitted/presented.
-        if (shownDraws >= phaseFrames) exitApp(failures ? 1 : 0);
+        if (mode == Mode::Resize && shownDraws >= phaseFrames) {
+            if (!resourcesSampled) {
+                resourcesBefore = sg_query_stats().total;
+                resourcesSampled = true;
+            }
+            if (resizes < resizeCount && draws >= resizeFrame) {
+                getWindow()->setSize(160 + ((resizes + 1) % 5) * 19, 120 + ((resizes + 1) % 7) * 13);
+                ++resizes;
+                resizeFrame = draws + 4;
+            }
+            if (resizes == resizeCount && draws >= resizeFrame && !resizeChecked) {
+                const auto after = sg_query_stats().total;
+                auto same = [](const char* name, const sg_total_resource_stats& before,
+                               const sg_total_resource_stats& current) {
+                    std::printf("vulkanSingleWindow: live %s before=%u after=%u\n", name, before.alive, current.alive);
+                    check(name, before.alive == current.alive);
+                };
+                same("buffers", resourcesBefore.buffers, after.buffers);
+                same("images", resourcesBefore.images, after.images);
+                same("views", resourcesBefore.views, after.views);
+                same("samplers", resourcesBefore.samplers, after.samplers);
+                same("shaders", resourcesBefore.shaders, after.shaders);
+                same("pipelines", resourcesBefore.pipelines, after.pipelines);
+                std::printf("vulkanSingleWindow: %d resizes completed; ready for close\n", resizes);
+                resizeChecked = true;
+                if (!wmClose) exitApp(failures ? 1 : 0);
+            }
+        } else if (mode != Mode::Resize && shownDraws >= phaseFrames) {
+            exitApp(failures ? 1 : 0);
+        }
         if (mode == Mode::HiddenDraws && hiddenDraws >= phaseFrames && !getWindow()->isVisible()) {
             getWindow()->setVisible(true);
         }
@@ -66,6 +105,22 @@ struct GuardApp : App {
     }
     void draw() override {
         const auto sc = sapp_acquire_swapchain();
+        if (sc.invalid) {
+            // OUT_OF_DATE recreates the chain and skips this acquisition.
+            std::puts("vulkanSingleWindow: acquisition skipped during recreation");
+            return;
+        }
+        if (stencil) {
+            // Command-level check on the window attachment; Vulkan pixel readback
+            // is deferred. The probe records the native dynamic reference values.
+            for (uint8_t ref : {uint8_t(1), uint8_t(73), uint8_t(255)}) {
+                setStencilDesc(StencilDesc::shape(ref));
+                drawRect(0, 0, 32, 32);
+                setStencilDesc(StencilDesc::inside(ref));
+                drawRect(0, 0, 32, 32);
+            }
+            resetStencilDesc();
+        }
         check("valid acquired Vulkan image", !sc.invalid && sc.vulkan.render_image && sc.vulkan.render_view);
         check("depth and presentation semaphores", sc.vulkan.depth_stencil_image &&
               sc.vulkan.depth_stencil_view && sc.vulkan.render_finished_semaphore &&
@@ -96,6 +151,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (arg == "--msaa") expectedSamples = 4;
         if (arg == "--hidden-draws") mode = Mode::HiddenDraws;
         if (arg == "--hide-in-draw") mode = Mode::HideInDraw;
+        if (arg == "--resize") mode = Mode::Resize;
+        if (arg == "--wm-close") wmClose = true;
+        if (arg == "--stencil") stencil = true;
     }
     // A GPU wait can block the main thread, so the timeout runs independently.
     std::thread([] {
@@ -111,6 +169,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
                 check("16 hidden updates completed", hiddenUpdates >= phaseFrames);
                 check("default policy suppressed hidden draws", hiddenDraws == 0);
             }
+            if (mode == Mode::Resize) check("24 resize requests completed", resizes == resizeCount);
             errors.disconnect();
         });
 #else

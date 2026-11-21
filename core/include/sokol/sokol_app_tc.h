@@ -12588,13 +12588,17 @@ static void _sapp_tc_vk_create_instance(void) {
     // Bound (port): no instance layers are enabled; the fixed list has 32 slots.
     _SAPP_VK_ZERO_COUNT_AND_ARRAY(32, const char*, layer_count, layer_names);
 
-    // Bound (port): the instance extension list contains only surface and platform-surface names.
+    // Bound (port): surface, platform-surface and debug-utils names fit in 32 slots.
     _SAPP_VK_ZERO_COUNT_AND_ARRAY(32, const char*, ext_count, ext_names);
     ext_names[ext_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
     #if defined(VK_USE_PLATFORM_XLIB_KHR)
         ext_names[ext_count++] = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
     #elif defined(VK_USE_PLATFORM_WIN32_KHR)
         ext_names[ext_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+    #endif
+    // [TrussC] sokol-gfx's debug Vulkan backend requires object naming support.
+    #if defined(SOKOL_DEBUG) || !defined(NDEBUG)
+        ext_names[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
     #endif
     SOKOL_ASSERT(ext_count <= 32);
 
