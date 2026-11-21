@@ -13,7 +13,7 @@ void check(const char* label, bool okay) {
 struct Empty : App {};
 size_t records(const std::shared_ptr<internal::AppOwner>& owner) {
     std::lock_guard lock(owner->cancellationsMutex);
-    return owner->cancellations.size();
+    return owner->cancellations.size() + owner->listeners.size();
 }
 void cycles() {
     auto app = internal::makeConstructedApp<Empty>();
@@ -111,10 +111,11 @@ void retirement() {
     std::thread worker([&] { int value = 0; typed.notify(value); plain.notify(); });
     worker.join();
     internal::retireAppOwner(owner);
-    check("retirement releases captures even with retained callback and queued deliveries", capture.expired());
+    check("retirement retains queued snapshot captures until queue release", !capture.expired());
     check("retirement disconnects only its own listeners", typed.listenerCount() == 0 && plain.listenerCount() == 1 && records(owner) == 0);
     pending();
     internal::drainMainThreadQueue();
+    check("queue release destroys retired captures", capture.expired());
     plain.notify();
     check("retired queued and retained callbacks never run; peer survives", calls == 0 && peerCalls == 2);
     check("callback restores caller ownership", !internal::currentAppOwner());

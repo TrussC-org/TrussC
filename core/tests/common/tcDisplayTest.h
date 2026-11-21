@@ -30,6 +30,8 @@ template<class AppClass>
 int runDisplayTest(const tc::WindowSettings& settings, int& failures,
                    std::function<void()> finalChecks = {},
                    const tc::RuntimeSettings& runtime = {}) {
+    // Line-buffer stdout so a crash log still shows the last check reached.
+    std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
     using TestApp = detail::DisplayTestApp<AppClass>;
     TestApp::finish = [&failures, finalChecks = std::move(finalChecks)] {
         if (finalChecks) finalChecks();

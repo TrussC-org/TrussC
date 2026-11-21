@@ -92,7 +92,10 @@ bool getKeepScreenOn() { return keepScreenOn_; }
 // Screen points relative to the primary screen's top-left for every Window.
 IVec2 internal::windowPositionNative(const void* handle) {
     NSWindow* window = (__bridge NSWindow*)handle;
-    if (!window) return IVec2(-1, -1);
+    if (!window) {
+        logWarning("Platform") << "getWindowPosition() requires an NSWindow";
+        return IVec2(-1, -1);
+    }
     NSScreen* primary = [[NSScreen screens] firstObject];
     const NSRect frame = [window frame];
     return IVec2((int)frame.origin.x, (int)(primary.frame.size.height - NSMaxY(frame)));
