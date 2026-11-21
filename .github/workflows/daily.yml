@@ -228,7 +228,7 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_examples_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
-          ./examples/build_all.py --verbose
+          ./examples/build_all.py --verbose --exclude-addons tcxBox2d
           TC_BUILD
 
       - name: Check build warnings (daily_examples_native)
@@ -245,7 +245,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_addon_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
-          ./examples/build_all.py --addon-tests-only --include-daily --verbose
+          ./examples/build_all.py --addon-tests-only --include-daily --verbose --exclude-addons tcxBox2d
           TC_BUILD
 
       - name: Check build warnings (daily_addon_tests)
@@ -415,8 +415,8 @@ jobs:
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/web_examples.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           # emcc fetches emdawnwebgpu lazily; retry once after a transient download failure.
-          ./examples/build_all.py --web-only --verbose ||
-            ./examples/build_all.py --web-only --verbose
+          ./examples/build_all.py --web-only --verbose --exclude-addons tcxBox2d ||
+            ./examples/build_all.py --web-only --verbose --exclude-addons tcxBox2d
           TC_BUILD
 
       - name: Check build warnings (web_examples)

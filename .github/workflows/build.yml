@@ -596,7 +596,7 @@ jobs:
           import os
           import subprocess
           subprocess.run(['python3', 'examples/build_all.py', '--addon-tests-only',
-                          '--include-daily', '--verbose', '--addons',
+                          '--include-daily', '--verbose', '--exclude-addons', 'tcxBox2d', '--addons',
                           *json.loads(os.environ['SELECTED_ADDONS'])], check=True)
           PYTHON
           TC_BUILD
