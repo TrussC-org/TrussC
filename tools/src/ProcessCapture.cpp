@@ -21,7 +21,7 @@ using namespace std;
 
 #ifdef _WIN32
 
-int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile) {
+int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile, const bool* cancel) {
     if (argv.empty()) return -1;
     // Text printed so far must come before the child's output, also through a pipe.
     cout.flush();
@@ -68,6 +68,10 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
             const DWORD wanted = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
             if (!ReadFile(readEnd, buffer, wanted, &count, nullptr) || count == 0) break;
             onData(buffer, count);
+            if (cancel && *cancel) {
+                TerminateProcess(pi.hProcess, 1);
+                break;
+            }
             continue;
         }
         if (exited) break;   // the child is gone and the pipe is drained
@@ -87,7 +91,7 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
 
 #else
 
-int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile) {
+int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile, const bool* cancel) {
     if (argv.empty()) return -1;
     // Text printed so far must come before the child's output, also through a pipe.
     cout.flush();
@@ -132,7 +136,14 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
         }
         if (ready > 0) {
             const ssize_t count = read(fds[0], buffer, sizeof(buffer));
-            if (count > 0) { onData(buffer, static_cast<size_t>(count)); continue; }
+            if (count > 0) {
+                onData(buffer, static_cast<size_t>(count));
+                if (cancel && *cancel) {
+                    kill(pid, SIGKILL);
+                    break;
+                }
+                continue;
+            }
             if (count == 0) break;                       // every writer closed
             if (errno == EINTR || errno == EAGAIN) continue;
             break;

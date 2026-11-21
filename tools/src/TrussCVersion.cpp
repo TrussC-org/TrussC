@@ -3,6 +3,9 @@
 #include "GeneratedFile.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <chrono>
+#include <charconv>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -137,7 +140,25 @@ static std::string checkedGit(std::vector<std::string> args, bool objectId = fal
 }
 
 std::string commitAt(const fs::path& root) {
-    return checkedGit({"-C", root.string(), "rev-parse", "--verify", "HEAD^{commit}"}, true);
+    if (fs::exists(root / ".git")) {
+        return checkedGit({"-C", root.string(), "rev-parse", "--verify", "HEAD^{commit}"}, true);
+    }
+    std::ifstream file(root / ".git_archival.txt", std::ios::binary);
+    // Bound (archive metadata needs only a short describe line): read at most 4 KiB plus one overflow byte before parsing.
+    char metadata[4097];
+    file.read(metadata, sizeof(metadata));
+    if (file.gcount() > 4096) return "unknown";
+    std::istringstream lines(std::string(metadata, static_cast<size_t>(file.gcount())));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.compare(0, 9, "describe:") == 0) {
+            auto start = line.find_first_not_of(" \t", 9);
+            if (start == std::string::npos || line.find("$Format:") != std::string::npos) break;
+            auto end = line.find_last_not_of(" \t\r");
+            return line.substr(start, end - start + 1);
+        }
+    }
+    return "unknown";
 }
 
 static fs::path cacheRoot() {
@@ -194,13 +215,180 @@ static void checkExistingWorktree(const Spec& spec, const fs::path& bare, const 
     throw std::runtime_error("cannot acquire TrussC ref '" + spec.ref + "': destination is not its exact registered worktree root; conflicts with '" + otherRef + "': " + destination.string());
 }
 
-// All transport and worktree mutations live here. Stage 1b can add tarballs
-// without changing project selection. The URL override also supports file://.
+// Detect Git once per invocation. Tests can exercise the same no-Git path.
+static bool useTarball() {
+    const char* transport = std::getenv("TRUSSC_FETCH");
+    if (transport && std::string(transport) == "tarball") return true;
+    static const bool available = [] {
+        const char* searchPath = std::getenv("PATH");
+        if (!searchPath) return false;
+#ifdef _WIN32
+        constexpr char separator = ';';
+        const char* executable = "git.exe";
+#else
+        constexpr char separator = ':';
+        const char* executable = "git";
+#endif
+        std::istringstream directories(searchPath);
+        std::string directory;
+        while (std::getline(directories, directory, separator)) {
+            std::error_code error;
+            if (fs::is_regular_file(fs::path(directory) / executable, error)) return git({"--version"}).first == 0;
+        }
+        return false;
+    }();
+    return !available;
+}
+
+// All curl/tar execution stays in this transport seam. No shell is involved.
+static void fetchTarball(const Spec& spec, const fs::path& destination, const std::string& base) {
+    checkCachePath(destination);
+    auto versionRoot = cacheRoot() / "versions" / spec.owner / spec.repo;
+    // A slash ref must not replace a different ref's tree (or its parent).
+    for (auto parent = destination.parent_path(); parent != versionRoot.parent_path(); parent = parent.parent_path()) {
+        if (fs::exists(parent / ".git_archival.txt") || fs::exists(parent / ".git")) {
+            throw std::runtime_error("TrussC ref conflicts with an existing cached version: " + parent.string());
+        }
+    }
+    if (fs::exists(destination) && (!fs::is_regular_file(destination / ".git_archival.txt") ||
+                                  fs::exists(destination / ".git"))) {
+        throw std::runtime_error("TrussC ref conflicts with an existing cache directory: " + destination.string());
+    }
+    fs::create_directories(destination.parent_path());
+    // create_directory reserves a private sibling; never reuse someone else's scratch tree.
+    fs::path scratch;
+    for (unsigned attempt = 0; ; ++attempt) {
+        scratch = destination.parent_path() / (".trussc-download-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" + std::to_string(attempt));
+        if (fs::create_directory(scratch)) break;
+    }
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { std::error_code error; fs::remove_all(path, error); }
+    } cleanup{scratch};
+    auto run = [](const std::vector<std::string>& args) {
+        std::string output;
+        bool exceeded = false;
+        // Bound (untrusted archive listings): avoid retaining unlimited tool output.
+        constexpr size_t outputLimit = 16 * 1024 * 1024;
+        auto status = runCaptured(args, [&](const char* bytes, size_t size) {
+            if (size > outputLimit - output.size()) exceeded = true;
+            else if (!exceeded) output.append(bytes, size);
+        }, nullptr, &exceeded);
+        if (exceeded) throw std::runtime_error("TrussC archive listing is too large");
+        return std::make_pair(status, output);
+    };
+    auto archive = scratch / "archive.tar.gz";
+    auto tree = scratch / "tree";
+    fs::create_directory(tree);
+    auto encode = [](const std::string& text) {
+        std::string encoded;
+        const char* digits = "0123456789ABCDEF";
+        for (unsigned char c : text) {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '/') encoded += c;
+            else { encoded += '%'; encoded += digits[c >> 4]; encoded += digits[c & 15]; }
+        }
+        return encoded;
+    };
+    auto download = [&](const std::string& ref) {
+        // Bound (remote acquisition): cap transfer size and duration for update/use.
+        return run({"curl", "--location", "--fail", "--silent", "--show-error",
+                    "--max-filesize", "1073741824", "--max-time", "300", "--output", archive.string(),
+                    "--url", base + "/" + spec.owner + "/" + spec.repo + "/archive/" + encode(ref) + ".tar.gz"});
+    };
+    // Explicit tag URL wins even when a branch has the same name. The short URL
+    // is also used by file:// fixtures and resolves branches/commits on GitHub.
+    auto downloaded = spec.commit ? download(spec.ref) : download("refs/tags/" + spec.ref);
+    if (!spec.commit && downloaded.first != 0) downloaded = download(spec.ref);
+    if (downloaded.first != 0) throw std::runtime_error("TrussC archive download failed: " + downloaded.second);
+    auto names = run({"tar", "-P", "-tzf", archive.string()});
+    auto details = run({"tar", "-P", "-tvzf", archive.string()});
+    if (names.first != 0 || details.first != 0) {
+        throw std::runtime_error("cannot read TrussC archive: " + names.second + details.second);
+    }
+    auto safePath = [](const std::string& name) {
+        // Reject Windows separators/drives too, even on Unix. Tar's escaped
+        // names are rejected rather than interpreted differently by platforms.
+        if (name.empty() || name.front() == '/' || name.find_first_of("\\:\r\n\t") != std::string::npos) return false;
+        std::istringstream parts(name);
+        std::string part;
+        while (std::getline(parts, part, '/')) {
+            if (part.empty() || part.back() == '.' || part.back() == ' ') return false;
+            std::transform(part.begin(), part.end(), part.begin(), [](unsigned char c) {
+                return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : static_cast<char>(c);
+            });
+            if (part == ".git") return false;
+        }
+        return true;
+    };
+    std::istringstream nameLines(names.second), detailLines(details.second);
+    std::string name, detail, top;
+    // Bound (2 GiB leaves ample room for TrussC sources): reject larger expanded totals before extraction.
+    constexpr uint64_t expandedLimit = uint64_t{2} * 1024 * 1024 * 1024;
+    uint64_t expandedSize = 0;
+    while (std::getline(nameLines, name)) {
+        if (!std::getline(detailLines, detail) || detail.empty() || !safePath(name)) {
+            throw std::runtime_error("unsafe TrussC archive path");
+        }
+        std::istringstream fields(detail);
+        std::string permissions, owner, sizeText;
+        fields >> permissions >> owner;
+        if (owner.find('/') == std::string::npos) {
+            // BSD tar lists a link count, user and group; GNU tar uses user/group.
+            std::string user, group;
+            fields >> user >> group;
+        }
+        fields >> sizeText;
+        uint64_t memberSize = 0;
+        auto parsed = std::from_chars(sizeText.data(), sizeText.data() + sizeText.size(), memberSize);
+        if (sizeText.empty() || parsed.ec != std::errc{} || parsed.ptr != sizeText.data() + sizeText.size()) {
+            throw std::runtime_error("invalid TrussC archive member size");
+        }
+        if (memberSize > expandedLimit - expandedSize) throw std::runtime_error("TrussC archive expanded size exceeds 2 GiB");
+        expandedSize += memberSize;
+        auto slash = name.find('/');
+        auto folder = name.substr(0, slash);
+        if (top.empty()) top = folder;
+        if (folder != top || slash == std::string::npos) throw std::runtime_error("TrussC archive must have one top-level folder");
+        if (detail.front() == 'l') {
+            auto marker = detail.find(" " + name + " -> ");
+            if (marker == std::string::npos ||
+                detail.find(" " + name + " -> ", marker + 1) != std::string::npos ||
+                !safePath(detail.substr(marker + name.size() + 5))) {
+                throw std::runtime_error("unsafe TrussC archive link");
+            }
+            // With no '..' or absolute targets, even chains of links stay in the tree.
+        } else if (detail.front() != '-' && detail.front() != 'd') {
+            // Git archives contain directories, regular files and symbolic links;
+            // device nodes and hard links are not source-tree entries.
+            throw std::runtime_error("unsupported TrussC archive entry");
+        }
+    }
+    if (top.empty() || std::getline(detailLines, detail)) throw std::runtime_error("invalid TrussC archive listing");
+    auto extracted = run({"tar", "-xzf", archive.string(), "--strip-components=1", "-C", tree.string()});
+    if (extracted.first != 0) throw std::runtime_error("TrussC archive extraction failed: " + extracted.second);
+    if (!fs::is_regular_file(tree / "core/cmake/trussc_app.cmake") ||
+        !fs::is_regular_file(tree / ".git_archival.txt")) {
+        throw std::runtime_error("TrussC archive is missing core/cmake/trussc_app.cmake or .git_archival.txt");
+    }
+    checkCachePath(destination);
+    auto previous = scratch / "previous";
+    if (fs::exists(destination)) fs::rename(destination, previous);
+    try { fs::rename(tree, destination); }
+    catch (...) {
+        if (fs::exists(previous)) fs::rename(previous, destination);
+        throw;
+    }
+}
+
+// All transport and worktree mutations enter here. The URL override supports file://.
 static void fetchVersion(const Spec& spec, const fs::path& destination) {
     auto bare = cacheRoot() / "repos" / spec.owner / (spec.repo + ".git");
     const char* baseOverride = std::getenv("TRUSSC_GITHUB_BASE_URL");
     std::string base = baseOverride ? baseOverride : "https://github.com";
     while (!base.empty() && base.back() == '/') base.pop_back();
+    if (useTarball()) { fetchTarball(spec, destination, base); return; }
     auto url = base + "/" + spec.owner + "/" + spec.repo + ".git";
     checkCachePath(destination);
     checkCachePath(bare);

@@ -3761,7 +3761,8 @@ static int cmdBuild(const vector<string>& args) {
     if (!selectedRoot.empty()) {
         selectedRoot = fs::absolute(selectedRoot).generic_string();
         cout << "TrussC: " << selectedRoot;
-        if (fs::exists(fs::path(selectedRoot) / ".git")) cout << " (" << trusscVersion::commitAt(selectedRoot) << ")";
+        if (fs::exists(fs::path(selectedRoot) / ".git") ||
+            fs::exists(fs::path(selectedRoot) / ".git_archival.txt")) cout << " (" << trusscVersion::commitAt(selectedRoot) << ")";
         cout << "\n";
     }
 

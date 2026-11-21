@@ -17,6 +17,7 @@
 // the pipe is read, so a background process that kept the pipe open cannot
 // hold trusscli.
 // When stderrFile is supplied, stderr goes there instead of the output pipe.
+// Setting cancel from onData terminates the child and stops reading output.
 int runCaptured(const std::vector<std::string>& argv,
                 const std::function<void(const char*, size_t)>& onData,
-                FILE* stderrFile = nullptr);
+                FILE* stderrFile = nullptr, const bool* cancel = nullptr);
