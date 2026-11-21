@@ -1263,6 +1263,7 @@ inline bool isStrokeEnabled() {
 
 // Calculate text bounding box (UTF-8 + fullwidth aware). Same measurement as
 // getBitmapStringWidth / getBitmapStringHeight, so it follows setBitmapLineHeight.
+[[deprecated("Use getBitmapStringBBox() instead. Will be removed in v1.0.0")]]
 inline void getBitmapStringBounds(const std::string& text, float& width, float& height) {
     const auto& ctx = getDefaultContext();
     width  = ctx.getBitmapStringWidth(text);
@@ -1462,8 +1463,9 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     fill();
 
     // Calculate text size
-    float textWidth, textHeight;
-    getBitmapStringBounds(text, textWidth, textHeight);
+    const Rect textBox = getBitmapStringBBox(text);
+    const float textWidth = textBox.width;
+    const float textHeight = textBox.height;
 
     const float lineHeight = getBitmapLineHeight();
     const float exactHeight = textHeight;
@@ -2783,7 +2785,7 @@ struct ConsoleCPCtrlGuard {
 //          runApp() just stores the descriptor for sokol_main() to retrieve.
 #ifdef __ANDROID__
 namespace internal {
-    inline sapp_desc g_androidDesc = {};  // Android only: no hot reload there
+    extern sapp_desc g_androidDesc;  // Defined by the Android entry point bridge
 }
 
 template<typename AppClass>

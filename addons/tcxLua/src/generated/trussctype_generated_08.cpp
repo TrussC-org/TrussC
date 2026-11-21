@@ -60,98 +60,99 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["toFillMesh"] = &trussc::Path::toFillMesh;
     }
     {
-        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
-        t["decorated"] = &trussc::WindowSettings::decorated;
-        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
-        t["height"] = &trussc::WindowSettings::height;
-        t["highDpi"] = &trussc::WindowSettings::highDpi;
-        t["maxFrameLatency"] = &trussc::WindowSettings::maxFrameLatency;
-        t["pipelinePoolSize"] = &trussc::WindowSettings::pipelinePoolSize;
-        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
-        t["quitOnClose"] = &trussc::WindowSettings::quitOnClose;
-        t["resourcePoolSize"] = &trussc::WindowSettings::resourcePoolSize;
-        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
-        t["shaderPoolSize"] = &trussc::WindowSettings::shaderPoolSize;
-        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
-        t["title"] = &trussc::WindowSettings::title;
-        t["visible"] = &trussc::WindowSettings::visible;
-        t["width"] = &trussc::WindowSettings::width;
-        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
-        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
-        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
-        t["setMaxFrameLatency"] = &trussc::WindowSettings::setMaxFrameLatency;
-        t["setParentWindow"] = sol::overload([](trussc::WindowSettings& self, const std::shared_ptr<trussc::Window> & parent) -> decltype(auto) { return self.setParentWindow(parent); }, [](trussc::WindowSettings& self, trussc::Window & parent) -> decltype(auto) { return self.setParentWindow(parent); });
-        t["setPipelinePoolSize"] = &trussc::WindowSettings::setPipelinePoolSize;
-        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
-        t["setQuitOnClose"] = &trussc::WindowSettings::setQuitOnClose;
-        t["setResourcePoolSize"] = &trussc::WindowSettings::setResourcePoolSize;
-        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
-        t["setShaderPoolSize"] = &trussc::WindowSettings::setShaderPoolSize;
-        t["setSize"] = &trussc::WindowSettings::setSize;
-        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
-        t["setTitle"] = &trussc::WindowSettings::setTitle;
-        t["setVisible"] = &trussc::WindowSettings::setVisible;
-    }
-    {
-        auto constructors = tcxLuaConstructors<trussc::IVec3
-            , trussc::IVec3()
-            , trussc::IVec3(int, int, int)
-            , trussc::IVec3(int)
-            , trussc::IVec3(const trussc::IVec2 &)
-            , trussc::IVec3(const trussc::IVec2 &, int)
+        auto constructors = tcxLuaConstructors<trussc::Vec2
+            , trussc::Vec2()
+            , trussc::Vec2(float, float)
+            , trussc::Vec2(float)
         >();
-        sol::usertype<trussc::IVec3> t = lua->new_usertype<trussc::IVec3>("IVec3", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = [](const trussc::IVec3& a, int b){ return a * b; };
-        t[sol::meta_function::addition] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec3& a){ return -a; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a == b; };
-        t["x"] = &trussc::IVec3::x;
-        t["y"] = &trussc::IVec3::y;
-        t["z"] = &trussc::IVec3::z;
-        t["toVec3"] = &trussc::IVec3::toVec3;
-        t["xy"] = &trussc::IVec3::xy;
+        sol::usertype<trussc::Vec2> t = lua->new_usertype<trussc::Vec2>("Vec2", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::Vec2& a, float b){ return a * b; }, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a * b; });
+        t[sol::meta_function::addition] = [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a - b; };
+        t[sol::meta_function::unary_minus] = [](const trussc::Vec2& a){ return -a; };
+        t[sol::meta_function::division] = sol::overload([](const trussc::Vec2& a, float b){ return a / b; }, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a / b; });
+        t[sol::meta_function::equal_to] = [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a == b; };
+        t[sol::meta_function::index] = [](const trussc::Vec2& a, int b){ return a[b]; };
+        t["x"] = &trussc::Vec2::x;
+        t["y"] = &trussc::Vec2::y;
+        t["angle"] = sol::overload([](trussc::Vec2& self) { return self.angle(); }, [](trussc::Vec2& self, const trussc::Vec2 & v) { return self.angle(v); });
+        t["cross"] = &trussc::Vec2::cross;
+        t["distance"] = &trussc::Vec2::distance;
+        t["distanceSquared"] = &trussc::Vec2::distanceSquared;
+        t["dot"] = &trussc::Vec2::dot;
+        t["length"] = &trussc::Vec2::length;
+        t["lengthSquared"] = &trussc::Vec2::lengthSquared;
+        t["lerp"] = &trussc::Vec2::lerp;
+        t["limit"] = &trussc::Vec2::limit;
+        t["normalize"] = &trussc::Vec2::normalize;
+        t["normalized"] = &trussc::Vec2::normalized;
+        t["perpendicular"] = &trussc::Vec2::perpendicular;
+        t["reflected"] = &trussc::Vec2::reflected;
+        t["rotate"] = &trussc::Vec2::rotate;
+        t["rotated"] = &trussc::Vec2::rotated;
+        t["set"] = sol::overload([](trussc::Vec2& self, float x_, float y_) -> decltype(auto) { return self.set(x_, y_); }, [](trussc::Vec2& self, const trussc::Vec2 & v) -> decltype(auto) { return self.set(v); });
+        t["fromAngle"] = sol::overload([](float radians) { return trussc::Vec2::fromAngle(radians); }, [](float radians, float length) { return trussc::Vec2::fromAngle(radians, length); });
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::IVec2
-            , trussc::IVec2()
-            , trussc::IVec2(int, int)
-            , trussc::IVec2(int)
+        auto constructors = tcxLuaConstructors<trussc::Rect
+            , trussc::Rect()
+            , trussc::Rect(float, float, float, float)
+            , trussc::Rect(const trussc::Vec2 &, float, float)
+            , trussc::Rect(const trussc::Vec3 &, float, float)
+            , trussc::Rect(float, float, float, float, float)
         >();
-        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = [](const trussc::IVec2& a, int b){ return a * b; };
-        t[sol::meta_function::addition] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec2& a){ return -a; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; };
-        t["x"] = &trussc::IVec2::x;
-        t["y"] = &trussc::IVec2::y;
-        t["toVec2"] = &trussc::IVec2::toVec2;
+        sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect", constructors, sol::call_constructor, constructors);
+        t["height"] = &trussc::Rect::height;
+        t["width"] = &trussc::Rect::width;
+        t["x"] = &trussc::Rect::x;
+        t["y"] = &trussc::Rect::y;
+        t["contains"] = &trussc::Rect::contains;
+        t["getBottom"] = &trussc::Rect::getBottom;
+        t["getCenter"] = &trussc::Rect::getCenter;
+        t["getCenterX"] = &trussc::Rect::getCenterX;
+        t["getCenterY"] = &trussc::Rect::getCenterY;
+        t["getRight"] = &trussc::Rect::getRight;
+        t["intersects"] = &trussc::Rect::intersects;
+        t["set"] = sol::overload([](trussc::Rect& self, float x_, float y_, float w_, float h_) -> decltype(auto) { return self.set(x_, y_, w_, h_); }, [](trussc::Rect& self, const trussc::Vec2 & pos, float w_, float h_) -> decltype(auto) { return self.set(pos, w_, h_); });
     }
     {
-        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["level"] = &trussc::PlayingSoundInfo::level;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
+        auto constructors = tcxLuaConstructors<trussc::ColorHSB
+            , trussc::ColorHSB()
+            , trussc::ColorHSB(float, float, float)
+            , trussc::ColorHSB(float, float, float, float)
+        >();
+        sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB", constructors, sol::call_constructor, constructors);
+        t["a"] = &trussc::ColorHSB::a;
+        t["b"] = &trussc::ColorHSB::b;
+        t["h"] = &trussc::ColorHSB::h;
+        t["s"] = &trussc::ColorHSB::s;
+        t["lerp"] = sol::overload([](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t) { return self.lerp(target, t); }, [](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
+        t["toLinear"] = &trussc::ColorHSB::toLinear;
+        t["toOKLCH"] = &trussc::ColorHSB::toOKLCH;
+        t["toOKLab"] = &trussc::ColorHSB::toOKLab;
+        t["toRGB"] = &trussc::ColorHSB::toRGB;
     }
     {
-        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
-        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
-        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
-        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
-        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
-        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
-        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
-        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
+        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
+        t["audio"] = &trussc::VideoRecordSettings::audio;
+        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
+        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
+        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
+        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
+        t["codec"] = &trussc::VideoRecordSettings::codec;
+        t["duration"] = &trussc::VideoRecordSettings::duration;
+        t["fps"] = &trussc::VideoRecordSettings::fps;
+        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
     }
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled),
+        "Custom", sol::var(trussc::BlendMode::Custom));
     lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
         sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
         "None", sol::var(trussc::EasyCam::Modifier::None),
@@ -163,26 +164,26 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
         "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
         "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
-    {
-        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
-        t["data"] = &trussc::UdpReceiveEventArgs::data;
-        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
-        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
-    }
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
     {
         sol::usertype<trussc::BlendDesc::Component> t = lua->new_usertype<trussc::BlendDesc::Component>("BlendDescComponent");
         t["dst"] = &trussc::BlendDesc::Component::dst;
         t["op"] = &trussc::BlendDesc::Component::op;
         t["src"] = &trussc::BlendDesc::Component::src;
     }
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    {
+        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
+        t["error"] = &trussc::SendResult::error;
+        t["id"] = &trussc::SendResult::id;
+        t["ok"] = &trussc::SendResult::ok;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

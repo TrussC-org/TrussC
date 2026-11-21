@@ -213,9 +213,9 @@ TC_CORE_TEST_MAIN() {
     std::thread delivery([&] { workerSignal.notify(); });
     delivery.join();
     b->destroyApp(); apply(*b);
-    check("retirement releases queued callback captures before a drain", queuedCapture.expired());
+    check("retirement defers queued capture destruction until drain", !queuedCapture.expired());
     internal::drainMainThreadQueue();
-    check("retired worker delivery cannot invoke App code", workerCalls == 0);
+    check("retired worker delivery cannot invoke App code and releases its capture", workerCalls == 0 && queuedCapture.expired());
     auto c = window(303);
     State lastB, lastC;
     b->setApp<Probe>(lastB, "last-B"); c->setApp<Probe>(lastC, "last-C");

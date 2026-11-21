@@ -153,7 +153,8 @@ for (const id in REF) {
     if (e.kind !== 'func' || e.owner || e.ns || e.hidden || e.lua_skip || e.deprecated) continue;
     if (e.tparams && e.tparams.length) continue;
     if (/^operator/.test(e.name)) continue;
-    const bindSigs = (e.signatures || []).filter(sigBindable);
+    const bindSigs = (e.signatures || []).filter(s => sigBindable(s) &&
+        !(['loadJson', 'parseJson'].includes(e.name) && s.lua_skip));
     if (!bindSigs.length) continue;
 
     const catId = e.category && CAT_BY_ID.has(e.category) ? e.category : OTHER_ID;

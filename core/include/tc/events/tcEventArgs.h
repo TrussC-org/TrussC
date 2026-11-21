@@ -28,8 +28,20 @@ enum class MouseButton {
 };
 
 // ---------------------------------------------------------------------------
-// Key event arguments
+// Keyboard event arguments
 // ---------------------------------------------------------------------------
+struct CharEventArgs {
+    uint32_t codepoint = 0;
+    bool isRepeat = false;
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+    bool super = false;
+    bool consumed = false;
+    bool injected = false;
+    std::string sourceTag;
+};
+
 struct KeyEventArgs {
     int key = 0;              // Key code (SAPP_KEYCODE_*)
     bool isRepeat = false;    // Whether this is a repeat input
@@ -40,6 +52,8 @@ struct KeyEventArgs {
     // Set by a listener to stop propagation to lower-priority listeners
     // (Event<T>::notify breaks once this is true). See tcEvent.h.
     bool consumed = false;
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // ---------------------------------------------------------------------------
@@ -85,6 +99,8 @@ struct MouseEventArgs {
 
     // Sync legacy scalar mirrors from the canonical Vec2 fields.
     void syncLegacy() { x = pos.x; y = pos.y; }
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // Mouse moved (no button)
@@ -106,6 +122,8 @@ struct MouseMoveEventArgs {
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // Mouse dragged (move with a button held)
@@ -128,6 +146,8 @@ struct MouseDragEventArgs {
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +168,8 @@ struct ScrollEventArgs {
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     void syncLegacy() { scrollX = scroll.x; scrollY = scroll.y; }
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // ---------------------------------------------------------------------------
@@ -170,6 +192,8 @@ struct MouseEventRaw {
     bool alt = false;
     bool super = false;
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +205,8 @@ inline MouseMoveEventArgs toMoveArgs(const MouseEventRaw& m) {
     a.delta = m.delta; a.globalDelta = m.globalDelta;
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
     a.consumed = m.consumed;
+    a.injected = m.injected;
+    a.sourceTag = m.sourceTag;
     a.syncLegacy();
     return a;
 }
@@ -192,6 +218,8 @@ inline MouseDragEventArgs toDragArgs(const MouseEventRaw& m) {
     a.button = m.button;
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
     a.consumed = m.consumed;
+    a.injected = m.injected;
+    a.sourceTag = m.sourceTag;
     a.syncLegacy();
     return a;
 }
@@ -205,6 +233,8 @@ inline MouseEventRaw toRaw(const T& a) {
     if constexpr (requires { a.button; }) m.button = a.button;
     m.shift = a.shift; m.ctrl = a.ctrl; m.alt = a.alt; m.super = a.super;
     m.consumed = a.consumed;
+    m.injected = a.injected;
+    m.sourceTag = a.sourceTag;
     return m;
 }
 
@@ -276,6 +306,8 @@ struct TouchEventArgs {
     float x() const { return numTouches > 0 ? touches[0].x : 0.0f; }
     float y() const { return numTouches > 0 ? touches[0].y : 0.0f; }
     int id() const { return numTouches > 0 ? touches[0].id : 0; }
+    bool injected = false;
+    std::string sourceTag;
 };
 
 // ---------------------------------------------------------------------------

@@ -194,18 +194,27 @@ void preview() {
     Pixels bytes;
     check("resized cache read", stencil.readStencil(bytes));
     Fbo moved(std::move(stencil));
+    if (getWindowWidth() < 320 || getWindowHeight() < 256) {
+        std::puts("SKIP: stencilRoundTrip screen preview needs a 320x256 logical fixture");
+        return;
+    }
+    const float pixelScale = getDpiScale();
     setupScreenOrtho();
     moved.drawStencil(0, 0);
     internal::ensureCurrentPass();
     internal::parkWindowPass();
     Pixels screen;
     check("screen capture", grabScreen(screen));
-    exact = screen.getWidth() == 320 && screen.getHeight() == 256 && screen.getChannels() == 4;
+    exact = screen.getWidth() >= int(320 * pixelScale) &&
+        screen.getHeight() >= int(256 * pixelScale) && screen.getChannels() == 4;
     if (exact) {
         for (int y = 0; y < 256; ++y)
-            for (int x = 0; x < 320; ++x)
+            for (int x = 0; x < 320; ++x) {
+                const int px = int((x + 0.5f) * pixelScale);
+                const int py = int((y + 0.5f) * pixelScale);
                 for (int c = 0; c < 3; ++c)
-                    exact &= screen.getData()[(y * 320 + x) * 4 + c] == x / 20 + 16 * (y / 16);
+                    exact &= screen.getData()[(py * screen.getWidth() + px) * 4 + c] == x / 20 + 16 * (y / 16);
+            }
     }
     check("screen-sized preview RGB equals value/255", exact);
     if (!evidenceDirectory.empty())

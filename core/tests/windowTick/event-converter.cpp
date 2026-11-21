@@ -364,13 +364,13 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
             check("native redraw preserves larger pending count",loop.redrawCount==3);
         }
         // Expected typed notifications by sapp_event_type ordinal. Touch has no points here.
-        constexpr int expected[]={0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,0,0,0,0,1,1,1,1,1,1,0,0};
+        constexpr int expected[]={0,1,1,0,1,1,1,1,1,0,1,1,1,1,0,0,0,0,0,1,1,1,1,1,0,1,0,0};
         static_assert(std::size(expected)==_SAPP_EVENTTYPE_NUM);
-        constexpr bool wakes[]={false,true,true,true,true,true,true,true,true,true,true,true,true,true,false,true,true,true,true,false,false,false,true,true,false,false,false};
+        constexpr bool wakes[]={false,true,true,true,true,true,true,true,true,true,true,true,true,true,false,true,true,true,true,false,false,false,true,true,false,false,false,false};
         static_assert(std::size(wakes)==_SAPP_EVENTTYPE_NUM);
         check("exhaustive typed parity table",typed==(type<_SAPP_EVENTTYPE_NUM?expected[type]:0)&&rawCount==(processEvent ? 0 : 1)&&rawFirst);
         check("exhaustive wake classifier",_sapp_tc_event_wakes(e.type)==(type<_SAPP_EVENTTYPE_NUM?wakes[type]:false));
-        constexpr const char* names[]={"a rawEvent listener","keyPressed()","keyReleased()","a rawEvent listener","mousePressed()","mouseReleased()","mouseScrolled()","mouseMoved()","mouseMoved()","a rawEvent listener","touchPressed()","touchMoved()","touchReleased()","touchReleased()","windowResized()","a rawEvent listener","a rawEvent listener","windowFocusChanged()","windowFocusChanged()","a rawEvent listener","a rawEvent listener","the exitRequested event","the clipboardPasted event","filesDropped()","the deviceLost event","a rawEvent listener","a rawEvent listener"};
+        constexpr const char* names[]={"a rawEvent listener","keyPressed()","keyReleased()","charInput()","mousePressed()","mouseReleased()","mouseScrolled()","mouseMoved()","mouseMoved()","a rawEvent listener","touchPressed()","touchMoved()","touchReleased()","touchReleased()","windowResized()","a rawEvent listener","a rawEvent listener","windowFocusChanged()","windowFocusChanged()","a rawEvent listener","a rawEvent listener","the exitRequested event","the clipboardPasted event","filesDropped()","the backPressed event","the deviceLost event","a rawEvent listener","a rawEvent listener"};
         static_assert(std::size(names)==_SAPP_EVENTTYPE_NUM);
         check("exhaustive diagnostic classifier",std::string(internal::eventEntryName(&e,false))==(type<_SAPP_EVENTTYPE_NUM?names[type]:"a rawEvent listener"));
         counts.push_back(typed);

@@ -295,6 +295,7 @@ void releaseRuntimeWindow(Window&) { ++retirements; }
 struct WindowRequestAccess {
     static void teardown(Window& w) { w.teardown(); }
     static void endForShutdown(Window&) {}
+    static void acceptCodeQuit(Window& w) noexcept { w.closeRequested_ = true; }
     static void unbind(Window& w) { ++unbinds; w.binding_.bound = false; w.binding_.handle = {}; }
 };
 struct Owner {

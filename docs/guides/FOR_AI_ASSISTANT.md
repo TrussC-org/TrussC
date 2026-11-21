@@ -71,7 +71,7 @@ Runtime strongly owns every open Window. Releasing the last external shared hand
 
 Construct content with `window->setApp<Scene>(args...)`, or use `runApp<T>()` / `runHeadlessApp<T>()` to launch an App. Runtime owns the App attachments as well as the Windows. Each construction has its own owner token from before the derived constructor begins; nested construction restores the previous owner. Constructor-owned listeners, tools and completions belong to that candidate. A failed construction or a superseded unpublished candidate retires its registrations without calling setup, exit or cleanup. Direct construction and attaching an existing shared App are rejected. An App must not contain another App as a member or an additional base class. Factories bypass class-specific allocation overrides. `destroyApp()` leaves the Window empty; replacement preserves its event slots, settings and clock.
 
-Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, deliver exit once, disconnect audio and wait, clean up the tree (children first, then the App), then retire subscriptions, tools, completions and weak references. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
+Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, remove ordinary listeners registered by the App, deliver exit once, disconnect audio and wait, clean up the tree (children first, then the App), then retire the remaining subscriptions, tools, completions and weak references. Exit listeners and addons' protected teardown hooks still run during the exit notification. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
 
 Runtime also owns OS session query/commit. Win32 uses a hidden top-level control HWND that outlives user windows; macOS forwards applicationShouldTerminate and NSWorkspaceWillPowerOff on the main queue. Busy means host/App code on the main stack, including native startup, constructor, callback and tick probes; workers alone do not count. Idle queries reuse Runtime-first exitRequested; busy queries accept without entering App callbacks. Commit is unvetoable and deduplicated. Busy commit invokes no App exit or cleanup and arms no watchdog. Windows returns from WM_ENDSESSION and lets the OS end the process; macOS calls _exit(0) before NSTerminateNow. Idle commit runs normal reverse ending and complete cleanup synchronously, closes the Logger file sink, flushes stdio, then calls std::exit with the application exit code on Windows and macOS. Like ordinary exit, it runs atexit handlers and C++ static destructors. Busy and OS-killed ends skip them; neither session path returns to frames.
 
@@ -101,9 +101,25 @@ Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window 
 
 Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Windowed and headless Apps share the update and cleanup tree entries: children, Mods, timers and destroyed-child removal run in both. Each scheduled update uses the same fixed-step and update-time scope. Drawing and hover updates are window-only; headless keeps its fixed rate, bounded catch-up and quit checks between steps.
 
-App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
+App audio callbacks attach after the first setup completes. Ending detaches the Window/root and removes ordinary listeners registered by the App before the exit notification. Exit listeners and addons' protected teardown hooks still run during that notification, around `App::exit()`. Ending then disconnects this App's audio callbacks and waits for callbacks already running, calls cleanup and retires its remaining owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
-Guest retirement cancels registered callbacks and releases their captures. Queued main-thread copies check owner liveness at execution and retain captures until the queue destroys them. Every successfully loaded module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
+Put shutdown work in `App::exit()` rather than relying on ordinary event listeners there:
+
+```cpp
+void tcApp::exit() {
+    logNotice() << "App stopped";
+}
+```
+
+App retirement cancels registered Event callbacks, including callbacks in outstanding synchronous snapshots and queued Main deliveries. Their captures remain alive until every retaining snapshot and queue item is released. Cancellation therefore does not imply immediate capture destruction. Release resources explicitly in the App's `cleanup()` instead of relying on a callback capture's destructor at retirement. For an App with a `Texture texture` member:
+
+```cpp
+void cleanup() override {
+    texture.clear();
+}
+```
+
+Queued Main deliveries check App liveness again before execution. Every successfully loaded guest module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
 
 Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
 
@@ -322,7 +338,8 @@ draw per consecutive run on the same atlas page (A/B/A uses three draws).
 ASCII is built in. Apps / addons register additional glyphs for any
 Unicode codepoint via `tc::bitmapfont::`. The atlas is allocated **lazily**
 and grows tier-by-tier — headless apps and apps that never call
-`drawBitmapString` pay 0 KB of GPU memory.
+`drawBitmapString` get no atlas image (graphics apps still create one
+small sampler at startup).
 
 ```cpp
 using namespace bitmapfont;
@@ -592,9 +609,11 @@ bool onMouseEnter() override;
 bool onMouseLeave() override;
 ```
 
-App-level events:
+App-level input events on the receiving Window:
 ```cpp
 void keyPressed(int key) override;
+void charInput(const CharEventArgs& e) override;
+void filesDropped(const DragDropEventArgs& e) override;
 void mousePressed(Vec2 pos, int button) override;
 void mouseDragged(Vec2 pos, int button) override;
 ```
@@ -606,28 +625,33 @@ regardless of Shift). The defined `KEY_*` constants are `KEY_SPACE`, `KEY_ESCAPE
 `KEY_RIGHT_CONTROL`, `KEY_LEFT_ALT`, `KEY_RIGHT_ALT`, `KEY_LEFT_SUPER`,
 `KEY_RIGHT_SUPER`, and `KEY_F1` through `KEY_F12`.
 
-#### Rich form (dual API)
-Every mouse handler also has a rich overload that takes a per-kind args
-struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
+#### Rich mouse input arguments
+Rich mouse input callbacks in App and Node receive a per-kind args struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
 the default) **or** the rich form — the rich default just forwards to the
 simple one, so existing simple overrides keep working.
 ```cpp
-bool onMousePress (const MouseEventArgs& e) override;   // pressed / released
-bool onMouseMove  (const MouseMoveEventArgs& e) override;
-bool onMouseDrag  (const MouseDragEventArgs& e) override;
-bool onMouseScroll(const ScrollEventArgs& e) override;
-// App-level: mousePressed(const MouseEventArgs&), mouseMoved(const MouseMoveEventArgs&), etc.
+void mousePressed(const MouseEventArgs& e) override {
+    logNotice("input") << e.injected << " " << e.sourceTag;
+}
 ```
 There is one struct per event kind so no field is ever meaningless. Fields:
-- `pos` — local position (in the receiving node's space). `globalPos` — screen space.
+- `pos` — local position (in the receiving node's space). `globalPos` — window content coordinates.
 - `delta` / `globalDelta` — movement since the last event (move/drag only).
 - `button` — `int`, compare with `MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (press/drag).
 - `scroll` — `Vec2` scroll amount (ScrollEventArgs).
 - `shift` / `ctrl` / `alt` / `super` — modifier keys, on every kind.
+- `injected` — true for `Window::injectInput` and MCP input, false for input from a device. Key and touch args also carry this field.
+- `sourceTag` — the supplied injection tag, `"mcp"` for MCP, or empty for input from a device. Key and touch args also carry this field.
 
 > Legacy scalar mirrors (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY`) are
 > kept for source compatibility and slated for removal at v1.0 — prefer the
 > Vec2 fields in new code.
+
+```cpp
+void mouseMoved(const MouseMoveEventArgs& e) override {
+    logNotice("input") << e.pos.x << " " << e.pos.y;
+}
+```
 
 ### Timers
 Any Node (the App is one) can schedule callbacks. Two flavours:
@@ -1384,7 +1408,266 @@ With the CMake Tools extension in VSCode / Cursor, **you can't build until you s
 
 ### What makes TrussC fast and lightweight?
 
-The foundation — a thin wrapper over each OS's native API + C++ — gives a **high performance ceiling, and lets you reach down into the native layer when needed** (high optimization freedom). Commercial frameworks with license fees or OS limits tend to hit a ceiling on optimization; TrussC leaves that open. At the same time you can **deliberately build low-memory apps** — again, thanks to being low-level. Defaults lean toward a small footprint (e.g. the bitmap-font atlas is lazily allocated — 0KB GPU if you never call `drawBitmapString`; IBL/PBR allocate only when used), and you can lower the draw rate with `setFps` / `EVENT_DRIVEN` / `setIndependentFps` (which also saves power and extends runtime). "Thinness" feeds all of this: optimization freedom, low memory, and portability.
+The foundation — a thin wrapper over each OS's native API + C++ — gives a **high performance ceiling, and lets you reach down into the native layer when needed** (high optimization freedom). Commercial frameworks with license fees or OS limits tend to hit a ceiling on optimization; TrussC leaves that open. At the same time you can **deliberately build low-memory apps** — again, thanks to being low-level. Defaults lean toward a small footprint (e.g. the bitmap-font atlas image is created only when `drawBitmapString` is first called; IBL/PBR allocate only when used), and you can lower the draw rate with `setFps` / `EVENT_DRIVEN` / `setIndependentFps` (which also saves power and extends runtime). "Thinness" feeds all of this: optimization freedom, low memory, and portability.
+
+### How do I save power and battery? (setFps / EVENT_DRIVEN)
+
+Drawing less often saves the most power and battery: lower the frame rate, or draw only when something on screen changes.
+
+A fixed, lower rate is the simplest step:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+Event-driven drawing skips frames until you call `redraw()`. Between those frames the loop still wakes each display tick, but the GPU does almost no work. For example:
+```cpp
+void tcApp::setup() {
+    setFps(EVENT_DRIVEN);
+}
+void tcApp::mousePressed(Vec2 pos, int button) {
+    marker = pos;
+    redraw();
+}
+```
+
+- To keep logic and timers at a steady rate while drawing on demand, use `setIndependentFps(60, EVENT_DRIVEN)`.
+- `setFps()`, `setIndependentFps()` and `redraw()` act on the current window (inside a window's callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target another window from anywhere on the main thread.
+- Sentinels: `VSYNC` (-1, follow the display = default) and `EVENT_DRIVEN` (0). `getFpsSettings()` reads the current rates.
+
+On desktop, a hidden window (minimized or fully covered) stops drawing but keeps calling `update()`. To slow updates too, change the rate in an `occludedChanged` listener:
+```cpp
+EventListener visibilityListener; // tcApp member
+void tcApp::setup() {
+    visibilityListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
+        setFps(e.occluded ? 5 : VSYNC);
+    });
+}
+```
+
+A headless app has no drawing at all; lower its update rate in `main.cpp` (see HEADLESS_LINUX.md):
+```cpp
+return runHeadlessApp<tcApp>(HeadlessSettings().setFps(10));
+```
+
+### Screen won't update in event-driven mode? (forgot redraw)
+
+In event-driven mode (`setFps(EVENT_DRIVEN)` or `setIndependentFps(update, EVENT_DRIVEN)`), `draw()` runs only when a frame is requested, so changing state without `redraw()` leaves the old picture on screen (a common trap). TrussC also draws on its own when the window is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame, which can hide the bug until later.
+
+Call `redraw()` right where the visible state changes:
+```cpp
+void tcApp::keyPressed(int key) {
+    showGrid = !showGrid;
+    redraw();
+}
+```
+
+`redraw(count)` asks for several frames, for example to finish a short animation. It keeps the larger of the pending count and `count`; it does not add them.
+
+### How do I make my app faster? (draw calls, meshes, text)
+
+Most speed comes from doing less work per frame: build geometry and text once, keep it on the GPU, and rebuild it only when it changes. Each item below links to the API card with the full rules.
+
+Many points or a fixed shape: build a `Mesh` once and draw it every frame. Mesh keeps its GPU buffers and uploads again only after you edit it (`Mesh::draw`).
+```cpp
+Mesh cloud; // tcApp member
+void tcApp::setup() {
+    cloud.setMode(PrimitiveMode::Points);
+    for (int i = 0; i < 100000; i++) {
+        cloud.addVertex(random(-300.0f, 300.0f), random(-300.0f, 300.0f), random(-300.0f, 300.0f));
+    }
+}
+void tcApp::draw() {
+    cloud.draw();
+}
+```
+- Editing functions mark the mesh changed automatically. If you keep a reference to a vertex array across frames and write through it later, call `cloud.markGpuDirty();` after writing.
+
+Thick lines that rarely change: keep a `StrokeMesh`. `beginStroke()`, `drawStroke()` and `Path::drawStroke()` rebuild a StrokeMesh on the CPU on every call.
+```cpp
+StrokeMesh outline; // tcApp member
+void tcApp::setup() {
+    outline.setWidth(6);
+    outline.addVertex(40, 120);
+    outline.addVertex(150, 40);
+    outline.addVertex(260, 120);
+    outline.update();
+}
+void tcApp::draw() {
+    outline.draw();
+}
+```
+- `draw()` does not call `update()`. After changing the stroke, call `outline.update();` once; an unchanged `update()` does nothing (`StrokeMesh::update`).
+
+Lots of text: `Font::drawString` lays the text out again on every call. `GlyphBatch` builds it once and draws it many times (`GlyphBatch`).
+```cpp
+Font font;        // tcApp member
+GlyphBatch label; // tcApp member
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 24);
+    label.setFont(font);
+    label.add("Score", 20, 40);
+}
+void tcApp::draw() {
+    label.draw();
+}
+```
+
+Heavy per-pixel or per-particle work: move it to the GPU with `Shader`, `FullscreenShader` or `ComputeShader` (C++ only; see `examples/compute/computeParticlesExample`).
+
+Very many draw calls per frame on Metal, WebGPU or Vulkan: each draw takes a slice of the uniform buffer (about 4 MiB per 8,000 draw calls). Metal and WebGPU grow it once with a log notice; Vulkan does not grow it, so reserve enough at startup (`RuntimeSettings::reserveUniformBuffer`):
+```cpp
+int main() {
+    WindowSettings settings;
+    RuntimeSettings runtime;
+    runtime.reserveUniformBuffer(8 * 1024 * 1024);
+    return runApp<tcApp>(settings, runtime);
+}
+```
+
+- Fbo mipmaps cost extra GPU passes at every `end()`. Leave them off (the default) unless the Fbo is drawn much smaller than its size: `fbo.allocate(1920, 1080);` (`Fbo::allocate`).
+- Input feels late on Windows: `settings.setMaxFrameLatency(1);` gives the lowest input latency on D3D11, at the cost of less CPU/GPU overlap (`WindowSettings::setMaxFrameLatency`).
+- Video decoding speed depends on the codec and the OS; see "Which video formats play fast on each OS?" in this section.
+
+### How do I reduce memory use? (fonts, sound, video, buffers)
+
+TrussC allocates most resources only when they are first used, so memory mostly follows what your app loads: fonts, sounds, videos and images.
+
+Fonts keep only the glyphs drawn so far. Oversampling multiplies atlas memory by about n², and mipmaps add about one third. To use the least, turn both down before loading and check the result (`Font::setOversampling`, `Font::setMipmaps`, `Font::getMemoryUsage`):
+```cpp
+void tcApp::setup() {
+    font.setOversampling(1);
+    font.setMipmaps(false);
+    font.load(TC_FONT_SANS, 24);
+}
+void tcApp::keyPressed(int key) {
+    logNotice("Font") << font.getMemoryUsage();
+}
+```
+- `font.clearAtlas();` drops cached glyphs. Fonts with the same file, size and settings share one atlas, so it clears theirs too, and a `GlyphBatch` using the font must be rebuilt afterwards (`Font::clearAtlas`).
+
+Long music: `Sound::loadStream` decodes while playing instead of keeping the whole file in memory.
+```cpp
+Sound music; // tcApp member
+void tcApp::setup() {
+    music.loadStream("music.mp3");
+    music.play();
+}
+```
+- Web has no streaming; `loadStream` logs a warning and loads the whole file instead (`Sound::loadStream`).
+
+Video audio on Linux streams through a small buffer by default. `video.setAudioStreaming(false);` before `load()` loads the whole track for sample-accurate loops and seeks, at the cost of memory (`VideoPlayer::setAudioStreaming`).
+
+After a one-off scene that drew a huge amount of 2D geometry, release the idle drawing buffers between frames. They are created again on the next draw (`releaseSglBuffers`):
+```cpp
+void tcApp::update() {
+    if (leftHeavyScene) {
+        releaseSglBuffers();
+        leftHeavyScene = false;
+    }
+}
+```
+
+- GPU-compressed textures (`Texture::allocateCompressed`, HAP video) stay compressed in GPU memory.
+- `RuntimeSettings::reserveUniformBuffer` costs twice its size on Metal, WebGPU and Vulkan (one copy per frame in flight).
+- On Windows, each extra back buffer from `setMaxFrameLatency` uses about 8 MB at 1080p.
+
+### Which video formats play fast on each OS? (hardware decoding, HAP)
+
+`VideoPlayer` uses each OS's own video system, so decoding speed depends on the OS and the codec more than on TrussC.
+
+- macOS and iOS use AVFoundation, Windows uses Media Foundation, and Web uses the browser's video element. They choose hardware decoding on their own.
+- Linux uses FFmpeg. `setUseHwAccel` (on by default) tries CUDA, VAAPI, VDPAU, V4L2M2M and DRM in order and falls back to software decoding.
+
+Check which path a clip actually uses after loading (`VideoPlayer::setUseHwAccel`):
+```cpp
+void tcApp::setup() {
+    video.load("clip.mp4");
+    logNotice("Video") << video.isUsingHwAccel() << " " << video.getHwAccelName();
+}
+```
+
+- Linux hardware decoding keeps frames as NV12 on the GPU and skips the CPU color conversion, so `getPixels()` returns `nullptr` on that path. Draw with the player itself: `video.draw(0, 0);`.
+
+When you need a video's pixels on the CPU, draw it into an Fbo and read the Fbo back. This works with every decoder, including hardware decoding and HAP, and copies only the frames you ask for (`Fbo::readPixels`):
+```cpp
+VideoPlayer video; // tcApp member
+Fbo fbo;           // tcApp member
+Pixels pixels;     // tcApp member
+void tcApp::setup() {
+    video.load("clip.mp4");
+    fbo.allocate(video.getWidth(), video.getHeight());
+}
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        if (fbo.readPixels(pixels)) {
+            // use pixels
+        }
+    }
+}
+```
+- `readPixels()` returns false on WebGPU and inside another active Fbo. There, keep the frame on the GPU: `fbo.getTexture().draw(0, 0);`.
+
+- Raspberry Pi 4 decodes H.264 in hardware through V4L2M2M. Raspberry Pi 5 has no H.264 hardware decoder, and TrussC currently decodes HEVC in software there too, so prefer modest resolutions or HAP on Pi 5.
+- Rotated clips (portrait phone videos) cost extra CPU on the Linux software path, about half a core at 1080p30 on a Raspberry Pi 5. Re-encode them upright once: `ffmpeg -i in.mp4 -c:a copy out.mp4` (`VideoPlayer::getRotation`).
+
+HAP (`tcxHap` addon) stores frames as GPU-compressed (BC) textures. The CPU only unpacks a light compression layer and the GPU samples the frames directly, so CPU use stays very low. It suits many videos at once or very high resolutions; files are large. It needs a GPU that supports the movie's BC format and fails to load cleanly without it (for example on the iOS Simulator):
+```cpp
+tcx::hap::HapPlayer movie; // tcApp member
+void tcApp::setup() {
+    movie.load("clip_hap.mov");
+    movie.play();
+}
+void tcApp::update() {
+    movie.update();
+}
+void tcApp::draw() {
+    movie.draw(0, 0);
+}
+```
+
+### Which build type is fastest or smallest? (Debug, RelWithDebInfo, Release)
+
+`trusscli build` uses RelWithDebInfo (-O2 with debug info) by default, which is fast enough for everyday work and still debuggable. Release mainly removes debug info and makes the binary smaller; the speed gain over the default is usually small.
+
+```bash
+trusscli build --release   # -O3, no debug info: use for distribution (DISTRIBUTION.md)
+trusscli build --debug     # -O0 -g: slow, for stepping through code in a debugger
+```
+
+- The three flags are mutually exclusive and apply to native builds only. Web projects build as MinSizeRel (-Os, smallest download) and Android as Release.
+- A smaller binary also comes from adding only the addons you use: addons not listed in `addons.make` are neither built nor linked.
+
+### General techniques for faster code (SoA, reuse, rebuild on change)
+
+These are general C++ habits rather than TrussC features, and they help in every hot loop.
+
+Store each value in its own array (structure of arrays, SoA) instead of an array of objects. The data stays in cache, and array functions such as `mean` and `minMax` can use SIMD:
+```cpp
+vector<float> speeds; // tcApp member
+void tcApp::update() {
+    float average = mean(speeds);
+}
+```
+
+Avoid `new` / `delete` and growing containers every frame. Reserve once and reuse:
+```cpp
+vector<Vec2> trail; // tcApp member
+void tcApp::setup() {
+    trail.reserve(1000);
+}
+void tcApp::update() {
+    trail.clear();
+}
+```
+- `clear()` keeps the reserved capacity, so later `push_back` calls in the same frame do not allocate.
+
+Rebuild only when the data changes. Mesh, StrokeMesh and GlyphBatch all work this way: build in `setup()` or when an input changes, and only draw in `draw()`.
 
 ### Can I make a console / headless app (no draw)?
 
@@ -1398,20 +1681,7 @@ Heavy dependencies are **split into addons.** Even official features that are he
 
 ### Are physics / many objects too heavy?
 
-Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics** (Jolt Physics) is fast even on the CPU because it's C++, and **handles hundreds of objects on wasm (web) without falling over.** Avoiding "web is slow" is possible because of the thin native layer + C++ foundation.
-
-### Can I run for hours / keep power low on mobile? (FPS control)
-
-TrussC keeps resource use small, so power draw is low — lightness helps battery, not just frame rate. Lowering draw frequency helps most:
-- `setFps(60)` for a fixed rate; `setFps(EVENT_DRIVEN)` for "draw only when `redraw()` is called."
-- `setFps()`, `setIndependentFps()` and `redraw()` target the current window (inside a window’s callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target that window from anywhere on the main thread.
-- `setIndependentFps(updateFps, drawFps)` separates update and draw rates. e.g. `setIndependentFps(60, EVENT_DRIVEN)` runs logic/timers steadily at 60fps but draws only when the screen changes via `redraw()` — an idle UI barely touches the GPU.
-- Sentinels: `VSYNC` (-1, monitor sync = default) and `EVENT_DRIVEN` (0). `redraw(count = 1)` requests a draw; `getFpsSettings()` reads the current rate.
-A barely-redrawing UI can run for many hours on mobile.
-
-### Screen won't update in event-driven mode? (forgot redraw)
-
-The top power-saving recommendation is **event-driven** (`setFps(EVENT_DRIVEN)` or `setIndependentFps(update, EVENT_DRIVEN)`). The catch: in this mode `draw()` only runs **when you call `redraw()`.** So if you change UI state but forget `redraw()`, the screen won't change and you'll go "huh, nothing happened" (a common trap). Make it a habit to **call `redraw()` on every change that affects appearance.** Do that consistently and an idle UI uses near-zero GPU.
+Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics** (Jolt Physics) is fast even on the CPU because it's C++; in our own projects it has **handled hundreds of objects on wasm (web)** without trouble. Avoiding "web is slow" is possible because of the thin native layer + C++ foundation.
 
 ### Optimizing / reusing shaders? (sokol-shdc)
 
@@ -1419,11 +1689,15 @@ Offloading heavy work to the GPU is the standard move. Thanks to **sokol-shdc**,
 
 ### Optimizations possible because it's low-level?
 
-Because TrussC is header-only and all-source, **you can optimize the foundation itself.** Real examples: changing the (deferred) draw buffer from a fixed size to **dynamic growth**, and adding a **10-bit color** render target. Such sokol-derived modifications are collected in `sokol_gl_tc.h` (a fork of sokol_gl). These are parts you can't touch in a proprietary environment — TrussC's escape-hatch strength.
+Because TrussC ships as full source, including its sokol fork, **you can optimize the foundation itself.** Real examples: changing the (deferred) draw buffer from a fixed size to **dynamic growth**, and adding a **10-bit color** render target. Such sokol-derived modifications are collected in `sokol_gl_tc.h` (a fork of sokol_gl). These are parts you can't touch in a proprietary environment — TrussC's escape-hatch strength.
 
-### How low-end can it run? (target floor + power evidence)
+### How low-end can it run? (Raspberry Pi, phones, battery)
 
-The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers are tuned for it). On Raspberry Pi, **native-API video playback** works too. For always-on UI tools, event-driven brings idle power to near zero — e.g. TrussC's own "TrussC Project Generator" (the trusscli GUI) barely uses battery when left running. Always-on display apps on a 2025-era phone, and wearable-tracking-style apps, have run for nearly a day / ~10 hours on mid-range devices. Low-level + C++ + small defaults is what makes it "scale down."
+Graphics apps need OpenGL ES 3.0 or newer, so on Raspberry Pi that means a Pi 4 or Pi 5; both are regular test devices. Older VideoCore IV boards such as the Pi Zero and Pi 3 only offer OpenGL ES 2.0, so they cannot run graphics apps; a headless app (`runHeadlessApp`) needs no GPU and still runs there. Video on Raspberry Pi is covered in "Which video formats play fast on each OS?" in this section.
+
+Field experience from the TrussC authors, not measured guarantees:
+- The TrussC Project Generator (the trusscli GUI) runs event-driven and barely uses battery when left open.
+- Always-on display apps on a 2025 mid-range phone, and wearable-tracking style apps, have run for about 10 hours up to most of a day.
 
 ## Node & Mod patterns
 
@@ -1517,7 +1791,7 @@ public:
 };
 ```
 
-App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
+App audio callbacks attach after the first setup completes. Ending detaches the Window/root and removes ordinary listeners registered by the App before the exit notification. Exit listeners and addons' protected teardown hooks still run during that notification, around `App::exit()`. Ending then disconnects this App's audio callbacks and waits for callbacks already running, calls cleanup and retires its remaining owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
 ### Bubble events up, don't broadcast?
 
@@ -2082,6 +2356,7 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 - Save/restore settings: JSON + reflection (`TC_REFLECT`)
 - HTTP request: addon **tcxCurl** / OSC: addon **tcxOsc** / serial: `Serial`
 - File picker dialog: `loadDialog()` / `saveDialog()` (→ `FileDialogResult`)
+- Receive typed characters: `events().charInput` / `App::charInput` (`CharEventArgs`, one Unicode scalar per event)
 - Receive dropped files: `events().filesDropped` (`DragDropEventArgs`)
 - Clipboard: `setClipboardString(text)` (paste arrives via the `clipboardPasted` event)
 - Number → string: `toString(value[, precision])` (oF `ofToString`; reverse: `toInt` / `toFloat` / `toBool`)
@@ -2223,11 +2498,13 @@ void endStroke(bool close = false)  // Finish drawing the current stroke.
 float getBitmapFontHeight()  // Get the bitmap font's fixed cell height in pixels.
 float getBitmapLineHeight()  // Get the current line spacing used for newlines in bitmap text.
 Rect getBitmapStringBBox(const std::string & text)  // Get the text's bounding box as a Rect.
-void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get a bitmap string's width and height through output parameters.
+void getBitmapStringBounds(const std::string & text, float & width, float & height) ⚠️deprecated  // Deprecated: use getBitmapStringBBox() for bitmap text size; removed in v1.0.0.
 float getBitmapStringHeight(const std::string & text)  // Get the text's rendered height in pixels.
 float getBitmapStringWidth(const std::string & text)  // Get the text's rendered width in pixels.
 Direction getTextAlignH()  // Get the current horizontal text alignment.
 Direction getTextAlignV()  // Get the current vertical text alignment.
+ShapeScope scopedShape(bool close = false)  // Calls `beginShape()` now and `endShape(close)` automatically at scope exit, also on an early return.
+StrokeScope scopedStroke(bool close = false)  // Calls `beginStroke()` now and `endStroke(close)` automatically at scope exit, also on an early return.
 void setBitmapLineHeight(float h)  // Set the line spacing used for newlines in bitmap text.
 void setFps(float fps)  // Set the target frame rate that update and draw run at together.
 void setTextAlign(Direction h, Direction v)  // Set the anchor point used when drawing bitmap text.
@@ -2530,7 +2807,7 @@ int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
 bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
-IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
+IVec2 getWindowPosition() [macos,windows,linux]  // Returns the current window’s position in OS screen coordinates; returns (-1, -1) when unavailable.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
 bool isFullscreen()  // Returns this window's observed fullscreen state.
 bool isRecording()  // Returns whether the global screen recorder is capturing.
@@ -2581,7 +2858,7 @@ LogStream logNotice(const std::string & module = std::string(""))  // Logs a mes
 LogStream logVerbose(const std::string & module = std::string(""))  // Creates a stream for verbose-level log messages.
 LogStream logWarning(const std::string & module = std::string(""))  // Creates a stream for warning-level logging.
 Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serializes a node and its subtree to JSON.
-Json parseJson(const std::string & str)  // Parses a JSON string into a Json value.
+Json parseJson(const std::string & str) [+1]  // Parses JSON text; use the LoadResult overload to distinguish failure from valid null.
 Xml parseXml(const std::string & str)  // Parses an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Applies JSON values to an object's reflected members.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Returns an object's reflected members as JSON.
@@ -2647,7 +2924,7 @@ fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Return a path
 std::string joinPath(const fs::path & dir, const fs::path & file)  // Joins two filesystem paths.
 std::vector<std::string> listDirectory(const fs::path & path)  // Lists the immediate files and directories in a directory.
 const char * loadErrorName(LoadError e)  // Returns the short name of a load error.
-Json loadJson(const fs::path & path)  // Loads a JSON value from a file.
+Json loadJson(const fs::path & path) [+1]  // Loads a JSON file; use the LoadResult overload to distinguish failure from valid null.
 std::string loadTextFile(const fs::path & path)  // Loads an entire file into a string.
 Xml loadXml(const fs::path & path)  // Loads an XML file into an Xml object.
 std::string pathToUtf8(const fs::path & p)  // Converts a filesystem path to a UTF-8 string.
@@ -2945,8 +3222,9 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ```cpp
 void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native capture thread for every microphone block.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
+void App::charInput(const CharEventArgs & e)  // Called for one typed character in this Window.
 void App::exit()  // Called once when the App ends, right before cleanup().
-void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
+void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped paths and position in this Window, while preserving path-only overrides.
 Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const ⚠️deprecated  // Returns whether the deprecated requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
@@ -3070,6 +3348,11 @@ int BuildInfo::year()  // Returns the year when the build was configured.
 ```cpp
 Ray CameraContext::screenPointToRay(float screenX, float screenY) const  // Converts a screen point into a world-space ray.
 Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Projects a world position into screen coordinates.
+```
+
+### CharEventArgs — One typed Unicode scalar, with repeat, modifier, and injection information.
+
+```cpp
 ```
 
 ### ChipSoundBundle — Combines timed chiptune notes into a single sound.
@@ -3329,10 +3612,11 @@ int Fbo::getWidth() const  // Returns the framebuffer width.
 bool Fbo::isActive() const  // Reports whether the framebuffer has an active rendering scope.
 bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeeded.
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a top-first CPU RGBA8 buffer.
-bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
+bool Fbo::readPixels(unsigned char * pixels) const [+1] [macos,windows,linux,ios,android,web]  // Reads an ended Fbo as RGBA8 into Pixels with automatic sizing or a byte buffer allocated by the caller.
+bool Fbo::readPixelsFloat(float * pixels) const [+1] [macos,ios,windows,linux,android,web]  // Reads an ended Fbo as F32 into Pixels with automatic sizing or a float buffer allocated by the caller, using the source channel count.
 bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads ended single-sample Fbo stencil bytes into one-channel U8 Pixels for debugging.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
+FboScope Fbo::scoped() [+1]  // Calls `Fbo::begin()` now and `Fbo::end()` automatically at scope exit, also on an early return.
 void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
 
@@ -3470,7 +3754,7 @@ void FullscreenShader::setParams(const T & params)  // Sets the uniform paramete
 ### GlyphBatch — Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused.
 
 ```cpp
-void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
+void GlyphBatch::add(uint32_t codepoint) [+8]  // Appends retained text at a position or with a matrix, avoiding per-string matrix-stack changes.
 void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
 void GlyphBatch::draw() [+1]  // Draws the retained glyphs with the current camera, target and blend mode; draw(transform) places the whole batch.
 const Color & GlyphBatch::getColor() const  // Returns the current batch color.
@@ -3592,6 +3876,27 @@ void Image::setColor(int x, int y, const Color & c)  // Sets a CPU pixel color.
 void Image::setDebugName(const std::string & name)  // Sets the image name used for MCP inspection.
 void Image::setDirty()  // Marks the image as needing a texture update.
 void Image::update()  // Uploads pending CPU pixel changes to the texture.
+```
+
+### InputEvent — Copies input to send to a Window with Window::injectInput.
+
+```cpp
+InputEvent InputEvent::charInput(uint32_t codepoint, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds one character input from a Unicode scalar or received CharEventArgs.
+InputEvent InputEvent::filesDropped(std::vector<std::string> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
+InputEvent InputEvent::keyPressed(int key, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds a keyPressed input from values or received arguments.
+InputEvent InputEvent::keyReleased(int key, InputModifiers mods = {}) [+1]  // Builds a keyReleased input from values or received arguments.
+InputEvent InputEvent::mouseMoved(Vec2 pos, InputModifiers mods = {}) [+1]  // Builds a mouseMoved input from values or received arguments.
+InputEvent InputEvent::mousePressed(Vec2 pos, MouseButton button, InputModifiers mods = {}) [+1]  // Builds a mousePressed input from values or received arguments.
+InputEvent InputEvent::mouseReleased(Vec2 pos, MouseButton button, InputModifiers mods = {}) [+1]  // Builds a mouseReleased input from values or received arguments.
+InputEvent InputEvent::mouseScrolled(Vec2 scroll, InputModifiers mods = {}) [+1]  // Builds a mouseScrolled input from values or received arguments.
+InputEvent InputEvent::touchMoved(const TouchEventArgs & event)  // Builds a touchMoved input from received touch arguments.
+InputEvent InputEvent::touchPressed(const TouchEventArgs & event)  // Builds a touchPressed input from received touch arguments.
+InputEvent InputEvent::touchReleased(const TouchEventArgs & event)  // Builds a touchReleased input from received touch arguments.
+```
+
+### InputModifiers — Modifier flags copied into an injected key, mouse or scroll event.
+
+```cpp
 ```
 
 ### JsonReadReflector — Reads JSON values into reflected members.
@@ -4481,6 +4786,7 @@ bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a shad
 void Shader::onBegin()  // Runs when this shader's drawing scope begins.
 void Shader::onEnd()  // Runs when this shader's drawing scope ends.
 sg_pipeline Shader::pipelineForCurrentTarget()  // Returns a shader pipeline compatible with the current render target.
+ShaderScope Shader::scoped()  // Calls `Shader::begin()` now and `Shader::end()` automatically at scope exit, also on an early return.
 bool Shader::setStorageBuffer(int slot, const StorageBuffer & buffer)  // Binds read-only storage for deferred graphics drawing (C++ only).
 void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Stores a texture binding for a shader slot.
 void Shader::setUniform(int slot, float value) [+9]  // Stores uniform-block data for a shader slot.
@@ -5103,7 +5409,7 @@ std::string VideoPlayerBase::getHwAccelName() const  // Return the reported deco
 float VideoPlayerBase::getPan() const  // Returns the stored stereo pan.
 unsigned char * VideoPlayerBase::getPixels() [+1]  // Return a pointer to the player's RGBA pixel buffer.
 float VideoPlayerBase::getPosition() const  // Return the normalized playback position.
-float VideoPlayerBase::getResyncThreshold() const  // Returns the hard resynchronization threshold.
+float VideoPlayerBase::getResyncThreshold() const  // Returns the playback catch-up threshold in seconds.
 float VideoPlayerBase::getSpeed() const  // Returns the stored playback speed.
 Texture & VideoPlayerBase::getTexture() [+1]  // Return the player's video texture.
 int VideoPlayerBase::getTotalFrames() const  // Return the total frame count.
@@ -5142,7 +5448,7 @@ void VideoPlayerBase::setPaused(bool paused)  // Pauses or resumes playback.
 void VideoPlayerBase::setPausedImpl(bool paused)  // Provide backend pause control.
 void VideoPlayerBase::setPosition(float pct)  // Seek to a normalized playback position.
 void VideoPlayerBase::setPositionImpl(float pct)  // Provide backend seeking to a normalized position.
-void VideoPlayerBase::setResyncThreshold(float seconds)  // Sets the threshold for hard playback resynchronization.
+void VideoPlayerBase::setResyncThreshold(float seconds)  // Sets the Linux playback lag threshold for trying to catch up (default 0.5 seconds), not a maximum lag; keyframe spacing and decoding speed determine the lag. HapPlayer uses it for hard audio resynchronization.
 void VideoPlayerBase::setSpeed(float speed)  // Sets the requested playback speed.
 void VideoPlayerBase::setSpeedImpl(float speed)  // Apply playback speed to the playback backend.
 void VideoPlayerBase::setVolume(float vol)  // Sets the audio volume.
@@ -5188,9 +5494,10 @@ CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
 float Window::getFps() const  // Returns this window's target frame rate.
 int Window::getHeight() const  // Returns this window's content height.
-IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
+IVec2 Window::getPosition() const [macos,windows,linux]  // Reads this window’s position in OS screen coordinates; use it on desktop when you need the decorated frame location. Returns (-1, -1) when unavailable.
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
+bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values).
 bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
 bool Window::isFullscreen() const  // Returns this window's observed fullscreen state.
 bool Window::isOccluded() const  // Returns whether this window is explicitly hidden, minimized or fully occluded.

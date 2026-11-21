@@ -169,12 +169,11 @@ void applyKeepScreenOn(bool enabled, bool headless) {
 // ---------------------------------------------------------------------------
 IVec2 internal::windowPositionNative(const void* handle) {
     HWND hwnd = (HWND)handle;
-    if (!hwnd) return IVec2(-1, -1);
-
     RECT rect;
-    if (GetWindowRect(hwnd, &rect)) {
+    if (hwnd && GetWindowRect(hwnd, &rect)) {
         return IVec2(rect.left, rect.top);
     }
+    logWarning("Platform") << "getWindowPosition() could not read the native window position";
     return IVec2(-1, -1);
 }
 

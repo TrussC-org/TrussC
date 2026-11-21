@@ -55,18 +55,50 @@ string jsonNesting(int depth) { return string(size_t(depth), '[') + "0" + string
 }
 
 TC_CORE_TEST_MAIN() {
-    int notices = 0, warnings = 0;
+    int notices = 0, warnings = 0, errors = 0;
     string lastError;
     auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
         if (event.level == LogLevel::Notice) ++notices;
         if (event.level == LogLevel::Warning) ++warnings;
-        if (event.level == LogLevel::Error) lastError = event.message;
+        if (event.level == LogLevel::Error) { ++errors; lastError = event.message; }
     });
     check("upstream JSON accepts nesting beyond 64", !Json::parse(jsonNesting(65)).is_discarded());
     const string nulJson = string("{\"count\":42}") + char(0) + "not-json";
     check("JSON raw NUL rejects the whole string", parseJson(nulJson).is_null());
     check("JSON trailing raw NUL rejects the document", parseJson(string("{}") + char(0)).is_null());
     check("JSON escaped NUL remains valid", parseJson(R"({"name":"\u0000"})")["name"] == string(1, char(0)));
+    Json output = {{"keep", 7}};
+    check("JSON result distinguishes valid null", parseJson("null", output).ok() && output.is_null());
+    check("JSON result parses objects", parseJson(R"({"value":42})", output).ok() && output["value"] == 42);
+    const Json unchanged = {{"keep", 7}};
+    for (const auto& input : {string(""), string("{"), nulJson, string("{}") + char(0)}) {
+        output = unchanged;
+        const int errorsBefore = errors;
+        const auto result = parseJson(input, output);
+        check("JSON parse failure has position and preserves output",
+              result.error == LoadError::DecodeFailed && output == unchanged &&
+              result.message.find("byte ") != string::npos);
+        check("JSON result parse failure logs once", errors == errorsBefore + 1);
+    }
+    const string privateSentinel = "json-private-sentinel";
+    const string privateMalformed = "{\"value\":\"" + privateSentinel;
+    for (const auto& input : {privateMalformed, string("1e1000"), string("1e1000x")}) {
+        output = unchanged;
+        const int errorsBefore = errors;
+        const auto result = parseJson(input, output);
+        check("JSON rejected content is a decode failure and preserves output",
+              result.error == LoadError::DecodeFailed && output == unchanged);
+        check("JSON parse diagnostics omit document contents",
+              result.message.find(privateSentinel) == string::npos &&
+              lastError.find(privateSentinel) == string::npos && errors == errorsBefore + 1);
+    }
+    const auto positioned = parseJson("{", output);
+    check("JSON parse position is one-based byte offset", positioned.message.find("byte 2:") != string::npos);
+    check("JSON escaped NUL result remains valid",
+          parseJson(R"({"name":"\u0000"})", output).ok() && output["name"] == string(1, char(0)));
+    check("legacy JSON valid null remains null", parseJson("null").is_null());
+    check("legacy JSON malformed input retains generic error",
+          parseJson("{").is_null() && lastError == "[Json] invalid JSON document");
     Xml xml;
     check("XML baseline document parses", xml.parse("<n/>"));
     check("XML syntax failure preserves previous document", !xml.parse("<broken>") && string(xml.root().name()) == "n");
@@ -185,6 +217,42 @@ TC_CORE_TEST_MAIN() {
     { ofstream file(nulPath, ios::binary); file.write(nulJson.data(), nulJson.size()); }
     check("JSON raw NUL rejects the complete local file", loadJson(nulPath).is_null());
     check("JSON raw NUL file error names the file", lastError.find(pathToUtf8(nulPath)) != string::npos);
+    const auto rejectedPath = folder / "rejected.json";
+    for (const auto& input : {privateMalformed, string("1e1000"), string("1e1000x")}) {
+        { ofstream file(rejectedPath, ios::binary); file << input; }
+        output = unchanged;
+        const int errorsBefore = errors;
+        const auto result = loadJson(rejectedPath, output);
+        check("JSON rejected file is a decode failure and preserves output",
+              result.error == LoadError::DecodeFailed && output == unchanged &&
+              result.message.find(pathToUtf8(rejectedPath)) != string::npos);
+        check("JSON file diagnostics omit document contents",
+              result.message.find(privateSentinel) == string::npos &&
+              lastError.find(privateSentinel) == string::npos && errors == errorsBefore + 1);
+    }
+    const auto nullPath = folder / "null.json";
+    { ofstream file(nullPath, ios::binary); file << "null"; }
+    check("JSON file result distinguishes valid null", loadJson(nullPath, output).ok() && output.is_null());
+    check("legacy JSON null file remains null", loadJson(nullPath).is_null());
+    const auto missingPath = folder / "missing.json";
+    for (const auto& path : {missingPath, emptyJsonPath, brokenJson, nulPath}) {
+        output = unchanged;
+        const int errorsBefore = errors;
+        const auto result = loadJson(path, output);
+        check("JSON file failure classifies error and preserves output",
+              result.error == (path == missingPath ? LoadError::FileNotFound : LoadError::DecodeFailed) &&
+              output == unchanged && result.message.find(pathToUtf8(path)) != string::npos);
+        check("JSON result file failure logs once", errors == errorsBefore + 1);
+        if (path != missingPath)
+            check("JSON file failure includes byte position", result.message.find("byte ") != string::npos);
+        else
+            check("JSON missing path uses shared reporter", lastError == "[Json] " + result.message);
+        if (path == brokenJson)
+            check("JSON file malformed position retained", result.message.find("byte 2:") != string::npos);
+    }
+    setDataPathRoot(folder);
+    check("JSON result resolves relative data path", loadJson("null.json", output).ok() && output.is_null());
+    setDataPathRoot(oldDataRoot);
     const fs::path jsonPath = folder / "large.json";
     const fs::path xmlPath = folder / "large.xml";
     const string payload(16u * 1024u * 1024u + 32, 'a');
