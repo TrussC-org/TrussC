@@ -1436,7 +1436,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 - `setFps()`, `setIndependentFps()` and `redraw()` act on the current window (inside a window's callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target another window from anywhere on the main thread.
 - Sentinels: `VSYNC` (-1, follow the display = default) and `EVENT_DRIVEN` (0). `getFpsSettings()` reads the current rates.
 
-A hidden window (minimized or fully covered) stops drawing but keeps calling `update()`. To slow updates too, change the rate in an `occludedChanged` listener:
+On desktop, a hidden window (minimized or fully covered) stops drawing but keeps calling `update()`. To slow updates too, change the rate in an `occludedChanged` listener:
 ```cpp
 EventListener visibilityListener; // tcApp member
 void tcApp::setup() {
