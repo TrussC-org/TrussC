@@ -51,7 +51,7 @@ class VersionTests(unittest.TestCase):
         self.git("-C", self.source, "branch", "feature/version+test")
         self.git("-C", self.source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                  "tag", "-a", "annotated", self.initial, "-m", "annotated release")
-        for owner in ("tettou771", "fork-owner"):
+        for owner in ("TrussC-org", "tettou771"):
             remote = self.base / "remotes" / owner / "TrussC.git"
             remote.parent.mkdir(parents=True, exist_ok=True)
             self.git("clone", "--bare", self.source, remote)
@@ -97,13 +97,13 @@ class VersionTests(unittest.TestCase):
         return json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))["vendor"]["trussc"].get("localPath")
 
     def test_tags_branches_commits_forks_and_tag_priority(self):
-        for spec, commit, owner, ref in (("v1", self.initial, "tettou771", "v1"),
-                ("main", self.moved, "tettou771", "main"),
-                (self.initial, self.initial, "tettou771", self.initial),
-                ("fork-owner/TrussC@v1", self.initial, "fork-owner", "v1"),
-                ("shared", self.initial, "tettou771", "shared"),
-                ("annotated", self.initial, "tettou771", "annotated"),
-                ("feature/version+test", self.moved, "tettou771", "feature/version+test")):
+        for spec, commit, owner, ref in (("v1", self.initial, "TrussC-org", "v1"),
+                ("main", self.moved, "TrussC-org", "main"),
+                (self.initial, self.initial, "TrussC-org", self.initial),
+                ("tettou771/TrussC@v1", self.initial, "tettou771", "v1"),
+                ("shared", self.initial, "TrussC-org", "shared"),
+                ("annotated", self.initial, "TrussC-org", "annotated"),
+                ("feature/version+test", self.moved, "TrussC-org", "feature/version+test")):
             with self.subTest(spec=spec):
                 self.cli("use", spec)
                 expected = self.cache / "versions" / owner / "TrussC" / ref
@@ -112,9 +112,28 @@ class VersionTests(unittest.TestCase):
                 self.assertTrue((self.cache / "repos" / owner / "TrussC.git").is_dir())
                 self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8").strip(), spec)
 
+    def test_official_and_fork_same_tag_keep_separate_worktrees(self):
+        fork_remote = self.base / "remotes/tettou771/TrussC.git"
+        self.git("--git-dir=" + str(fork_remote), "update-ref", "refs/tags/v1", self.moved)
+        official = self.cache / "versions/TrussC-org/TrussC/v1"
+        fork = self.cache / "versions/tettou771/TrussC/v1"
+        acquired = {}
+        for spec, root, commit in (("v1", official, self.initial),
+                                   ("tettou771/TrussC@v1", fork, self.moved),
+                                   ("v1", official, self.initial)):
+            with self.subTest(spec=spec):
+                self.cli("use", spec)
+                self.assertEqual(self.root(), root)
+                acquired[root] = commit
+                for worktree, expected in acquired.items():
+                    self.assertEqual(self.git("-C", worktree, "rev-parse", "HEAD").strip(), expected)
+                output = self.cli("build", "--dry-run")
+                self.assertIn("-DTRUSSC_DIR=" + str(root / "core"), output)
+                self.assertIn(commit, output)
+
     def test_colliding_ref_paths_do_not_reuse_other_worktrees(self):
         self.git("-C", self.source, "branch", "v1/core")
-        self.git("-C", self.source, "push", self.base / "remotes/tettou771/TrussC.git", "refs/heads/v1/core")
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "refs/heads/v1/core")
         for first, second, commit in (("v1", "v1/core", self.initial),
                                       ("v1/core", "v1", self.moved)):
             with self.subTest(first=first):
@@ -129,7 +148,7 @@ class VersionTests(unittest.TestCase):
 
     def test_commit_id_wins_over_hex_named_tag(self):
         self.git("-C", self.source, "tag", self.initial, self.moved)
-        self.git("-C", self.source, "push", self.base / "remotes/tettou771/TrussC.git",
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git",
                  "refs/tags/" + self.initial)
         self.cli("use", self.initial)
         self.assertEqual(self.git("-C", self.root(), "rev-parse", "HEAD").strip(), self.initial)
@@ -142,7 +161,7 @@ class VersionTests(unittest.TestCase):
         self.advance()
         self.git("-C", self.source, "tag", "parent")
         self.git("-C", self.source, "branch", "parent/escape/child")
-        self.git("-C", self.source, "push", self.base / "remotes/tettou771/TrussC.git",
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git",
                  "refs/tags/parent", "refs/heads/parent/escape/child")
         self.cli("use", "parent")
         self.assertTrue((self.root() / "escape").is_symlink())
@@ -172,7 +191,7 @@ class VersionTests(unittest.TestCase):
         self.cli("use", "main")
         self.advance()
         latest = self.git("-C", self.source, "rev-parse", "HEAD").strip()
-        self.git("-C", self.source, "push", self.base / "remotes/tettou771/TrussC.git", "main")
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main")
         out = self.cli("build", "--dry-run")
         self.assertIn(self.moved, out)
         self.assertNotIn(latest, out)
@@ -189,7 +208,7 @@ class VersionTests(unittest.TestCase):
             self.assertIn("run `trusscli update`", out)
             self.assertFalse(self.cache.exists())
         self.cli("update", "--ide", "cmake")
-        self.assertEqual(self.root(), self.cache / "versions/tettou771/TrussC/v1")
+        self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/v1")
         shutil.rmtree(self.root())
         self.cli("build", success=False)
         self.cli("update")
@@ -204,14 +223,14 @@ class VersionTests(unittest.TestCase):
         (self.project / ".trussc-version").write_text("main\n", encoding="utf-8")
         self.cli("update")
         self.assertEqual(self.root(), self.source)
-        self.assertFalse((self.cache / "versions/tettou771/TrussC/main").exists())
+        self.assertFalse((self.cache / "versions/TrussC-org/TrussC/main").exists())
         self.cli("use-local", "--clear")
-        self.assertEqual(self.root(), self.cache / "versions/tettou771/TrussC/main")
+        self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/main")
         self.assertIsNone(self.local())
         self.cli("use-local", self.source)
         self.cli("use", "v1")
         self.assertIsNone(self.local())
-        self.assertEqual(self.root(), self.cache / "versions/tettou771/TrussC/v1")
+        self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/v1")
         self.cli("update", "--tc-root", self.source)
         self.assertEqual(self.local(), self.source.as_posix())
         self.cli("use", "--clear")
@@ -227,7 +246,7 @@ class VersionTests(unittest.TestCase):
         (self.project / ".trussc-version").write_text("main\n", encoding="utf-8")
         out = self.cli("build", "--dry-run")
         self.assertIn(self.moved, out)
-        self.assertIn("-DTRUSSC_DIR=" + str(self.cache / "versions/tettou771/TrussC/main/core"), out)
+        self.assertIn("-DTRUSSC_DIR=" + str(self.cache / "versions/TrussC-org/TrussC/main/core"), out)
         self.cli("use-local", self.source)
         (self.project / ".trussc-version").write_text("unavailable\n", encoding="utf-8")
         self.assertIn(str(self.source), self.cli("build", "--dry-run"))

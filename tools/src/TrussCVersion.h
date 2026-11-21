@@ -5,7 +5,7 @@
 
 namespace trusscVersion {
 struct Spec {
-    std::string owner = "tettou771";
+    std::string owner = "TrussC-org";
     std::string repo = "TrussC";
     std::string ref;
     bool commit = false;
