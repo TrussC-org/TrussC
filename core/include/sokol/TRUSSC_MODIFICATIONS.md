@@ -926,7 +926,7 @@ Mac display/Metal validation and post-implementation review remain required.
 
 Upstream fixes `sg_desc.uniform_buffer_size` at `sg_setup()` (4 MiB, ~8k draws);
 overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 growth makes
-`WindowSettings::reserveUniformBuffer` an optimization, not a correctness need.
+`RuntimeSettings::reserveUniformBuffer` an optimization, not a correctness need.
 
 - `_sg_mtl_grow_uniform_buffer()` doubles the current rotate slot, defers old
   storage release, resets `cur_ub_offset` and logs `METAL_UNIFORM_BUFFER_GROWN`

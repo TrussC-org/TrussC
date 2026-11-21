@@ -7252,14 +7252,17 @@ description.ko = "요청에 따른 그리기를 지정한다."
 details.en = '''
 - This float constant is 0. With `setFps(EVENT_DRIVEN)`, the current window updates and draws together when `redraw()` requests a frame.
 - With `setIndependentFps`, an `EVENT_DRIVEN` draw rate waits for `redraw()`, while an `EVENT_DRIVEN` update rate disables independent updates.
+- Besides `redraw()`, the window also draws once when it is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame.
 '''
 details.ja = '''
 - 値が 0 の float 定数です。`setFps(EVENT_DRIVEN)` を指定すると、現在のウィンドウは `redraw()` でフレームを要求したときに更新と描画を一緒に行います。
 - `setIndependentFps` では、描画レートを `EVENT_DRIVEN` にすると `redraw()` を待ち、更新レートを `EVENT_DRIVEN` にすると独立した更新を行わなくなります。
+- `redraw()` のほかに、ウィンドウが最初に表示されたとき（1 回）、大きさが変わったとき（2 回）、スクリーンショットや MCP の取り込みでフレームが必要なときにも描画します。
 '''
 details.ko = '''
 - 값이 0인 float 상수입니다. `setFps(EVENT_DRIVEN)`을 지정하면 현재 윈도우는 `redraw()`로 프레임을 요청했을 때 업데이트와 그리기를 함께 수행합니다.
 - `setIndependentFps`에서 그리기 레이트를 `EVENT_DRIVEN`으로 지정하면 `redraw()`를 기다리며, 업데이트 레이트를 `EVENT_DRIVEN`으로 지정하면 독립 업데이트를 수행하지 않습니다.
+- `redraw()` 외에도 윈도우가 처음 표시될 때(1회), 크기가 바뀐 뒤(2회), 스크린샷이나 MCP 캡처에 프레임이 필요할 때도 그립니다.
 '''
 
 ["EaseMode"]
@@ -53700,18 +53703,21 @@ description.ko = "이벤트 기반 렌더링에서 추가 프레임을 요청한
 details.en = '''
 - Acts on the current window, including secondary setup, event, update and draw callbacks. Each window has its own scheduler; tick-source rate and visibility follow the OS.
 - With `setFps(EVENT_DRIVEN)`, requests `count` draws, defaulting to `1`; the usual synchronized update also runs for each drawn frame.
+- TrussC also draws on its own in this mode: once when the window is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame. Call `redraw()` for every change of your own that should appear on screen.
 - Sets the remaining draw count to the larger of its current value and `count`, rather than adding counts. Zero or negative values do not cancel pending draws, and continuous rendering modes keep their normal pacing.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
 - 副窓の setup・event・update・draw 内も含め、現在のウィンドウを対象にします。各窓は個別のスケジューラを持ち、tick の頻度と可視性は OS に従います。
 - `setFps(EVENT_DRIVEN)` のときに、`count` 回の描画を要求します。既定値は `1` で、通常の同期更新も描画フレームごとに実行します。
+- このモードでも、ウィンドウが最初に表示されたとき（1 回）、大きさが変わったとき（2 回）、スクリーンショットや MCP の取り込みでフレームが必要なときは、自動で描画します。画面に出したい自分の変更には、毎回 `redraw()` を呼んでください。
 - 残りの描画回数は加算せず、現在値と `count` の大きい方にします。`0` や負の値では保留中の描画を取り消せず、連続描画モードでは通常の描画間隔を維持します。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
-- `getDrawCount()`는 각 윈도우의 실제 그리기를 셉니다. 동작 변경: 이 모드에서 메인의 `getDrawCount() % N` 주기는 이전 장치 프레임 기준 주기와 다릅니다.
+- 보조 창의 setup·event·update·draw 안을 포함해 현재 윈도우를 대상으로 합니다. 각 창은 개별 스케줄러를 가지며 tick 빈도와 가시성은 OS를 따릅니다.
 - `setFps(EVENT_DRIVEN)` 상태에서 `count`회의 그리기를 요청합니다. 기본값은 `1`이며 일반적인 동기 갱신도 그리는 프레임마다 실행합니다.
+- 이 모드에서도 윈도우가 처음 표시될 때(1회), 크기가 바뀐 뒤(2회), 스크린샷이나 MCP 캡처에 프레임이 필요할 때는 자동으로 그립니다. 화면에 반영할 변경에는 매번 `redraw()`를 호출하세요.
 - 남은 그리기 횟수에 더하지 않고 현재 값과 `count` 중 큰 값을 설정합니다. `0`이나 음수로 대기 중인 그리기를 취소할 수 없으며 연속 렌더링 모드에서는 기존 그리기 간격을 유지합니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 '''
