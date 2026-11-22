@@ -3886,6 +3886,9 @@ static int cmdBuild(const vector<string>& args) {
         resolvedAddonPaths = resolveAddonVersions(projectPath, addonRoot, false);
     }
 
+    trusscVersion::markCachedUsed(addonRoot);
+    for (const auto& addon : resolvedAddonPaths) trusscVersion::markCachedUsed(addon.second);
+
     // Windows: the presets pin the Visual Studio toolchain found when they were
     // written. If Visual Studio changed since, rewrite them (same targets and
     // IDE) and drop the native build folder; the configure below then runs on
@@ -5479,6 +5482,9 @@ static void printTopHelp() {
          << "  update                         Regenerate build files for the project in CWD\n"
          << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
          << "  addon <command>                Manage addons: list, add, add-local, remove, clone, pull, search\n"
+         << "  cache <command>                Manage cached versions: list, clear, autoremove\n"
+         << "  cache remove <spec>            Remove one cached TrussC version\n"
+         << "  cache remove --addon <spec>    Remove one cached external addon version\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
          << "  clean                          Delete build directories\n"
@@ -5572,7 +5578,7 @@ int main(int argc, char* argv[]) try {
     // trusscli was built from. Skipped for commands that either report this
     // themselves (doctor), act on it (upgrade), or must keep output machine-clean
     // (completion).
-    if (first != "upgrade" && first != "doctor" && first != "completion") {
+    if (first != "cache" && first != "upgrade" && first != "doctor" && first != "completion") {
         warnIfVersionDrift(autoDetectTcRoot());
     }
 
@@ -5601,6 +5607,7 @@ int main(int argc, char* argv[]) try {
             }
         }
     }
+    if (first == "cache") return trusscVersion::cacheCommand(subArgs);
     if (first == "new")     return cmdNew(subArgs);
     if (first == "cp")      return cmdCp(subArgs);
     if (first == "update")  return cmdUpdate(subArgs);

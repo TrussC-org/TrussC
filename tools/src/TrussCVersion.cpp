@@ -1,4 +1,5 @@
 #include "TrussCVersion.h"
+#include "AddonVersions.h"
 #include "ProcessCapture.h"
 #include "GeneratedFile.h"
 #include <nlohmann/json.hpp>
@@ -8,6 +9,15 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <iomanip>
+#include <ctime>
+#include <cmath>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -385,6 +395,14 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
         throw std::runtime_error("TrussC archive is missing core/cmake/trussc_app.cmake or .git_archival.txt");
     }
     checkCachePath(destination);
+    auto marker = destination / ".last-used";
+    auto newMarkerStatus = fs::symlink_status(tree / ".last-used");
+    if (fs::is_regular_file(fs::symlink_status(marker)) &&
+        (!fs::exists(newMarkerStatus) || fs::is_regular_file(newMarkerStatus))) {
+        std::error_code error;
+        fs::copy_file(marker, tree / ".last-used", fs::copy_options::overwrite_existing, error);
+        if (!error) fs::last_write_time(tree / ".last-used", fs::last_write_time(marker), error);
+    }
     auto previous = scratch / "previous";
     if (fs::exists(destination)) fs::rename(destination, previous);
     try { fs::rename(tree, destination); }
@@ -454,6 +472,255 @@ std::string readBounded(const fs::path& path, size_t limit) {
     return text;
 }
 
+static std::string today() {
+    auto now = std::time(nullptr);
+    auto local = *std::localtime(&now);
+    std::ostringstream text;
+    text << std::put_time(&local, "%Y-%m-%d");
+    return text.str();
+}
+
+static std::string lastUsed(const fs::path& root) {
+    auto marker = root / ".last-used";
+    if (!fs::is_regular_file(fs::symlink_status(marker))) return "-";
+    std::ifstream file(marker);
+    // Bound (usage date): a date line is 11 bytes; read 12 to detect excess data.
+    char text[12]{};
+    file.read(text, sizeof(text));
+    std::string date(text, static_cast<size_t>(file.gcount()));
+    if (!date.empty() && date.back() == '\n') date.pop_back();
+    return date.size() == 10 ? date : "-";
+}
+
+static void markUsed(const fs::path& root) {
+    try {
+        auto date = today();
+        if (lastUsed(root) == date) return;
+        auto marker = root / ".last-used";
+        auto status = fs::symlink_status(marker);
+        if (fs::exists(status) && !fs::is_regular_file(status)) {
+            throw std::runtime_error(".last-used is not a regular file");
+        }
+        std::ofstream file(marker);
+        file << date << '\n';
+        file.close();
+        if (!file) throw std::runtime_error("cannot write .last-used");
+    } catch (const std::exception& error) {
+        std::cerr << "Warning: cannot record cache usage for " << root.string() << ": " << error.what() << '\n';
+    }
+}
+
+void markCachedUsed(const fs::path& path) {
+    if (path.empty()) return;
+    auto relative = fs::absolute(path).lexically_normal().lexically_relative(cacheRoot().lexically_normal());
+    if (relative.empty() || (*relative.begin() != "versions" && *relative.begin() != "addons")) return;
+    try {
+        checkCachePath(path);
+        if (!fs::is_regular_file(fs::symlink_status(path / ".git")) &&
+            !fs::is_regular_file(fs::symlink_status(path / ".git_archival.txt"))) return;
+        markUsed(path);
+    } catch (const std::exception& error) {
+        std::cerr << "Warning: cannot record cache usage for " << path.string() << ": " << error.what() << '\n';
+    }
+}
+
+// Recursive iterators do not follow directory symlinks. symlink_status also
+// prevents file_size (and the Windows permission change) from following links.
+static uintmax_t cacheSize(const fs::path& path) {
+    uintmax_t size = 0;
+    if (!fs::exists(path)) return size;
+    for (const auto& entry : fs::recursive_directory_iterator(path)) {
+        if (fs::is_regular_file(entry.symlink_status())) size += entry.file_size();
+    }
+    return size;
+}
+
+static void removeCacheTree(const fs::path& path) {
+    checkCachePath(path);
+#ifdef _WIN32
+    // Git object files are read-only on Windows. Do not change symlink targets.
+    for (const auto& entry : fs::recursive_directory_iterator(path)) {
+        if (!fs::is_symlink(entry.symlink_status())) {
+            fs::permissions(entry.path(), fs::perms::owner_write, fs::perm_options::add);
+        }
+    }
+    fs::permissions(path, fs::perms::owner_write, fs::perm_options::add);
+#endif
+    fs::remove_all(path);
+}
+
+void removeCachedVersion(const fs::path& path, const Spec& spec) {
+    checkCachePath(path);
+    bool worktree = fs::is_regular_file(fs::symlink_status(path / ".git"));
+    auto bare = cacheRoot() / "repos" / spec.owner / (spec.repo + ".git");
+    if (worktree) checkCachePath(bare);
+    removeCacheTree(path);
+    if (worktree && fs::exists(bare)) {
+        checkedGit({"--git-dir=" + bare.string(), "worktree", "prune", "--expire", "now"});
+    }
+}
+
+struct CacheEntry {
+    fs::path path;
+    Spec spec;
+    bool addon;
+    bool worktree;
+    uintmax_t size;
+    std::string date;
+};
+
+static std::vector<CacheEntry> cacheEntries() {
+    std::vector<CacheEntry> entries;
+    for (bool addon : {false, true}) {
+        auto base = cacheRoot() / (addon ? "addons" : "versions");
+        checkCachePath(base);
+        if (!fs::exists(base)) continue;
+        for (auto it = fs::recursive_directory_iterator(base); it != fs::recursive_directory_iterator(); ++it) {
+            if (!fs::is_directory(it->symlink_status()) || it.depth() < 2) continue;
+            auto path = it->path();
+            checkCachePath(path);
+            bool worktree = fs::is_regular_file(fs::symlink_status(path / ".git"));
+            if (!worktree && !fs::is_regular_file(fs::symlink_status(path / ".git_archival.txt"))) continue;
+            auto relative = path.lexically_relative(base);
+            auto part = relative.begin();
+            auto owner = (part++)->string();
+            auto repo = (part++)->string();
+            fs::path ref;
+            for (; part != relative.end(); ++part) ref /= *part;
+            auto spec = parse(owner + "/" + repo + "@" + ref.generic_string());
+            entries.push_back({path, spec, addon, worktree, cacheSize(path), lastUsed(path)});
+            it.disable_recursion_pending();
+        }
+    }
+    std::sort(entries.begin(), entries.end(), [](const CacheEntry& a, const CacheEntry& b) { return a.path < b.path; });
+    return entries;
+}
+
+static bool oldDate(const std::string& date) {
+    if (date.size() != 10 || date[4] != '-' || date[7] != '-') return false;
+    std::tm local{};
+    std::istringstream input(date);
+    input >> std::get_time(&local, "%Y-%m-%d");
+    if (input.fail()) return false;
+    local.tm_hour = 12;
+    local.tm_isdst = -1;
+    auto stamp = std::mktime(&local);
+    std::ostringstream normalized;
+    normalized << std::put_time(&local, "%Y-%m-%d");
+    if (stamp == std::time_t(-1) || normalized.str() != date) return false;
+    auto now = std::time(nullptr);
+    auto current = *std::localtime(&now);
+    current.tm_hour = 12;
+    current.tm_min = current.tm_sec = 0;
+    current.tm_isdst = -1;
+    // Round calendar days across daylight-saving transitions.
+    return std::llround(std::difftime(std::mktime(&current), stamp) / 86400.0) >= 90;
+}
+
+static bool confirmCacheRemoval() {
+#ifdef _WIN32
+    bool terminal = _isatty(_fileno(stdin));
+#else
+    bool terminal = isatty(fileno(stdin));
+#endif
+    if (!terminal) {
+        std::cout << "Not removed. Run this command interactively in a terminal to confirm.\n";
+        return false;
+    }
+    std::cout << "Remove these cached files? [y/N] " << std::flush;
+    std::string answer;
+    std::getline(std::cin, answer);
+    return answer == "y" || answer == "Y";
+}
+
+int cacheCommand(const std::vector<std::string>& args) {
+    bool known = !args.empty() && (args[0] == "list" || args[0] == "clear" || args[0] == "autoremove" || args[0] == "remove");
+    if (args.empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" ||
+        (known && args.size() == 2 && (args[1] == "--help" || args[1] == "-h"))) {
+        std::cout << "Usage: trusscli cache "
+            << (args.size() == 2 ? args[0] : "[list|clear|autoremove|remove]") << "\n\n"
+            << "Manage shared TrussC and external addon downloads. Local folders are not cached.\n\n"
+            "Commands:\n"
+            "  list        List specs, worktree/tarball, bytes and last-used date (- if unknown)\n"
+            "  remove <spec>          Remove one TrussC version without confirmation\n"
+            "  remove --addon <spec>  Remove one external addon version without confirmation\n"
+            "  clear       Show total bytes and remove the whole cache after one y/N prompt\n"
+            "  autoremove  List and remove versions last used 90 or more days ago (one y/N prompt)\n\n"
+            "Addon rows are marked 'addon'; other rows are marked 'TrussC'.\n"
+            "remove uses specs as for use or addon add; qualify the owner if an addon is ambiguous.\n"
+            "Versions without .last-used are never auto-removed.\n"
+            "clear and autoremove require terminal input; the default answer is No.\n"
+            "  -h, --help  Show this help\n";
+        return 0;
+    }
+    if (!args.empty() && args[0] == "remove") {
+        bool addon = args.size() == 3 && args[1] == "--addon";
+        if (!addon && args.size() != 2) {
+            throw std::runtime_error("expected cache remove [--addon] <spec>; run `trusscli cache --help`");
+        }
+        const auto& text = args.back();
+        Spec spec;
+        if (addon) {
+            auto parsed = addonVersions::parse(text);
+            spec.owner = parsed.owner;
+            spec.repo = parsed.name;
+            spec.ref = parsed.ref.empty() ? "HEAD" : parsed.ref;
+        } else {
+            spec = parse(text);
+        }
+        auto entries = cacheEntries();
+        std::vector<CacheEntry> matches;
+        for (const auto& entry : entries) {
+            if (entry.addon == addon && entry.spec.repo == spec.repo && entry.spec.ref == spec.ref &&
+                (spec.owner.empty() || entry.spec.owner == spec.owner)) matches.push_back(entry);
+        }
+        if (matches.empty()) throw std::runtime_error("spec is not in the cache: " + text + "; run `trusscli cache list`");
+        if (matches.size() > 1) throw std::runtime_error("ambiguous cached addon: " + text + "; use owner/repo@ref from `trusscli cache list`");
+        removeCachedVersion(matches[0].path, matches[0].spec);
+        std::cout << "Removed " << (addon ? "addon " : "TrussC ") << text << '\n';
+        return 0;
+    }
+    if (args.size() != 1 || !known) {
+        throw std::runtime_error("unknown cache command; run `trusscli cache --help`");
+    }
+    auto root = cacheRoot();
+    checkCachePath(root);
+    if (args[0] == "clear") {
+        std::cout << "Total: " << cacheSize(root) << " bytes\n";
+        if (confirmCacheRemoval() && fs::exists(root)) {
+            for (const auto& entry : fs::directory_iterator(root)) {
+                if (fs::is_directory(entry.symlink_status())) removeCacheTree(entry.path());
+                else {
+#ifdef _WIN32
+                    if (!fs::is_symlink(entry.symlink_status())) {
+                        fs::permissions(entry.path(), fs::perms::owner_write, fs::perm_options::add);
+                    }
+#endif
+                    fs::remove(entry.path());
+                }
+            }
+        }
+        return 0;
+    }
+    auto entries = cacheEntries();
+    uintmax_t total = 0;
+    std::vector<CacheEntry> selected;
+    for (const auto& entry : entries) {
+        if (args[0] == "autoremove" && !oldDate(entry.date)) continue;
+        std::cout << (entry.addon ? "addon " : "TrussC ")
+            << entry.spec.owner << '/' << entry.spec.repo << '@' << entry.spec.ref
+            << ' ' << (entry.worktree ? "worktree" : "tarball") << ' ' << entry.size
+            << " bytes " << entry.date << '\n';
+        total += entry.size;
+        selected.push_back(entry);
+    }
+    std::cout << "Total: " << total << " bytes" << (args[0] == "list" ? " (versions; bare repos excluded)\n" : "\n");
+    if (args[0] == "autoremove" && !selected.empty() && confirmCacheRemoval()) {
+        for (const auto& entry : selected) removeCachedVersion(entry.path, entry.spec);
+    }
+    return 0;
+}
+
 std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string& sourceUrl) {
     // Validate at the shared boundary, including specs assembled from registry metadata.
     parse(spec.owner + "/" + spec.repo + "@" + spec.ref);
@@ -479,6 +746,7 @@ std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string&
     if (addon ? !addonDirectory(root) : !fs::is_regular_file(root / "core/cmake/trussc_app.cmake")) {
         throw std::runtime_error(std::string(addon ? "addon" : "TrussC") + " version is unavailable; run `trusscli update`: " + spec.owner + "/" + spec.repo + "@" + spec.ref);
     }
+    if (fetch) markUsed(root);
     return root.string();
 }
 
