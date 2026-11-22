@@ -268,10 +268,14 @@ elseif(TC_PLATFORM_MACOS)
     target_compile_options(TrussC PRIVATE -fobjc-arc)
 
 elseif(TC_PLATFORM_WINDOWS)
+    if(TC_GFX_BACKEND STREQUAL "vulkan")
+        find_package(Vulkan REQUIRED)
+        target_link_libraries(TrussC PUBLIC Vulkan::Vulkan)
+    endif()
     # WIN32_LEAN_AND_MEAN: reduce the weight of including windows.h
     # NOMINMAX: avoid conflicts with std::min / std::max
     target_compile_definitions(TrussC PUBLIC
-        SOKOL_D3D11
+        SOKOL_${TC_GRAPHICS_BACKEND}
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _USE_MATH_DEFINES

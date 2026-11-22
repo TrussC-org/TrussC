@@ -511,17 +511,28 @@ Generated shader headers reach consumers through the `<name>_shaders` INTERFACE 
 
 Shader files using compute features (dispatch or storage buffers) use the suffix `*.compute.glsl` under `src/`, whether they contain `@cs`, `@vs`/`@fs`, or both. CMake rejects storage-buffer declarations in plain `.glsl` files and reports the required `.compute.glsl` filename. They have a separate sokol-shdc target set with `glsl310es` for GLES compute; ordinary `.glsl` graphics sources keep `glsl300es` for WebGL2. Include the resulting `*.compute.glsl.h` and pass its descriptor function to `ComputeShader::load()` or `Shader::load()` for its program. Both 300ES graphics and 310ES compute require a GLES 3.1 or later context when used together.
 
-### Experimental Vulkan build (Linux)
+### Experimental Vulkan build (Linux and Windows)
 
-The experimental Linux Vulkan backend builds and presents a single X11 window
-with depth and MSAA. The production Runtime clear-color smoke passes 16 frames
-on lavapipe under Xvfb at 1 sample and 4x MSAA; emptyExample also presents and
-exits cleanly. Configure an existing Linux CMake project to select Vulkan and
-generate SPIR-V with the pinned sokol-shdc:
+The experimental Vulkan backend presents one X11 or Win32 window with depth
+and MSAA. Select it explicitly with `TC_GFX_BACKEND=vulkan`; Windows still
+uses D3D11 by default, and Linux keeps its GL/GLES default. Linux validation
+runs on lavapipe/Xvfb; Windows Intel/NVIDIA device verification is required.
+The installed Windows Vulkan SDK must provide headers, the loader library and
+the Khronos validation layer; there is no TrussC API to install these tools.
+The pinned sokol-shdc generates SPIR-V for both platforms.
+
+Configure an existing Linux CMake project:
 
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+Configure an existing Windows CMake project in Developer PowerShell:
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 
 StorageBuffer readback, byte/float Fbo readback and screenshot/window capture
@@ -529,12 +540,23 @@ are not supported on Vulkan yet (step 4). There is no API to enable them.
 StorageBuffer asynchronous reads deliver deferred failure; synchronous reads
 return failure. Fbo readback and window capture warn on every call and return
 false. MCP capture and image analysis report the failure; Fbo/window recording
-stops at its first readback failure. Use the default GL backend when these
-features are needed:
+stops at its first readback failure. Use the platform default when these
+features are needed (use the `windows` preset on Windows):
 
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+Windows Vulkan always uses the client size in pixels. `highDpi(false)` behaves
+as `highDpi(true)` and logs one Warning at window creation; request high DPI
+explicitly when launching your tcApp. Mouse positions and window sizes stay in
+logical points, as with any high-DPI window. X11 already uses window pixels for its framebuffer.
+
+```cpp
+int main() {
+    return tc::runApp<tcApp>(tc::WindowSettings{}.setHighDpi(true));
+}
 ```
 
 The Vulkan backend allows one native window. Every additional `createWindow()`
@@ -553,11 +575,30 @@ Enable the installed validation layer when running an app:
 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ./bin/emptyExample
 ```
 
-The `vulkanSingleWindow` test exercises 24 resizes, WM_DELETE/exitApp close,
-stable resource counts, and native stencil references on lavapipe/Xvfb with
-validation enabled. Stencil reference commands are checked without pixel
-readback; there is no Vulkan pixel readback API yet. Real GPUs and real display
-sessions still need verification; multiwindow remains deferred.
+The `vulkanSingleWindow` test exercises 24 resizes, WM_DELETE/WM_CLOSE and
+`exitApp()` close, stable sokol resource counts, 4x MSAA and hidden drawing.
+On Windows, enable validation in PowerShell before launching the smoke:
+
+```powershell
+$env:VK_INSTANCE_LAYERS = "VK_LAYER_KHRONOS_validation"
+$env:VK_LOADER_DEBUG = "layer"
+```
+
+For controlled validation, the live runner clears inherited layer settings and
+uses an empty settings file; the Windows device sheet applies the same setup.
+Run the smoke through the validator (add `--probe /path/to/libvulkanHostProbe.so` on Linux):
+
+```bash
+python core/tests/vulkanSingleWindow/validate.py --binary core/tests/vulkanSingleWindow/bin/vulkanSingleWindow --log smoke.log
+```
+
+`core/tests/vulkanSingleWindow/validate.py` checks Linux live runs with its
+LD_PRELOAD probe, or Windows app/host logs with `--windows --check-log
+--exit-code N`. Windows checks recreation logs and validation-clean stencil
+draws; native object counts, injected WSI results and native stencil-reference
+observation are Linux-only. There is no Vulkan pixel readback API yet.
+Real GPUs and display sessions still need verification; multiple Vulkan
+windows have no supported API yet.
 
 ### macOS Deployment Target
 

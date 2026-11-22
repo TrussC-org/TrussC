@@ -107,6 +107,46 @@ and present SUBOPTIMAL; it checks native references and object teardown through
 device destruction. Pixel-level stencil verification still needs Vulkan readback
 (step 4). Real GPUs/displays use the step 2b run sheet; multiwindow is deferred.
 
+## Windows Vulkan host (step 3, 2026-11-22)
+
+- `sokol_app_tc.h` shares the step 2a/2b Vulkan lifecycle through the internal
+  `util/sokol_app_vulkan.h` (types, device, depth/MSAA, swapchain, cached
+  acquisition, WSI recreation and teardown). The extracted X11 implementation
+  retains its existing behavior and markers; its extension-property allocation
+  remains malloc/free. The helper retains upstream `93aa187b` lineage/license.
+- The Win32 surface uses upstream's `VkWin32SurfaceCreateInfoKHR`, with the
+  fork's main HWND and module instance. Initialization follows native window
+  publication. The existing Win32 message loop and timer fallback pace Vulkan;
+  D3D11 device/swapchain operations and occlusion probes are excluded. Resize
+  recreates at the admitted tick, and every acquired frame finishes presentation,
+  including a frame hidden inside draw. WM_CLOSE and exitApp keep the Runtime's
+  existing close/cleanup sequence; the main HWND stays alive when Runtime
+  releases its Window backing, with client callbacks detached, until gfx cleanup
+  and Vulkan teardown finish.
+  Vulkan waits idle and releases the swapchain, device, surface and instance
+  after client cleanup, then Win32 destroys the retained HWND. Secondary native windows
+  remain refused, matching X11 and the common Runtime warning.
+- Environment/swapchain glue returns Vulkan device, queue, native images, views
+  and semaphores; metadata is sampled after acquisition. Debug enables
+  `VK_EXT_debug_utils`, as in 2b. Win32 host logs identify the chosen GPU, each
+  completed swapchain creation, non-success acquire/present results and completed
+  teardown for device verification.
+  These logs do not claim native object leak counts; Khronos validation observes
+  device destruction. D3D11 stays the default; the explicit Vulkan build switch
+  selects Windows sources and links the installed Vulkan loader. No gfx change.
+- Win32 Vulkan normalizes `no_high_dpi` to false at window creation, with one
+  Warning when requested. Surface extents and dimension polling then both use
+  client pixels, preventing repeated recreation on scaled displays. X11 already
+  polls framebuffer dimensions in window pixels and needs no normalization.
+- Windows StorageBuffer/Fbo/window readback explicitly returns unsupported,
+  matching Linux; implementations remain deferred to step 4. The Windows smoke
+  posts real WM_CLOSE after resize completion and logs stencil draw references.
+  Its validator checks app live-resource counts and host recreations, with
+  native object counts, WSI injection and native stencil observation Linux-only.
+  A plain-main mock fixture executes the production destroy-window body and
+  sapp_run cleanup sequence to check callback detachment and HWND lifetime.
+  Real Windows Intel/NVIDIA verification uses the step 3 device run sheet.
+
 ## Files and platform scope
 
 | File | Ownership |

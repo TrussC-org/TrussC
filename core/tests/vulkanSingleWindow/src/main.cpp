@@ -92,6 +92,13 @@ struct GuardApp : App {
                 std::printf("vulkanSingleWindow: %d resizes completed; ready for close\n", resizes);
                 resizeChecked = true;
                 if (!wmClose) exitApp(failures ? 1 : 0);
+#if defined(_WIN32)
+                else {
+                    // The Windows runner has no X11/probe; use the real WM_CLOSE path.
+                    const auto hwnd = (HWND)sapp_win32_get_hwnd();
+                    check("WM_CLOSE posted", PostMessageW(hwnd, WM_CLOSE, 0, 0) != 0);
+                }
+#endif
             }
         } else if (mode != Mode::Resize && shownDraws >= phaseFrames) {
             exitApp(failures ? 1 : 0);
@@ -112,12 +119,16 @@ struct GuardApp : App {
         }
         if (stencil) {
             // Command-level check on the window attachment; Vulkan pixel readback
-            // is deferred. The probe records the native dynamic reference values.
+            // is deferred. Linux's probe records native reference values;
+            // Windows logs the draws and relies on validation diagnostics.
             for (uint8_t ref : {uint8_t(1), uint8_t(73), uint8_t(255)}) {
                 setStencilDesc(StencilDesc::shape(ref));
                 drawRect(0, 0, 32, 32);
                 setStencilDesc(StencilDesc::inside(ref));
                 drawRect(0, 0, 32, 32);
+#if defined(_WIN32)
+                if (draws == 0) std::printf("vulkanSingleWindow: stencil draw ref=%u\n", unsigned(ref));
+#endif
             }
             resetStencilDesc();
         }
@@ -171,6 +182,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             }
             if (mode == Mode::Resize) check("24 resize requests completed", resizes == resizeCount);
             errors.disconnect();
+            std::puts("vulkanSingleWindow: app checks complete");
         });
 #else
     (void)argc;
