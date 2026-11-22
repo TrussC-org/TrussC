@@ -2,6 +2,15 @@
 
 #include "tcxInputReplayFormat.h"
 #include <chrono>
+#include <tcxImGui.h>
+#include <imgui/imgui_internal.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 // Opt-in debugging recorder. Call setup() in tcApp::setup(), then use
 // these functions on the main thread. Paths use getDataPath(). See README.md
@@ -11,6 +20,8 @@ enum class RecordingMode { Ring };
 struct WindowMapping { std::string key; tc::Window* window; };
 namespace detail {
 inline void registerTools();
+inline void installToolbar();
+inline void removeToolbar();
 inline uint64_t clockMs() {
     return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -60,6 +71,26 @@ public:
     uint64_t recordStart = 0, frameStart = 0;
     size_t writtenBytes = 0, writtenRecords = 0;
 
+    bool toolbarVisible = true, visibilityBeforePlayback = true, playbackVisibilitySaved = false;
+    bool hotKeyEnabled = true, toolbarFrameSeen = false;
+    int hotKey = tc::KEY_F9;
+    ImGuiContext* toolbarContext = nullptr;
+    ImGuiID toolbarHook = 0, shutdownHook = 0;
+    std::filesystem::path selectedPath, recordingPath, temporaryRecording, pendingSave;
+
+    void restoreToolbar() {
+        if (playbackVisibilitySaved) toolbarVisible = visibilityBeforePlayback;
+        playbackVisibilitySaved = false;
+    }
+    void selectDrop(const tc::DragDropEventArgs& event) {
+        for (const auto& file : event.files) {
+            const auto path = tc::utf8ToPath(file);
+            if (path.extension() == ".jsonl") {
+                selectedPath = tc::getDataPath(path);
+                break;
+            }
+        }
+    }
     bool recording() const { return ringRecording || output.is_open(); }
     bool warning(const std::string& message) {
         lastError = message;
@@ -98,6 +129,7 @@ public:
         ringRecording = false;
         ring = {};
         if (output.is_open()) output.close();
+        restoreToolbar();
         timeline = {};
     }
     void write(Json j, const std::string& type) {
@@ -157,8 +189,15 @@ public:
         const bool closedDuringPlayback = timeline.active && !mappedWindowsOpen();
         finishRecording();
         if (closedDuringPlayback) error("mapped window is closed");
+        restoreToolbar();
         timeline = {};
+        removeToolbar();
         listeners.clear();
+        if (!temporaryRecording.empty()) {
+            warning("Unsaved recording retained at " + tc::pathToUtf8(temporaryRecording));
+            temporaryRecording.clear();
+        }
+        pendingSave.clear();
         cancellation.reset();
         window = nullptr;
         mappings.clear();
@@ -172,6 +211,7 @@ public:
         if (ringRecording) ring.trim(clockMs() - recordStart);
         while (auto record = timeline.next(clockMs())) {
             if (record->type == "end") {
+                restoreToolbar();
                 timeline = {};
                 playbackEnd.notify();
                 break;
@@ -273,7 +313,15 @@ inline void setup(std::vector<WindowMapping> mappings = {}) {
         }, priority));
     }
     auto& e = s.window->events();
+    s.listeners.push_back(e.keyPressed.listen([&s](const tc::KeyEventArgs& event) {
+        if (s.hotKeyEnabled && event.key == s.hotKey && !event.isRepeat) {
+            s.toolbarVisible = !s.toolbarVisible;
+            tc::redraw();
+        }
+    }, priority));
+    s.listeners.push_back(e.filesDropped.listen([&s](const tc::DragDropEventArgs& event) { s.selectDrop(event); }, priority));
     s.listeners.push_back(e.update.listen([&s] { s.update(); }, priority));
+    detail::installToolbar();
     s.listeners.push_back(tc::internal::FrameworkEventAccess::listen(e.exit, [&s] { s.cleanup(); }, tc::EventPriority::AfterApp));
     s.cancellation = tc::internal::ownAppCancellation([&s] { s.cleanup(); });
     detail::registerTools();
@@ -296,6 +344,13 @@ inline Json recordingHeader(State& s) {
 inline bool beginRecording(State& s) {
     if (!s.ready()) return false;
     if (s.recording()) return s.warning("Already recording");
+    if (!s.temporaryRecording.empty()) {
+        s.warning("Discarding unsaved recording at " + tc::pathToUtf8(s.temporaryRecording));
+        std::error_code ignored;
+        std::filesystem::remove(s.temporaryRecording, ignored);
+        s.temporaryRecording.clear();
+    }
+    s.pendingSave.clear();
     s.lastError.clear();
     s.recordStart = clockMs();
     s.frameStart = s.context().updateCount;
@@ -308,6 +363,7 @@ inline bool startRecording(const std::filesystem::path& path) {
     s.output.clear();
     s.output.open(tc::getDataPath(path), std::ios::binary | std::ios::trunc);
     if (!s.output) { s.error("cannot open recording file"); return false; }
+    s.recordingPath = tc::getDataPath(path);
     s.writtenBytes = s.writtenRecords = 0;
     s.write(detail::recordingHeader(s), "header");
     return s.output.is_open();
@@ -382,6 +438,9 @@ inline bool play(const std::filesystem::path& path, ScaleMode mode = ScaleMode::
         }
         s.scaleMode = mode;
         s.timeline.start(std::move(session), detail::clockMs());
+        s.playbackVisibilitySaved = true;
+        s.visibilityBeforePlayback = s.toolbarVisible;
+        s.toolbarVisible = false;
         return true;
     } catch (const std::exception& e) { s.error(e.what()); return false; }
 }
@@ -390,9 +449,13 @@ inline bool stopPlayback() {
     if (!s.ready()) return false;
     if (!s.timeline.active) return s.warning("Playback is already stopped");
     s.lastError.clear();
+    s.restoreToolbar();
     s.timeline = {};
     return true;
 }
+// Hotkeys only toggle the toolbar on the setup window.
+inline void setHotKeyEnabled(bool enabled) { detail::state().hotKeyEnabled = enabled; }
+inline void setHotKey(int key) { detail::state().hotKey = key; }
 // Only the next matching mark advances playback. Early arrival skips remaining
 // input in the previous scene; late arrival waits without a timeout.
 inline void mark(const std::string& name) {
@@ -403,6 +466,178 @@ inline void mark(const std::string& name) {
 }
 // Natural completion only (explicit stop/errors do not notify). Retain listen()'s RAII handle.
 inline tc::Event<void>& onPlaybackEnd() { return detail::state().playbackEnd; }
+namespace detail {
+using FileChoice = std::function<void(const tc::FileDialogResult&)>;
+// Internal seams let virtual-window tests observe dialogs without native UI.
+inline std::function<void(FileChoice)> savePicker = [](FileChoice callback) {
+    tc::saveDialogAsync("Save input recording", "", {}, "session.jsonl", std::move(callback));
+};
+inline std::function<void(FileChoice)> openPicker = [](FileChoice callback) {
+    tc::loadDialogAsync("Open input recording", "", {}, false, std::move(callback));
+};
+inline std::function<bool()> savePickerSupported = [] {
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+    return false;
+#else
+    return true;
+#endif
+};
+inline std::filesystem::path stagingPath() {
+    static uint64_t sequence = 0;
+    const auto directory = tc::getDataPath(state().flushDirectory);
+    std::filesystem::create_directories(directory);
+    const auto path = directory / (".trussc-input-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+        "-" + std::to_string(++sequence) + ".jsonl");
+    // Create exclusively before opening a stream; POSIX permissions apply at creation.
+#ifdef _WIN32
+    const int fd = _wopen(path.c_str(), _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (fd >= 0) _close(fd);
+#else
+    const int fd = ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+    if (fd >= 0) ::close(fd);
+#endif
+    if (fd < 0) throw std::runtime_error("cannot create staging file at " + tc::pathToUtf8(path));
+    return path;
+}
+inline bool hasPendingSave() {
+    const auto& s = state();
+    return !s.recording() && (!s.pendingSave.empty() || !s.temporaryRecording.empty());
+}
+inline void toolbarSave() {
+    auto& s = state();
+    if (!hasPendingSave()) return;
+    if (s.pendingSave.empty()) s.pendingSave = s.temporaryRecording;
+    const auto path = s.pendingSave;
+    if (!savePickerSupported()) {
+        s.warning("Toolbar saving requires a desktop file dialog; recording retained at " + tc::pathToUtf8(path));
+        return;
+    }
+    savePicker([path](const tc::FileDialogResult& choice) {
+        auto& s = state();
+        if (choice.success) {
+            std::error_code failure;
+            if (choice.filePath != path)
+                std::filesystem::copy_file(path, choice.filePath, std::filesystem::copy_options::overwrite_existing, failure);
+            if (failure) {
+                s.lastError = "cannot save recording: " + failure.message() + "; recording retained at " + tc::pathToUtf8(path);
+                tc::logError("tcxInputReplay") << s.lastError;
+                return;
+            }
+            s.selectedPath = choice.filePath;
+        }
+        if (s.temporaryRecording == path) {
+            if (!choice.success || choice.filePath != path) {
+                std::error_code ignored;
+                std::filesystem::remove(path, ignored);
+            }
+            s.temporaryRecording.clear();
+        }
+        if (s.pendingSave == path) s.pendingSave.clear();
+    });
+}
+inline void toolbarRecord() {
+    auto& s = state();
+    try {
+        if (!s.recording()) {
+            // beginRecording discards the previous unsaved session, with a warning.
+            const auto path = stagingPath();
+            if (startRecording(path)) s.temporaryRecording = path;
+            else {
+                std::error_code ignored;
+                std::filesystem::remove(path, ignored);
+            }
+            return;
+        }
+        if (s.ringRecording) {
+            const auto path = stagingPath();
+            s.temporaryRecording = path;
+            if (!flush(path)) return;
+            s.pendingSave = path;
+        } else {
+            if (!stopRecording()) return;
+            s.pendingSave = s.recordingPath;
+        }
+        toolbarSave();
+    } catch (const std::exception& e) { s.error(e.what()); }
+}
+inline void toolbarOpen() {
+    openPicker([](const tc::FileDialogResult& choice) {
+        if (choice.success) state().selectedPath = choice.filePath;
+    });
+}
+inline void drawToolbar() {
+    auto& s = state();
+    if (!s.toolbarVisible) return;
+    const auto& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, 4}, ImGuiCond_Always, {0.5f, 0});
+    if (ImGui::Begin("Input replay", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
+        if (ImGui::Button(s.recording() ? "Stop recording" : "Record")) toolbarRecord();
+        if (hasPendingSave()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Save")) toolbarSave();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(s.timeline.active ? "Stop playback" : "Play")) {
+            if (s.timeline.active) stopPlayback();
+            else if (!s.selectedPath.empty()) play(s.selectedPath);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Open")) toolbarOpen();
+        ImGui::SameLine();
+        const auto name = tc::pathToUtf8(s.selectedPath.filename());
+        ImGui::TextUnformatted(name.empty() ? "No file" : name.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tc::pathToUtf8(s.selectedPath).c_str());
+        ImGui::SameLine();
+        if (s.ringRecording) ImGui::Text("Ring: %zu", s.ring.records.size());
+        else ImGui::TextUnformatted(s.recording() ? "Recording" : "Idle");
+    }
+    ImGui::End();
+}
+inline void installToolbar() {
+    auto& s = state();
+    // ImGui's NewFrame hook shares the app's frame; fallback runs only if the
+    // app did not begin one, before tcxImGui submits it at priority 1000.
+    tcx::imgui::imguiSetup();
+    // imguiSetup may return with another window's context still current.
+    for (const auto& [context, widgets] : tcx::imgui::detail::contexts()) {
+        if (widgets.owner == &s.context()) {
+            s.toolbarContext = context;
+            break;
+        }
+    }
+    ImGui::SetCurrentContext(s.toolbarContext);
+    ImGuiContextHook hook;
+    hook.Type = ImGuiContextHookType_NewFramePost;
+    hook.Callback = [](ImGuiContext*, ImGuiContextHook*) {
+        state().toolbarFrameSeen = true;
+        drawToolbar();
+    };
+    s.toolbarHook = ImGui::AddContextHook(s.toolbarContext, &hook);
+    hook.Type = ImGuiContextHookType_Shutdown;
+    hook.Callback = [](ImGuiContext*, ImGuiContextHook*) { state().toolbarContext = nullptr; };
+    s.shutdownHook = ImGui::AddContextHook(s.toolbarContext, &hook);
+    s.listeners.push_back(s.window->events().onRender.listen([] {
+        auto& s = state();
+        if (!s.toolbarFrameSeen && s.toolbarVisible) {
+            tcx::imgui::imguiBegin();
+            tcx::imgui::imguiEnd();
+        }
+        s.toolbarFrameSeen = false;
+    }, 900));
+}
+inline void removeToolbar() {
+    auto& s = state();
+    if (s.toolbarContext) {
+        ImGui::RemoveContextHook(s.toolbarContext, s.toolbarHook);
+        ImGui::RemoveContextHook(s.toolbarContext, s.shutdownHook);
+        s.toolbarContext = nullptr;
+    }
+    s.toolbarFrameSeen = false;
+}
+}
+
 namespace detail {
 inline Json toolResult(bool ok) {
     return ok ? Json{{"status", "ok"}} : Json{{"status", "error"}, {"message", state().lastError}};

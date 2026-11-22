@@ -289,7 +289,10 @@ void timing() {
 int runInputReplayWindowChecks();
 int runInputReplayRingChecks();
 int runInputReplayB1WindowChecks();
+int runInputReplayB2WindowChecks();
 int main() {
+    sg_desc graphics = {};
+    sg_setup(&graphics);
     validation();
     scaling();
     timing();
@@ -298,5 +301,7 @@ int main() {
     const int ringFailures = runInputReplayRingChecks();
     const int windowFailures = runInputReplayWindowChecks();
     const int b1Failures = runInputReplayB1WindowChecks();
-    return failures || ringFailures || windowFailures || b1Failures ? 1 : 0;
+    const int b2Failures = runInputReplayB2WindowChecks();
+    sg_shutdown();
+    return failures || ringFailures || windowFailures || b1Failures || b2Failures ? 1 : 0;
 }

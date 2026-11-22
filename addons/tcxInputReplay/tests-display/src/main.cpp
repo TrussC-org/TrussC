@@ -242,7 +242,45 @@ void finishChecks() {
 }
 } // namespace
 #ifndef TCX_INPUTREPLAY_MOCK_WINDOW
+namespace {
+bool appImGuiFrame = false;
+class ToolbarSmoke : public tc::App {
+    tc::EventListener inspected_;
+    int frames_ = 0;
+    int previousFrame_ = 0;
+public:
+    void setup() override {
+        replay::setup();
+        previousFrame_ = ImGui::GetFrameCount();
+        inspected_ = events().onRender.listen([this] {
+            check(ImGui::GetFrameCount() == previousFrame_ + 1, "one ImGui frame per window draw");
+            previousFrame_ = ImGui::GetFrameCount();
+            auto* toolbar = ImGui::FindWindowByName("Input replay");
+            check(toolbar && toolbar->Active, "toolbar drawn in shared or owned frame");
+            if (++frames_ == 4) tc::exitApp();
+        }, 1001);
+    }
+    void draw() override {
+        if (appImGuiFrame) {
+            if (tcx::imgui::imguiBegin()) {
+                ImGui::Begin("App UI");
+                ImGui::TextUnformatted("App frame");
+                ImGui::End();
+            }
+            tcx::imgui::imguiEnd();
+        }
+    }
+};
+}
 int main(int argc, char** argv) {
+    if (argc == 2 && (std::string(argv[1]) == "--toolbar-check" || std::string(argv[1]) == "--toolbar-app-check")) {
+        appImGuiFrame = std::string(argv[1]) == "--toolbar-app-check";
+        tc::WindowSettings settings;
+        settings.setSize(640, 240);
+        return tcCoreTest::runDisplayTest<ToolbarSmoke>(settings, failures, [] {
+            std::printf("Toolbar smoke: %d checks, %d failures\n", checks, failures);
+        });
+    }
     if (argc != 2 || std::string(argv[1]) != "--display-check") {
         std::printf("SKIP: use --display-check with a display server\n");
         return 0;

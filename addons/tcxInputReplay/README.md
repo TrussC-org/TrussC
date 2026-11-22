@@ -12,6 +12,58 @@ void tcApp::setup() {
 }
 ```
 
+## Use the input replay toolbar
+
+`setup()` adds a small toolbar at the top center of its window. Record starts a temporary file; Stop recording opens the native save dialog and saves JSONL. Cancel discards a toolbar recording. When code started a file recording, cancel keeps the original file. Stopping a ring from the toolbar offers the same save dialog. Code calls to `stopRecording()` and `flush()` never open dialogs.
+
+```cpp
+void tcApp::setup() {
+    tcx::inputreplay::setup();
+}
+```
+
+Failed saves keep the recording and leave Save available for retry; the Error log includes its path. Toolbar saving requires a desktop file dialog. On Web and Android, Save keeps the staging file and logs a Warning with its path on each attempt. Use code to close a file recording or save a ring without a dialog:
+
+```cpp
+void tcApp::saveCapture() {
+    tcx::inputreplay::stopRecording();
+}
+```
+
+For a ring, save directly to a chosen path:
+
+```cpp
+void tcApp::saveCapture() {
+    tcx::inputreplay::flush("session.jsonl");
+}
+```
+
+Toolbar staging files live in the `setFlushDirectory()` folder (default: `input-replay` under the data folder), with owner-only permissions on POSIX. A crash or cleanup with an unsaved recording can leave a staging file there. A toolbar recording stopped by a recording limit remains available through Save. Starting a new recording discards the previous unsaved staging file with a Warning.
+
+
+Open chooses a recording; the toolbar shows its filename and hovering it shows the full path. Dropping files selects the first `.jsonl` path (case sensitive) on the setup window, without starting playback. The app still receives every drop, recording continues, and the drop is recorded normally. Other extensions are ignored by the addon. Open and drop select a path; Play validates and starts it.
+
+F9 toggles only toolbar visibility, is enabled by default, and ignores key repeat. On macOS, press it with fn, or change the key. Use core's integer key constants to change it or disable it for an app that already uses that key.
+
+```cpp
+void tcApp::configureReplay() {
+    tcx::inputreplay::setHotKey(tc::KEY_F8);
+    tcx::inputreplay::setHotKeyEnabled(false);
+}
+```
+
+Playback hides the toolbar and restores its previous visibility when it ends or is stopped. The hotkey still toggles it during playback. Replayed input can operate ImGui, including the toolbar; there is no API to isolate the toolbar from replayed input.
+
+The addon loads tcxImGui automatically. Apps using `imguiBegin()` / `imguiEnd()` share that frame automatically; otherwise the addon starts its own frame before rendering. No manual toolbar draw call is needed. The toolbar is attached to the setup window's ImGui context; keep that context initialized until app cleanup (there is no API to reattach after an explicit `imguiShutdown()`).
+
+
+Hot-reload builds must list tcxImGui explicitly in `addons.make`:
+
+```makefile
+tcxInputReplay
+tcxImGui
+```
+
 ## Record and replay input
 
 Paths resolve through `getDataPath()`. Start recording with a destination path, then stop to write the end record.
@@ -204,4 +256,4 @@ Playback validates the whole file before injecting anything, reporting errors wi
 
 `example-inputReplay` shows recording on R, stopping on S, playback on P and a scene mark on M. `tests` runs headlessly and covers file validation, exact bounds, round trips, scaling and fake-clock marks. `tests-display --display-check` records injected input and compares replay delivery on a display (Xvfb works on Linux).
 
-The toolbar, hotkey and file dialogs belong to stage B2.
+`tests` also covers toolbar controls, dialogs through injected file choices, drop selection and auto-hide. `tests-display --toolbar-check` and `--toolbar-app-check` verify drawing without and with an app ImGui frame on a display server. Native dialog interaction requires a human check.
