@@ -4455,6 +4455,7 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().send(af::val<const std::string>());
+        (void)af::val<UdpSocket>().send(af::val<std::span<const unsigned char>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const void *>(), af::val<size_t>());

@@ -5221,7 +5221,7 @@ bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::str
 bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leaves an IPv4 multicast group.
 void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes pending UDP datagrams.
 int UdpSocket::receive(void * buffer, size_t bufferSize) [+3] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
-bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
+bool UdpSocket::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
 bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
 void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.

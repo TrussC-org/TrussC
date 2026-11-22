@@ -31,5 +31,8 @@ TC_CORE_TEST_MAIN() {
     check("simple vector receive count", receiver.receive(received) == 4);
     check("string literal send remains available", sender.sendTo("127.0.0.1", receiver.getLocalPort(), "test"));
     check("pointer receive remains available", receiver.receive(received.data(), received.size()) == 4);
+    check("connect", sender.connect("127.0.0.1", receiver.getLocalPort()));
+    check("connected vector send", sender.send(sent));
+    check("connected send receive count", receiver.receive(received) == 4 && equal(sent.begin(), sent.end(), received.begin()));
     return failures ? 1 : 0;
 }

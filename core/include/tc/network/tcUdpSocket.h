@@ -209,6 +209,7 @@ public:
     // Send to destination set by connect()
     bool send(const void* data, size_t size);
     bool send(const std::string& message);
+    TC_LUA_SKIP bool send(std::span<const unsigned char> data) { return send(data.data(), data.size()); }
     // Synchronous receive (blocking) - for when not using events
     // Returns: received byte count, -1 on error
     int receive(void* buffer, size_t bufferSize);

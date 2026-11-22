@@ -37830,16 +37830,19 @@ description.ja = "設定済みの宛先に UDP データグラムを送信する
 description.ko = "설정된 대상으로 UDP 데이터그램을 전송한다."
 details.en = '''
 - Call `connect(host, port)` successfully first; pass either a data pointer and byte count or a `string`, whose bytes are sent without an added null terminator.
+- `send(span<const unsigned char>)` sends the span bytes and returns the same bool as the pointer overload.
 - Returns `true` if the OS send call succeeds; an invalid socket, missing destination, or send failure emits `onError` and returns `false`.
 - Success reports the send operation only and does not confirm delivery or receipt.
 '''
 details.ja = '''
 - 先に `connect(host, port)` を成功させてください。データのポインターとバイト数、または `string` を渡せます。文字列は終端のヌル文字を追加せず、そのバイト列を送信します。
+- `send(span<const unsigned char>)` は span のバイト列を送り、ポインタ版と同じ bool を返します。
 - OS の送信処理に成功すると `true` を返します。ソケットが無効、宛先が未設定、または送信に失敗した場合は、`onError` を発火して `false` を返します。
 - 成功は送信操作の成功だけを示し、宛先への到達や受信は確認しません。
 '''
 details.ko = '''
 - 먼저 `connect(host, port)`가 성공해야 합니다. 데이터 포인터와 바이트 수 또는 `string`을 전달할 수 있습니다. 문자열은 끝에 널 문자를 추가하지 않고 해당 바이트를 전송합니다.
+- `send(span<const unsigned char>)`는 span 바이트를 보내며 포인터 버전과 같은 bool을 반환합니다.
 - OS의 전송 처리가 성공하면 `true`를 반환합니다. 소켓이 무효이거나 대상이 설정되지 않았거나 전송에 실패하면 `onError`를 발생시키고 `false`를 반환합니다.
 - 성공은 전송 작업의 성공만 나타내며 대상에 대한 도달이나 수신을 확인하지 않습니다.
 '''
