@@ -3713,6 +3713,7 @@ struct Cover_Serial : af::Scope<Serial> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().readBytes(af::val<void *>(), af::val<int>());
+        (void)af::val<Serial>().readBytes(af::val<std::span<unsigned char>>());
         (void)af::val<Serial>().readBytes(af::val<std::string>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
@@ -3725,6 +3726,7 @@ struct Cover_Serial : af::Scope<Serial> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().writeBytes(af::val<const void *>(), af::val<int>());
+        (void)af::val<Serial>().writeBytes(af::val<std::span<const unsigned char>>());
         (void)af::val<Serial>().writeBytes(af::val<const std::string>());
 #endif
     }
@@ -4447,14 +4449,18 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().receive(af::val<void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().receive(af::val<void *>(), af::val<size_t>(), af::val<std::string>(), af::val<int>());
+        (void)af::val<UdpSocket>().receive(af::val<std::span<unsigned char>>());
+        (void)af::val<UdpSocket>().receive(af::val<std::span<unsigned char>>(), af::val<std::string>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().send(af::val<const std::string>());
+        (void)af::val<UdpSocket>().send(af::val<std::span<const unsigned char>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const std::string>());
+        (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<std::span<const unsigned char>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setBindAddress(af::val<const std::string>());

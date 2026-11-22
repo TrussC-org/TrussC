@@ -4766,10 +4766,10 @@ bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.
 void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
 int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
-int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
+int Serial::readBytes(void * buffer, int length) [+2] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
 bool Serial::setup(const std::string & portName, int baudRate) [+2] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
 bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
-int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
+int Serial::writeBytes(const void * buffer, int length) [+2] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
 ```
 
 ### SerialDeviceInfo — Holds information about one enumerated serial device.
@@ -4913,9 +4913,9 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
-bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
+bool StorageBuffer::read(void * destination, size_t bytes) [+2] [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
 void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
-bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
+bool StorageBuffer::update(const void * data, size_t size) [+2]  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
 ### StrokeMesh — Builds triangle geometry for variable-width polyline strokes.
@@ -5220,9 +5220,9 @@ bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Returns wh
 bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Joins an IPv4 multicast group for reception.
 bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leaves an IPv4 multicast group.
 void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes pending UDP datagrams.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
-bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+3] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
+bool UdpSocket::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
 void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.

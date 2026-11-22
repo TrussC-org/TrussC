@@ -28890,37 +28890,58 @@ related = ["Serial::isConnected", "Serial::onDisconnect"]
 
 ["Serial::readBytes"]
 description.en = "Reads received bytes into a buffer or string."
-description.ja = "受信したバイト列をバッファまたは文字列に読み取る。"
-description.ko = "수신한 바이트를 버퍼나 문자열로 읽는다."
+description.ja = "受信したバイト列をバッファまたは文字列に読み取ります。"
+description.ko = "수신한 바이트를 버퍼나 문자열로 읽습니다."
 details.en = '''
+- `readBytes(span<unsigned char>)` uses the writable byte count and returns the actual count or -1 without resizing the buffer.
 - `readBytes(void* buffer, int length)` consumes up to `length` bytes from the receive buffer and returns the actual count, including 0 when empty. It does not wait for new data; provide writable storage for at least `length` bytes when the length is positive.
 - Returns -1 when disconnected or when device loss is detected. A detected loss closes the connection and fires `onDisconnect`; see `Serial::onDisconnect` for notification details.
 - For the pointer overload, a connected port with `length <= 0` returns 0 after the loss check.
 - `readBytes(string& buffer, int length)` first resizes the string to `length`, then reads into it and resizes it to the actual count on success. On a -1 result, the string remains resized to the requested length; a negative length reaches string resizing before the pointer overload checks it.
 - See `Serial::setup` for threading rules and `Serial::getDroppedByteCount` for receive-buffer overflow.
+
+Use writable storage with its own length:
+```cpp
+void tcApp::update() {
+    logNotice() << serial.readBytes(bytes);
+}
+```
 '''
 details.ja = '''
+- `readBytes(span<unsigned char>)` は書き込み可能なバイト数を使い、リサイズせず実際の数または -1 を返します。
 - `readBytes(void* buffer, int length)` は受信バッファから最大 `length` バイトを取り出し、実際に読み取った数を返します。空なら 0 を返します。新しいデータは待ちません。正の長さを渡す場合は、少なくとも `length` バイトを書き込める領域を用意してください。
 - 未接続またはデバイス消失の検出時は -1 を返します。消失を検出すると接続を閉じて `onDisconnect` を発火します。通知の詳細は `Serial::onDisconnect` を参照してください。
 - ポインタ版では、接続中で `length <= 0` の場合、消失の確認後に 0 を返します。
 - `readBytes(string& buffer, int length)` は先に文字列を `length` にリサイズし、読み取り成功時に実際のバイト数へ再度リサイズします。結果が -1 の場合は要求した長さのままです。負の長さも、ポインタ版で確認する前に文字列のリサイズへ渡されます。
 - スレッドの扱いは `Serial::setup`、受信バッファの容量超過は `Serial::getDroppedByteCount` を参照してください。
+
+書き込み可能な領域の長さをそのまま使います。
+```cpp
+void tcApp::update() {
+    logNotice() << serial.readBytes(bytes);
+}
+```
 '''
 details.ko = '''
+- `readBytes(span<unsigned char>)`는 쓰기 가능한 바이트 수를 사용하며 크기를 변경하지 않고 실제 개수 또는 -1을 반환합니다.
 - `readBytes(void* buffer, int length)`는 수신 버퍼에서 최대 `length`바이트를 꺼내 실제로 읽은 수를 반환하며 버퍼가 비어 있으면 0을 반환합니다. 새 데이터를 기다리지 않습니다. 양수 길이를 전달한다면 최소 `length`바이트를 쓸 수 있는 공간을 준비하세요.
 - 연결되지 않았거나 장치 소실을 감지하면 -1을 반환합니다. 소실을 감지하면 연결을 닫고 `onDisconnect`를 발생시킵니다. 알림의 자세한 내용은 `Serial::onDisconnect`를 참조하세요.
 - 포인터 버전에서는 연결 중이고 `length <= 0`이면 소실 확인 후 0을 반환합니다.
 - `readBytes(string& buffer, int length)`는 먼저 문자열 크기를 `length`로 바꾸고 읽기에 성공하면 실제 바이트 수로 다시 바꿉니다. 결과가 -1이면 요청한 길이를 유지합니다. 음수 길이도 포인터 버전에서 확인하기 전에 문자열 크기 변경에 전달됩니다.
 - 스레드 규칙은 `Serial::setup`, 수신 버퍼 용량 초과는 `Serial::getDroppedByteCount`를 참조하세요.
+
+쓰기 가능한 저장소 자체의 길이를 사용합니다.
+```cpp
+void tcApp::update() {
+    logNotice() << serial.readBytes(bytes);
+}
+```
 '''
 related = ["Serial::isConnected", "Serial::available", "Serial::onDisconnect"]
 snippet = '''
 void tcApp::update() {
-    static Serial serial;
-    if (!serial.isConnected()) serial.setup(0, 115200);
-    unsigned char buffer[64];
-    int count = serial.readBytes(buffer, sizeof(buffer));
-    if (count > 0) logNotice() << "Received " << count << " bytes";
+    vector<unsigned char> bytes(64);
+    logNotice() << serial.readBytes(bytes);
 }
 '''
 
@@ -29017,10 +29038,11 @@ related = ["Serial::writeBytes", "Serial::setup"]
 
 ["Serial::writeBytes"]
 description.en = "Writes bytes from a buffer or string to the serial connection."
-description.ja = "バッファまたは文字列のバイト列をシリアル接続に書き込む。"
-description.ko = "버퍼나 문자열의 바이트를 시리얼 연결에 쓴다."
+description.ja = "バッファまたは文字列のバイト列をシリアル接続に書き込みます。"
+description.ko = "버퍼나 문자열의 바이트를 시리얼 연결에 씁니다."
 related = ["Serial::isConnected", "Serial::onDisconnect"]
 details.en = '''
+- `writeBytes(span<const unsigned char>)` uses the span byte count and returns the actual count, preserving partial writes and errors.
 - `writeBytes(const void* buffer, int length)` writes up to `length` bytes and returns the actual count, or -1 on an error with no reported progress. `writeBytes(const string& buffer)` writes the string's bytes, including embedded null bytes, without adding a terminator.
 - A disconnected port returns -1. After the loss and connection checks, a nonpositive length returns 0.
 - On macOS and Linux, the port is nonblocking: a write can transfer fewer bytes than requested or return -1 while the output buffer is full, without closing the port.
@@ -29030,8 +29052,17 @@ details.en = '''
 - An Android transfer error logs an error and returns earlier progress, or -1 if none; that error alone does not close the connection. Once the receive worker records a loss, a subsequent reporting I/O call closes it and fires `onDisconnect`.
 - A loss detected by this call closes the connection, fires `onDisconnect`, and returns -1; see `Serial::onDisconnect` for notification details. On Windows, receive status/read failures other than canceled reads also count as loss; framing and parity flags only produce warnings.
 - Use a separate thread when a slow write must not stall the app; receive calls do not wait for the write itself. See `Serial::setup` for shared threading rules.
+
+Keep unsent bytes using the returned count; call on a worker when blocking is unacceptable:
+```cpp
+void tcApp::sendBytes() {
+    int count = serial.writeBytes(bytes);
+    if (count > 0) bytes.erase(bytes.begin(), bytes.begin() + count);
+}
+```
 '''
 details.ja = '''
+- `writeBytes(span<const unsigned char>)` は span のバイト数を使い、部分送信やエラーを含む実際の数を返します。
 - `writeBytes(const void* buffer, int length)` は最大 `length` バイトを書き込み、実際のバイト数を返します。転送済みのバイトが報告されないエラーでは -1 を返します。`writeBytes(const string& buffer)` は、途中の null バイトも含めて文字列のバイトを書き込み、終端文字は追加しません。
 - 未接続の場合は -1 を返します。消失と接続状態の確認後、長さが 0 以下なら 0 を返します。
 - macOS と Linux のポートはノンブロッキングです。要求より少ないバイト数だけを書き込む場合や、出力バッファが満杯の間に -1 を返す場合があり、その場合はポートを閉じません。
@@ -29041,8 +29072,17 @@ details.ja = '''
 - Android の転送エラーでは、エラーをログに出し、それまでの転送済みバイト数、または転送済みがなければ -1 を返します。そのエラーだけでは接続を閉じません。受信ワーカーが消失を記録すると、後続の報告する I/O 呼び出しが接続を閉じて `onDisconnect` を発火します。
 - この呼び出しが消失を検出した場合は、接続を閉じて `onDisconnect` を発火し、-1 を返します。通知の詳細は `Serial::onDisconnect` を参照してください。Windows では、キャンセルされた読み取りを除く受信状態の取得や読み取りの失敗も消失として扱います。framing と parity のフラグは警告だけを出します。
 - 遅い書き込みでアプリを止めたくない場合は、別スレッドを使ってください。受信の呼び出しは書き込み自体の完了を待ちません。共通のスレッドの扱いは `Serial::setup` を参照してください。
+
+戻り値の数で未送信部分を管理します。ブロックを避ける必要があればワーカーから呼びます。
+```cpp
+void tcApp::sendBytes() {
+    int count = serial.writeBytes(bytes);
+    if (count > 0) bytes.erase(bytes.begin(), bytes.begin() + count);
+}
+```
 '''
 details.ko = '''
+- `writeBytes(span<const unsigned char>)`는 span 바이트 수를 사용하며 부분 쓰기와 오류를 포함한 실제 개수를 반환합니다.
 - `writeBytes(const void* buffer, int length)`는 최대 `length`바이트를 쓰고 실제 바이트 수를 반환합니다. 전송 진행량이 보고되지 않는 오류에서는 -1을 반환합니다. `writeBytes(const string& buffer)`는 중간의 null 바이트를 포함한 문자열 바이트를 쓰며 종료 문자를 추가하지 않습니다.
 - 연결되지 않은 포트에서는 -1을 반환합니다. 소실과 연결 상태를 확인한 뒤 길이가 0 이하이면 0을 반환합니다.
 - macOS와 Linux의 포트는 논블로킹입니다. 요청보다 적은 바이트만 쓰거나 출력 버퍼가 가득 찬 동안 -1을 반환할 수 있으며 이 경우 포트를 닫지 않습니다.
@@ -29052,13 +29092,19 @@ details.ko = '''
 - Android 전송 오류에서는 오류를 로그에 남기고 이전까지 전송한 바이트 수를 반환하며 전송한 바이트가 없으면 -1을 반환합니다. 그 오류만으로 연결을 닫지는 않습니다. 수신 워커가 소실을 기록하면 이후 보고하는 I/O 호출이 연결을 닫고 `onDisconnect`를 발생시킵니다.
 - 이 호출이 소실을 감지하면 연결을 닫고 `onDisconnect`를 발생시킨 뒤 -1을 반환합니다. 알림의 자세한 내용은 `Serial::onDisconnect`를 참조하세요. Windows에서는 취소된 읽기를 제외한 수신 상태 조회나 읽기 실패도 소실로 취급합니다. framing과 parity 플래그는 경고만 남깁니다.
 - 느린 쓰기로 앱이 멈추면 안 된다면 별도 스레드를 사용하세요. 수신 호출은 쓰기 자체의 완료를 기다리지 않습니다. 공통 스레드 규칙은 `Serial::setup`을 참조하세요.
+
+반환 개수로 미전송 부분을 관리합니다. 차단을 피해야 한다면 작업 스레드에서 호출합니다.
+```cpp
+void tcApp::sendBytes() {
+    int count = serial.writeBytes(bytes);
+    if (count > 0) bytes.erase(bytes.begin(), bytes.begin() + count);
+}
+```
 '''
 snippet = '''
-void tcApp::setup() {
-    static Serial serial;
-    if (serial.setup(0, 115200)) {
-        serial.writeBytes("hello\n");
-    }
+void tcApp::update() {
+    vector<unsigned char> bytes{1, 2, 3};
+    logNotice() << serial.writeBytes(bytes);
 }
 '''
 
@@ -37718,37 +37764,63 @@ void tcApp::setup() {
 
 ["UdpSocket::receive"]
 description.en = "Receives one UDP datagram into a buffer."
-description.ja = "UDP データグラムを 1 個バッファに受信する。"
-description.ko = "UDP 데이터그램 하나를 버퍼로 수신한다."
+description.ja = "UDP データグラムを 1 個バッファに受信します。"
+description.ko = "UDP 데이터그램 하나를 버퍼로 수신합니다."
 details.en = '''
+- `receive(span<unsigned char>)` uses the writable byte count and returns the received count or -1 without resizing; the sender-address overload also accepts a span.
 - Writes up to `bufferSize` bytes into `buffer` and returns the received byte count, `0` for an empty datagram, or `-1` for an invalid socket or receive failure; it does not emit `onReceive` or `onError`.
 - The overload with `remoteHost` and `remotePort` updates those output arguments only when the returned count is positive, using a numeric IPv4 address and sender port.
 - Use `bind(port, false)` for synchronous reception without a competing event receiver; a newly created socket blocks until data arrives unless non-blocking mode or a receive timeout is set.
 - See `UdpSocket::startReceiving` for changes to blocking mode when starting or stopping event reception.
 - If the buffer is too small, an oversized datagram is truncated on POSIX or causes a receive failure on Windows.
+
+Bind without event reception, limit the receive wait to 100 ms, and provide space for the complete datagram:
+```cpp
+void tcApp::setup() {
+    udp.bind(9000, false);
+    udp.setReceiveTimeout(100);
+    bytes.resize(65536);
+}
+```
 '''
 details.ja = '''
+- `receive(span<unsigned char>)` は書き込み可能なバイト数を使い、リサイズせず受信数または -1 を返します。送信元アドレス付きの版も span に対応します。
 - `buffer` に最大 `bufferSize` バイトを書き込み、受信バイト数を返します。空のデータグラムでは `0`、ソケットが無効な場合や受信に失敗した場合は `-1` を返します。`onReceive` と `onError` は発火しません。
 - `remoteHost` と `remotePort` を受け取るオーバーロードは、戻り値が正の場合だけ出力引数を更新し、送信元の数値形式の IPv4 アドレスとポートを設定します。
 - 同期受信では、イベント受信と競合しないように `bind(port, false)` を使ってください。作成直後のソケットは、ノンブロッキングモードまたは受信タイムアウトを設定しない限り、データが届くまで待ちます。
 - イベント受信の開始や停止によるブロッキングモードの変化については、`UdpSocket::startReceiving` を参照してください。
 - バッファが小さすぎる場合、大きすぎるデータグラムは POSIX では切り詰められ、Windows では受信に失敗します。
+
+イベント受信なしで bind し、受信待ちを 100 ms に制限して、データグラム全体の領域を用意します。
+```cpp
+void tcApp::setup() {
+    udp.bind(9000, false);
+    udp.setReceiveTimeout(100);
+    bytes.resize(65536);
+}
+```
 '''
 details.ko = '''
+- `receive(span<unsigned char>)`는 쓰기 가능한 바이트 수를 사용하며 크기를 변경하지 않고 수신 개수 또는 -1을 반환합니다. 송신자 주소 오버로드도 span을 받습니다.
 - `buffer`에 최대 `bufferSize`바이트를 쓰고 수신 바이트 수를 반환합니다. 빈 데이터그램이면 `0`을, 소켓이 무효이거나 수신에 실패하면 `-1`을 반환합니다. `onReceive`와 `onError`는 발생시키지 않습니다.
 - `remoteHost`와 `remotePort`를 받는 오버로드는 반환값이 양수일 때만 출력 인수를 갱신하여 송신자의 숫자 형식 IPv4 주소와 포트를 설정합니다.
 - 동기 수신에서는 이벤트 수신과 경쟁하지 않도록 `bind(port, false)`를 사용합니다. 새로 생성한 소켓은 논블로킹 모드나 수신 타임아웃을 설정하지 않으면 데이터가 도착할 때까지 기다립니다.
 - 이벤트 수신의 시작과 중지에 따른 블로킹 모드 변경은 `UdpSocket::startReceiving`을 참조하세요.
 - 버퍼가 너무 작으면 큰 데이터그램은 POSIX에서 잘리고 Windows에서는 수신에 실패합니다.
+
+이벤트 수신 없이 bind하고 수신 대기를 100 ms로 제한한 뒤 전체 데이터그램을 담을 공간을 준비합니다.
+```cpp
+void tcApp::setup() {
+    udp.bind(9000, false);
+    udp.setReceiveTimeout(100);
+    bytes.resize(65536);
+}
+```
 '''
 snippet = '''
-void tcApp::setup() {
-    UdpSocket udp;
-    if (!udp.bind(9000, false)) return;
-    udp.setReceiveTimeout(100);
-    char buffer[1024];
-    int received = udp.receive(buffer, sizeof(buffer));
-    if (received > 0) logNotice() << string(buffer, received);
+void tcApp::update() {
+    vector<unsigned char> bytes(65536);
+    logNotice() << udp.receive(bytes);
 }
 '''
 
@@ -37758,16 +37830,19 @@ description.ja = "設定済みの宛先に UDP データグラムを送信する
 description.ko = "설정된 대상으로 UDP 데이터그램을 전송한다."
 details.en = '''
 - Call `connect(host, port)` successfully first; pass either a data pointer and byte count or a `string`, whose bytes are sent without an added null terminator.
+- `send(span<const unsigned char>)` sends the span bytes and returns the same bool as the pointer overload.
 - Returns `true` if the OS send call succeeds; an invalid socket, missing destination, or send failure emits `onError` and returns `false`.
 - Success reports the send operation only and does not confirm delivery or receipt.
 '''
 details.ja = '''
 - 先に `connect(host, port)` を成功させてください。データのポインターとバイト数、または `string` を渡せます。文字列は終端のヌル文字を追加せず、そのバイト列を送信します。
+- `send(span<const unsigned char>)` は span のバイト列を送り、ポインタ版と同じ bool を返します。
 - OS の送信処理に成功すると `true` を返します。ソケットが無効、宛先が未設定、または送信に失敗した場合は、`onError` を発火して `false` を返します。
 - 成功は送信操作の成功だけを示し、宛先への到達や受信は確認しません。
 '''
 details.ko = '''
 - 먼저 `connect(host, port)`가 성공해야 합니다. 데이터 포인터와 바이트 수 또는 `string`을 전달할 수 있습니다. 문자열은 끝에 널 문자를 추가하지 않고 해당 바이트를 전송합니다.
+- `send(span<const unsigned char>)`는 span 바이트를 보내며 포인터 버전과 같은 bool을 반환합니다.
 - OS의 전송 처리가 성공하면 `true`를 반환합니다. 소켓이 무효이거나 대상이 설정되지 않았거나 전송에 실패하면 `onError`를 발생시키고 `false`를 반환합니다.
 - 성공은 전송 작업의 성공만 나타내며 대상에 대한 도달이나 수신을 확인하지 않습니다.
 '''
@@ -37781,30 +37856,57 @@ void tcApp::setup() {
 
 ["UdpSocket::sendTo"]
 description.en = "Sends a UDP datagram to a specified host and port."
-description.ja = "指定したホストとポートに UDP データグラムを送信する。"
-description.ko = "지정한 호스트와 포트로 UDP 데이터그램을 전송한다."
+description.ja = "指定したホストとポートに UDP データグラムを送信します。"
+description.ko = "지정한 호스트와 포트로 UDP 데이터그램을 전송합니다."
 details.en = '''
+- `sendTo(host, port, span<const unsigned char>)` sends the span bytes and returns the same bool as the pointer overload.
 - Accepts an IPv4 address or hostname, a destination port, and either a data pointer with byte count or a `string`; strings are sent without an added null terminator.
 - Creates the socket if necessary and resolves the host synchronously on every call; it does not update the destination stored by `connect()`.
 - Returns `true` if the OS send call succeeds; socket creation, resolution, or send failure emits `onError` and returns `false`. Success does not confirm delivery.
 - For broadcast, enable `setBroadcast(true)` first; multicast sending does not require group membership.
+
+Enable broadcast before sending a broadcast datagram:
+```cpp
+void tcApp::setup() {
+    udp.setBroadcast(true);
+    udp.sendTo("255.255.255.255", 9000, bytes);
+}
+```
 '''
 details.ja = '''
+- `sendTo(host, port, span<const unsigned char>)` は span のバイト列を送り、ポインタ版と同じ bool を返します。
 - IPv4 アドレスまたはホスト名、宛先ポート、データのポインターとバイト数、または `string` を受け取ります。文字列は終端のヌル文字を追加せずに送信します。
 - 必要に応じてソケットを作成し、呼び出すたびにホスト名を同期的に解決します。`connect()` で保存した宛先は更新しません。
 - OS の送信処理に成功すると `true` を返します。ソケットの作成、名前解決、送信に失敗すると、`onError` を発火して `false` を返します。成功しても到達は確認しません。
 - ブロードキャストでは先に `setBroadcast(true)` を設定してください。マルチキャスト送信ではグループへの参加は不要です。
+
+ブロードキャストの送信前に有効にします。
+```cpp
+void tcApp::setup() {
+    udp.setBroadcast(true);
+    udp.sendTo("255.255.255.255", 9000, bytes);
+}
+```
 '''
 details.ko = '''
+- `sendTo(host, port, span<const unsigned char>)`는 span 바이트를 보내며 포인터 버전과 같은 bool을 반환합니다.
 - IPv4 주소 또는 호스트 이름, 대상 포트, 데이터 포인터와 바이트 수 또는 `string`을 받습니다. 문자열은 끝에 널 문자를 추가하지 않고 전송합니다.
 - 필요한 경우 소켓을 생성하고 호출할 때마다 호스트를 동기적으로 확인합니다. `connect()`로 저장한 대상은 갱신하지 않습니다.
 - OS의 전송 처리가 성공하면 `true`를 반환합니다. 소켓 생성, 이름 확인 또는 전송에 실패하면 `onError`를 발생시키고 `false`를 반환합니다. 성공하더라도 도달 여부는 확인하지 않습니다.
 - 브로드캐스트에는 먼저 `setBroadcast(true)`를 설정합니다. 멀티캐스트 전송에는 그룹 가입이 필요하지 않습니다.
+
+브로드캐스트 데이터그램을 보내기 전에 활성화합니다.
+```cpp
+void tcApp::setup() {
+    udp.setBroadcast(true);
+    udp.sendTo("255.255.255.255", 9000, bytes);
+}
+```
 '''
 snippet = '''
-void tcApp::setup() {
-    UdpSocket udp;
-    if (!udp.sendTo("127.0.0.1", 9000, "hello")) logError() << "UDP send failed";
+void tcApp::update() {
+    vector<unsigned char> bytes{1, 2, 3};
+    udp.sendTo("127.0.0.1", 9000, bytes);
 }
 '''
 
@@ -68179,23 +68281,49 @@ description.en = "Uploads CPU bytes to the beginning of persistent storage once 
 description.ja = "デバイスフレームごとに一度、永続バッファの先頭へ CPU のバイト列を転送します。"
 description.ko = "디바이스 프레임마다 한 번 영구 버퍼의 시작 부분에 CPU 바이트를 업로드합니다."
 details.en = '''
+- `update(values)` accepts a vector, array or span and forwards its size in bytes; it returns the pointer overload’s bool without resizing or converting elements.
 - update(data, size) requires allocated storage, non-null data and a positive size divisible by four that does not exceed getSize(). Bytes beyond this range are preserved. No typed conversion or resizing occurs.
 - This sokol revision uses sg_write_buffer_transient plus sg_copy_buffer_to_buffer rather than sg_update_buffer. A lazily allocated GPU upload buffer is written and copied outside a pass. Using a real GPU copy also preserves WebGPU command ordering. Sokol forbids rewriting that staging source after a copy in the same frame, so a second update before the next sg_commit returns false with a warning. Device frames are shared across windows; setup and the first update may share one. Initial data in allocate does not consume this update.
+
+Upload from update() once per device frame:
+```cpp
+void tcApp::update() {
+    buffer.update(values);
+}
+```
 - Flushes earlier recorded drawing before the copy, using the same continuation as compute dispatch; later draws/dispatches see the new bytes. CPU data may be released on return; no GPU completion wait occurs. Invalid input or unavailable resources warn and return false without changing storage.
 '''
 details.ja = '''
+- `update(values)` は vector、array、span を受け取り、サイズをバイト数へ換算して転送します。サイズ変更や要素の変換は行わず、ポインタ版と同じ bool を返します。
 - update(data, size) には確保済みの領域、null でない data、getSize() 以下の正の 4 の倍数のサイズが必要です。範囲より後ろの内容は保持します。型変換やサイズ変更はしません。
 - この sokol 版では sg_update_buffer の代わりに sg_write_buffer_transient と sg_copy_buffer_to_buffer を使います。必要になった時に GPU 転送用バッファを確保し、パスの外で書き込みとコピーを行います。GPU 間のコピーによって WebGPU のコマンド順序も維持します。sokol は同じフレームのコピー後に元のステージングへ再度書くことを禁止するため、次の sg_commit より前の 2 回目の更新は警告を出して false を返します。デバイスフレームはウィンドウ間で共有し、setup と最初の update が同じフレームになる場合があります。allocate の初期データは更新回数に含みません。
+
+デバイスフレームごとに一度 update() から転送します。
+```cpp
+void tcApp::update() {
+    buffer.update(values);
+}
+```
 - コピー前に記録済みの描画を送り出し、compute dispatch と同じ継続処理を使います。後続の描画・dispatch は新しい内容を読みます。戻った後は CPU データを解放できます。GPU 完了は待ちません。不正な入力や利用できないリソースでは警告を出して false を返し、内容を変更しません。
 '''
 details.ko = '''
+- `update(values)`는 vector, array, span을 받아 크기를 바이트 수로 변환하여 전달합니다. 크기 변경이나 요소 변환 없이 포인터 버전과 같은 bool을 반환합니다.
 - update(data, size)는 할당된 저장소, null이 아닌 data, getSize() 이하의 양의 4의 배수 크기를 요구합니다. 범위 뒤의 내용은 유지합니다. 타입 변환이나 크기 변경은 수행하지 않습니다.
 - 이 sokol 버전은 sg_update_buffer 대신 sg_write_buffer_transient와 sg_copy_buffer_to_buffer를 사용합니다. 필요할 때 GPU 업로드 버퍼를 할당하고 패스 밖에서 쓰기와 복사를 수행합니다. GPU 간 복사는 WebGPU 명령 순서도 유지합니다. sokol은 같은 프레임에서 복사한 스테이징 원본의 재작성을 금지하므로 다음 sg_commit 전 두 번째 업데이트는 경고 후 false를 반환합니다. 디바이스 프레임은 창 사이에 공유하며 setup과 첫 update가 같은 프레임일 수 있습니다. allocate의 초기 데이터는 업데이트 횟수에 포함하지 않습니다.
+
+디바이스 프레임마다 한 번 update()에서 업로드합니다.
+```cpp
+void tcApp::update() {
+    buffer.update(values);
+}
+```
 - 복사 전에 기록된 그리기를 전송하며 compute dispatch와 같은 재개 처리를 사용합니다. 이후 그리기와 dispatch는 새 내용을 읽습니다. 반환 후 CPU 데이터를 해제할 수 있으며 GPU 완료를 기다리지 않습니다. 잘못된 입력이나 사용 불가능한 리소스는 경고 후 false를 반환하며 저장소를 변경하지 않습니다.
 '''
 snippet = '''
-std::array<Vec4, 4> values = {};
-bool uploaded = buffer.update(values.data(), sizeof(values));
+void tcApp::update() {
+    vector<float> values(4);
+    buffer.update(values);
+}
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
@@ -68204,24 +68332,49 @@ description.en = "Reads bytes from the start of storage and blocks until GPU com
 description.ja = "領域の先頭からバイト列を読み取り、GPU の完了までブロックします（ネイティブ専用です。Web では readAsync() を使います）。"
 description.ko = "저장소의 시작부터 바이트를 읽고 GPU 완료까지 차단합니다(네이티브 전용이며 Web에서는 readAsync()를 사용합니다)."
 details.en = '''
+- `read(values)` fills a writable vector, array or span without resizing and returns the pointer overload’s bool.
 - read(destination, bytes) immediately submits preceding recorded draws and dispatches in order and blocks until completion. The frame stalls while it waits; calling it every frame can lower fps. No frame commit occurs, and later drawing continues normally. Available on Metal, D3D11, GL 4.3 and GLES 3.1, including Raspberry Pi 5. It is not available on Web: calling it there is a compile error.
+
+Use asynchronous readback to avoid blocking, including on Web:
+```cpp
+void tcApp::update() {
+    buffer.readAsync([](ReadbackResult result) { logNotice() << result.ok(); });
+}
+```
 - Copies bytes from offset zero without conversion. Partial reads, including byte counts not divisible by four, are allowed. A zero-byte read succeeds without allocated storage or a destination and submits no work. A nonzero read requires allocated storage, a non-null destination with room for bytes, and bytes <= getSize(). Invalid input or native readback failure returns false with a warning (at most once every 5 seconds per buffer), and leaves the destination untouched. A successful result is a CPU snapshot that later GPU writes cannot change.
 - Every StorageBuffer allocation includes copy-source usage automatically. Call on the main thread with an initialized windowed GPU; this API does not enable headless compute.
 '''
 details.ja = '''
+- `read(values)` は書き込み可能な vector、array、span にサイズを変更せず書き込み、ポインタ版と同じ bool を返します。
 - read(destination, bytes) は先行する記録済みの描画と dispatch を順番どおり直ちに送信し、完了までブロックします。待機中はフレームが停止し、毎フレーム呼ぶと fps が低下する場合があります。フレームの commit は行わず、その後も描画を続けられます。Metal、D3D11、GL 4.3、GLES 3.1（Raspberry Pi 5 を含みます）に対応します。Web では利用できず、呼ぶとコンパイルエラーになります。
+
+Web を含め、ブロックを避けるには非同期で読み取ります。
+```cpp
+void tcApp::update() {
+    buffer.readAsync([](ReadbackResult result) { logNotice() << result.ok(); });
+}
+```
 - オフセット 0 から bytes バイトを変換せずコピーします。4 の倍数でないバイト数を含め、部分読み取りができます。0 バイトなら確保済み領域や出力先は不要で、GPU へ送信せず true を返します。0 より大きい場合は、確保済み領域、bytes バイト以上の null でない出力先、bytes <= getSize() が必要です。不正な入力やネイティブ読み取り失敗では、警告を出して false を返し、出力先を変更しません。警告はバッファごとに 5 秒に 1 回までです。成功時の CPU スナップショットは、その後の GPU 書き込みでは変わりません。
 - すべての StorageBuffer は自動的にコピー元として確保します。ウィンドウの GPU が初期化された状態で、メインスレッドから呼びます。ヘッドレス compute を有効にする API ではありません。
 '''
 details.ko = '''
+- `read(values)`는 쓰기 가능한 vector, array, span에 크기를 변경하지 않고 쓰며 포인터 버전과 같은 bool을 반환합니다.
 - read(destination, bytes)는 앞서 기록된 그리기와 dispatch를 순서대로 즉시 제출하고 완료까지 차단합니다. 기다리는 동안 프레임이 멈추며 매 프레임 호출하면 fps가 낮아질 수 있습니다. 프레임 commit은 수행하지 않으며 이후 그리기를 계속합니다. Metal, D3D11, GL 4.3, GLES 3.1(Raspberry Pi 5 포함)을 지원합니다. Web에서는 사용할 수 없으며 호출하면 컴파일 오류가 발생합니다.
+
+Web을 포함하여 차단을 피하려면 비동기로 읽습니다.
+```cpp
+void tcApp::update() {
+    buffer.readAsync([](ReadbackResult result) { logNotice() << result.ok(); });
+}
+```
 - 오프셋 0부터 bytes바이트를 변환 없이 복사합니다. 4의 배수가 아닌 바이트 수를 포함하여 부분 읽기를 허용합니다. 0바이트 읽기는 할당된 저장소나 출력 대상 없이 성공하며 GPU 작업을 제출하지 않습니다. 0보다 큰 읽기는 할당된 저장소, bytes바이트 이상을 담는 null이 아닌 출력 대상, bytes <= getSize()를 요구합니다. 잘못된 입력이나 네이티브 읽기 실패 시 경고하고 false를 반환하며 출력 대상을 변경하지 않습니다. 경고는 버퍼마다 5초에 한 번까지 출력합니다. 성공한 CPU 스냅샷은 이후 GPU 쓰기로 변경되지 않습니다.
 - 모든 StorageBuffer는 자동으로 복사 원본 용도를 포함하여 할당합니다. 창의 GPU를 초기화한 상태에서 메인 스레드에서 호출합니다. 이 API는 헤드리스 compute를 활성화하지 않습니다.
 '''
 snippet = '''
-compute.dispatch(groups);
-std::vector<float> values(count);
-if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << values[0];
+void tcApp::update() {
+    vector<float> values(4);
+    if (buffer.read(values)) logNotice() << values[0];
+}
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
