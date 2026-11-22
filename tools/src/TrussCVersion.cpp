@@ -535,6 +535,20 @@ static uintmax_t cacheSize(const fs::path& path) {
     return size;
 }
 
+static std::string formatCacheSize(uintmax_t bytes) {
+    if (bytes < 1024) return std::to_string(bytes) + " B";
+    const char* units[] = {"KB", "MB", "GB"};
+    double size = static_cast<double>(bytes) / 1024;
+    int unit = 0;
+    while (size >= 1024 && unit < 2) {
+        size /= 1024;
+        ++unit;
+    }
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(1) << size << ' ' << units[unit];
+    return output.str();
+}
+
 static void removeCacheTree(const fs::path& path) {
     checkCachePath(path);
 #ifdef _WIN32
@@ -641,10 +655,10 @@ int cacheCommand(const std::vector<std::string>& args) {
             << (args.size() == 2 ? args[0] : "[list|clear|autoremove|remove]") << "\n\n"
             << "Manage shared TrussC and external addon downloads. Local folders are not cached.\n\n"
             "Commands:\n"
-            "  list        List specs, worktree/tarball, bytes and last-used date (- if unknown)\n"
+            "  list        List specs, worktree/tarball, size and last-used date (- if unknown)\n"
             "  remove <spec>          Remove one TrussC version without confirmation\n"
             "  remove --addon <spec>  Remove one external addon version without confirmation\n"
-            "  clear       Show total bytes and remove the whole cache after one y/N prompt\n"
+            "  clear       Show total size and remove the whole cache after one y/N prompt\n"
             "  autoremove  List and remove versions last used 90 or more days ago (one y/N prompt)\n\n"
             "Addon rows are marked 'addon'; other rows are marked 'TrussC'.\n"
             "remove uses specs as for use or addon add; qualify the owner if an addon is ambiguous.\n"
@@ -686,7 +700,7 @@ int cacheCommand(const std::vector<std::string>& args) {
     auto root = cacheRoot();
     checkCachePath(root);
     if (args[0] == "clear") {
-        std::cout << "Total: " << cacheSize(root) << " bytes\n";
+        std::cout << "Total: " << formatCacheSize(cacheSize(root)) << '\n';
         if (confirmCacheRemoval() && fs::exists(root)) {
             for (const auto& entry : fs::directory_iterator(root)) {
                 if (fs::is_directory(entry.symlink_status())) removeCacheTree(entry.path());
@@ -709,12 +723,12 @@ int cacheCommand(const std::vector<std::string>& args) {
         if (args[0] == "autoremove" && !oldDate(entry.date)) continue;
         std::cout << (entry.addon ? "addon " : "TrussC ")
             << entry.spec.owner << '/' << entry.spec.repo << '@' << entry.spec.ref
-            << ' ' << (entry.worktree ? "worktree" : "tarball") << ' ' << entry.size
-            << " bytes " << entry.date << '\n';
+            << ' ' << (entry.worktree ? "worktree" : "tarball") << ' ' << formatCacheSize(entry.size)
+            << ' ' << entry.date << '\n';
         total += entry.size;
         selected.push_back(entry);
     }
-    std::cout << "Total: " << total << " bytes" << (args[0] == "list" ? " (versions; bare repos excluded)\n" : "\n");
+    std::cout << "Total: " << formatCacheSize(total) << (args[0] == "list" ? " (versions; bare repos excluded)\n" : "\n");
     if (args[0] == "autoremove" && !selected.empty() && confirmCacheRemoval()) {
         for (const auto& entry : selected) removeCachedVersion(entry.path, entry.spec);
     }
