@@ -52,24 +52,50 @@ class CacheTests(AddonVersionTests):
     def test_cache_empty_does_not_create_folders(self):
         empty = self.base / "empty-cache"
         self.env["TRUSSC_CACHE_DIR"] = str(empty)
-        self.assertIn("Total: 0 bytes", self.command("list"))
-        self.assertIn("Total: 0 bytes", self.command("autoremove"))
+        self.assertIn("Total: 0 B", self.command("list"))
+        self.assertIn("Total: 0 B", self.command("autoremove"))
         self.assertIn("interactively in a terminal", self.command("clear"))
         self.assertFalse(empty.exists())
 
     def test_cache_list_four_kinds_sizes_and_dates(self):
         self.fixture_cache()
         (self.tarball / ".last-used").unlink()
+        for root in self.versions:
+            size = sum(p.stat().st_size for p in root.rglob("*")
+                       if not p.is_symlink() and p.is_file())
+            self.assertLessEqual(size, 1024**2)
+            with (root / "padding").open("wb") as padding:
+                padding.truncate(1024**2 - size)
         output = self.command("list")
         self.assertIn("TrussC TrussC-org/TrussC@v1.0.0 worktree", output)
         self.assertIn("TrussC TrussC-org/TrussC@main tarball", output)
         self.assertIn("addon alice/tcxFixture@v1 worktree", output)
         self.assertIn("addon alice/tcxFixture@feature/next tarball", output)
-        self.assertIn(" bytes -\n", output)
-        total = sum(p.stat().st_size for root in self.versions for p in root.rglob("*")
-                    if not p.is_symlink() and p.is_file())
-        self.assertIn(f"Total: {total} bytes", output)
+        self.assertIn(" 1.0 MB -\n", output)
+        self.assertEqual(output.count(" 1.0 MB "), 4)
+        self.assertIn("Total: 4.0 MB", output)
         self.assertEqual(len(output.splitlines()), 5)
+
+    def test_cache_size_boundaries(self):
+        self.env["TRUSSC_CACHE_DIR"] = str(self.base / "size-cache")
+        root = self.base / "size-cache/versions/TrussC-org/TrussC/size-test"
+        root.mkdir(parents=True)
+        (root / ".git_archival.txt").touch()
+        marker = root / ".last-used"
+        marker.write_text("2000-01-01\n", encoding="utf-8")
+        for size, expected in ((512, "512 B"), (1023, "1023 B"),
+                               (1024, "1.0 KB"), (1536, "1.5 KB"),
+                               (1024**2, "1.0 MB"), (1024**3, "1.0 GB")):
+            with self.subTest(size=size):
+                # Sparse files exercise GB output without allocating GB of storage.
+                with (root / "payload").open("wb") as payload:
+                    payload.truncate(size - marker.stat().st_size)
+                for command in ("list", "autoremove", "clear"):
+                    output = self.command(command)
+                    self.assertIn(f"Total: {expected}\n" if command != "list" else
+                                  f"Total: {expected} (versions; bare repos excluded)\n", output)
+                    if command != "clear":
+                        self.assertIn(f"tarball {expected} 2000-01-01\n", output)
 
     def test_cache_clear_answers_and_symlinks(self):
         self.fixture_cache()
