@@ -38,7 +38,7 @@ void tcApp::saveCapture() {
 }
 ```
 
-Toolbar staging files live in the `setFlushDirectory()` folder (default: `input-replay` under the data folder), with owner-only permissions on POSIX. A crash or cleanup with an unsaved recording can leave a staging file there. A toolbar recording stopped by a recording limit remains available through Save. Starting a new recording discards the previous unsaved staging file with a Warning.
+Toolbar staging files live in the `setFlushDirectory()` folder (default: `input-replay` under the data folder), with owner-only permissions on POSIX. A crash or cleanup with an unsaved recording can leave a staging file there. Starting a new recording discards the previous unsaved staging file with a Warning.
 
 
 Open chooses a recording; the toolbar shows its filename and hovering it shows the full path. Dropping files selects the first `.jsonl` path (case sensitive) on the setup window, without starting playback. The app still receives every drop, recording continues, and the drop is recorded normally. Other extensions are ignored by the addon. Open and drop select a path; Play validates and starts it.
@@ -99,9 +99,20 @@ Mouse moves, drags (stored once as moves), buttons, scroll, keys including repea
 
 File drops contain paths as data; playback does not recreate files. The addon has no file-restoration API. Core's file-drop arguments have no provenance API, so recorded drops use `injected: false` and an empty tag. The synchronous replay guard still prevents re-recording them. Scroll position is saved as data; the injection API uses the destination window's current pointer position and has no explicit scroll-position argument.
 
+## Count recorded input
+
+`getRecordedCount()` returns input records written in the current recording (retained inputs in Ring mode), excluding marks and header/end lines, or 0 when stopped; use it to set your own limit.
+
+```cpp
+void tcApp::update() {
+    if (tcx::inputreplay::getRecordedCount() > 100000)
+        tcx::inputreplay::stopRecording();
+}
+```
+
 ## Retain recent input in a ring
 
-Ring recording keeps the last N minutes in memory for incident capture, bounded by a record capacity and the JSONL byte limits. No file is opened until flush. Both duration and count apply: this keeps at most five minutes and 100,000 input/mark records.
+Ring recording keeps the last N minutes in memory for incident capture. No file is opened until flush. An optional explicit capacity also bounds the input/mark count: this keeps at most five minutes and 100,000 input/mark records.
 
 ```cpp
 void tcApp::beginCapture() {
@@ -109,7 +120,7 @@ void tcApp::beginCapture() {
 }
 ```
 
-The duration is `std::chrono::milliseconds` (1 ms through seven days); chrono minutes/seconds convert directly. Capacity excludes header/end, defaults to 999,998, and must be 1–999,998. Older complete records are evicted when time, count or bytes reach a bound. An oversized individual line stops recording with an Error. There is no API to store an oversized line.
+The duration is positive `std::chrono::milliseconds`; chrono minutes/seconds convert directly. Capacity excludes header/end, must be positive, and defaults to unbounded. Older complete records are evicted by duration and, when specified, capacity.
 
 `flush(path)` writes the retained segment and stops recording, including on a file error. It creates parent folders and opens no dialog. Restart explicitly to capture another incident.
 
@@ -183,7 +194,7 @@ void tcApp::enableRemoteDebugging() {
 
 | Tool | Arguments |
 | --- | --- |
-| `tcx_inputreplay_start_recording` | `path` for a file; omit it for a ring, with optional `durationMs` (default 300000) and `capacity` (default 999998) |
+| `tcx_inputreplay_start_recording` | `path` for a file; omit it for a ring, with optional `durationMs` (default 300000) and `capacity` (unbounded by default) |
 | `tcx_inputreplay_stop_recording` | none; discards a ring |
 | `tcx_inputreplay_play` | `path`, optional `scale`: `none`, `stretch`, `fit` |
 | `tcx_inputreplay_stop_playback` | none |
@@ -250,7 +261,7 @@ UTF-8, one object per line. The first object is a header with `type: "header"`, 
 
 Every subsequent record has `type`, elapsed `ms` and relative `frame`. Input also has its mapped `window` key (default `"main"`), `injected` and `tag`. Mouse input has `x`, `y`, `mods` (shift=1, ctrl=2, alt=4, super=8); buttons add `button` (0–2), scroll adds `scrollX`, `scrollY`. Keys have `key`, `mods`, `repeat`; characters have `codepoint`, `mods`, `repeat`. Touch has `canceled` and `touches` (`id`, `x`, `y`, `pressure`, `changed`). Drops have `x`, `y`, `files`. Marks have `name`; the final record has `type: "end"`.
 
-Playback validates the whole file before injecting anything, reporting errors with a line number. Limits are 64 KiB per line excluding LF, 128 MiB per file including line endings, 1,000,000 objects including header/end, and seven days for `ms`. Timestamps and frames must be nondecreasing. Invalid/missing fields, non-finite or out-of-domain values, unknown versions/event kinds, missing end records and trailing records fail validation. Failed or interrupted recordings can be incomplete; there is no recovery API.
+Playback validates the whole file before injecting anything, reporting errors with a line number. Timestamps and frames must be nondecreasing. Invalid/missing fields, non-finite or out-of-domain values, unknown versions/event kinds, missing end records and trailing records fail validation. Failed or interrupted recordings can be incomplete; there is no recovery API.
 
 ## Example and tests
 

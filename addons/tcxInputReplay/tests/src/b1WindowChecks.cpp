@@ -72,6 +72,17 @@ void windowChecks() {
     tc::mcp::internal::grantToolLevelWithoutOpening(tc::mcp::ToolLevel::Control);
     for (const auto* suffix : {"start_recording", "stop_recording", "play", "stop_playback", "flush"})
         check(tc::mcp::hasTool(std::string("tcx_inputreplay_") + suffix), "setup registers MCP tool");
+    for (const auto& args : {Json{{"capacity", 0}}, Json{{"durationMs", 0}}}) {
+        check(call("start_recording", args)["status"] == "error" && !s.recording(), "MCP requires positive duration/capacity");
+    }
+    for (const auto& args : {Json{{"capacity", -1}}, Json{{"durationMs", -1}}}) {
+        const auto reply = request("tools/call", {{"name", "tcx_inputreplay_start_recording"}, {"arguments", args}});
+        check(reply.dump().find("nonnegative integer") != std::string::npos && !s.recording(), "MCP rejects negative duration/capacity");
+    }
+    check(call("start_recording", {{"durationMs", 604800001}, {"capacity", 1000001}})["status"] == "ok", "MCP accepts values above old caps");
+    replay::stopRecording();
+    check(call("start_recording")["status"] == "ok" && s.ring.capacity == (std::numeric_limits<size_t>::max)(), "MCP default capacity unbounded");
+    replay::stopRecording();
     check(call("start_recording", {{"durationMs", 1000}, {"capacity", 4}})["status"] == "ok" && s.ringRecording, "MCP ring start");
     check(call("start_recording")["status"] == "error", "MCP redundant start returns error text");
     check(call("flush", {{"path", tc::pathToUtf8(path)}})["status"] == "ok" && !s.recording(), "MCP flush saves and stops");

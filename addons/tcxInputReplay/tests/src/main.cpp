@@ -83,8 +83,8 @@ void validation() {
     check(accepts(encode({bad, e}), "duplicate"), "duplicate window key");
     check(accepts(encode({h, m, end(9, 1)}), "nonmonotonic"), "time ordering");
     check(accepts(encode({h, m, end(10, 0)}), "nonmonotonic"), "frame ordering");
-    check(accepts(encode({h, end(timeLimit, UINT64_MAX)})), "time and frame at bound");
-    check(accepts(encode({h, end(timeLimit + 1)}), "ms exceeds"), "time over bound");
+    check(accepts(encode({h, end(UINT64_MAX, UINT64_MAX)})), "time and frame at bound");
+    check(accepts(encode({h, end(604800001)})), "time beyond seven days");
     bad = m;
     bad["frame"] = -1;
     check(accepts(encode({h, bad, e}), "nonnegative"), "negative frame");
@@ -191,9 +191,8 @@ void validation() {
         check(true, "validated drop ignores irrelevant modifier extension");
     } catch (...) { check(false, "validated drop ignores irrelevant modifier extension"); }
     auto padded = h.dump();
-    padded.insert(padded.size() - 1, lineLimit - padded.size(), ' ');
-    check(accepts(padded + "\n" + e.dump() + "\n"), "line at bound");
-    check(accepts(padded + " \n" + e.dump() + "\n", "line limit"), "line over bound");
+    padded.insert(padded.size() - 1, 65537 - padded.size(), ' ');
+    check(accepts(padded + "\n" + e.dump() + "\n"), "line beyond old bound");
     for (size_t arrays : {size_t(15), size_t(16)}) {
         const auto extension = ",\"extra\":" + std::string(arrays, '[') + "0" + std::string(arrays, ']') + "}";
         const auto nestedHeader = h.dump().substr(0, h.dump().size() - 1) + extension;
@@ -204,7 +203,7 @@ void validation() {
     check(accepts(encode({h}) + std::string(32000, '[') + "0" + std::string(32000, ']') + "\n", "line 2: JSON nesting limit"), "deep input rejected during parsing");
 }
 
-// Generate large streams on demand, rather than holding a second 128 MiB copy.
+// Generate repeated records without holding a second complete copy.
 class RepeatedStream : public std::streambuf {
     std::string first_, repeated_, last_, chunk_;
     size_t count_, emitted_ = 0;
@@ -222,30 +221,11 @@ public:
         return underflow();
     }
 };
-void largeLimits() {
-    const std::string h = header().dump() + '\n', e = end().dump() + '\n';
-    const std::string mark = "{\"type\":\"mark\",\"ms\":0,\"frame\":0,\"name\":\"\"}\n";
-    for (size_t extra : {size_t(0), size_t(1)}) {
-        RepeatedStream buf(h, mark, recordLimit - 2 + extra, e);
-        std::istream stream(&buf);
-        bool accepted = false;
-        try { load(stream); accepted = true; }
-        catch (const std::exception& ex) { check(std::string(ex.what()).find("record limit") != std::string::npos, "record limit diagnostic"); }
-        check(accepted == (extra == 0), "record bound at/over");
-    }
-    std::string padded = mark;
-    padded.insert(padded.size() - 2, 65500 - padded.size(), ' ');
-    const size_t count = (fileLimit - h.size() - e.size()) / padded.size();
-    const size_t rest = fileLimit - h.size() - e.size() - count * padded.size();
-    for (size_t extra : {size_t(0), size_t(1)}) {
-        const auto last = std::string(rest + extra, ' ') + e;
-        RepeatedStream buf(h, padded, count, last);
-        std::istream stream(&buf);
-        bool accepted = false;
-        try { load(stream); accepted = true; }
-        catch (const std::exception& ex) { check(std::string(ex.what()).find("file limit") != std::string::npos, "file limit diagnostic"); }
-        check(accepted == (extra == 0), "file bound at/over");
-    }
+void largeRecording() {
+    RepeatedStream buf(header().dump() + '\n',
+        "{\"type\":\"mark\",\"ms\":0,\"frame\":0,\"name\":\"\"}\n", 1000000, end().dump() + '\n');
+    std::istream stream(&buf);
+    check(load(stream).records.size() == 1000001, "more than old record limit loads");
 }
 void scaling() {
     const Size recorded{100, 50}, current{300, 100};
@@ -296,7 +276,7 @@ int main() {
     validation();
     scaling();
     timing();
-    largeLimits();
+    largeRecording();
     std::printf("%d checks, %d failures\n", checks, failures);
     const int ringFailures = runInputReplayRingChecks();
     const int windowFailures = runInputReplayWindowChecks();

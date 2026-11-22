@@ -13,15 +13,6 @@ enum class ScaleMode { None, Stretch, Fit };
 
 namespace detail {
 using Json = tc::Json;
-// Bound (parsing memory): one JSON line contains at most 64 KiB, excluding LF.
-inline constexpr size_t lineLimit = 64 * 1024;
-// Bound (debug recording memory): a complete file contains at most 128 MiB.
-inline constexpr size_t fileLimit = 128 * 1024 * 1024;
-// Bound (parsing work): a complete file contains at most 1,000,000 objects, including header/end.
-inline constexpr size_t recordLimit = 1000000;
-// Bound (practical replay duration): offsets cannot exceed seven days in milliseconds.
-inline constexpr uint64_t timeLimit = 604800000;
-
 struct Size { double width = 0, height = 0; };
 
 inline tc::Vec2 scalePosition(tc::Vec2 p, Size recorded, Size current, ScaleMode mode) {
@@ -158,7 +149,7 @@ inline void validateHeader(const Json& j, Session& out) {
 }
 
 inline Record validateRecord(Json j) {
-    Record r{string(j, "type"), unsignedValue(j, "ms", timeLimit), unsignedValue(j, "frame"), {}};
+    Record r{string(j, "type"), unsignedValue(j, "ms"), unsignedValue(j, "frame"), {}};
     if (r.type == "mark") { string(j, "name"); }
     else if (r.type != "end") {
         if (string(j, "window").empty()) throw std::runtime_error("empty window key");
@@ -207,22 +198,14 @@ inline Record validateRecord(Json j) {
 // Transactional: the caller receives nothing until the complete stream is valid.
 inline Session load(std::istream& stream) {
     Session result;
-    size_t total = 0, line = 0;
+    size_t line = 0;
     bool ended = false;
-    std::array<char, lineLimit + 2> buffer{};
+    std::string text;
     try {
-        while (stream.peek() != std::char_traits<char>::eof()) {
+        while (std::getline(stream, text)) {
             ++line;
-            if (line > recordLimit) throw std::runtime_error("record limit exceeded");
-            stream.getline(buffer.data(), std::streamsize(buffer.size()));
-            const size_t bytes = size_t(stream.gcount());
-            if (bytes > fileLimit - total) throw std::runtime_error("file limit exceeded");
-            total += bytes;
-            const size_t length = bytes - (stream.eof() ? 0 : 1);
-            if (stream.fail() && !stream.eof()) throw std::runtime_error("line limit exceeded or read failed");
-            if (length > lineLimit) throw std::runtime_error("line limit exceeded");
             if (ended) throw std::runtime_error("record after end");
-            auto j = Json::parse(buffer.data(), buffer.data() + length,
+            auto j = Json::parse(text,
                 [](int depth, Json::parse_event_t event, Json&) {
                     // Bound (recursive JSON copies/destruction on small stacks): allow at most 16 nested containers.
                     if (depth >= 16 && (event == Json::parse_event_t::object_start || event == Json::parse_event_t::array_start))
@@ -243,7 +226,7 @@ inline Session load(std::istream& stream) {
                 result.records.push_back(std::move(r));
             }
         }
-        if (stream.bad()) throw std::runtime_error("read failed");
+        if (stream.bad() || (stream.fail() && !stream.eof())) throw std::runtime_error("read failed");
         if (!ended) throw std::runtime_error("missing end record");
     } catch (const Json::parse_error&) {
         // Parser diagnostics can quote sensitive recording content; report only its line.
@@ -254,45 +237,37 @@ inline Session load(std::istream& stream) {
     return result;
 }
 
-// Store complete records, reserving the header and a worst-case end line.
+// Store complete records within a duration and an optional explicit capacity.
 // Original offsets can span a long-running installation; export rebases them.
 class Ring {
 public:
-    struct Entry { Json data; size_t bytes; };
+    struct Entry { Json data; };
     std::deque<Entry> records;
     Json header;
     uint64_t duration = 0;
-    size_t capacity = 0, bytes = 0, headerBytes = 0;
-    void start(Json value, uint64_t milliseconds, size_t count) {
-        if (!milliseconds || milliseconds > timeLimit || !count || count > recordLimit - 2)
-            throw std::runtime_error("ring duration/capacity exceeds recording limits");
+    size_t capacity = 0, inputCount = 0;
+    void start(Json value, uint64_t milliseconds, size_t count = (std::numeric_limits<size_t>::max)()) {
+        if (!milliseconds || !count) throw std::runtime_error("ring duration/capacity must be positive");
         Session metadata;
         validateHeader(value, metadata);
-        const auto length = value.dump().size();
-        if (length > lineLimit || length + 1 + 128 > fileLimit) throw std::runtime_error("ring header exceeds limits");
         *this = {};
         header = std::move(value);
-        headerBytes = length + 1;
         duration = milliseconds;
         capacity = count;
     }
     void trim(uint64_t now) {
-        while (!records.empty() && (records.size() > capacity || bytes + headerBytes + 128 > fileLimit ||
+        while (!records.empty() && (records.size() > capacity ||
             (now > duration && unsignedValue(records.front().data, "ms") < now - duration))) {
-            bytes -= records.front().bytes;
+            if (records.front().data.at("type") != "mark") --inputCount;
             records.pop_front();
         }
     }
     void push(Json value) {
-        auto checked = value;
-        checked["ms"] = 0; // The exported offsets, rather than uptime, have the seven-day bound.
-        validateRecord(std::move(checked));
-        const auto length = value.dump().size();
-        if (length > lineLimit || length + 1 + headerBytes + 128 > fileLimit)
-            throw std::runtime_error("ring record exceeds JSONL limits");
+        validateRecord(value);
         const auto now = unsignedValue(value, "ms");
-        records.push_back({std::move(value), length + 1});
-        bytes += length + 1;
+        const bool isInput = value.at("type") != "mark";
+        records.push_back({std::move(value)});
+        if (isInput) ++inputCount;
         trim(now);
     }
     void save(std::ostream& stream, uint64_t now, uint64_t frame) {

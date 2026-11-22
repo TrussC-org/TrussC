@@ -159,26 +159,6 @@ void windowChecks() {
     };
     toolbarSave();
     check(!hasPendingSave() && !std::filesystem::exists(retained) && std::filesystem::exists(path), "Save retry succeeds and releases staging");
-    for (int limit = 0; limit < 3; ++limit) {
-        toolbarRecord();
-        const auto limited = s.temporaryRecording;
-        const auto beforeLimit = dialogs;
-        if (limit == 0) s.writtenRecords = recordLimit - 1;
-        if (limit == 1) s.writtenBytes = fileLimit - 128;
-        if (limit == 2) s.recordStart = clockMs() - timeLimit - 1;
-        key(tc::KEY_F8);
-        check(!s.recording() && hasPendingSave() && std::filesystem::exists(limited) && dialogs == beforeLimit, "recording limit retains Save without a dialog");
-        if (limit == 0) {
-            toolbarSave();
-            check(!hasPendingSave() && !std::filesystem::exists(limited), "limit-finished recording can be saved");
-        } else {
-            toolbarRecord();
-            check(s.recording() && !std::filesystem::exists(limited), "new recording discards previous completed staging");
-            replay::stopRecording();
-            check(dialogs == beforeLimit && hasPendingSave(), "code stop stays dialog-free with toolbar staging");
-            toolbarSave();
-        }
-    }
     // A ring copy failure also retains its frozen segment for retry.
     replay::startRecording(replay::RecordingMode::Ring, std::chrono::minutes(1));
     savePicker = [&](FileChoice callback) {

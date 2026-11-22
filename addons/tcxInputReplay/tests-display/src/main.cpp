@@ -45,34 +45,40 @@ class Smoke : public App {
         check(mainCount == 1 && previewCount == 1 && !state.timeline.active, "display two-window replay destinations");
     }
 #endif
-    void checkRecordingLimits() {
+    void checkRecordingCount() {
         auto& state = detail::state();
-        int replayed = 0;
-        auto listener = events().mouseMoved.listen([&](const MouseMoveEventArgs& e) {
-            if (e.sourceTag == "replayed") ++replayed;
-        }, 0);
-        for (int limit = 0; limit < 4; ++limit) {
-            replay::startRecording(path_);
-            check(getWindow()->injectInput(InputEvent::mouseMoved({10, 20}), "script"), "input before recording limit");
-            // Reach each bound without writing a million records/128 MiB or waiting seven days.
-            if (limit == 0) state.writtenRecords = detail::recordLimit - 1;
-            if (limit == 1) state.writtenBytes = detail::fileLimit - 128;
-            if (limit == 2) state.recordStart -= detail::timeLimit + 1;
-            if (limit == 3) state.write({{"name", std::string(detail::lineLimit, 'x')}}, "mark");
-            else getWindow()->injectInput(InputEvent::mouseMoved({30, 40}), "script");
-            check(!state.output.is_open(), "recording limit closes output");
-            std::ifstream file(path_);
-            auto session = detail::load(file);
-            check(session.records.size() == 2 && session.records.back().type == "end", "recording limit preserves valid prefix and end");
-            // Use a fake playback clock for the seven-day boundary, with real Window injection.
-            detail::Timeline timeline;
-            timeline.start(std::move(session), 0);
-            while (auto r = timeline.next(detail::timeLimit)) {
-                if (r->type != "end") check(getWindow()->injectInput(
-                    detail::input(*r, timeline.session.size, state.currentSize(), ScaleMode::None), "replayed"), "limited recording plays");
-            }
-            check(!timeline.active && replayed == limit + 1, "limited recording completes playback");
-        }
+        check(replay::getRecordedCount() == 0, "count before start");
+        replay::startRecording(path_);
+        check(replay::getRecordedCount() == 0, "header excluded from count");
+        getWindow()->injectInput(InputEvent::mouseMoved({10, 20}), "script");
+        check(replay::getRecordedCount() == 1, "file counts first input");
+        replay::mark(std::string(65537, 'x'));
+        check(replay::getRecordedCount() == 1, "mark excluded from count; long line records");
+        state.recordStart -= 604800001;
+        getWindow()->injectInput(InputEvent::mouseMoved({30, 40}), "script");
+        check(replay::getRecordedCount() == 2 && state.recording(), "file continues beyond seven days");
+        replay::stopRecording();
+        check(replay::getRecordedCount() == 0, "count after file stop");
+        std::ifstream file(path_);
+        const auto session = detail::load(file);
+        check(session.records.size() == 4 && session.records[2].ms > 604800000, "long recording loads");
+        replay::startRecording(RecordingMode::Ring, std::chrono::milliseconds(1000), 2);
+        replay::mark("scene");
+        getWindow()->injectInput(InputEvent::mouseMoved({10, 20}), "script");
+        check(replay::getRecordedCount() == 1, "ring counts inputs only");
+        getWindow()->injectInput(InputEvent::mouseMoved({20, 30}), "script");
+        getWindow()->injectInput(InputEvent::mouseMoved({30, 40}), "script");
+        check(replay::getRecordedCount() == 2, "ring count reflects capacity eviction");
+        // Advance the recording clock without waiting for the duration window.
+        state.recordStart -= 2000;
+        check(replay::getRecordedCount() == 0, "ring count trims idle expired inputs");
+        getWindow()->injectInput(InputEvent::mouseMoved({40, 50}), "script");
+        check(replay::getRecordedCount() == 1, "ring count after duration eviction");
+        replay::stopRecording();
+        check(replay::getRecordedCount() == 0, "count after ring stop");
+        replay::startRecording(RecordingMode::Ring, std::chrono::minutes(1));
+        check(state.ring.capacity == (std::numeric_limits<size_t>::max)(), "public ring default unbounded");
+        replay::stopRecording();
     }
     void received(const char* type, Json j, bool own) {
         if (!own) return;
@@ -109,7 +115,7 @@ public:
 #else
         replay::setup();
 #endif
-        checkRecordingLimits();
+        checkRecordingCount();
         auto& e = events();
         auto moved = [this](const auto& v) {
             if (!detail::state().touchDispatch) received("mouseMoved", detail::pointer(v), v.sourceTag == "replayed" && v.injected);

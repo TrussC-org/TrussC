@@ -69,7 +69,7 @@ public:
     bool injecting = false, touchDispatch = false;
     std::ofstream output;
     uint64_t recordStart = 0, frameStart = 0;
-    size_t writtenBytes = 0, writtenRecords = 0;
+    size_t writtenRecords = 0;
 
     bool toolbarVisible = true, visibilityBeforePlayback = true, playbackVisibilitySaved = false;
     bool hotKeyEnabled = true, toolbarFrameSeen = false;
@@ -138,13 +138,8 @@ public:
             j["type"] = type;
             if (type != "header") {
                 const auto elapsed = clockMs() - recordStart;
-                j["ms"] = type == "end" && !ringRecording ? (std::min)(elapsed, timeLimit) : elapsed;
+                j["ms"] = elapsed;
                 j["frame"] = context().updateCount - frameStart;
-                if (!ringRecording && elapsed > timeLimit && type != "end") {
-                    tc::logWarning("tcxInputReplay") << "Recording stopped because the seven-day limit was reached";
-                    finishRecording();
-                    return;
-                }
             }
             if (ringRecording) {
                 ring.push(std::move(j));
@@ -155,20 +150,10 @@ public:
                 validateHeader(j, metadata);
             } else validateRecord(j);
             const auto line = j.dump();
-            // Reserve space for a final end record so successful recordings always load.
-            const size_t reserve = type == "end" ? 0 : 128;
-            if (line.size() > lineLimit || writtenRecords >= recordLimit - (type == "end" ? 0 : 1) ||
-                line.size() + 1 + reserve > fileLimit - writtenBytes) {
-                if (type == "end") throw std::runtime_error("recording exceeds JSONL limits");
-                tc::logWarning("tcxInputReplay") << "Recording stopped because a JSONL limit was reached";
-                finishRecording();
-                return;
-            }
             output << line << '\n';
             output.flush();
             if (!output) throw std::runtime_error("recording write failed");
-            writtenBytes += line.size() + 1;
-            ++writtenRecords;
+            if (type != "header" && type != "end" && type != "mark") ++writtenRecords;
         } catch (const std::exception& e) { error(e.what()); }
     }
     void record(const std::string& key, const std::string& type, Json j) {
@@ -364,13 +349,12 @@ inline bool startRecording(const std::filesystem::path& path) {
     s.output.open(tc::getDataPath(path), std::ios::binary | std::ios::trunc);
     if (!s.output) { s.error("cannot open recording file"); return false; }
     s.recordingPath = tc::getDataPath(path);
-    s.writtenBytes = s.writtenRecords = 0;
+    s.writtenRecords = 0;
     s.write(detail::recordingHeader(s), "header");
     return s.output.is_open();
 }
-// Duration and capacity both apply; capacity excludes header/end and cannot
-// exceed the loader's record limit minus those two records.
-inline bool startRecording(RecordingMode, std::chrono::milliseconds duration, size_t capacity = detail::recordLimit - 2) {
+// Capacity defaults to unbounded; an explicit capacity includes input/marks, excludes header/end.
+inline bool startRecording(RecordingMode, std::chrono::milliseconds duration, size_t capacity = (std::numeric_limits<size_t>::max)()) {
     auto& s = detail::state();
     if (!detail::beginRecording(s)) return false;
     try {
@@ -379,6 +363,17 @@ inline bool startRecording(RecordingMode, std::chrono::milliseconds duration, si
         s.ringRecording = true;
         return true;
     } catch (const std::exception& e) { s.error(e.what()); return false; }
+}
+// Input records written in the current recording, excluding marks/header/end.
+// Ring mode reports retained input records; returns zero when not recording.
+inline size_t getRecordedCount() {
+    auto& s = detail::state();
+    if (!s.recording()) return 0;
+    if (s.ringRecording) {
+        s.ring.trim(detail::clockMs() - s.recordStart);
+        return s.ring.inputCount;
+    }
+    return s.writtenRecords;
 }
 inline bool stopRecording() {
     auto& s = detail::state();
@@ -647,12 +642,12 @@ inline void registerTools() {
     tc::mcp::tool("tcx_inputreplay_start_recording", "Start file or ring input recording (debugging only)")
         .level(ToolLevel::Control)
         .arg<std::string>("path", "File path; omit for ring recording", false)
-        .arg<int>("durationMs", "Ring retention in milliseconds (1..604800000)", false)
-        .arg<int>("capacity", "Ring record capacity (1..999998)", false)
+        .arg<int>("durationMs", "Positive ring retention in milliseconds", false)
+        .arg<int>("capacity", "Positive ring record capacity; omit for unbounded", false)
         .bind(std::function<Json(const Json&)>([](const Json& args) {
             if (args.contains("path")) return toolResult(startRecording(tc::utf8ToPath(string(args, "path"))));
-            const auto duration = args.contains("durationMs") ? unsignedValue(args, "durationMs", timeLimit) : 300000;
-            const auto capacity = args.contains("capacity") ? unsignedValue(args, "capacity", recordLimit - 2) : recordLimit - 2;
+            const auto duration = args.contains("durationMs") ? unsignedValue(args, "durationMs", uint64_t((std::numeric_limits<std::chrono::milliseconds::rep>::max)())) : 300000;
+            const auto capacity = args.contains("capacity") ? unsignedValue(args, "capacity", (std::numeric_limits<size_t>::max)()) : (std::numeric_limits<size_t>::max)();
             return toolResult(startRecording(RecordingMode::Ring, std::chrono::milliseconds(duration), size_t(capacity)));
         }));
     tc::mcp::tool("tcx_inputreplay_stop_recording", "Stop recording; ring content is discarded")
