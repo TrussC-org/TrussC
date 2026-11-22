@@ -3,5 +3,6 @@
   "author": "tettou771",
   "license": "MIT",
   "category": "utilities",
+  "dependencies": ["tcxImGui"],
   "keywords": ["input", "record", "replay", "debug", "testing"]
 }
