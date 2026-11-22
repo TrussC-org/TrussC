@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace trusscVersion {
 struct Spec {
@@ -20,5 +21,11 @@ std::string resolve(const std::filesystem::path& project, bool fetch);
 std::string acquire(const Spec& spec, bool fetch, bool addon = false,
                     const std::string& sourceUrl = "");
 std::string readBounded(const std::filesystem::path& path, size_t limit);
+// Records usage only for acquired cache paths; local folders are ignored.
+void markCachedUsed(const std::filesystem::path& path);
+// Cache commands share acquisition paths and containment checks.
+int cacheCommand(const std::vector<std::string>& args);
+// Removes one acquired version and prunes its worktree registration; keeps the bare repo.
+void removeCachedVersion(const std::filesystem::path& path, const Spec& spec);
 std::string commitAt(const std::filesystem::path& root);
 }
