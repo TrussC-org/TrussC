@@ -71349,3 +71349,138 @@ struct tcApp : App {
 - 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
 - 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
 '''
+
+["median"]
+category = "math_general"
+description.en = "Returns the middle value, averaging the middle pair for an even count."
+description.ja = "中央の値を返し、偶数個では中央の2値を平均します。"
+description.ko = "중앙값을 반환하며 짝수 개이면 가운데 두 값을 평균합니다."
+details.en = '''
+Accepts `std::span<const float>` and copies the input to preserve its order. Ignores NaN; empty or all-NaN input returns `nullopt`. Equivalent to `percentile(values, 0.5)`. Returns `optional<float>`; infinities are retained, but interpolation between opposite infinities returns `nullopt`. Check the result before use:
+'''
+details.ja = '''
+`std::span<const float>` を受け取り、順序を保つため入力をコピーします。NaN は除外し、空またはすべて NaN の入力には `nullopt` を返します。`percentile(values, 0.5)` と同じです。戻り値は `optional<float>` です。無限大は残しますが、正負の無限大間の補間は `nullopt` になります。使用前に結果を確認します。
+'''
+details.ko = '''
+`std::span<const float>`를 받고 순서를 유지하도록 입력을 복사합니다. NaN은 제외하며 빈 입력이나 모두 NaN인 입력에는 `nullopt`를 반환합니다. `percentile(values, 0.5)`와 같습니다. 반환형은 `optional<float>`입니다. 무한대는 유지하지만 양과 음의 무한대 사이의 보간은 `nullopt`를 반환합니다. 사용 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> values{9, 1, 5, 3};
+    auto result = median(values);
+    if (result) logNotice("Stats") << *result;
+}
+'''
+
+["percentile"]
+category = "math_general"
+description.en = "Returns an interpolated percentile with a fraction p from 0 to 1."
+description.ja = "0〜1 の割合 p に対応する補間したパーセンタイルを返します。"
+description.ko = "0부터 1까지의 비율 p에 해당하는 보간된 백분위수를 반환합니다."
+details.en = '''
+Accepts `std::span<const float>` and returns `optional<float>`. Copies the input, ignores NaN, and linearly interpolates rank `p * (n - 1)`. Empty/all-NaN input or nonfinite/out-of-range p returns `nullopt`; p is not clamped. Infinities are retained; interpolation between opposite infinities returns `nullopt`. Check the result before use:
+'''
+details.ja = '''
+`std::span<const float>` を受け取り、`optional<float>` を返します。入力をコピーし、NaN を除外して順位 `p * (n - 1)` を線形補間します。空またはすべて NaN の入力、非有限または範囲外の p は `nullopt` になります。p はクランプしません。無限大は残しますが、正負の無限大間の補間は `nullopt` になります。使用前に結果を確認します。
+'''
+details.ko = '''
+`std::span<const float>`를 받고 `optional<float>`를 반환합니다. 입력을 복사하고 NaN을 제외한 뒤 순위 `p * (n - 1)`를 선형 보간합니다. 빈 입력, 모두 NaN인 입력, 유한하지 않거나 범위를 벗어난 p에는 `nullopt`를 반환합니다. p를 제한하지 않습니다. 무한대는 유지하지만 양과 음의 무한대 사이의 보간은 `nullopt`를 반환합니다. 사용 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> values{9, 1, 5, 3};
+    auto result = percentile(values, 0.25);
+    if (result) logNotice("Stats") << *result;
+}
+'''
+
+["histogram"]
+category = "math_general"
+description.en = "Counts values in equal-width bins over [low, high)."
+description.ja = "[low, high) の範囲を等幅のビンに分けて値を数えます。"
+description.ko = "[low, high) 범위를 같은 너비의 구간으로 나누어 값을 셉니다."
+details.en = '''
+Accepts `std::span<const float>` and returns `optional<vector<size_t>>`. Empty input returns a vector containing `bins` zeros. Skips NaN, infinities, and values outside `[low, high)`; low is included and high is excluded. Zero bins, nonfinite bounds, or low >= high returns `nullopt`. Check the result before reading counts:
+'''
+details.ja = '''
+`std::span<const float>` を受け取り、`optional<vector<size_t>>` を返します。空入力では bins 個のゼロを返します。NaN、無限大、`[low, high)` の範囲外の値は数えません。low は含み、high は含みません。bins が0、境界が非有限、または low >= high の場合は `nullopt` を返します。件数を読む前に結果を確認します。
+'''
+details.ko = '''
+`std::span<const float>`를 받고 `optional<vector<size_t>>`를 반환합니다. 빈 입력에는 bins개의 0을 반환합니다. NaN, 무한대, `[low, high)` 밖의 값은 세지 않습니다. low는 포함하고 high는 제외합니다. bins가 0이거나 경계가 유한하지 않거나 low >= high이면 `nullopt`를 반환합니다. 개수를 읽기 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> values{0, 0.25f, 0.5f, 1};
+    auto counts = histogram(values, 4, 0, 1);
+    if (counts) logNotice("Stats") << counts->at(0);
+}
+'''
+
+["correlation"]
+category = "math_general"
+description.en = "Returns the Pearson correlation of paired float values."
+description.ja = "対になる float 値のピアソン相関係数を返します。"
+description.ko = "쌍을 이루는 float 값의 피어슨 상관계수를 반환합니다."
+details.en = '''
+Accepts two `std::span<const float>` inputs and returns `optional<double>`. Uses scalar double accumulation in two passes, subtracting the means before computing moments. Empty input, unequal lengths, fewer than two pairs, any NaN/infinity, or zero variance in either input returns `nullopt`. Check the result before use:
+'''
+details.ja = '''
+2つの `std::span<const float>` を受け取り、`optional<double>` を返します。スカラーの double で2回走査し、平均を引いてからモーメントを計算します。空入力、長さの不一致、2組未満、NaN・無限大の混入、どちらかの分散が0の場合は `nullopt` を返します。使用前に結果を確認します。
+'''
+details.ko = '''
+두 `std::span<const float>` 입력을 받고 `optional<double>`를 반환합니다. 스칼라 double로 두 번 순회하며 평균을 뺀 뒤 모멘트를 계산합니다. 빈 입력, 길이 불일치, 두 쌍 미만, NaN이나 무한대 포함, 어느 한 입력의 분산이 0이면 `nullopt`를 반환합니다. 사용 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> x{0, 1, 2}, y{3, 5, 7};
+    auto result = correlation(x, y);
+    if (result) logNotice("Stats") << *result;
+}
+'''
+
+["fitLine"]
+category = "math_general"
+description.en = "Fits y = slope * x + intercept by least squares."
+description.ja = "最小二乗法で y = slope * x + intercept を当てはめます。"
+description.ko = "최소제곱법으로 y = slope * x + intercept를 맞춥니다."
+details.en = '''
+Accepts two `std::span<const float>` inputs and returns `optional<LineFit>` with double slope and intercept to preserve calculation precision. Uses scalar double accumulation in two passes after centering. Empty input, unequal lengths, fewer than two pairs, any NaN/infinity, or zero x variance returns `nullopt`. Constant y gives a horizontal line. Check the result before reading coefficients:
+'''
+details.ja = '''
+2つの `std::span<const float>` を受け取り、計算精度を保つ double の slope と intercept を持つ `optional<LineFit>` を返します。スカラーの double で2回走査し、平均を引いて計算します。空入力、長さの不一致、2組未満、NaN・無限大の混入、x の分散が0の場合は `nullopt` を返します。y が一定なら水平線になります。係数を読む前に結果を確認します。
+'''
+details.ko = '''
+두 `std::span<const float>` 입력을 받고 계산 정밀도를 유지하는 double slope와 intercept를 가진 `optional<LineFit>`를 반환합니다. 스칼라 double로 두 번 순회하며 평균을 뺀 뒤 계산합니다. 빈 입력, 길이 불일치, 두 쌍 미만, NaN이나 무한대 포함, x의 분산이 0이면 `nullopt`를 반환합니다. y가 일정하면 수평선이 됩니다. 계수를 읽기 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> x{0, 1, 2}, y{3, 5, 7};
+    auto line = fitLine(x, y);
+    if (line) logNotice("Stats") << line->slope << ", " << line->intercept;
+}
+'''
+
+["LineFit"]
+category = "math_general"
+description.en = "Least-squares line coefficients returned by fitLine, stored as doubles."
+description.ja = "fitLine が返す最小二乗直線の係数を double で保持します。"
+description.ko = "fitLine이 반환하는 최소제곱 직선 계수를 double로 저장합니다."
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> x{0, 1, 2}, y{3, 5, 7};
+    auto line = fitLine(x, y);
+    if (line) logNotice("Stats") << line->slope << ", " << line->intercept;
+}
+'''
+
+["LineFit::slope"]
+category = "math_general"
+description.en = "Slope in y = slope * x + intercept."
+description.ja = "y = slope * x + intercept の傾きです。"
+description.ko = "y = slope * x + intercept의 기울기입니다."
+
+["LineFit::intercept"]
+category = "math_general"
+description.en = "Intercept in y = slope * x + intercept."
+description.ja = "y = slope * x + intercept の切片です。"
+description.ko = "y = slope * x + intercept의 절편입니다."

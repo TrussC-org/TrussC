@@ -2752,6 +2752,7 @@ float angleDifferenceDeg(float deg1, float deg2)  // Returns the shortest signed
 void applyWindow(std::vector<float> & signal, WindowType type) [+1]  // Applies a window to a signal in place.
 float binToFrequency(int bin, int fftSize, int sampleRate)  // Converts an FFT bin index to a frequency.
 float ceil(float x) [std]  // Rounds a number toward positive infinity.
+std::optional<double> correlation(std::span<const float> x, std::span<const float> y)  // Returns the Pearson correlation of paired float values.
 float exp(float x) [std]  // Returns e raised to the given power.
 void fft(std::vector<std::complex<float>> & data)  // Transforms complex samples into a frequency spectrum in place.
 std::vector<float> fftMagnitude(const std::vector<std::complex<float>> & spectrum)  // Returns the magnitude of each spectrum bin.
@@ -2759,19 +2760,23 @@ std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>> & spect
 std::vector<float> fftPhase(const std::vector<std::complex<float>> & spectrum)  // Returns the phase angle of each spectrum bin.
 std::vector<float> fftPower(const std::vector<std::complex<float>> & spectrum)  // Returns the squared magnitude of each spectrum bin.
 std::vector<std::complex<float>> fftReal(const std::vector<float> & signal) [+1]  // Computes the frequency spectrum of a real-valued signal.
+std::optional<LineFit> fitLine(std::span<const float> x, std::span<const float> y)  // Fits y = slope * x + intercept by least squares.
 float floor(float x) [std]  // Rounds a number toward negative infinity.
 float fmod(float x, float y) [std]  // Returns the floating-point remainder of a division.
 float fract(float value)  // Returns the fractional part relative to the floor of a value.
 int frequencyToBin(float freq, int fftSize, int sampleRate)  // Converts a frequency to an FFT bin index.
+std::optional<std::vector<std::size_t>> histogram(std::span<const float> values, std::size_t bins, float low, float high)  // Counts values in equal-width bins over [low, high).
 void ifft(std::vector<std::complex<float>> & data)  // Transforms a complex spectrum back into samples in place.
 bool isPowerOfTwo(int n)  // Tests whether an integer is a positive power of two.
 float log(float x) [std]  // Returns the natural logarithm of a value.
 float max(float a, float b) [std]  // Returns the greater of two values.
 float mean(std::span<const float> values)  // Returns the arithmetic mean of the values.
+std::optional<float> median(std::span<const float> values)  // Returns the middle value, averaging the middle pair for an even count.
 float min(float a, float b) [std]  // Returns the lesser of two values.
 std::pair<float, float> minMax(std::span<const float> values)  // Returns the minimum and maximum as a pair of floats.
 float mse(std::span<const float> a, std::span<const float> b)  // Returns the mean squared difference between two inputs.
 int nextPowerOfTwo(int n)  // Returns the smallest positive power of two at least as large as a value.
+std::optional<float> percentile(std::span<const float> values, double p)  // Returns an interpolated percentile with a fraction p from 0 to 1.
 float pow(float x, float y) [std]  // Returns a base raised to an exponent.
 float rms(std::span<const float> values)  // Returns the root mean square of the values.
 float round(float x) [std]  // Rounds a number to the nearest integer value.
@@ -4001,6 +4006,11 @@ Light & Light::setShadowSamples(int taps)  // Sets the soft-shadow filter sample
 Light & Light::setShadowSoftness(float size)  // Sets the light's effective emitter size for soft shadows.
 void Light::setSpecular(const Color & c) [+1]  // Sets the specular light color.
 void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Configures the light as a spot light.
+```
+
+### LineFit — Least-squares line coefficients returned by fitLine, stored as doubles.
+
+```cpp
 ```
 
 ### LoadResult — Represents the result of loading a resource.
