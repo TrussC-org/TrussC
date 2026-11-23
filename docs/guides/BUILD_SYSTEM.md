@@ -103,43 +103,77 @@ GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 ### Build with a project's pinned TrussC version
 
-`trusscli use` saves a project's TrussC version in `.trussc-version`.
-For versions advertising protocol `1` in `tools/trusscli-protocol`, `use` and
-`update` also prepare that version's own size-optimized, stripped trusscli once.
-Subsequent builds use the cached executable in the version's `tools/bin/` directory (inside
-`trusscli.app/Contents/MacOS/` on macOS).
+A project's `.trussc-version` selects the TrussC sources and, for versions with
+`tools/trusscli-protocol` set to `1`, that version's own trusscli. Share this file
+with the project so collaborators build with the same version. `use` saves the
+selection and prepares it; `update` refreshes it and regenerates project files.
+Tags, branches, commit hashes, and forks (`owner/repo@ref`) are supported:
 
 ```bash
 trusscli use v0.8.1
 trusscli build --release
 ```
 
-For a tag, `use` and `update` first try the selected repository's GitHub release
-asset for the running CLI's OS and architecture, verify its SHA-256 against the
-release checksum file, and extract it. If acquisition fails, one line states the
-reason and says `building it from source (first time takes a few minutes)` before
-building that version's CLI locally. Branches and commit pins always build locally.
+For tags, `use` and `update` first try the selected repository's release asset:
+`trusscli-<tag>-<os>-<arch>.tar.gz` and `trusscli-<tag>-SHA256SUMS.txt`.
+They verify SHA-256, extract the executable (the app bundle on macOS), and run
+`--version` with a three-second timeout before installing it into the cached
+version's `tools/bin/`. Assets cover Linux x86_64, macOS arm64, and Windows x86_64.
+Other architectures, missing assets, and failed checks fall back to building
+that version's CLI from source, with one reason line. Branches and commit pins
+always build locally. The first fallback build takes a few minutes; prepare it
+ahead of time from the project directory:
 
-`build` forwards its arguments to that executable and returns its exit code.
-It never acquires or compiles a missing CLI. If it reports a missing delegate,
-prepare it with an explicit update:
+```bash
+trusscli update
+```
+
+`build` delegates its arguments to the cached version's executable and returns
+its exit code. It never downloads or builds a missing delegate; prepare a missing
+delegate explicitly:
 
 ```bash
 trusscli update
 trusscli build --release
 ```
 
-Updating a branch that has moved rebuilds its delegate with the refreshed source.
-Versions without the marker keep using the current trusscli and print a notice
-on every build: `<version> has no trusscli delegation support; building with
-this trusscli`. There is no API to add delegation to an older release; select a
-version that includes the marker to use its own CLI.
+Updating a branch that has moved refreshes its sources and rebuilds its delegate.
+Versions without the protocol marker print a notice and build with the current
+trusscli. There is no API to add delegation support to an older release.
 
-`use-local` keeps building with the current trusscli:
+`use-local` saves a machine-local checkout override in project metadata and
+builds with the **current trusscli**. This override takes precedence over the
+shared version file:
 
 ```bash
 trusscli use-local /path/to/TrussC
 trusscli build --release
+```
+
+Return to the shared pin with `use-local --clear`. Remove both selections with
+`use --clear` to return to the current installation:
+
+```bash
+trusscli use-local --clear
+trusscli use --clear
+```
+
+Cached versions are shared across projects. Inspect them with `cache list` and
+remove an unused version with `cache remove <spec>`. Removing a selected cached
+version requires preparing it again before the next build:
+
+```bash
+trusscli cache list
+trusscli cache remove v0.8.1
+trusscli update
+```
+
+`cache autoremove` offers to remove versions unused for at least 90 days;
+`cache clear` offers to remove the whole cache. Both ask for confirmation:
+
+```bash
+trusscli cache autoremove
+trusscli cache clear
 ```
 
 ### Keeping `trusscli` in sync
