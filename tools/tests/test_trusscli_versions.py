@@ -44,7 +44,7 @@ class VersionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.release_scratch = tempfile.TemporaryDirectory(prefix="trusscli-release-stub-")
         cls.addClassCleanup(cls.release_scratch.cleanup)
-        source = Path(cls.release_scratch.name) / "stub.c"
+        source = Path(cls.release_scratch.name).resolve() / "stub.c"
         source.write_text(DELEGATE_STUB, encoding="utf-8")
         cls.release_stub = source.with_name("stub.exe" if sys.platform == "win32" else "stub")
         subprocess.run([os.environ.get("CC", "cc"), str(source), "-o", str(cls.release_stub)], check=True)
@@ -52,7 +52,7 @@ class VersionTests(unittest.TestCase):
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory(prefix="trusscli-versions-")
         self.addCleanup(self.scratch.cleanup)
-        self.base = Path(self.scratch.name)
+        self.base = Path(self.scratch.name).resolve()
         self.project = self.base / "project"
         (self.project / "src").mkdir(parents=True)
         (self.project / "src/main.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
@@ -413,7 +413,7 @@ class VersionTests(unittest.TestCase):
         self.assertIn("4096-byte limit", output)
         self.assertFalse(self.cache.exists())
 
-    @unittest.skipUnless(sys.platform == "linux", "fixture uses /dev/zero")
+    @unittest.skipIf(sys.platform == "win32", "fixture uses /dev/zero")
     def test_version_manifest_rejects_special_file_symlink(self):
         (self.project / ".trussc-version").symlink_to("/dev/zero")
         output = self.cli("build", "--dry-run", success=False)
@@ -643,36 +643,31 @@ class TarballTests(unittest.TestCase):
                 self.assertEqual(list(root.iterdir()), [])
                 self.assertFalse((self.base / "outside").exists())
 
-    @unittest.skipUnless(sys.platform == "linux", "tiny sparse archive fixture uses GNU tar")
+    def large_zero_archive(self, ref, members, owner="", group=""):
+        # PAX sparse 0.1 stores a hole ending at size, with no payload to compress.
+        # tarfile writes the headers; both GNU tar and BSD tar read this format.
+        archive = self.archive_path(ref)
+        with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as file:
+            for name, size in members:
+                info = tarfile.TarInfo("TrussC-large/" + name)
+                info.uname, info.gname = owner, group
+                info.pax_headers = {"GNU.sparse.size": str(size),
+                                    "GNU.sparse.numblocks": "1",
+                                    "GNU.sparse.map": f"{size},0"}
+                file.addfile(info)
+        self.assertLess(archive.stat().st_size, 4 * 1024 ** 2)
+
     def test_expanded_member_total_is_bounded_before_extraction(self):
-        fixture = self.base / "TrussC-large"
-        (fixture / "core/cmake").mkdir(parents=True)
-        (fixture / "core/cmake/trussc_app.cmake").write_text("# fixture\n", encoding="utf-8")
-        (fixture / ".git_archival.txt").write_text("describe: v1\n", encoding="utf-8")
-        # Each member fits the limit; their sum exceeds it. Sparse zeros keep the fixture tiny.
-        for name in ("first", "second"):
-            with (fixture / name).open("wb") as file:
-                file.truncate(1024 ** 3 + 1)
-        archive = self.archive_path("large")
-        subprocess.run(["tar", "-czSf", str(archive), "-C", str(self.base), fixture.name], check=True)
-        self.assertLess(archive.stat().st_size, 65536)
+        # Each member fits the limit; their sum exceeds it.
+        self.large_zero_archive("large", [("first", 1024 ** 3 + 1), ("second", 1024 ** 3 + 1)])
         self.assertIn("expanded size exceeds 2 GiB", self.cli("use", "large", success=False))
         self.assertEqual(list((self.cache / "versions/TrussC-org/TrussC").iterdir()), [])
 
-    @unittest.skipUnless(sys.platform == "linux", "tiny sparse archive fixture uses GNU tar")
     def test_owner_names_with_spaces_do_not_hide_member_size(self):
-        fixture = self.base / "TrussC-owner"
-        (fixture / "core/cmake").mkdir(parents=True)
-        (fixture / "core/cmake/trussc_app.cmake").write_text("# fixture\n", encoding="utf-8")
-        (fixture / ".git_archival.txt").write_text("describe: v1\n", encoding="utf-8")
-        with (fixture / "large").open("wb") as file:
-            file.truncate(2 * 1024 ** 3 + 1)
         # A group named "x 5" once made the listing parser read 5 as the size.
         for owner, group in (("a", "x 5"), ("a b", "x 5")):
             with self.subTest(owner=owner, group=group):
-                archive = self.archive_path("owner")
-                subprocess.run(["tar", "-czSf", str(archive), f"--owner={owner}:1000", f"--group={group}:1000",
-                                "-C", str(self.base), fixture.name], check=True)
+                self.large_zero_archive("owner", [("large", 2 * 1024 ** 3 + 1)], owner, group)
                 self.assertIn("expanded size exceeds 2 GiB", self.cli("use", "owner", success=False))
                 self.assertEqual(list((self.cache / "versions/TrussC-org/TrussC").iterdir()), [])
 
