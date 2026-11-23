@@ -23,7 +23,25 @@ NATIVE = {"linux": "linux", "darwin": "macos", "win32": "windows"}[sys.platform]
 DELEGATE_STUB = r"""
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 int main(int argc, char** argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        if (getenv("TRUSSC_DELEGATED_ROOT")) return 98;
+        const char* probe = getenv("TRUSSC_STUB_PROBE");
+        if (probe && strcmp(probe, "sleep") == 0) {
+#ifdef _WIN32
+            Sleep(60000);
+#else
+            sleep(60);
+#endif
+        }
+        return probe && strcmp(probe, "fail") == 0 ? 127 : 0;
+    }
     const char* output = getenv("TRUSSC_STUB_OUTPUT");
     FILE* file = fopen(output, "w");
     if (!file) return 99;
@@ -148,7 +166,7 @@ class VersionTests(unittest.TestCase):
                     "win32": "trusscli.exe"}.get(sys.platform, "trusscli")
         return (root or self.root()) / "tools/bin" / relative
 
-    def release(self, ref="vRelease", owner="TrussC-org", unsafe=False, dotted=False, locked=False):
+    def release(self, ref="vRelease", owner="TrussC-org", unsafe=False, dotted=False, locked=False, stub=None):
         base = Path(self.env["TRUSSC_GITHUB_BASE_URL"].removeprefix("file://"))
         folder = base / owner / "TrussC/releases/download" / ref
         folder.mkdir(parents=True, exist_ok=True)
@@ -168,7 +186,7 @@ class VersionTests(unittest.TestCase):
                 archive.addfile(root)
                 name = "./" + name
             info = tarfile.TarInfo(name)
-            data = self.release_stub.read_bytes()
+            data = (stub or self.release_stub).read_bytes()
             info.size = len(data)
             info.mode = 0o644  # Acquisition must add Unix execute permissions.
             archive.addfile(info, io.BytesIO(data))
@@ -195,6 +213,62 @@ class VersionTests(unittest.TestCase):
                 self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
                 self.assertEqual(self.delegate_binary().read_bytes(), self.release_stub.read_bytes())
                 self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
+
+    def test_packaged_release_round_trip(self):
+        self.release_source()
+        arch = {"amd64": "x86_64", "aarch64": "arm64"}.get(platform.machine().lower(), platform.machine().lower())
+        folder = self.base / "remotes/TrussC-org/TrussC/releases/download/vRelease"
+        bin_dir = self.base / "release-bin"
+        binary = self.delegate_binary(Path("root")).relative_to("root/tools/bin")
+        (bin_dir / binary).parent.mkdir(parents=True)
+        shutil.copy2(self.release_stub, bin_dir / binary)
+        script = ROOT / "tools/package_trusscli_release.py"
+        subprocess.run([sys.executable, "-I", str(script), "package", "--tag", "vRelease",
+                        "--os", NATIVE, "--arch", arch, "--bin-dir", str(bin_dir), "--out", str(folder)], check=True)
+        subprocess.run([sys.executable, "-I", str(script), "checksums", "--tag", "vRelease", "--dir", str(folder)], check=True)
+        self.assertNotIn("first time takes", self.cli("use", "vRelease"))
+        self.assertEqual(self.delegate_binary().read_bytes(), self.release_stub.read_bytes())
+        self.assertFalse((self.root() / "tools/trusscli-build.log").exists())
+        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
+
+    def test_release_probe_failures_build_local_delegate(self):
+        self.release_source()
+        source = self.base / "release-only.c"
+        source.write_text(DELEGATE_STUB.replace('"delegate stdout"', '"release-only delegate stdout"'), encoding="utf-8")
+        stub = source.with_suffix(".exe" if sys.platform == "win32" else ".bin")
+        subprocess.run([os.environ.get("CC", "cc"), str(source), "-o", str(stub)], check=True)
+        for probe, reason in (("fail", "exit 127"), ("sleep", "timeout")):
+            with self.subTest(probe=probe):
+                self.env["TRUSSC_CACHE_DIR"] = str(self.cache / probe)
+                self.env["TRUSSC_STUB_PROBE"] = probe
+                self.release(stub=stub)
+                output = self.cli("use", "vRelease")
+                self.assertEqual(output.count("building it from source"), 1, output)
+                self.assertIn("does not run here (" + reason + ")", output)
+                self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
+                self.assertTrue(self.delegate_binary().is_file())
+                self.assertNotEqual(self.delegate_binary().read_bytes(), stub.read_bytes())
+                self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
+                self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
+        self.env.pop("TRUSSC_STUB_PROBE")
+
+    def test_release_probe_spawn_failure_builds_local_delegate(self):
+        self.release_source()
+        stub = self.base / "invalid-binary"
+        stub.write_bytes(b"This is not an executable format.\n")
+        stub.chmod(0o755)
+        self.release(stub=stub)
+        output = self.cli("use", "vRelease")
+        reasons = [line for line in output.splitlines() if "building it from source" in line]
+        self.assertEqual(len(reasons), 1, output)
+        self.assertIn("does not run here (cannot start)", reasons[0])
+        self.assertNotIn("failed to spawn", output)
+        self.assertNotIn(".trusscli-release-", output)
+        self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
+        self.assertTrue(self.delegate_binary().is_file())
+        self.assertNotEqual(self.delegate_binary().read_bytes(), stub.read_bytes())
+        self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
+        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
 
     def test_release_failures_fall_back_once(self):
         self.release_source()

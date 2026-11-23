@@ -445,6 +445,13 @@ std::string tryReleaseDelegate(const fs::path& root, const Spec& tag) {
 #ifndef _WIN32
         fs::permissions(binary, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec, fs::perm_options::add);
 #endif
+        // Bound (CLI metadata startup): allow three seconds before falling back to a local build.
+        const int probe = runCaptured({binary.string(), "--version"}, [](const char*, size_t) {},
+                                      nullptr, nullptr, 3000, {"TRUSSC_DELEGATED_ROOT"}, true);
+        if (probe != 0) {
+            const std::string reason = probe == -2 ? "timeout" : probe == -1 ? "cannot start" : "exit " + std::to_string(probe);
+            return "downloaded trusscli for " + tag.ref + " does not run here (" + reason + ")";
+        }
         fs::create_directories(root / "tools/bin");
 #ifdef __APPLE__
         fs::remove_all(root / "tools/bin/trusscli.app");
