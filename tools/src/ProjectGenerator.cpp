@@ -371,6 +371,27 @@ static WindowsToolchainPins selectedWindowsToolchainPins(const ProjectSettings& 
 }
 #endif
 
+std::string nativeToolchainPreset(const ProjectSettings& settings) {
+    Json preset;
+#ifdef _WIN32
+    preset["generator"] = "Ninja";
+    const auto pins = selectedWindowsToolchainPins(settings);
+    if (!pins.makeProgram.empty()) preset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
+    if (!pins.include.empty()) {
+        preset["environment"]["INCLUDE"] = pins.include;
+        preset["environment"]["LIB"] = pins.lib;
+        preset["environment"]["PATH"] = pins.path;
+    }
+#else
+    (void)settings;
+    preset["generator"] = "Unix Makefiles";
+#ifdef __APPLE__
+    preset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
+#endif
+#endif
+    return preset.dump();
+}
+
 static void checkWebNinja(const ProjectSettings& settings) {
 #ifdef _WIN32
     // Kept targets retain their existing configure-failure warning behavior.
@@ -398,13 +419,11 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
 #ifdef __APPLE__
     // macOS preset
-    Json macosPreset;
+    Json macosPreset = Json::parse(nativeToolchainPreset(settings_));
     macosPreset["name"] = "macos";
     macosPreset["displayName"] = "macOS";
     macosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("macos");
-    macosPreset["generator"] = "Unix Makefiles";
     macosPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
-    macosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
         macosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
@@ -426,27 +445,16 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
 #elif defined(_WIN32)
     // Windows preset with ninja path and environment
-    Json windowsPreset;
+    Json windowsPreset = Json::parse(nativeToolchainPreset(settings_));
     windowsPreset["name"] = "windows";
     windowsPreset["displayName"] = "Windows";
     windowsPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("windows");
-    windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
         windowsPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
     }
 
-    // `trusscli build` re-pins the same values after a VS change.
-    const WindowsToolchainPins pins = selectedWindowsToolchainPins(settings_);
-    if (!pins.makeProgram.empty()) {
-        windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
-    }
-    if (!pins.include.empty()) {
-        windowsPreset["environment"]["INCLUDE"] = pins.include;
-        windowsPreset["environment"]["LIB"] = pins.lib;
-        windowsPreset["environment"]["PATH"] = pins.path;
-    }
     presets["configurePresets"].push_back(windowsPreset);
 
     Json windowsBuildPreset;
@@ -456,11 +464,10 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
 #else
     // Linux preset
-    Json linuxPreset;
+    Json linuxPreset = Json::parse(nativeToolchainPreset(settings_));
     linuxPreset["name"] = "linux";
     linuxPreset["displayName"] = "Linux";
     linuxPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("linux");
-    linuxPreset["generator"] = "Unix Makefiles";
     linuxPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
@@ -547,6 +554,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["generator"] = "Ninja";
         // Ninja needs no VS compiler environment; emcc comes from toolchainFile.
         // With no VS Ninja pin, leave CMake to find Ninja on PATH.
+        const WindowsToolchainPins pins = selectedWindowsToolchainPins(settings_);
         if (!pins.makeProgram.empty()) {
             webPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
         }

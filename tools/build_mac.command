@@ -39,7 +39,7 @@ for lang in C CXX OBJC OBJCXX; do
     fi
 done
 echo "Running CMake..."
-cmake .. "${LAUNCHER_ARGS[@]}"
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel "${LAUNCHER_ARGS[@]}"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: CMake configuration failed!"
@@ -56,7 +56,7 @@ fi
 JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(sysctl -n hw.ncpu)}"
 echo ""
 echo "Building (parallel jobs: $JOBS)..."
-cmake --build . --parallel "$JOBS"
+cmake --build . --config MinSizeRel --parallel "$JOBS"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: Build failed!"

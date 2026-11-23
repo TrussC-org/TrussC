@@ -11,15 +11,19 @@ struct Spec {
     std::string ref;
     bool commit = false;
 };
+std::filesystem::path delegateBinary(const std::filesystem::path& root);
+bool supportsDelegation(const std::filesystem::path& root);
+std::string tryReleaseDelegate(const std::filesystem::path& root, const Spec& tag);
 Spec parse(const std::string& text);
 std::string localPath(const std::filesystem::path& project);
 void setLocalPath(const std::filesystem::path& project, const std::string& path);
 // Empty means no selection: the caller retains the existing autodetection.
 // Fetching is permitted only for an explicit update (including use).
-std::string resolve(const std::filesystem::path& project, bool fetch);
+// releaseTag is populated only when fetching resolves an explicit tag.
+std::string resolve(const std::filesystem::path& project, bool fetch, Spec* releaseTag = nullptr);
 // Shared cache acquisition for TrussC and external addons. spec must come from parse().
 std::string acquire(const Spec& spec, bool fetch, bool addon = false,
-                    const std::string& sourceUrl = "");
+                    const std::string& sourceUrl = "", Spec* releaseTag = nullptr);
 std::string readBounded(const std::filesystem::path& path, size_t limit);
 // Records usage only for acquired cache paths; local folders are ignored.
 void markCachedUsed(const std::filesystem::path& path);
