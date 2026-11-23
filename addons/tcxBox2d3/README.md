@@ -12,8 +12,8 @@ configure; select only `tcxBox2d3` for a v3 project:
 tcxBox2d3
 ```
 
-Slice 2 provides World, an owning RigidBody2D Mod, shapes as v3 ids, and Node
-sync from body-move events. Events and drag have no TrussC API yet (slices 3–4).
+World, an owning RigidBody2D Mod, shapes as v3 ids, Node sync from body-move
+events, post-step events, and drag are available.
 Classic CircleBody, RectBody and PolyShape remain in the frozen v2 addon.
 
 ```cpp
@@ -208,14 +208,6 @@ world.setSubSteps(4);
 world.setup();
 ```
 
-Workers default to one. `setWorkerCount` uses the built-in v3 task system and
-upstream clamping, before setup or at runtime:
-
-```cpp
-world.setup();
-world.setWorkerCount(2);
-```
-
 Raw settings use meters:
 
 ```cpp
@@ -224,8 +216,215 @@ b2World_SetGravity(world.id(), {0.0f, 10.0f});
 ```
 
 Filters are upstream's 64-bit `b2Filter` in `b2ShapeDef`. Fixed rotation uses
-upstream motion locks. The planned contact/sensor/hit events will be delivered
-only after managed steps, without Stay; no TrussC event API exists in this slice.
+upstream motion locks.
+
+## Drag
+
+`startDrag(rb, position)` grabs a dynamic RigidBody2D at a world pixel position.
+`updateDrag(position)` moves its target in world pixels; `endDrag()` releases it.
+The helper uses the v3.2 sample's kinematic cursor and motor-joint spring:
+7.5 Hz, damping ratio 1, maximum spring force 100 × body mass × gravity
+magnitude, and angular friction torque 0.25 × sqrt(inertia / mass) × mass ×
+gravity magnitude. The cursor follows its target during `world.update()`.
+
+Wire the existing `tcApp` body to press, move, and release:
+
+```cpp
+void mousePressed(const MouseEventArgs& e) override {
+    world.startDrag(rb, e.pos);
+}
+```
+
+```cpp
+void mouseDragged(const MouseDragEventArgs& e) override {
+    world.updateDrag(e.pos);
+}
+```
+
+```cpp
+void mouseReleased(const MouseEventArgs&) override {
+    world.endDrag();
+}
+```
+
+Each World has one drag. Starting again replaces it, and releasing without a
+drag does nothing. Null targets, bodies from another World, and static or
+kinematic bodies do not start a drag; pass a dynamic Mod from this World:
+
+```cpp
+rb = node->addMod<box2d::RigidBody2D>(world, b2_dynamicBody);
+rb->addBox(80, 40);
+world.startDrag(rb, rb->getPosition());
+```
+
+Mod or Node destruction, World re-setup, and World destruction release the
+drag automatically. A saved Mod pointer is still yours to clear when removing
+its owner:
+
+```cpp
+node->removeMod<box2d::RigidBody2D>();
+rb = nullptr;
+```
+
+As in the upstream sample, zero gravity gives zero spring force. Set nonzero
+gravity before starting a drag that should pull a body:
+
+```cpp
+world.setGravity(Vec2(0, 300));
+world.startDrag(rb, rb->getPosition());
+```
+
+## Workers
+
+Workers default to one and use Box2D's built-in task system. Call it before
+setup(). If you change it later, it takes effect at the next setup().
+
+```cpp
+world.setWorkerCount(4);
+world.setup();
+```
+
+More workers can help scenes with many awake bodies; small scenes may gain
+nothing because scheduling has a cost.
+
+`world.update()` remains synchronous. Worker threads run Box2D tasks inside
+the step; Node sync and event listeners run afterward on the calling thread.
+
+## Events
+
+tcxBox2d3 delivers contact, sensor and hit events on RigidBody2D after each world.update().
+Delivery follows Node sync, in this order: contact begin, contact end, hit,
+sensor begin, sensor end; each category preserves v3's array order. Each event
+notifies shape A then B (sensor then visitor for sensor events). There is no Stay.
+Raw `b2World_Step` calls do not deliver TrussC events; use the managed step:
+
+```cpp
+world.update();
+```
+
+Contact begin/end flags are on from creation for every shape created by a
+RigidBody2D Mod, regardless of listeners. Subscribing after a broad-phase
+contact exists still receives future begin/end events; past events are not replayed.
+
+At the next managed step after a listener state change, sensor flags are enabled
+on **all Mod-created shapes in that World** while any Mod listens to sensor
+begin/end. v3 requires both sensor and visitor flags and reads them each step: subscribing during an
+existing overlap produces a begin on the next step. Removing the last sensor
+listener turns off the automatic flags. Hit listeners enable hit flags only on
+the listening Mod's shapes. Removing the last hit listener turns off those
+automatic flags too. Explicit true sensor/hit flags from shape definitions
+remain enabled. Shapes added later participate on the next managed step.
+
+Raw shapes have no owning Mod; when mixing raw sensor/visitor shapes, enable
+their sensor flag explicitly (inside tcApp setup, with the raw shape id):
+
+```cpp
+b2Shape_EnableSensorEvents(rawShapeId, true);
+```
+
+Raw ids also let you turn off flags on managed shapes. Contact flags are never
+reapplied; raw sensor/hit overrides stick until the corresponding automatic listener state next changes (none ↔ some):
+
+```cpp
+b2Shape_EnableContactEvents(rb->shapeIds().front(), false);
+b2Shape_EnableSensorEvents(rb->shapeIds().front(), false);
+b2Shape_EnableHitEvents(rb->shapeIds().front(), false);
+```
+
+Keep the EventListener handles as tcApp members, for example
+`EventListener contactBegin, contactEnd, sensorBegin, sensorEnd, hit;`.
+`ContactEvent`, `SensorEvent` and `HitEvent` carry `shape`, `otherShape` and
+`other`. Each receiver sees its own shape first. `other` is null if its owner
+is gone or unmanaged; check it before accessing the other Mod:
+
+```cpp
+contactBegin = rb->onContactBegin.listen([](box2d::ContactEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("touching");
+});
+```
+
+```cpp
+contactEnd = rb->onContactEnd.listen([](box2d::ContactEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("separated");
+});
+```
+
+```cpp
+sensorBegin = rb->onSensorBegin.listen([](box2d::SensorEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("touching");
+});
+```
+
+```cpp
+sensorEnd = rb->onSensorEnd.listen([](box2d::SensorEvent& e) {
+    if (!e.other) return;
+    e.other->getOwner()->setName("separated");
+});
+```
+
+For hit events, listen in setup, before bodies touch:
+
+```cpp
+hit = rb->onHit.listen([](box2d::HitEvent& e) {
+    logNotice() << e.approachSpeed;
+});
+```
+
+Hit events need an approach speed above v3's `hitEventThreshold` (default
+1 m/s = 30 pixels/s); move the body fast enough for an impact:
+
+```cpp
+rb->setVelocity(Vec2(0, 300));
+```
+
+Contact begin and hit carry `point` in world pixels and a unit `normal` pointing
+from the receiving body toward the other body. Begin uses the first point of
+v3's current contact manifold (resolved from its contactId after the step),
+reconstructed from body A's world center and anchorA. A zero-point manifold
+uses the midpoint of the two body origins. Contact end leaves point/normal
+zero. Hit also carries `approachSpeed` in pixels/second.
+
+Every v3 event array is copied before Node observers or event listeners run.
+Receivers and `other` are resolved again before each listener. Destroyed
+receivers are skipped; destroying/resetting World stops the old step's delivery.
+v3.2 emits end events on body destruction; surviving owners receive those on
+the next managed step with null `other`. Shape ids retain their generation but
+may be stale; validate before raw API access:
+
+```cpp
+if (!b2Shape_IsValid(e.otherShape)) return;
+auto bodyId = b2Shape_GetBody(e.otherShape);
+```
+
+Listener changes follow core Event semantics: removal takes effect immediately;
+a listener added during a notification starts at the next notification.
+Delivery is synchronous on the thread calling update, including listeners
+registered with Deliver::Main; step from the app's update thread:
+
+```cpp
+void update() override { world.update(); }
+```
+
+Re-entrant `world.update()` is refused with a Warning on every call. Request
+a step in a listener and perform it next frame instead (tcApp members):
+
+```cpp
+bool stepRequested = false;
+void requestStep() { stepRequested = true; }
+void update() override { if (std::exchange(stepRequested, false)) world.update(); }
+```
+
+Concurrent World mutation or dispatch from multiple threads is unsupported;
+there is no API for cross-thread physics mutation. Rare nested interleavings
+outside owner destruction, re-setup, and listener changes have no added ordering
+guarantees. Keep physics changes on the app update thread:
+
+```cpp
+void update() override { world.update(); }
+```
 
 ## Offline build
 

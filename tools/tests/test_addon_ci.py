@@ -77,6 +77,20 @@ class AddonSelectionTests(unittest.TestCase):
             self.assertEqual(runner.find_addon_tests(str(root), addons=[]), [])
             self.assertEqual(len(runner.find_addon_tests(str(root), include_daily=True)), 3)
 
+    def test_exclusion_keeps_v3_examples_and_tests(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            root = Path(temp)
+            for addon in ('tcxBox2d', 'tcxBox2d3'):
+                for project in ('example-basic', 'tests'):
+                    (root / 'addons' / addon / project / 'src').mkdir(parents=True)
+            excluded = ['tcxBox2d']
+            self.assertEqual(runner.find_examples(str(root), exclude_addons=excluded),
+                             [str(root / 'addons/tcxBox2d3/example-basic')])
+            self.assertEqual(runner.find_addon_tests(str(root), exclude_addons=excluded),
+                             [str(root / 'addons/tcxBox2d3/tests')])
+            self.assertEqual(len(runner.find_examples(str(root))), 2)
+            self.assertEqual(len(runner.find_addon_tests(str(root))), 2)
+
 
 class AddonWorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -131,6 +145,7 @@ class AddonWorkflowTests(unittest.TestCase):
         for argument in ('examples/build_all.py', '--addon-tests-only', '--include-daily', '--addons'):
             self.assertIn(argument, run)
         self.assertIn("json.loads(os.environ['SELECTED_ADDONS'])", run)
+        self.assertIn("'--exclude-addons', 'tcxBox2d'", run)
         daily = (ROOT / '.github/workflows/daily.yml').read_text(encoding='utf-8')
         self.assertIn('./examples/build_all.py --addon-tests-only --include-daily --verbose', daily)
         self.assertNotIn('--addons', daily)

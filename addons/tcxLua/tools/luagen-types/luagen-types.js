@@ -37,6 +37,7 @@ function qualifyType(t) {
 }
 const PRIM = new Set(['void','bool','char','short','int','long','float','double','unsigned','signed','size_t','wchar_t','char16_t','char32_t','int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t']);
 function argBindable(a) {
+    if (/\bstd::span\s*</.test(a.type)) return false; // non-owning C++ buffers have no Lua representation
     if (a.isArray || a.isPointer) return false;
     if (/\binternal::/.test(a.type)) return false;   // internal:: types are incomplete / not public API
     if (/&&/.test(a.type)) return false;             // move-in param: no Lua equivalent, sol2 cannot wrap it

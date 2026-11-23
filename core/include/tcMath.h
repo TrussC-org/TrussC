@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <random>
 #include <span>
+#include <optional>
 #include <utility>
 #include <vector>
 #include "tc/utils/tcAnnotations.h"
@@ -1225,6 +1226,25 @@ TC_LUA_SKIP std::pair<float, float> minMax(std::span<const float> values);
 TC_LUA_SKIP float rms(std::span<const float> values);
 // Different lengths produce a warning and return zero.
 TC_LUA_SKIP float mse(std::span<const float> a, std::span<const float> b);
+
+// Scalar selection statistics copy the input and ignore NaN. p is in [0, 1].
+// Empty/all-NaN input, invalid p, or undefined interpolation returns nullopt.
+TC_LUA_SKIP std::optional<float> percentile(std::span<const float> values, double p);
+TC_LUA_SKIP std::optional<float> median(std::span<const float> values);
+// Half-open [low, high) bins; nonfinite/out-of-range values are not counted.
+// Zero bins or nonfinite/unordered bounds return nullopt; empty input gives zeros.
+TC_LUA_SKIP std::optional<std::vector<std::size_t>> histogram(
+    std::span<const float> values, std::size_t bins, float low, float high);
+
+// Double coefficients preserve the precision of the centered, two-pass fit.
+struct TC_LUA_SKIP LineFit {
+    double slope = 0.0;
+    double intercept = 0.0;
+};
+// Paired inputs must have equal lengths, at least two points, and finite values.
+// Correlation requires nonzero variance in both inputs; fitLine only in x.
+TC_LUA_SKIP std::optional<double> correlation(std::span<const float> x, std::span<const float> y);
+TC_LUA_SKIP std::optional<LineFit> fitLine(std::span<const float> x, std::span<const float> y);
 
 // Set seed
 inline void randomSeed(unsigned int seed) {
