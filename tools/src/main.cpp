@@ -689,7 +689,7 @@ static void warnIfVersionDrift(const string& tcRoot) {
 static int resolveProjectAndTcRoot(const string& explicitPath,
                                    const string& explicitTcRoot,
                                    string& outProjectPath,
-                                   string& outTcRoot, bool fetchVersion = false) {
+                                   string& outTcRoot, bool fetchVersion = false, trusscVersion::Spec* releaseTag = nullptr) {
     if (explicitPath.empty()) {
         outProjectPath = autoDetectProjectRoot("");
         if (outProjectPath.empty()) {
@@ -706,7 +706,7 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
     }
 
     if (!explicitTcRoot.empty()) trusscVersion::setLocalPath(outProjectPath, explicitTcRoot);
-    outTcRoot = trusscVersion::resolve(outProjectPath, fetchVersion);
+    outTcRoot = trusscVersion::resolve(outProjectPath, fetchVersion, releaseTag);
     if (outTcRoot.empty()) outTcRoot = autoDetectTcRoot();
     if (outTcRoot.empty()) {
         cerr << "Error: could not detect TrussC root. "
@@ -1358,14 +1358,21 @@ static void printUpdateHelp() {
          << "hidden; errors still show) and saved to <build folder>/build.log.\n";
 }
 
-// Acquisition seam: part 2 can try a release asset here before the A-1 build.
+// Release acquisition and A-1 share this update/use-only seam.
 // Only explicit update/use call this; build never acquires a CLI.
-static void getDelegateBinary(const fs::path& versionRoot) {
+static void getDelegateBinary(const fs::path& versionRoot, const trusscVersion::Spec& releaseTag) {
     if (!trusscVersion::supportsDelegation(versionRoot)) return;
     const auto root = fs::absolute(versionRoot);
     const auto binary = trusscVersion::delegateBinary(root);
     if (fs::is_regular_file(binary)) return;
-    cout << "Building this version's trusscli; the first time takes a few minutes.\n" << flush;
+    if (!releaseTag.ref.empty()) {
+        auto reason = trusscVersion::tryReleaseDelegate(root, releaseTag);
+        if (reason.empty()) return;
+        for (auto& c : reason) if (c == '\n' || c == '\r') c = ' ';
+        cout << reason << "; building it from source (first time takes a few minutes)\n" << flush;
+    } else {
+        cout << "Building this version's trusscli; the first time takes a few minutes.\n" << flush;
+    }
     const auto build = root / "tools/build-trusscli";
     const auto staging = build / "stage";
     fs::remove_all(build);
@@ -1513,14 +1520,15 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true) {
     }
     string resolvedProjectPath;
     string resolvedTcRoot;
-    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot, fetchVersion)) {
+    trusscVersion::Spec releaseTag;
+    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot, fetchVersion, &releaseTag)) {
         return rc;
     }
     projectPath = resolvedProjectPath;
     tcRoot = resolvedTcRoot;
 
     if (fetchVersion && trusscVersion::localPath(projectPath).empty() &&
-        fs::exists(fs::path(projectPath) / ".trussc-version")) getDelegateBinary(tcRoot);
+        fs::exists(fs::path(projectPath) / ".trussc-version")) getDelegateBinary(tcRoot, releaseTag);
 
     auto addonPaths = resolveAddonVersions(projectPath, tcRoot, fetchVersion);
     addonVersions::saveResolved(projectPath, addonPaths);

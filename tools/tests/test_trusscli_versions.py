@@ -3,6 +3,8 @@
 Run through tcbuild.sh: one check configures and builds a tiny fixture app.
 All Git writes are confined to temporary fake repositories, never this checkout.
 """
+import hashlib
+import platform
 import io
 import tarfile
 import json
@@ -18,9 +20,35 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli")).resolve()
 NATIVE = {"linux": "linux", "darwin": "macos", "win32": "windows"}[sys.platform]
 
+DELEGATE_STUB = r"""
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc, char** argv) {
+    const char* output = getenv("TRUSSC_STUB_OUTPUT");
+    FILE* file = fopen(output, "w");
+    if (!file) return 99;
+    fprintf(file, "%s\n", getenv("TRUSSC_DELEGATED_ROOT"));
+    for (int i = 1; i < argc; ++i) fprintf(file, "%s\n", argv[i]);
+    fclose(file);
+    puts("delegate stdout");
+    fputs("delegate stderr\n", stderr);
+    const char* code = getenv("TRUSSC_STUB_EXIT");
+    return code ? atoi(code) : 0;
+}
+"""
+
 
 @unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
 class VersionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.release_scratch = tempfile.TemporaryDirectory(prefix="trusscli-release-stub-")
+        cls.addClassCleanup(cls.release_scratch.cleanup)
+        source = Path(cls.release_scratch.name) / "stub.c"
+        source.write_text(DELEGATE_STUB, encoding="utf-8")
+        cls.release_stub = source.with_name("stub.exe" if sys.platform == "win32" else "stub")
+        subprocess.run([os.environ.get("CC", "cc"), str(source), "-o", str(cls.release_stub)], check=True)
+
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory(prefix="trusscli-versions-")
         self.addCleanup(self.scratch.cleanup)
@@ -110,22 +138,7 @@ class VersionTests(unittest.TestCase):
             'add_executable(trusscli stub.c)\n'
             'if(APPLE)\nset_target_properties(trusscli PROPERTIES MACOSX_BUNDLE TRUE)\nendif()\n',
             encoding="utf-8")
-        (tools / "stub.c").write_text("invalid C\n" if broken else r"""
-#include <stdio.h>
-#include <stdlib.h>
-int main(int argc, char** argv) {
-    const char* output = getenv("TRUSSC_STUB_OUTPUT");
-    FILE* file = fopen(output, "w");
-    if (!file) return 99;
-    fprintf(file, "%s\n", getenv("TRUSSC_DELEGATED_ROOT"));
-    for (int i = 1; i < argc; ++i) fprintf(file, "%s\n", argv[i]);
-    fclose(file);
-    puts("delegate stdout");
-    fputs("delegate stderr\n", stderr);
-    const char* code = getenv("TRUSSC_STUB_EXIT");
-    return code ? atoi(code) : 0;
-}
-""", encoding="utf-8")
+        (tools / "stub.c").write_text("invalid C\n" if broken else DELEGATE_STUB, encoding="utf-8")
         self.advance()
         self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main")
         self.env["TRUSSC_STUB_OUTPUT"] = str(self.base / "delegate argv")
@@ -134,6 +147,121 @@ int main(int argc, char** argv) {
         relative = {"darwin": "trusscli.app/Contents/MacOS/trusscli",
                     "win32": "trusscli.exe"}.get(sys.platform, "trusscli")
         return (root or self.root()) / "tools/bin" / relative
+
+    def release(self, ref="vRelease", owner="TrussC-org", unsafe=False, dotted=False, locked=False):
+        base = Path(self.env["TRUSSC_GITHUB_BASE_URL"].removeprefix("file://"))
+        folder = base / owner / "TrussC/releases/download" / ref
+        folder.mkdir(parents=True, exist_ok=True)
+        arch = {"amd64": "x86_64", "aarch64": "arm64"}.get(platform.machine().lower(), platform.machine().lower())
+        asset = folder / f"trusscli-{ref}-{NATIVE}-{arch}.tar.gz"
+        with tarfile.open(asset, "w:gz") as archive:
+            if locked:
+                directory = tarfile.TarInfo("locked")
+                directory.type = tarfile.DIRTYPE
+                directory.mode = 0
+                archive.addfile(directory)
+            name = "../outside" if unsafe else str(self.delegate_binary(Path("root")).relative_to("root/tools/bin"))
+            if dotted:
+                root = tarfile.TarInfo("./")
+                root.type = tarfile.DIRTYPE
+                root.mode = 0o755
+                archive.addfile(root)
+                name = "./" + name
+            info = tarfile.TarInfo(name)
+            data = self.release_stub.read_bytes()
+            info.size = len(data)
+            info.mode = 0o644  # Acquisition must add Unix execute permissions.
+            archive.addfile(info, io.BytesIO(data))
+        sums = folder / f"trusscli-{ref}-SHA256SUMS.txt"
+        sums.write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n", encoding="utf-8")
+        return asset, sums
+
+    def release_source(self):
+        self.publish_delegate()
+        self.git("-C", self.source, "tag", "vRelease")
+        for owner in ("TrussC-org", "tettou771"):
+            self.git("-C", self.source, "push", self.base / f"remotes/{owner}/TrussC.git", "main", "vRelease")
+
+    def test_release_tag_and_fork_download_without_build(self):
+        self.release_source()
+        for owner in ("TrussC-org", "tettou771"):
+            with self.subTest(owner=owner):
+                self.release(owner=owner, dotted=owner == "tettou771")
+                output = self.cli("use", f"{owner}/TrussC@vRelease")
+                self.assertNotIn("first time takes", output)
+                self.assertTrue(self.delegate_binary().is_file())
+                self.assertFalse((self.root() / "tools/trusscli-build.log").exists())
+                self.assertFalse((self.root() / "tools/build-trusscli").exists())
+                self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
+                self.assertEqual(self.delegate_binary().read_bytes(), self.release_stub.read_bytes())
+                self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
+
+    def test_release_failures_fall_back_once(self):
+        self.release_source()
+        for failure, reason in (("mismatch", "SHA-256 mismatch"), ("asset", "asset"),
+                                ("checksum", "checksum download"), ("release", "asset"),
+                                ("unsafe", "unsafe TrussC archive path"),
+                                ("permissions", "unsafe trusscli archive directory permissions"),
+                                ("large-asset", "asset"), ("large-checksum", "checksum download")):
+            with self.subTest(failure=failure):
+                self.env["TRUSSC_CACHE_DIR"] = str(self.cache / failure)
+                asset, sums = self.release(unsafe=failure == "unsafe", locked=failure == "permissions")
+                if failure == "large-asset":
+                    with asset.open("r+b") as file:
+                        file.truncate(64 * 1024 * 1024 + 1)
+                elif failure == "large-checksum":
+                    sums.write_bytes(b"x" * (64 * 1024 + 1))
+                elif failure == "mismatch":
+                    sums.write_text("0" * 64 + "  " + asset.name + "\n", encoding="utf-8")
+                elif failure == "asset":
+                    asset.rename(asset.with_name("other-platform.tar.gz"))
+                elif failure == "checksum":
+                    sums.unlink()
+                elif failure == "release":
+                    shutil.rmtree(asset.parent)
+                output = self.cli("use", "vRelease")
+                lines = [line for line in output.splitlines() if "building it from source" in line]
+                self.assertEqual(len(lines), 1, output)
+                self.assertIn(reason, lines[0])
+                self.assertEqual(output.count("first time takes a few minutes"), 1)
+                self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
+                self.assertTrue(self.delegate_binary().is_file())
+                self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
+                self.assertFalse((self.root() / "tools/outside").exists())
+
+    def test_branch_and_commit_ignore_release_and_vendor_is_unchanged(self):
+        self.release_source()
+        commit = self.git("-C", self.source, "rev-parse", "HEAD").strip()
+        for ref in ("main", commit):
+            with self.subTest(ref=ref):
+                self.release(ref)
+                output = self.cli("use", ref)
+                self.assertNotIn("release asset", output)
+                self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
+                # Preserve the serialized vendor object, including localPath and addon marks.
+                presets = self.project / "CMakePresets.json"
+                text = presets.read_text(encoding="utf-8")
+                vendor = '{"trussc": {"addonLocalPaths": {"tcxFixture": "fixture addon"}, "addonPaths": {"tcxFixture": "resolved fixture"}, "addonOrder": ["tcxFixture"]}, "fixture": [1, 2]}'
+                data = json.loads(text)
+                # Write deliberately noncanonical whitespace to catch any rewrite.
+                data.pop("vendor")
+                text = json.dumps(data, indent=2)[:-1] + ', "vendor": ' + vendor + '}\n'
+                presets.write_text(text, encoding="utf-8")
+                before = presets.read_bytes()
+                self.cli("build", "--dry-run")
+                self.assertEqual(presets.read_bytes(), before)
+                # The real delegate's build path also preserves local selection marks.
+                vendor = '{"trussc": {"localPath": ' + json.dumps(str(self.source)) + ', "addonLocalPaths": {"tcxFixture": "fixture addon"}, "addonPaths": {"tcxFixture": "resolved fixture"}, "addonOrder": ["tcxFixture"]}}'
+                data["vendor"] = json.loads(vendor)
+                text = json.dumps(data, indent=2)
+                presets.write_text(text, encoding="utf-8")
+                before = presets.read_bytes()
+                self.env["TRUSSC_DELEGATED_ROOT"] = str(self.root())
+                try:
+                    self.cli("build", "--dry-run")
+                    self.assertEqual(presets.read_bytes(), before)
+                finally:
+                    self.env.pop("TRUSSC_DELEGATED_ROOT")
 
     def test_delegate_acquisition_arguments_streams_exit_and_missing_binary(self):
         self.publish_delegate()
@@ -531,6 +659,23 @@ class TarballTests(unittest.TestCase):
         self.assertIn("expanded size exceeds 2 GiB", self.cli("use", "large", success=False))
         self.assertEqual(list((self.cache / "versions/TrussC-org/TrussC").iterdir()), [])
 
+    @unittest.skipUnless(sys.platform == "linux", "tiny sparse archive fixture uses GNU tar")
+    def test_owner_names_with_spaces_do_not_hide_member_size(self):
+        fixture = self.base / "TrussC-owner"
+        (fixture / "core/cmake").mkdir(parents=True)
+        (fixture / "core/cmake/trussc_app.cmake").write_text("# fixture\n", encoding="utf-8")
+        (fixture / ".git_archival.txt").write_text("describe: v1\n", encoding="utf-8")
+        with (fixture / "large").open("wb") as file:
+            file.truncate(2 * 1024 ** 3 + 1)
+        # A group named "x 5" once made the listing parser read 5 as the size.
+        for owner, group in (("a", "x 5"), ("a b", "x 5")):
+            with self.subTest(owner=owner, group=group):
+                archive = self.archive_path("owner")
+                subprocess.run(["tar", "-czSf", str(archive), f"--owner={owner}:1000", f"--group={group}:1000",
+                                "-C", str(self.base), fixture.name], check=True)
+                self.assertIn("expanded size exceeds 2 GiB", self.cli("use", "owner", success=False))
+                self.assertEqual(list((self.cache / "versions/TrussC-org/TrussC").iterdir()), [])
+
     def test_oversized_archival_metadata_reports_unknown(self):
         self.cli("use", "v1")
         with (self.root() / ".git_archival.txt").open("wb") as file:
@@ -612,6 +757,35 @@ class TarballTests(unittest.TestCase):
         self.assertNotIn("Error:", self.cli("use", "v1"))
         self.assertFalse((self.cache / "repos").exists())
         self.assertIn("(v1)", self.cli("build", "--dry-run"))
+
+
+@unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
+class ArchiveReleaseTests(unittest.TestCase):
+    setUpClass = classmethod(VersionTests.setUpClass.__func__)
+    setUp = TarballTests.setUp
+    git = VersionTests.git
+    advance = VersionTests.advance
+    cli = VersionTests.cli
+    root = VersionTests.root
+    publish_delegate = VersionTests.publish_delegate
+    delegate_binary = VersionTests.delegate_binary
+    archive_path = TarballTests.archive_path
+    archive = TarballTests.archive
+    release = VersionTests.release
+
+    def test_qualified_tag_downloads_but_short_branch_archive_builds(self):
+        self.publish_delegate()
+        self.git("-C", self.source, "tag", "vRelease")
+        self.archive("vRelease", path="refs/tags/vRelease")
+        self.release()
+        output = self.cli("use", "vRelease")
+        self.assertNotIn("first time takes", output)
+        self.assertFalse((self.root() / "tools/trusscli-build.log").exists())
+        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
+        self.archive("main")
+        self.release("main")
+        self.assertIn("Building this version's trusscli", self.cli("use", "main"))
+        self.assertTrue((self.root() / "tools/trusscli-build.log").exists())
 
 
 if __name__ == "__main__":

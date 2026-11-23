@@ -105,15 +105,20 @@ GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 `trusscli use` saves a project's TrussC version in `.trussc-version`.
 For versions advertising protocol `1` in `tools/trusscli-protocol`, `use` and
-`update` also build that version's own Release, stripped trusscli once. The
-first build prints that it takes a few minutes. Subsequent builds use the
-cached executable in the version's `tools/bin/` directory (inside
+`update` also prepare that version's own Release, stripped trusscli once.
+Subsequent builds use the cached executable in the version's `tools/bin/` directory (inside
 `trusscli.app/Contents/MacOS/` on macOS).
 
 ```bash
 trusscli use v0.8.1
 trusscli build --release
 ```
+
+For a tag, `use` and `update` first try the selected repository's GitHub release
+asset for the running CLI's OS and architecture, verify its SHA-256 against the
+release checksum file, and extract it. If acquisition fails, one line states the
+reason and says `building it from source (first time takes a few minutes)` before
+building that version's CLI locally. Branches and commit pins always build locally.
 
 `build` forwards its arguments to that executable and returns its exit code.
 It never acquires or compiles a missing CLI. If it reports a missing delegate,
