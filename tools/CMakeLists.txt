@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(trusscli)
 
+# CLI builds default to Release; user app defaults stay in trussc_app.cmake.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Default path (for TrussC repository)
 set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../core")
 
@@ -42,3 +47,24 @@ trussc_app(
 # TrussC and addons, changing their compile commands on each commit/day.
 set_source_files_properties(src/main.cpp PROPERTIES COMPILE_DEFINITIONS
     "TRUSSCLI_VERSION=\"${TRUSSCLI_VERSION_STR}\";TRUSSCLI_BUILD_DATE=\"${TRUSSCLI_BUILD_DATE_STR}\"")
+
+# Allow delegate acquisition and verification to stage output before publishing.
+foreach(prop RUNTIME_OUTPUT_DIRECTORY RUNTIME_OUTPUT_DIRECTORY_RELEASE
+             RUNTIME_OUTPUT_DIRECTORY_DEBUG RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO
+             RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL)
+    if(DEFINED CMAKE_${prop})
+        set_target_properties(trusscli PROPERTIES ${prop} "${CMAKE_${prop}}")
+    endif()
+endforeach()
+if(APPLE)
+    target_link_options(trusscli PRIVATE "$<$<CONFIG:Release>:-Wl,-dead_strip>")
+    add_custom_command(TARGET trusscli POST_BUILD
+        COMMAND "$<$<CONFIG:Release>:${CMAKE_STRIP}>"
+                "$<$<CONFIG:Release>:-x>" "$<$<CONFIG:Release>:$<TARGET_FILE:trusscli>>"
+        COMMAND_EXPAND_LISTS VERBATIM)
+elseif(MSVC)
+    # Release's standard /O2 /DNDEBUG flags omit /Zi and /DEBUG (and PDBs).
+    target_link_options(trusscli PRIVATE "$<$<CONFIG:Release>:/DEBUG:NONE>")
+elseif(UNIX)
+    target_link_options(trusscli PRIVATE "$<$<CONFIG:Release>:-s>")
+endif()

@@ -101,6 +101,106 @@ class VersionTests(unittest.TestCase):
     def local(self):
         return json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))["vendor"]["trussc"].get("localPath")
 
+    def publish_delegate(self, broken=False):
+        tools = self.source / "tools"
+        tools.mkdir(exist_ok=True)
+        (tools / "trusscli-protocol").write_text("1\n", encoding="utf-8")
+        (tools / "CMakeLists.txt").write_text(
+            'cmake_minimum_required(VERSION 3.20)\nproject(stub C)\n'
+            'add_executable(trusscli stub.c)\n'
+            'if(APPLE)\nset_target_properties(trusscli PROPERTIES MACOSX_BUNDLE TRUE)\nendif()\n',
+            encoding="utf-8")
+        (tools / "stub.c").write_text("invalid C\n" if broken else r"""
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc, char** argv) {
+    const char* output = getenv("TRUSSC_STUB_OUTPUT");
+    FILE* file = fopen(output, "w");
+    if (!file) return 99;
+    fprintf(file, "%s\n", getenv("TRUSSC_DELEGATED_ROOT"));
+    for (int i = 1; i < argc; ++i) fprintf(file, "%s\n", argv[i]);
+    fclose(file);
+    puts("delegate stdout");
+    fputs("delegate stderr\n", stderr);
+    const char* code = getenv("TRUSSC_STUB_EXIT");
+    return code ? atoi(code) : 0;
+}
+""", encoding="utf-8")
+        self.advance()
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main")
+        self.env["TRUSSC_STUB_OUTPUT"] = str(self.base / "delegate argv")
+
+    def delegate_binary(self, root=None):
+        relative = {"darwin": "trusscli.app/Contents/MacOS/trusscli",
+                    "win32": "trusscli.exe"}.get(sys.platform, "trusscli")
+        return (root or self.root()) / "tools/bin" / relative
+
+    def test_delegate_acquisition_arguments_streams_exit_and_missing_binary(self):
+        self.publish_delegate()
+        output = self.cli("use", "main")
+        self.assertEqual(output.count("first time takes a few minutes"), 1)
+        self.assertTrue(self.delegate_binary().is_file())
+        self.assertFalse((self.root() / "tools/build-trusscli").exists())
+        self.assertNotIn("first time takes a few minutes", self.cli("update"))
+        self.assertIn("Delegate trusscli", self.cli("doctor"))
+        args = ["build", "--dry-run", "-p", str(self.project), "--release", "-j", "2", "--future-build-option"]
+        self.env["TRUSSC_STUB_EXIT"] = "23"
+        result = subprocess.run([str(CLI), *args], cwd=self.project, env=self.env,
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
+        self.assertIn("delegate stdout", result.stdout)
+        self.assertIn("delegate stderr", result.stderr)
+        received = (self.base / "delegate argv").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(received, [str(self.root()), *args])
+        self.delegate_binary().unlink()
+        (self.base / "delegate argv").unlink()
+        self.assertIn("run `trusscli update`", self.cli("build", success=False))
+        self.assertFalse((self.base / "delegate argv").exists())
+        self.assertFalse((self.root() / "tools/build-trusscli").exists())
+        self.assertEqual(self.cli("update").count("first time takes a few minutes"), 1)
+
+    def test_delegate_branch_refresh_rebuilds_and_failure_removes_old_binary(self):
+        self.publish_delegate()
+        self.cli("use", "main")
+        self.advance()
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main")
+        self.assertEqual(self.cli("update").count("first time takes a few minutes"), 1)
+        self.publish_delegate(broken=True)
+        output = self.cli("update", success=False)
+        self.assertIn("delegate trusscli build failed; log:", output)
+        self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
+        self.assertFalse(self.delegate_binary().exists())
+        self.assertIn("run `trusscli update`", self.cli("build", success=False))
+
+    def test_delegate_first_use_build_failure_and_recursion_guard(self):
+        self.publish_delegate(broken=True)
+        self.assertIn("delegate trusscli build failed; log:", self.cli("use", "main", success=False))
+        # No presets have been written yet; inspect the selected cache directly.
+        root = self.cache / "versions/TrussC-org/TrussC/main"
+        self.assertFalse(self.delegate_binary(root).exists())
+        self.publish_delegate()
+        self.cli("update")
+        # The delegate must use the supplied root, even with an unavailable pin.
+        (self.project / ".trussc-version").write_text("missing\n", encoding="utf-8")
+        self.env["TRUSSC_DELEGATED_ROOT"] = str(root)
+        output = self.cli("build", "--dry-run")
+        self.assertIn("-DTRUSSC_DIR=" + str(root / "core"), output)
+        self.assertNotIn("delegate stdout", output)
+        self.assertFalse((self.base / "delegate argv").exists())
+
+    def test_no_marker_notice_repeats_and_local_selection_does_not_delegate(self):
+        self.cli("use", "v1")
+        for _ in range(2):
+            self.assertIn("v1 has no trusscli delegation support; building with this trusscli",
+                          self.cli("build", "--dry-run"))
+        self.publish_delegate()
+        self.cli("use-local", self.source)
+        self.assertNotIn("first time takes a few minutes", self.cli("update"))
+        output = self.cli("build", "--dry-run")
+        self.assertIn("-DTRUSSC_DIR=" + str(self.source / "core"), output)
+        self.assertNotIn("delegation support", output)
+        self.assertFalse((self.base / "delegate argv").exists())
+
     def test_tags_branches_commits_forks_and_tag_priority(self):
         for spec, commit, owner, ref in (("v1", self.initial, "TrussC-org", "v1"),
                 ("main", self.moved, "TrussC-org", "main"),
@@ -318,6 +418,20 @@ class TarballTests(unittest.TestCase):
         self.archive("shared", revision="refs/tags/shared", path="refs/tags/shared")
         # A short URL pointing at the branch must not override the qualified tag.
         self.archive("shared", revision="refs/heads/shared")
+
+    publish_delegate = VersionTests.publish_delegate
+    delegate_binary = VersionTests.delegate_binary
+
+    def test_archive_delegate_is_built_once_and_refreshed_with_source(self):
+        self.publish_delegate()
+        self.archive("main")
+        self.assertEqual(self.cli("use", "main").count("first time takes a few minutes"), 1)
+        self.assertNotIn("first time takes a few minutes", self.cli("update"))
+        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
+        self.advance()
+        self.archive("main")
+        self.assertEqual(self.cli("update").count("first time takes a few minutes"), 1)
+        self.assertTrue(self.delegate_binary().is_file())
 
     def archive_path(self, ref, owner="TrussC-org"):
         return self.archives / owner / "TrussC/archive" / (ref + ".tar.gz")

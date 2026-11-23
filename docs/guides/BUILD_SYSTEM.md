@@ -101,6 +101,42 @@ reported with a warning and replaced by the default. `TC_WEB_BACKEND` is read
 the way CMake builds it: `"WGPU"` (or unset) is WebGPU, any other value is
 GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
+### Build with a project's pinned TrussC version
+
+`trusscli use` saves a project's TrussC version in `.trussc-version`.
+For versions advertising protocol `1` in `tools/trusscli-protocol`, `use` and
+`update` also build that version's own Release, stripped trusscli once. The
+first build prints that it takes a few minutes. Subsequent builds use the
+cached executable in the version's `tools/bin/` directory (inside
+`trusscli.app/Contents/MacOS/` on macOS).
+
+```bash
+trusscli use v0.8.1
+trusscli build --release
+```
+
+`build` forwards its arguments to that executable and returns its exit code.
+It never acquires or compiles a missing CLI. If it reports a missing delegate,
+prepare it with an explicit update:
+
+```bash
+trusscli update
+trusscli build --release
+```
+
+Updating a branch that has moved rebuilds its delegate with the refreshed source.
+Versions without the marker keep using the current trusscli and print a notice
+on every build: `<version> has no trusscli delegation support; building with
+this trusscli`. There is no API to add delegation to an older release; select a
+version that includes the marker to use its own CLI.
+
+`use-local` keeps building with the current trusscli:
+
+```bash
+trusscli use-local /path/to/TrussC
+trusscli build --release
+```
+
 ### Keeping `trusscli` in sync
 
 `trusscli` is a compiled binary. When you update TrussC by pulling the latest

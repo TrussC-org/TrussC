@@ -50,6 +50,9 @@ struct ProjectSettings {
     }
 };
 
+// Native generator, cache variables and environment shared by projects and A-1.
+std::string nativeToolchainPreset(const ProjectSettings& settings);
+
 // The toolchainFile to write into a web / android preset. `detected` is what
 // this shell finds (empty when nothing was found), `saved` the toolchainFile
 // of the existing preset, `envFallback` the $env{...} form CMake resolves at

@@ -37,7 +37,7 @@ cd "$SOURCE_DIR/build"
 
 # CMake configuration
 echo "Running CMake..."
-cmake ..
+cmake .. -DCMAKE_BUILD_TYPE=Release
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: CMake configuration failed!"
@@ -60,7 +60,7 @@ fi
 # Build
 echo ""
 echo "Building (parallel jobs: $JOBS)..."
-cmake --build . --parallel "$JOBS"
+cmake --build . --config Release --parallel "$JOBS"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: Build failed!"

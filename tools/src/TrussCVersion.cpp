@@ -26,6 +26,26 @@ namespace trusscVersion {
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
 
+fs::path delegateBinary(const fs::path& root) {
+#ifdef _WIN32
+    return root / "tools/bin/trusscli.exe";
+#elif defined(__APPLE__)
+    return root / "tools/bin/trusscli.app/Contents/MacOS/trusscli";
+#else
+    return root / "tools/bin/trusscli";
+#endif
+}
+
+bool supportsDelegation(const fs::path& root) {
+    if (!fs::exists(root / "tools/trusscli-protocol")) return false;
+    // Bound (protocol marker): the marker holds a short protocol number; read at most 32 bytes.
+    std::istringstream marker(readBounded(root / "tools/trusscli-protocol", 32));
+    std::string protocol;
+    marker >> protocol;
+    if (protocol != "1") throw std::runtime_error("unsupported trusscli delegation protocol: " + protocol);
+    return true;
+}
+
 static bool namePart(const std::string& part) {
     return !part.empty() && part.front() != '.' && part.front() != '-' &&
         part.back() != '.' && part.find("..") == std::string::npos &&
@@ -395,6 +415,19 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
         throw std::runtime_error("TrussC archive is missing core/cmake/trussc_app.cmake or .git_archival.txt");
     }
     checkCachePath(destination);
+    // An unchanged archive refresh retains its already-built delegate too.
+    if (!addon && fs::exists(destination) && commitAt(tree) != "unknown" &&
+        commitAt(tree) == commitAt(destination) && fs::is_regular_file(delegateBinary(destination))) {
+#ifdef __APPLE__
+        fs::create_directories(tree / "tools/bin");
+        fs::copy(destination / "tools/bin/trusscli.app", tree / "tools/bin/trusscli.app",
+                 fs::copy_options::recursive | fs::copy_options::copy_symlinks | fs::copy_options::overwrite_existing);
+#else
+        const auto binary = delegateBinary(tree);
+        fs::create_directories(binary.parent_path());
+        fs::copy_file(delegateBinary(destination), binary, fs::copy_options::overwrite_existing);
+#endif
+    }
     auto marker = destination / ".last-used";
     auto newMarkerStatus = fs::symlink_status(tree / ".last-used");
     if (fs::is_regular_file(fs::symlink_status(marker)) &&
@@ -741,7 +774,13 @@ std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string&
     if (!sourceUrl.empty() && sourceUrl.front() == '-') throw std::runtime_error("invalid addon repository URL");
     auto root = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo / spec.ref;
     checkCachePath(root);
-    if (fetch) fetchVersion(spec, root, addon, sourceUrl);
+    if (fetch) {
+        const auto previous = !addon && fs::exists(root / "core/cmake/trussc_app.cmake") ? commitAt(root) : "";
+        fetchVersion(spec, root, addon, sourceUrl);
+        if (!addon && !previous.empty() && previous != commitAt(root)) {
+            fs::remove(delegateBinary(root));
+        }
+    }
     else if (fs::exists(root)) {
         if (fs::exists(root / ".git")) {
             checkExistingWorktree(spec, cacheRoot() / "repos" / spec.owner / (spec.repo + ".git"), root, addon);
@@ -765,6 +804,8 @@ std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string&
 }
 
 std::string resolve(const fs::path& project, bool fetch) {
+    // Protocol 1: the delegate uses this root without resolving a project pin.
+    if (const char* root = std::getenv("TRUSSC_DELEGATED_ROOT"); root && *root) return root;
     auto local = localPath(project);
     if (!local.empty()) {
         auto root = fs::path(local);

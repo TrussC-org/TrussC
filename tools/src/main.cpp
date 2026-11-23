@@ -1358,6 +1358,103 @@ static void printUpdateHelp() {
          << "hidden; errors still show) and saved to <build folder>/build.log.\n";
 }
 
+// Acquisition seam: part 2 can try a release asset here before the A-1 build.
+// Only explicit update/use call this; build never acquires a CLI.
+static void getDelegateBinary(const fs::path& versionRoot) {
+    if (!trusscVersion::supportsDelegation(versionRoot)) return;
+    const auto root = fs::absolute(versionRoot);
+    const auto binary = trusscVersion::delegateBinary(root);
+    if (fs::is_regular_file(binary)) return;
+    cout << "Building this version's trusscli; the first time takes a few minutes.\n" << flush;
+    const auto build = root / "tools/build-trusscli";
+    const auto staging = build / "stage";
+    fs::remove_all(build);
+    fs::create_directories(build);
+    const auto logPath = root / "tools/trusscli-build.log";
+    ofstream log(logPath);
+    if (!log) throw runtime_error("cannot write delegate build log: " + logPath.string());
+    ProjectSettings settings;
+    settings.detectBuildEnvironment();
+    const auto native = Json::parse(nativeToolchainPreset(settings));
+    const string cmake = findCMake();
+    vector<string> prefix = {cmake, "-E", "env"};
+    if (native.contains("environment")) {
+        for (const auto& item : native["environment"].items()) {
+            string value = item.value().get<string>();
+            const string inherited = "$penv{PATH}";
+            if (auto at = value.find(inherited); at != string::npos) {
+                const char* path = getenv("PATH");
+                value.replace(at, inherited.size(), path ? path : "");
+            }
+            prefix.push_back(item.key() + "=" + value);
+        }
+    }
+    auto run = [&](vector<string> command) {
+        command.insert(command.begin(), prefix.begin(), prefix.end());
+        return runCaptured(command, [&](const char* bytes, size_t size) { log.write(bytes, size); });
+    };
+    vector<string> configure = {cmake, "-S", (root / "tools").string(), "-B", build.string(),
+        "-G", native["generator"].get<string>(), "-DCMAKE_BUILD_TYPE=Release"};
+    if (native.contains("cacheVariables")) {
+        for (const auto& item : native["cacheVariables"].items())
+            configure.push_back("-D" + item.key() + "=" + item.value().get<string>());
+    }
+    const string output = (staging / "tools/bin").string();
+    for (const string suffix : {"", "_RELEASE", "_DEBUG", "_RELWITHDEBINFO", "_MINSIZEREL"})
+        configure.push_back("-DCMAKE_RUNTIME_OUTPUT_DIRECTORY" + suffix + "=" + output);
+    auto fail = [&](const string& reason) {
+        log.flush();
+        throw runtime_error("delegate trusscli " + reason + "; log: " + logPath.string());
+    };
+    if (run(configure) != 0) fail("configure failed");
+    if (run({cmake, "--build", build.string(), "--config", "Release", "--target", "trusscli", "--parallel", "4"}) != 0)
+        fail("build failed");
+    const auto stagedBinary = trusscVersion::delegateBinary(staging);
+    if (!fs::is_regular_file(stagedBinary)) fail("build produced no binary");
+#ifdef __APPLE__
+    // NSBundle-based platform helpers need the bundle metadata alongside the CLI.
+    const auto bundle = root / "tools/bin/trusscli.app";
+    fs::create_directories(bundle.parent_path());
+    fs::remove_all(bundle);
+    fs::rename(staging / "tools/bin/trusscli.app", bundle);
+#else
+    fs::create_directories(binary.parent_path());
+    fs::rename(stagedBinary, binary);
+#endif
+    // Keep the diagnostic log, discard objects and CMake cache after success.
+    fs::remove_all(build);
+}
+
+// Protocol 1 forwards build argv verbatim and inherits the console streams.
+// The root variable makes the child use this source without re-resolution or
+// re-delegation. It is restored for callers such as `run` that keep working.
+static int runDelegate(const fs::path& root, const vector<string>& args) {
+    const auto binary = trusscVersion::delegateBinary(root);
+    if (!fs::is_regular_file(binary))
+        throw runtime_error("delegate trusscli is missing; run `trusscli update`");
+    const char* previous = getenv("TRUSSC_DELEGATED_ROOT");
+    const optional<string> saved = previous ? optional<string>(previous) : nullopt;
+    auto setRoot = [](const char* value) {
+#ifdef _WIN32
+        _putenv_s("TRUSSC_DELEGATED_ROOT", value ? value : "");
+#else
+        if (value) setenv("TRUSSC_DELEGATED_ROOT", value, 1);
+        else unsetenv("TRUSSC_DELEGATED_ROOT");
+#endif
+    };
+    struct Restore {
+        function<void()> action;
+        ~Restore() { action(); }
+    } restore{[&] { setRoot(saved ? saved->c_str() : nullptr); }};
+    setRoot(root.string().c_str());
+    vector<string> command = {binary.string(), "build"};
+    command.insert(command.end(), args.begin(), args.end());
+    return runCaptured(command, [](const char* bytes, size_t size) {
+        cout.write(bytes, size);
+        cout.flush();
+    }, stderr);
+}
+
 static int cmdUpdate(const vector<string>& args, bool fetchVersion = true) {
     string projectPath;
     GenerationFlags flags;
@@ -1421,6 +1518,9 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true) {
     }
     projectPath = resolvedProjectPath;
     tcRoot = resolvedTcRoot;
+
+    if (fetchVersion && trusscVersion::localPath(projectPath).empty() &&
+        fs::exists(fs::path(projectPath) / ".trussc-version")) getDelegateBinary(tcRoot);
 
     auto addonPaths = resolveAddonVersions(projectPath, tcRoot, fetchVersion);
     addonVersions::saveResolved(projectPath, addonPaths);
@@ -3309,6 +3409,13 @@ static int cmdDoctor(const vector<string>& args) {
     results.push_back(checkCompiler());
     results.push_back(checkTrussCCore(resolvedTcRoot));
     results.push_back(checkVersionMismatch(resolvedTcRoot));
+    if (!projectPath.empty() && trusscVersion::localPath(projectPath).empty() &&
+        fs::exists(fs::path(projectPath) / ".trussc-version")) {
+        const bool supported = trusscVersion::supportsDelegation(resolvedTcRoot);
+        const bool present = fs::is_regular_file(trusscVersion::delegateBinary(resolvedTcRoot));
+        results.push_back({"Delegate trusscli", supported && !present ? CheckStatus::Warning : CheckStatus::OK,
+            supported ? (present ? "present" : "missing; run `trusscli update`") : "version has no delegation support", "", true});
+    }
     results.push_back(checkPlatformSDK());
 #ifdef _WIN32
     // The project's pinned VS toolchain (only a Windows preset pins one)
@@ -3727,6 +3834,29 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
 }
 
 static int cmdBuild(const vector<string>& args) {
+    const char* delegatedRoot = getenv("TRUSSC_DELEGATED_ROOT");
+    const bool delegated = delegatedRoot && *delegatedRoot;
+    // Select a delegate before parsing build options: a pinned CLI may support
+    // newer flags than this entry-point CLI. Only project/root selectors matter here.
+    if (!delegated) {
+        string path;
+        bool localOverride = false;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if ((args[i] == "-p" || args[i] == "--path") && i + 1 < args.size()) path = args[++i];
+            else if (args[i] == "--tc-root") localOverride = true;
+        }
+        if (path.empty()) path = autoDetectProjectRoot("");
+        if (!localOverride && !path.empty() && trusscVersion::localPath(path).empty()) {
+            const auto root = trusscVersion::resolve(path, false);
+            if (!root.empty()) {
+                if (trusscVersion::supportsDelegation(root)) return runDelegate(fs::absolute(root), args);
+                ifstream versionFile(fs::path(path) / ".trussc-version");
+                string selection;
+                versionFile >> selection;
+                cout << selection << " has no trusscli delegation support; building with this trusscli\n";
+            }
+        }
+    }
     string explicitPath;
     string explicitTcRoot;
     string targetPreset;

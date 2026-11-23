@@ -11,6 +11,8 @@ struct Spec {
     std::string ref;
     bool commit = false;
 };
+std::filesystem::path delegateBinary(const std::filesystem::path& root);
+bool supportsDelegation(const std::filesystem::path& root);
 Spec parse(const std::string& text);
 std::string localPath(const std::filesystem::path& project);
 void setLocalPath(const std::filesystem::path& project, const std::string& path);
