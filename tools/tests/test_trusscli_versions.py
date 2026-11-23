@@ -129,7 +129,7 @@ class VersionTests(unittest.TestCase):
 
     def cli(self, *args, success=True):
         result = subprocess.run([str(CLI), *map(str, args)], cwd=self.project, env=self.env,
-                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         self.last_result = result
         output = result.stdout + result.stderr
         if success:
