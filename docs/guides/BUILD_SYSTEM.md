@@ -117,7 +117,7 @@ trusscli build --release
 For tags, `use` and `update` first try the selected repository's release asset:
 `trusscli-<tag>-<os>-<arch>.tar.gz` and `trusscli-<tag>-SHA256SUMS.txt`.
 They verify SHA-256, extract the executable (the app bundle on macOS), and run
-`--version` with a three-second timeout before installing it into the cached
+`--version` with a ten-second timeout before installing it into the cached
 version's `tools/bin/`. Assets cover Linux x86_64, macOS arm64, and Windows x86_64.
 Other architectures, missing assets, and failed checks fall back to building
 that version's CLI from source, with one reason line. Branches and commit pins
