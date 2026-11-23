@@ -1400,8 +1400,9 @@ static void getDelegateBinary(const fs::path& versionRoot, const trusscVersion::
         command.insert(command.begin(), prefix.begin(), prefix.end());
         return runCaptured(command, [&](const char* bytes, size_t size) { log.write(bytes, size); });
     };
+    // No build type: the version's own tools/CMakeLists.txt picks its small default.
     vector<string> configure = {cmake, "-S", (root / "tools").string(), "-B", build.string(),
-        "-G", native["generator"].get<string>(), "-DCMAKE_BUILD_TYPE=Release"};
+        "-G", native["generator"].get<string>()};
     if (native.contains("cacheVariables")) {
         for (const auto& item : native["cacheVariables"].items())
             configure.push_back("-D" + item.key() + "=" + item.value().get<string>());
@@ -1414,7 +1415,7 @@ static void getDelegateBinary(const fs::path& versionRoot, const trusscVersion::
         throw runtime_error("delegate trusscli " + reason + "; log: " + logPath.string());
     };
     if (run(configure) != 0) fail("configure failed");
-    if (run({cmake, "--build", build.string(), "--config", "Release", "--target", "trusscli", "--parallel", "4"}) != 0)
+    if (run({cmake, "--build", build.string(), "--target", "trusscli", "--parallel", "4"}) != 0)
         fail("build failed");
     const auto stagedBinary = trusscVersion::delegateBinary(staging);
     if (!fs::is_regular_file(stagedBinary)) fail("build produced no binary");

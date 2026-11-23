@@ -105,7 +105,7 @@ GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 `trusscli use` saves a project's TrussC version in `.trussc-version`.
 For versions advertising protocol `1` in `tools/trusscli-protocol`, `use` and
-`update` also prepare that version's own Release, stripped trusscli once.
+`update` also prepare that version's own size-optimized, stripped trusscli once.
 Subsequent builds use the cached executable in the version's `tools/bin/` directory (inside
 `trusscli.app/Contents/MacOS/` on macOS).
 

@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(trusscli)
 
-# CLI builds default to Release; user app defaults stay in trussc_app.cmake.
+# CLI builds default to MinSizeRel (smallest binary); user app defaults stay in trussc_app.cmake.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING "Build type" FORCE)
 endif()
 
 # Default path (for TrussC repository)
@@ -57,14 +57,14 @@ foreach(prop RUNTIME_OUTPUT_DIRECTORY RUNTIME_OUTPUT_DIRECTORY_RELEASE
     endif()
 endforeach()
 if(APPLE)
-    target_link_options(trusscli PRIVATE "$<$<CONFIG:Release>:-Wl,-dead_strip>")
+    target_link_options(trusscli PRIVATE "$<$<CONFIG:MinSizeRel>:-Wl,-dead_strip>")
     add_custom_command(TARGET trusscli POST_BUILD
-        COMMAND "$<$<CONFIG:Release>:${CMAKE_STRIP}>"
-                "$<$<CONFIG:Release>:-x>" "$<$<CONFIG:Release>:$<TARGET_FILE:trusscli>>"
+        COMMAND "$<$<CONFIG:MinSizeRel>:${CMAKE_STRIP}>"
+                "$<$<CONFIG:MinSizeRel>:-x>" "$<$<CONFIG:MinSizeRel>:$<TARGET_FILE:trusscli>>"
         COMMAND_EXPAND_LISTS VERBATIM)
 elseif(MSVC)
-    # Release's standard /O2 /DNDEBUG flags omit /Zi and /DEBUG (and PDBs).
-    target_link_options(trusscli PRIVATE "$<$<CONFIG:Release>:/DEBUG:NONE>")
+    # MinSizeRel's standard /O1 /DNDEBUG flags omit /Zi and /DEBUG (and PDBs).
+    target_link_options(trusscli PRIVATE "$<$<CONFIG:MinSizeRel>:/DEBUG:NONE>")
 elseif(UNIX)
-    target_link_options(trusscli PRIVATE "$<$<CONFIG:Release>:-s>")
+    target_link_options(trusscli PRIVATE "$<$<CONFIG:MinSizeRel>:-s>")
 endif()
