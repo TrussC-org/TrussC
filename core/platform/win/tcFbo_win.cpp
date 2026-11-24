@@ -6,6 +6,7 @@
 #include "../tcFboConversion.h"
 
 #if defined(_WIN32)
+#if !defined(SOKOL_VULKAN)
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -227,4 +228,16 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
 } // namespace trussc
 
+#else
+namespace trussc {
+bool Fbo::readPixelsPlatform(unsigned char*, bool) const {
+    logWarning("Fbo") << "readPixels is not supported on the Vulkan backend yet";
+    return false;
+}
+bool Fbo::readPixelsFloatPlatform(float*) const {
+    logWarning("Fbo") << "readPixelsFloat is not supported on the Vulkan backend yet";
+    return false;
+}
+} // namespace trussc
+#endif
 #endif // _WIN32

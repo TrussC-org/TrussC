@@ -1,5 +1,6 @@
 #include "TrussC.h"
 #if defined(_WIN32)
+#if !defined(SOKOL_VULKAN)
 #include <d3d11.h>
 #include "tcStorageBufferReadback.h"
 
@@ -31,4 +32,9 @@ bool StorageBuffer::readPlatform(void* destination, size_t bytes) {
     return ok;
 }
 } // namespace trussc
+#else
+namespace trussc {
+bool StorageBuffer::readPlatform(void*, size_t) { return false; }
+} // namespace trussc
+#endif
 #endif
