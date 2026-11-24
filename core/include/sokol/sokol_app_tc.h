@@ -5085,10 +5085,11 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     NSRect rect = NSMakeRect(px, py, width, height);
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                               NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
-    if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
     w->window = [[_sapp_tc_window alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->window == nil) return _sapp_tc_mac_fail(w, "NSWindow initWithContentRect returned nil (no NSError available)");
+    // [TrussC] Match runtime borderless chrome before showing either window kind (#1639).
+    if (w->desc.borderless) _sapp_tc_mac_apply_decoration(w);
     w->window.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {

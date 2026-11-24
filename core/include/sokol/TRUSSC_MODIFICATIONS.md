@@ -1454,6 +1454,7 @@ Runtime decoration changes preserve the current client size: X11 queues one
 `XResizeWindow` request after the Motif property change, Win32 adjusts the outer
 rectangle for the new style at the current DPI, and macOS restores the content
 size after changing the style mask. Existing fullscreen deferral is retained.
+Borderless macOS creation uses the runtime decoration helper before showing main and sub-windows, preserving native fullscreen resizing.
 Tests: `runtimeSettings` and `tools/tests/test_window_decoration.py`.
 
 ## Per-draw stencil references (#1512, part 2b)

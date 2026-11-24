@@ -1,9 +1,10 @@
-"""Execute production decoration changes against recording X11/Win32 boundaries.
+"""Execute production decoration changes against recording macOS/X11/Win32 boundaries.
 
 Run through tcbuild.sh. These sequence checks do not emulate mutter or AppKit.
 """
 from pathlib import Path
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -15,14 +16,18 @@ ROOT = Path(__file__).resolve().parents[2]
 NATIVE = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
 
 
-def execute(source):
+def execute(source, *, expected_failure=False):
     with tempfile.TemporaryDirectory(prefix='decoration-') as temporary:
         cpp = Path(temporary) / 'probe.cpp'
         binary = Path(temporary) / 'probe'
         cpp.write_text(source, encoding='utf-8')
         subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-I', str(ROOT / 'core/include/sokol'),
                         str(cpp), '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+        result = subprocess.run([str(binary)], capture_output=expected_failure)
+        if expected_failure:
+            assert result.returncode != 0, "mutation survived"
+        else:
+            result.check_returncode()
 
 
 class WindowDecoration(unittest.TestCase):
@@ -49,6 +54,90 @@ int main() {
         constructor = body(NATIVE, 'static _sapp_tc_window_t* _sapp_tc_x11_create_window(')
         self.assertLess(constructor.index('_sapp_tc_x11_create_native_window('),
                         constructor.index('_sapp_tc_x11_show_window(w)'))
+
+    def test_mac_borderless_launch_matches_runtime(self):
+        creator = body(NATIVE, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(')
+        # Both public entry points must use the same native constructor.
+        for signature in ('static bool _sapp_tc_mac_create_main_window(',
+                          'static _sapp_tc_window_t* _sapp_tc_mac_create_window('):
+            self.assertIn('_sapp_tc_mac_create_window_ex(', body(NATIVE, signature))
+        start = creator.index('NSWindowStyleMask style =')
+        end = creator.index('w->window.collectionBehavior')
+        creation = creator[start:end]
+        self.assertLess(end, creator.index('makeKeyAndOrderFront:'))
+        self.assertLess(end, creator.index('_sapp_tc_request_fullscreen(w, true)'))
+        self.assertLess(end, creator.index('_sapp_tc_mac_initialize_dimensions(w)'))
+        # Execute the production style/flag assignments with recording objects.
+        # Only Objective-C message syntax is adapted; this is not AppKit emulation.
+        creation = re.sub(r'w->window = \[\[_sapp_tc_window alloc\] initWithContentRect:rect styleMask:style\s+'
+                          r'backing:NSBackingStoreBuffered defer:NO\];',
+                          'w->window = &native; native.styleMask = style;', creation)
+        decoration = body(NATIVE, 'static void _sapp_tc_mac_apply_decoration(')
+        decoration = decoration.replace('window.contentView.frame.size', 'window->contentView.frame.size')
+        decoration = decoration.replace('window.', 'window->')
+        decoration = re.sub(r'\[\[window standardWindowButton:(\w+)\]\s+setHidden:(YES|NO)\];',
+                            r'window->buttons[\1] = \2;', decoration)
+        decoration = decoration.replace('[NSColor blackColor]', '1')
+        decoration = decoration.replace('[window setContentSize:content_size];',
+                                        'window->contentView.frame.size = content_size;')
+        fixture = r'''
+#include <cassert>
+#include <initializer_list>
+using NSWindowStyleMask = unsigned;
+constexpr unsigned NSWindowStyleMaskBorderless=0, NSWindowStyleMaskTitled=1,
+    NSWindowStyleMaskClosable=2, NSWindowStyleMaskMiniaturizable=4,
+    NSWindowStyleMaskResizable=8, NSWindowStyleMaskFullSizeContentView=0x8000;
+constexpr bool YES=true, NO=false;
+constexpr int NSWindowTitleVisible=0, NSWindowTitleHidden=1,
+    NSWindowCloseButton=0, NSWindowMiniaturizeButton=1, NSWindowZoomButton=2;
+struct NSSize { int width=960, height=600; };
+struct NSWindow {
+    NSWindowStyleMask styleMask=0;
+    bool titlebarAppearsTransparent=false, movableByWindowBackground=false,
+        hasShadow=true, opaque=false, buttons[3]{};
+    int titleVisibility=NSWindowTitleVisible, backgroundColor=0;
+    struct { struct { NSSize size; } frame; } contentView;
+};
+struct _sapp_tc_window_t { struct { bool borderless=false; } desc; NSWindow* window; };
+constexpr auto nil=nullptr;
+_sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t*, const char*) { assert(false); return nullptr; }
+''' + decoration + r'''
+_sapp_tc_window_t* create(_sapp_tc_window_t* w, NSWindow& native) {
+''' + creation + r'''
+    return w;
+}
+int main() {
+    { // Both entry points route to this extracted creation path.
+        NSWindow launched, toggled;
+        _sapp_tc_window_t launch{{true},nullptr}, runtime{{true},&toggled};
+        create(&launch,launched);
+        _sapp_tc_mac_apply_decoration(&runtime);
+        assert(launched.styleMask==toggled.styleMask);
+        assert((launched.styleMask & 0xf)==0xf); // Includes resize, close and minimize.
+        assert(launched.titlebarAppearsTransparent==toggled.titlebarAppearsTransparent);
+        assert(launched.titleVisibility==toggled.titleVisibility);
+        assert(launched.movableByWindowBackground==toggled.movableByWindowBackground);
+        assert(launched.hasShadow==toggled.hasShadow && launched.opaque==toggled.opaque);
+        assert(launched.backgroundColor==toggled.backgroundColor);
+        for (int i=0;i<3;++i) assert(launched.buttons[i]==toggled.buttons[i]);
+        assert(launched.contentView.frame.size.width==960 && launched.contentView.frame.size.height==600);
+        // Immediate fullscreen requires Resizable; no decoration toggle intervenes.
+        assert(launched.styleMask & NSWindowStyleMaskResizable);
+        NSWindow decorated;
+        _sapp_tc_window_t control{{false},nullptr};
+        create(&control,decorated);
+        assert(decorated.styleMask==0xf && !decorated.titlebarAppearsTransparent);
+    }
+}
+'''
+        execute(fixture)
+        # Restore the original creation path, including its zero style mask.
+        old = 'if (w->desc.borderless) _sapp_tc_mac_apply_decoration(w);'
+        self.assertIn(old, fixture)
+        mutant = fixture.replace(old, '').replace(
+            'w->window = &native;',
+            'if (w->desc.borderless) style = NSWindowStyleMaskBorderless; w->window = &native;')
+        execute(mutant, expected_failure=True)
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'X11 production branch requires Linux')
     def test_x11_size_request_order_and_count(self):
