@@ -619,5 +619,56 @@ class TarballTests(unittest.TestCase):
         self.assertIn("(v1)", self.cli("build", "--dry-run"))
 
 
+@unittest.skipIf(sys.platform == "win32", "fixture needs an executable Python script in PATH")
+class WindowsTarListingTests(unittest.TestCase):
+    """Exercise acquisition and its stops with CRLF and localized BSD listings."""
+    git = VersionTests.git
+    advance = VersionTests.advance
+    cli = VersionTests.cli
+    root = VersionTests.root
+    archive = TarballTests.archive
+    archive_path = TarballTests.archive_path
+    old_layout = VersionTests.old_layout
+    large_zero_archive = TarballTests.large_zero_archive
+    test_use_replaces_oversized_previous_pin = TarballTests.test_use_replaces_oversized_previous_pin
+    test_internal_symlink_is_supported = TarballTests.test_internal_symlink_is_supported
+    test_expanded_member_total_is_bounded_before_extraction = TarballTests.test_expanded_member_total_is_bounded_before_extraction
+    test_owner_names_with_spaces_do_not_hide_member_size = TarballTests.test_owner_names_with_spaces_do_not_hide_member_size
+    test_old_layout_use_preserves_selection_and_leaves_no_cache_entry = TarballTests.test_old_layout_use_preserves_selection_and_leaves_no_cache_entry
+    test_old_layout_update_preserves_existing_cached_tree = TarballTests.test_old_layout_update_preserves_existing_cached_tree
+
+    def setUp(self):
+        TarballTests.setUp(self)
+        tools = self.base / "windows-tar"
+        tools.mkdir()
+        tool = tools / "tar"
+        tool.write_text(
+            "#!" + sys.executable + "\n"
+            "import subprocess, sys\n"
+            "result = subprocess.run([" + repr(shutil.which("tar")) + "] + sys.argv[1:], capture_output=True)\n"
+            "output = result.stdout\n"
+            "if '-tzf' in sys.argv or '-tvzf' in sys.argv:\n"
+            "    lines = output.splitlines()\n"
+            "    if '-tvzf' in sys.argv:\n"
+            "        assert '--numeric-owner' in sys.argv\n"
+            "        names = subprocess.check_output([" + repr(shutil.which("tar")) + ", '-P', '-tzf', sys.argv[-1]]).splitlines()\n"
+            "        for i, line in enumerate(lines):\n"
+            "            mode, owner, rest = line.split(None, 2)\n"
+            "            if b'/' in owner:\n"
+            "                uid, gid = owner.split(b'/')\n"
+            "                size, rest = rest.split(None, 1)\n"
+            "            else:\n"
+            "                uid, gid, size, rest = rest.split(None, 3)\n"
+            "            name = rest[rest.index(names[i]):]\n"
+            "            date = ['11 24 14:28', '11月 24 14:28', '11 月 24 14:28'][i % 3].encode()\n"
+            "            lines[i] = b' '.join([mode, b'0', uid, gid, size, date, name])\n"
+            "    output = b'\\r\\n'.join(lines) + (b'\\r\\n' if lines else b'')\n"
+            "sys.stdout.buffer.write(output)\n"
+            "sys.stderr.buffer.write(result.stderr)\n"
+            "sys.exit(result.returncode)\n", encoding="utf-8")
+        tool.chmod(0o755)
+        self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
+
+
 if __name__ == "__main__":
     unittest.main()

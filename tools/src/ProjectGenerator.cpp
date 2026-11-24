@@ -596,6 +596,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
             presets["vendor"] = existing["vendor"];
         }
     }
+    existingPresets.close();
     if (!presets["vendor"]["trussc"].is_object()) {
         presets["vendor"]["trussc"] = Json::object();
     }
