@@ -619,6 +619,7 @@ class TarballTests(unittest.TestCase):
         self.assertIn("(v1)", self.cli("build", "--dry-run"))
 
 
+@unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
 @unittest.skipIf(sys.platform == "win32", "fixture needs an executable Python script in PATH")
 class WindowsTarListingTests(unittest.TestCase):
     """Exercise acquisition and its stops with CRLF and localized BSD listings."""
