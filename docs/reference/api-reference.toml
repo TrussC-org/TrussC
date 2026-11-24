@@ -44166,9 +44166,9 @@ void tcApp::setup() {
 
 ["setAndroidForegroundService"]
 keywords = ["android", "background", "foreground service", "mediaPlayback", "audio", "notification"]
-description.en = "Opts in to Android mediaPlayback foreground service for background playback; no wake lock or automatic notification permission request."
-description.ja = "Android のバックグラウンド再生用 mediaPlayback foreground service を有効にします。wake lock と通知権限の自動要求は行いません。"
-description.ko = "Android 백그라운드 재생용 mediaPlayback foreground service를 켭니다. wake lock이나 자동 알림 권한 요청은 하지 않습니다."
+description.en = "Opts in to Android mediaPlayback foreground service for background playback; visible opt-in requests notification permission on Android 13+ without delaying the service. No wake lock is acquired."
+description.ja = "Android のバックグラウンド再生用 mediaPlayback foreground service を有効にします。Android 13 以降は表示中の有効化で通知権限を要求し、結果を待たずにサービスを開始します。wake lock は取得しません。"
+description.ko = "Android 백그라운드 재생용 mediaPlayback foreground service를 켭니다. Android 13 이상에서는 표시 중에 활성화하면 알림 권한을 요청하고 결과를 기다리지 않고 서비스를 시작합니다. wake lock은 획득하지 않습니다."
 details.en = '''
 - Default: stopped on Android; no service runs until true is passed. Other OSes do nothing and log one Notice per call.
 
@@ -44186,7 +44186,17 @@ void tcApp::cleanup() {
 }
 ```
 
-- Android 13+ POST_NOTIFICATIONS is a runtime permission. This API does not request it; if denied, the service still runs but its notification is hidden from the notification drawer. TrussC has no notification-permission request API. With permission, a low-importance channel and ongoing notification are created.
+- On Android 13+, visible true calls request POST_NOTIFICATIONS if it is not granted, at most once per Activity instance. The service starts without waiting: denial or dismissal leaves it running, with its notification hidden from the drawer. Android < 13, false, and hidden calls request nothing. With permission, the low-importance ongoing notification appears. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- A custom AndroidManifest.xml must declare POST_NOTIFICATIONS; without it the system request has no effect. Add this declaration inside <manifest>:
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
 - No wake lock is acquired. Active audio normally keeps the CPU awake; this service alone does not guarantee CPU-only ticks with the screen off. TrussC has no background wake-lock API.
 - For targetSdk 34+, justify the mediaPlayback foreground service type in Play Console. Unused store builds should remove the service and the three related permissions from their project manifest; see BUILD_SYSTEM.md › Android background media playback.
 
@@ -44214,7 +44224,17 @@ void tcApp::cleanup() {
 }
 ```
 
-- Android 13 以降の POST_NOTIFICATIONS は実行時権限です。この API は要求しません。拒否されてもサービスは動きますが通知一覧には表示されません。TrussC に通知権限要求 API はありません。許可されていれば重要度の低いチャンネルと継続通知を作成します。
+- Android 13 以降は表示中に true を呼ぶと、未許可の POST_NOTIFICATIONS を Activity ごとに最大 1 回要求します。サービスは結果を待たずに開始します。拒否やダイアログを閉じた場合も動作を続けますが、通知一覧には表示されません。Android 13 未満、false、非表示中の呼び出しでは要求しません。許可されていれば重要度の低い継続通知を表示します。表示中に有効にします：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- 独自の AndroidManifest.xml には POST_NOTIFICATIONS の宣言が必要です。宣言がなければシステムへの要求は効果がありません。<manifest> 内に追加します：
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
 - wake lock は取得しません。音声再生中は通常 CPU が動き続けますが、サービス単体では画面オフ中の CPU 更新を保証しません。TrussC にバックグラウンド wake-lock API はありません。
 - targetSdk 34 以降は Play Console で mediaPlayback 型の説明が必要です。使わないストア用アプリは自身の manifest から service と関連する 3 権限を削除します。BUILD_SYSTEM.md › Android background media playback を参照してください。
 
@@ -44242,7 +44262,17 @@ void tcApp::cleanup() {
 }
 ```
 
-- Android 13 이상의 POST_NOTIFICATIONS는 런타임 권한입니다. 이 API는 요청하지 않습니다. 거부되어도 서비스는 실행되지만 알림 목록에는 보이지 않습니다. TrussC에는 알림 권한 요청 API가 없습니다. 허용된 경우 중요도가 낮은 채널과 지속 알림을 만듭니다.
+- Android 13 이상에서 표시 중에 true를 호출하면 허용되지 않은 POST_NOTIFICATIONS를 Activity 인스턴스마다 최대 한 번 요청합니다. 서비스는 결과를 기다리지 않고 시작합니다. 거부하거나 대화 상자를 닫아도 서비스는 계속 실행되지만 알림 목록에는 표시되지 않습니다. Android 13 미만, false, 숨김 상태의 호출에서는 요청하지 않습니다. 허용된 경우 중요도가 낮은 지속 알림을 표시합니다. 표시 중에 활성화합니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- 사용자 지정 AndroidManifest.xml에는 POST_NOTIFICATIONS 선언이 필요합니다. 선언이 없으면 시스템 요청은 효과가 없습니다. <manifest> 안에 추가합니다:
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
 - wake lock을 획득하지 않습니다. 오디오 재생 중에는 보통 CPU가 깨어 있지만 서비스만으로 화면이 꺼진 동안의 CPU 업데이트를 보장하지 않습니다. TrussC에는 백그라운드 wake-lock API가 없습니다.
 - targetSdk 34 이상은 Play Console에서 mediaPlayback 유형의 용도를 설명해야 합니다. 사용하지 않는 스토어 빌드는 자체 manifest에서 service와 관련 권한 3개를 제거합니다. BUILD_SYSTEM.md › Android background media playback을 참고하세요.
 

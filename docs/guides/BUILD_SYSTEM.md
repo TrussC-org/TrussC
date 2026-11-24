@@ -327,7 +327,21 @@ void tcApp::update() {
 
 Android hidden ticks also deliver queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks follow the same GPU restriction and visibility check. Image/Font/Video completions, other resource callbacks and GPU readback polling wait for a visible host turn. TrussC has no API for background GPU work.
 
-Android 13+ requires runtime POST_NOTIFICATIONS permission for the notification drawer. TrussC does not request it and has no notification-permission request API. If denied, the service still runs but its notification is hidden from the drawer. With permission, a low-importance notification channel and ongoing notification appear. No wake lock is acquired: active audio normally keeps the CPU awake, while CPU-only ticks with the screen off need device verification. TrussC has no background wake-lock API.
+Android 13+ requires runtime POST_NOTIFICATIONS permission for the notification drawer. Visible `setAndroidForegroundService(true)` requests it if needed, at most once per Activity instance. The service starts without waiting for the result; denial or dismissal leaves it running with its notification hidden from the drawer. Android < 13, false, and hidden calls request nothing. Opt in from a visible callback:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+A custom manifest must declare POST_NOTIFICATIONS; otherwise the system request has no effect. Add this inside `<manifest>`:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+With permission, a low-importance notification channel and ongoing notification appear. No wake lock is acquired: active audio normally keeps the CPU awake, while CPU-only ticks with the screen off need device verification. TrussC has no background wake-lock API.
 
 Stop the service when playback ends:
 

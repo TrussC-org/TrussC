@@ -115,7 +115,10 @@ jni_code = r'''
 #include <cstring>
 #include <sstream>
 using jobject=int;
-int starts=0,stops=0,frames=0;
+using jclass=int;
+bool hidden=false;
+bool isWindowOccluded() { return hidden; }
+int starts=0,stops=0,frames=0,requests=0;
 bool available=true,failRequest=false,exception=false;
 std::ostringstream warnings;
 std::ostringstream& logWarning(const char*) { return warnings; }
@@ -123,13 +126,20 @@ struct Env {
     int PushLocalFrame(int n) { assert(n>=7); ++frames; return 0; }
     void PopLocalFrame(void*) { --frames; }
     int GetObjectClass(int a) { assert(a==7); return 1; }
-    int FindClass(const char* name) { assert(!strcmp(name,"android/content/Intent")); return 2; }
+    int FindClass(const char* name) { assert(!strcmp(name,"android/content/Intent") || !strcmp(name,"java/lang/ClassLoader")); return 2; }
     const char* GetMethodID(int,const char* name,const char*) { return name; }
     int NewObject(int,const char*) { return 3; }
-    int NewStringUTF(const char* name) { assert(!strcmp(name,"org.trussc.core.ForegroundService")); return 4; }
+    int NewStringUTF(const char* name) { assert(!strcmp(name,"org.trussc.core.ForegroundService") || !strcmp(name,"org.trussc.core.NotificationPermission")); return 4; }
     int CallObjectMethod(int,const char* method,int=0,int=0) {
         if (!strcmp(method,"startForegroundService")) { ++starts; exception=failRequest; }
         return 5;
+    }
+    const char* GetStaticMethodID(int,const char* name,const char* signature) {
+        assert(!strcmp(name,"request") && !strcmp(signature,"(Landroid/app/Activity;)V"));
+        return name;
+    }
+    void CallStaticVoidMethod(int,const char*,int activity) {
+        assert(activity==7 && starts>0); ++requests;
     }
     bool CallBooleanMethod(int,const char* method,int) { assert(!strcmp(method,"stopService")); ++stops; return true; }
     bool ExceptionCheck() { return exception; }
@@ -142,12 +152,15 @@ struct JniScope {
 };
 ''' + platform[start:end] + r'''
 int main() {
-    setAndroidForegroundService(true); assert(starts==1 && !stops && !frames);
-    setAndroidForegroundService(false); assert(stops==1 && !frames);
+    setAndroidForegroundService(true); assert(starts==1 && !stops && !frames && requests==1);
+    setAndroidForegroundService(false); assert(stops==1 && !frames && requests==1);
+    hidden=true;
+    setAndroidForegroundService(true); assert(starts==2 && requests==1 && !frames);
+    hidden=false;
     failRequest=true;
-    setAndroidForegroundService(true); assert(starts==2 && !exception && !frames && !warnings.str().empty());
+    setAndroidForegroundService(true); assert(starts==3 && requests==1 && !exception && !frames && !warnings.str().empty());
     available=false;
-    setAndroidForegroundService(true); assert(starts==2 && !frames);
+    setAndroidForegroundService(true); assert(starts==3 && requests==1 && !frames);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='android-background-', dir=root / '.build') as folder:
