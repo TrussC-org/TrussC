@@ -152,6 +152,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 WORKING_DIRECTORY ${_shader_tmp_dir}
                 DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
+                VERBATIM
             )
         else()
             add_custom_command(
@@ -160,6 +161,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 WORKING_DIRECTORY ${_shader_out_dir}
                 DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
+                VERBATIM
             )
         endif()
     endforeach()
