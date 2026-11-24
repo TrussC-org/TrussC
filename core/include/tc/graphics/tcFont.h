@@ -211,13 +211,15 @@ inline GlyphQuad paddedGlyphQuad(const GlyphInfo& glyph, float x, float y, float
     const float tw = q.u1 - q.u0, th = q.v1 - q.v0;
     if (tw <= 0.0f || th <= 0.0f) return q;
     // The packer leaves at least one gap after every glyph and below every row,
-    // and half a gap of slack to the page's right and bottom edges. Each side
-    // is still clamped to the page: a glyph that only fits a full-size page
-    // flush to its edge keeps no pad on that side (clamp-to-edge sampling would
-    // smear its own edge texels instead).
+    // and half a gap of slack to the page's right and bottom edges. The right
+    // and bottom pads are still clamped to the page: a glyph that only fits a
+    // full-size page flush to its edge keeps no pad there (clamp-to-edge
+    // sampling would smear its own edge texels instead). Left and top need no
+    // clamp: the page inset in front of the first row/column is never written,
+    // so sampling past it reads empty coverage.
     const float m = std::floor(glyphGap * 0.5f);
-    const float l = std::min(m, q.u0), r = std::min(m, atlasWidth - q.u1);
-    const float t = std::min(m, q.v0), b = std::min(m, atlasHeight - q.v1);
+    const float l = m, r = std::min(m, atlasWidth - q.u1);
+    const float t = m, b = std::min(m, atlasHeight - q.v1);
     const float sx = w / tw, sy = h / th;
     q.x -= l * sx; q.w += (l + r) * sx;
     q.y -= t * sy; q.h += (t + b) * sy;
@@ -2935,6 +2937,13 @@ private:
         smp_desc.mipmap_filter = SG_FILTER_LINEAR;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        // Stop at mip 4. Glyph rects are aligned to 16 texels (alignGlyphOffset),
+        // so mip phase is only shared by every glyph down to L4; deeper levels
+        // merge each glyph with its neighbors and the gap, and their content
+        // depends on where the glyph was packed. Past ~48x minification that
+        // made neighbors bleed in (half of the ink at 8 px from a 384-texel
+        // line) and the shimmer worse; capped, both are gone at 6-8 px.
+        smp_desc.max_lod = 4.0f;
         samplers.mipped = sg_make_sampler(&smp_desc);
 
         // Pinned to mip 0. An NxN atlas is N times denser than the screen, so
