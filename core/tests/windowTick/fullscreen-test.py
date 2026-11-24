@@ -62,6 +62,7 @@ constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0, _SAPP_TC_X11_VISIBILITY_MAPPING=1;
 struct _sapp_tc_window_t {
  bool native_visible=false, fullscreen=false, fullscreen_requested=false, fullscreen_on_map=false, restore_valid=false, decoration_pending=false;
  double fullscreen_sent=0;
+ int windowed_width=800,windowed_height=600,decoration_width=0,decoration_height=0;
  struct { bool hidden=false, borderless=false; } desc;
  int hwnd=1,xwin=1, visibility_op=0,window=1;
  LONG_PTR stored_style=0,stored_ex_style=0;
@@ -102,8 +103,8 @@ double now=100; double _sapp_tc_now() { return now; }
 int decorWrites=0; bool decorValue=true;
 void _sapp_tc_x11_set_decorated(_sapp_tc_window_t*,bool decorated) { ++decorWrites; decorValue=decorated; }
 struct XWindowAttributes { int width=0,height=0; };
-int resizes=0; unsigned resizeW=0,resizeH=0;
-int XGetWindowAttributes(int,int,XWindowAttributes* a) { a->width=800; a->height=600; return 1; }
+int resizes=0, attributeReads=0, liveW=800, liveH=600; unsigned resizeW=0,resizeH=0;
+int XGetWindowAttributes(int,int,XWindowAttributes* a) { ++attributeReads; a->width=liveW; a->height=liveH; return 1; }
 void XResizeWindow(int,int,unsigned w,unsigned h) { ++resizes; resizeW=w; resizeH=h; }
 ''' + request + observe + toggle_x11 + decoration_x11 + '\nnamespace web { struct { bool fullscreen=false; } _sapp_tc;\nvoid _sapp_tc_js_toggle_fullscreen() {}\n' + web + '\n}\n' + r'''
 struct XEvent { int type=PropertyNotify; struct { Atom atom; int state=0; } xproperty; };
@@ -245,11 +246,15 @@ int main() {
  // A decoration change made while fullscreen is written again on exit (labwc).
  for (bool decorated : {false,true}) {
   record={}; record.fullscreen=record.fullscreen_requested=true; record.desc.borderless=decorated;
+  liveW=1920; liveH=1080;
   decorWrites=0; x11_set_decorated({1},decorated);
   check(decorWrites==1 && decorValue==decorated && record.desc.borderless==!decorated && record.decoration_pending);
   property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
   check(decorWrites==1); // still fullscreen
+  liveW=960; liveH=decorated ? 601 : 638;
+  int reads=attributeReads; resizes=0;
   property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
+  check(attributeReads==reads && resizes==1 && resizeW==800 && resizeH==600);
   check(decorWrites==2 && decorValue==decorated && !record.decoration_pending); // exit replays once
   process(&record,_sapp_tc.NET_WM_STATE); check(decorWrites==2);
   x11_set_decorated({1},!decorated);
@@ -293,7 +298,7 @@ def main():
             'x11-echo-overwrites-request': ('if (changed && !waiting && !w->desc.hidden', 'if (changed && !w->desc.hidden'),
             'x11-wait-forever': ('_sapp_tc_now() - w->fullscreen_sent < 0.5', 'true'),
             'x11-no-decoration-replay': ('if (!full && w->decoration_pending && (changed || !w->fullscreen_requested))', 'if (false)'),
-            'x11-wrong-deferred-size': ('(unsigned int)client.width, (unsigned int)client.height);', '(unsigned int)client.width + 1, (unsigned int)client.height);'),
+            'x11-wrong-deferred-size': ('(unsigned int)w->decoration_width, (unsigned int)w->decoration_height);', '(unsigned int)w->decoration_width + 1, (unsigned int)w->decoration_height);'),
             'x11-decoration-replay-before-entry': ('(changed || !w->fullscreen_requested)', '(true)'),
             'x11-decoration-replay-needs-observed-exit': ('(changed || !w->fullscreen_requested)', '(changed)'),
             'x11-decoration-replay-inverted': ('_sapp_tc_x11_set_decorated(w, !w->desc.borderless);', '_sapp_tc_x11_set_decorated(w, w->desc.borderless);'),

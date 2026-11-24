@@ -9844,6 +9844,8 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool fullscreen_on_map;     /* replay requested fullscreen once after explicit show (#1262) */
     double fullscreen_sent;     /* when the last fullscreen request was sent */
     bool decoration_pending;    /* decoration changed while fullscreen; write it again on exit */
+    int windowed_width, windowed_height; /* last observed windowed client pixels */
+    int decoration_width, decoration_height; /* windowed client pixels at the decoration request */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
     // [TrussC #1263] Follower pacing is divided without blocking the shared GL context.
@@ -11557,6 +11559,11 @@ static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t* w) {
     if ((attribs.width <= 0) || (attribs.height <= 0)) {
         return false;
     }
+    // [TrussC #1639] Fullscreen pixels must not replace the windowed size to keep.
+    if (!w->fullscreen && !w->fullscreen_requested && !w->decoration_pending) {
+        w->windowed_width = attribs.width;
+        w->windowed_height = attribs.height;
+    }
     /* X11 has no separate backing scale: framebuffer == window pixels */
     const bool changed = (attribs.width != w->fb_width) || (attribs.height != w->fb_height);
     if (changed && w->fb_width > 0 && w->fb_height > 0) w->surface_resize_pending = true;
@@ -11611,12 +11618,13 @@ static void _sapp_tc_x11_observe_fullscreen(_sapp_tc_window_t* w) {
     // a windowed update before a requested entry.
     if (!full && w->decoration_pending && (changed || !w->fullscreen_requested)) {
         w->decoration_pending = false;
-        XWindowAttributes client;
-        const bool have_client = XGetWindowAttributes(_sapp_tc.display, w->xwin, &client) != 0;
         _sapp_tc_x11_set_decorated(w, !w->desc.borderless);
-        // [TrussC] Preserve the windowed client once for the deferred change too (#1639).
-        if (have_client) {
-            XResizeWindow(_sapp_tc.display, w->xwin, (unsigned int)client.width, (unsigned int)client.height);
+        // [TrussC #1639] The WM may still expose its old frame rectangle here.
+        // Use the windowed client size saved when decorations were requested
+        // (none yet for a window that started fullscreen: X rejects a 0 size).
+        if (w->decoration_width > 0 && w->decoration_height > 0) {
+            XResizeWindow(_sapp_tc.display, w->xwin,
+                (unsigned int)w->decoration_width, (unsigned int)w->decoration_height);
         }
         XFlush(_sapp_tc.display);
     }
@@ -18475,6 +18483,8 @@ extern "C" void sapp_tc_window_set_decorated(sapp_tc_window win, bool decorated)
     w->desc.borderless = !decorated;
     _sapp_tc_x11_set_decorated(w, decorated);
     w->decoration_pending = w->fullscreen || w->fullscreen_requested;
+    w->decoration_width = w->decoration_pending ? w->windowed_width : client.width;
+    w->decoration_height = w->decoration_pending ? w->windowed_height : client.height;
     // [TrussC] Queue one client-size request after the Motif change (#1639).
     // With a WM, XResizeWindow sends ConfigureRequest even when the size is unchanged.
     if (!w->decoration_pending) {

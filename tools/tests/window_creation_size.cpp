@@ -50,6 +50,8 @@ struct State {
     float window_scale = 1, dpi_scale = 1;
     int xwin = 1, fb_width = 0, fb_height = 0, win_width = 0, win_height = 0;
     bool surface_resize_pending=false;
+    bool fullscreen=false, fullscreen_requested=false, decoration_pending=false;
+    int windowed_width=0, windowed_height=0;
     bool (*events_enabled)() = nullptr;
 #ifdef TEST_WIN
     State* hwnd = nullptr;

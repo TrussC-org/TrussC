@@ -144,6 +144,7 @@ int main() {
         execute(r'''
 #include <cassert>
 #include <vector>
+#include <cstring>
 using sapp_tc_window = int;
 using Atom = unsigned long;
 constexpr Atom XA_ATOM=4;
@@ -152,15 +153,21 @@ struct _sapp_tc_window_t {
     int xwin=1;
     bool fullscreen=false, fullscreen_requested=false, decoration_pending=false, fullscreen_on_map=false;
     double fullscreen_sent=0;
+    int windowed_width=0, windowed_height=0, decoration_width=0, decoration_height=0;
+    int fb_width=0, fb_height=0, win_width=0, win_height=0;
+    float dpi_scale=1;
+    bool surface_resize_pending=false;
 } window;
 struct { int display=1; Atom NET_WM_STATE=1, NET_WM_STATE_FULLSCREEN=2; } _sapp_tc;
 struct XWindowAttributes { int width, height; } live{960,600};
 std::vector<int> calls;
+unsigned expectedW=960, expectedH=600;
+int attributeReads=0;
 _sapp_tc_window_t* _sapp_tc_lookup(int) { return &window; }
-int XGetWindowAttributes(int, int, XWindowAttributes* client) { *client=live; return 1; }
+int XGetWindowAttributes(int, int, XWindowAttributes* client) { ++attributeReads; *client=live; return 1; }
 void _sapp_tc_x11_set_decorated(_sapp_tc_window_t*, bool) { calls.push_back(1); }
 void XResizeWindow(int,int,unsigned width,unsigned height) {
-    assert(width==unsigned(live.width) && height==unsigned(live.height));
+    assert(width==expectedW && height==expectedH);
     calls.push_back(2);
 }
 void XFlush(int) { calls.push_back(3); }
@@ -170,9 +177,11 @@ unsigned long _sapp_tc_x11_get_window_property(int,Atom,Atom,unsigned char** dat
     *data=nullptr;
     return 0; // The WM reports windowed on fullscreen exit.
 }
-''' + body(NATIVE, 'extern "C" void sapp_tc_window_set_decorated(')
+''' + body(NATIVE, 'static bool _sapp_tc_x11_update_dimensions(')
+    + body(NATIVE, 'extern "C" void sapp_tc_window_set_decorated(')
     + body(NATIVE, 'static void _sapp_tc_x11_observe_fullscreen(') + r'''
 int main() {
+    _sapp_tc_x11_update_dimensions(&window);
     for (bool decorated : {false,true,false,true}) {
         calls.clear();
         sapp_tc_window_set_decorated(1,decorated);
@@ -182,21 +191,36 @@ int main() {
         assert(calls.empty());
         // A later user resize is the size preserved by the next toggle.
         live={801,503};
+        expectedW=801; expectedH=503;
+        _sapp_tc_x11_update_dimensions(&window);
     }
-    window.fullscreen=true;
-    calls.clear();
-    sapp_tc_window_set_decorated(1,false);
-    assert(window.decoration_pending);
-    assert((calls==std::vector<int>{1,3}));
-    live={960,600}; // Current windowed client size when the WM reports exit.
-    calls.clear();
-    _sapp_tc_x11_observe_fullscreen(&window);
-    assert(!window.decoration_pending);
-    assert((calls==std::vector<int>{1,2,3}));
-    calls.clear();
-    _sapp_tc_x11_observe_fullscreen(&window);
-    sapp_tc_window_set_decorated(1,false);
-    assert(calls.empty()); // Repeated observation/request must not resize again.
+    // Freeze the current windowed size for either decoration direction.
+    for (bool decorated : {false,true}) {
+        window.fullscreen_requested=true;
+        live={1920,1080};
+        _sapp_tc_x11_update_dimensions(&window);
+        window.fullscreen=true;
+        _sapp_tc_x11_update_dimensions(&window);
+        calls.clear();
+        sapp_tc_window_set_decorated(1,decorated);
+        assert(window.decoration_pending);
+        assert((calls==std::vector<int>{1,3}));
+        live={960, decorated ? 601 : 638}; // WM's stale frame geometry on exit.
+        calls.clear();
+        int reads=attributeReads;
+        _sapp_tc_x11_observe_fullscreen(&window);
+        assert(attributeReads==reads); // Never sample exit geometry for the resize.
+        assert(!window.decoration_pending);
+        assert((calls==std::vector<int>{1,2,3}));
+        calls.clear();
+        _sapp_tc_x11_observe_fullscreen(&window);
+        sapp_tc_window_set_decorated(1,decorated);
+        assert(calls.empty());
+        window.fullscreen_requested=false;
+        live={800,520}; // A later manual resize becomes the next saved size.
+        _sapp_tc_x11_update_dimensions(&window);
+        expectedW=800; expectedH=520;
+    }
 }
 ''')
 
