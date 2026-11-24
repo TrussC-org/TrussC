@@ -258,6 +258,10 @@ public:
                 // recorded for comparison only. "before" (the current packer
                 // gap) carries the invariant.
                 const bool asserted = pixels >= threshold && row != 7 && reference == 0;
+                // Near the boundary (a pixel covers more texels than the gap),
+                // NVIDIA GL shows 2/255 on a single pixel from LOD rounding (side
+                // 12 at 1.5 px; Intel GL and Metal stay within 1). Allow 2 there.
+                const int tolerance = pixels < gapCase().side / double(manager_->getGlyphGap()) ? 2 : 1;
                 int maxDifference = 0, different = 0, aboveTolerance = 0;
                 for (int y = 8 + row * rowHeight; y < 8 + (row + 1) * rowHeight; ++y)
                     for (int x = engine * (width / 2); x < (engine + 1) * (width / 2); ++x) {
@@ -268,7 +272,7 @@ public:
                         }
                         maxDifference = std::max(maxDifference, delta);
                         different += delta != 0;
-                        aboveTolerance += delta > 1;
+                        aboveTolerance += delta > tolerance;
                     }
                 printf("COMPACT_PIXELS side=%d row=%d scale=%.9g pixels=%.9g threshold=%.9g engine=%s reference=%s %s different_pixels=%d above_tolerance=%d max=%d\n",
                     gapCase().side, row, comparisonScale(row), pixels, threshold, engine ? "GlyphBatch" : "drawString",
