@@ -73,7 +73,7 @@ public:
         if (isRecording()) record_->setActiveColor({0.84f, 0.14f, 0.14f});
         else record_->clearActiveColor();
         play_->setLabel(isPlaying() ? "Stop" : "Play");
-        if (isPlaying()) play_->setActiveColor({0.15f, 0.50f, 0.88f});
+        if (isPlaying()) play_->setActiveColor({0.05f, 0.48f, 0.80f});
         else play_->clearActiveColor();
         save_->setVisible(!isRecording() && !pendingSave_.empty());
         float x = 8;
