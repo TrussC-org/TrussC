@@ -601,7 +601,7 @@ class TarballTests(unittest.TestCase):
                 except ProcessLookupError:
                     pass
 
-    @unittest.skipIf(sys.platform == "win32", "fixture needs directory symlinks")
+    @unittest.skipIf(sys.platform == "win32", "fixture needs Windows symlink creation and tar extraction privileges")
     def test_internal_symlink_is_supported(self):
         self.fixture_symlink(self.source / "alias", "core", target_is_directory=True)
         self.advance()
@@ -651,9 +651,8 @@ class TarballTests(unittest.TestCase):
 
 
 @unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
-@unittest.skipIf(sys.platform == "win32", "fixture needs an executable Python script in PATH")
 class WindowsTarListingTests(unittest.TestCase):
-    """Exercise acquisition and its stops with CRLF and localized BSD listings."""
+    """Use native tar on Windows; simulate CRLF and localized BSD listings on POSIX."""
     fixture_symlink = VersionTests.fixture_symlink
     git = VersionTests.git
     advance = VersionTests.advance
@@ -672,6 +671,10 @@ class WindowsTarListingTests(unittest.TestCase):
 
     def setUp(self):
         TarballTests.setUp(self)
+        # runCaptured uses CreateProcess directly, so PATHEXT tar.cmd wrappers
+        # cannot intercept tar. Exercise the real Windows tar instead.
+        if sys.platform == "win32":
+            return
         tools = self.base / "windows-tar"
         tools.mkdir()
         tool = tools / "tar"
