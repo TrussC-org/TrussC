@@ -585,7 +585,9 @@ on other backends.
 
 ShaderStream, sgl, and ImGui vertex/index draws still use their existing transient
 write path: overflow drops those writes, so drawing can use old or uninitialized
-buffer contents. Raise `setVulkanUploadSize()` before startup as shown here:
+buffer contents. ImGui font and image texture updates sent in a frame that exceeds
+the limit can stay garbled until ImGui rebuilds its atlas, because ImGui treats
+them as uploaded. Raise `setVulkanUploadSize()` before startup as shown here:
 
 ```cpp
 WindowSettings settings;

@@ -68890,7 +68890,7 @@ details.en = '''
   ```
 - `bytes` sets the budget and returns the same `WindowSettings&` for chaining. Startup reads it once; later changes do not resize staging. `0` selects 64 MiB. Values above `INT_MAX` log an Error and use `INT_MAX` bytes. Headless apps do not initialize graphics; other backends ignore this setting.
 - Two frames in flight reserve twice this size plus sokol's 4 MiB copy staging in host-visible memory for the app's lifetime (132 MiB at the default). Allocation needs enough memory.
-- A failed texture/buffer upload skips its copy and keeps the previous content, with one Warning per target per overflow episode. Increase the budget before startup as shown here:
+- A failed texture/buffer upload skips its copy and keeps the previous content, with one Warning per target per overflow episode. ImGui font and image texture updates sent in such a frame can stay garbled until ImGui rebuilds its atlas. Increase the budget before startup as shown here:
   ```cpp
   WindowSettings settings;
   settings.setVulkanUploadSize(128 * 1024 * 1024);
@@ -68906,7 +68906,7 @@ details.ja = '''
   ```
 - `bytes` で上限を設定し、チェイン用に同じ `WindowSettings&` を返します。起動時に一度だけ読み取り、後から変更してもステージング領域は変わりません。`0` は 64 MiB を選びます。`INT_MAX` を超える値では Error を記録して `INT_MAX` バイトを使います。ヘッドレスアプリは描画系を初期化せず、他のバックエンドはこの設定を使いません。
 - 2 フレーム分と sokol のコピー用 4 MiB を、アプリの存続中ホスト可視メモリに予約します。既定値では合計 132 MiB です。確保には十分なメモリが必要です。
-- テクスチャー・バッファーのアップロードに失敗するとコピーを省略して以前の内容を保ち、対象ごとに連続した超過の最初だけ Warning を記録します。起動前に上限を増やしてください。
+- テクスチャー・バッファーのアップロードに失敗するとコピーを省略して以前の内容を保ち、対象ごとに連続した超過の最初だけ Warning を記録します。そのフレームで送られた ImGui のフォント・画像テクスチャーの更新は、ImGui がアトラスを作り直すまで崩れたまま残ることがあります。起動前に上限を増やしてください。
   ```cpp
   WindowSettings settings;
   settings.setVulkanUploadSize(128 * 1024 * 1024);
@@ -68922,7 +68922,7 @@ details.ko = '''
   ```
 - `bytes`로 한도를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. 시작 시 한 번만 읽으며 이후에 바꿔도 스테이징 크기는 바뀌지 않습니다. `0`은 64 MiB를 선택합니다. `INT_MAX`를 넘으면 Error를 기록하고 `INT_MAX` 바이트를 사용합니다. 헤드리스 앱은 그래픽을 초기화하지 않으며 다른 백엔드는 이 설정을 무시합니다.
 - 앱이 실행되는 동안 호스트 가시 메모리에 두 프레임 분량과 sokol 복사용 4 MiB를 예약합니다. 기본값에서는 총 132 MiB입니다. 할당에는 충분한 메모리가 필요합니다.
-- 텍스처나 버퍼 업로드가 실패하면 복사를 생략하고 이전 내용을 유지하며 대상마다 연속 초과가 시작될 때만 Warning을 기록합니다. 시작 전에 한도를 늘려야 합니다.
+- 텍스처나 버퍼 업로드가 실패하면 복사를 생략하고 이전 내용을 유지하며 대상마다 연속 초과가 시작될 때만 Warning을 기록합니다. 그런 프레임에 보낸 ImGui 글꼴과 이미지 텍스처 업데이트는 ImGui가 아틀라스를 다시 만들 때까지 깨진 채로 남을 수 있습니다. 시작 전에 한도를 늘려야 합니다.
   ```cpp
   WindowSettings settings;
   settings.setVulkanUploadSize(128 * 1024 * 1024);
