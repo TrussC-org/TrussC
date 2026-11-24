@@ -844,13 +844,22 @@ Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3),
 
 On the main window (swapchain), `gl_FragCoord.y` increases upward from the
 bottom on GL and downward from the top on Metal, D3D11, and WebGPU. For the same
-effect on every backend, use texture coordinates or a pixel position passed
-from the vertex shader instead of `gl_FragCoord`. For example, with `uv` passed
-from the vertex shader's texture coordinates, build a gradient in the fragment
-shader:
+effect on every backend, pass a pixel position from the vertex shader instead of
+reading `gl_FragCoord`. Shapes drawn under `pushShader()` (drawRect, drawCircle,
+drawTriangle, drawLine) have texture coordinates of (0, 0); texture coordinates
+are only usable with meshes and images that carry them, and with
+FullscreenShader. With the vertex shader's `screenSize` uniform:
 
 ```glsl
-float hue = fract(uv.x + uv.y);
+// vertex shader
+out vec2 pixelPosition;
+pixelPosition = vec2(position.x, screenSize.y - position.y);
+```
+
+```glsl
+// fragment shader
+in vec2 pixelPosition;
+float hue = fract((pixelPosition.x + pixelPosition.y) * 0.003);
 ```
 
 ### Running an Fbo through your own shader
