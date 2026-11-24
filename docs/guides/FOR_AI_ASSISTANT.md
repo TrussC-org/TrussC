@@ -840,6 +840,19 @@ popShader();
 
 Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3), texcoord(vec2), color(vec4).
 
+### Shader coordinates on the main window
+
+On the main window (swapchain), `gl_FragCoord.y` increases upward from the
+bottom on GL and downward from the top on Metal, D3D11, and WebGPU. For the same
+effect on every backend, use texture coordinates or a pixel position passed
+from the vertex shader instead of `gl_FragCoord`. For example, with `uv` passed
+from the vertex shader's texture coordinates, build a gradient in the fragment
+shader:
+
+```glsl
+float hue = fract(uv.x + uv.y);
+```
+
 ### Running an Fbo through your own shader
 
 Use two float Fbos for repeated passes: sample one and render into the other
@@ -867,7 +880,13 @@ Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mes
 flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom
 is positive on the former paths and negative on the latter. Use texture
 coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same
-everywhere.
+everywhere. With `uv` passed from the vertex shader's texture coordinates,
+build a gradient in the fragment shader:
+
+```glsl
+float hue = fract(uv.x + uv.y);
+```
+
 Independently opened sokol passes are outside TrussC's public-Fbo hook.
 
 Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
