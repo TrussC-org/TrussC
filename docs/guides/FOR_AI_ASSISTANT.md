@@ -860,10 +860,10 @@ On the clip-control path, pass logical pixel Y unchanged and
 `origin_top_left=false` to raw viewport/scissor calls; elsewhere keep the usual
 mapping.
 Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal,
-D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA
-Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa
-flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom
-is positive on the former paths and negative on the latter. Use texture
+D3D11, WebGPU, experimental Vulkan (`TC_GFX_BACKEND=vulkan`, Linux), and
+clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2
+with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native
+GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture
 coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same
 everywhere.
 Independently opened sokol passes are outside TrussC's public-Fbo hook.
