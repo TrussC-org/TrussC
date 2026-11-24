@@ -1186,6 +1186,26 @@ once-only `bindgroup_error_logged`. Default direct-mapped cache is 1024 slots
 normal collisions without Warning/loss counter. Representation/device arithmetic
 bounds and `Bound` annotations remain with this feature.
 
+### Vulkan unsigned limit clamps (2026-11-24)
+
+**Classification:** KEEP until upstream; upstream fix candidate (upstream issue in progress).
+
+**Code locations:** `_sg_vk_init_caps` (`[TrussC fork] Clamp in unsigned` marker).
+
+**Planned slice:** drop when upstream clamps these limits in unsigned.
+
+`_sg_vk_init_caps` cast five `VkPhysicalDeviceLimits` fields to `int` before
+clamping them with `_sg_min`: maxVertexInputAttributes, maxFragmentOutputAttachments,
+maxPerStageDescriptorSampledImages, maxPerStageDescriptorStorageBuffers and
+maxPerStageDescriptorStorageImages. A driver that reports `UINT32_MAX` (AMD Radeon
+iGPU on Windows reports it for the per-stage descriptor limits) turned into `-1`,
+so every shader failed `SHADERDESC_TOO_MANY_*` and pipelines failed validation.
+The fork clamps in `uint32_t` against the `SG_MAX_*` constant and casts the
+result. Upstream 3833b018 still has the same three per-stage lines. The plain
+image-size casts and the WebGPU init's equivalent lines are left as they are
+(real values are far below `INT_MAX`; rare-case rule).
+Anchor: Windows AMD iGPU run of `core/tests/vulkanSingleWindow` (8 modes).
+
 ### Core integration and pool configuration (not vendor patches)
 
 Integration context, not vendor-header deltas: ShaderStream uploads each flush
