@@ -23,6 +23,10 @@ inline uint64_t clockMs() {
 }
 
 inline Size windowSize(tc::Window& window) {
+    if (tc::internal::pixelPerfectMode()) {
+        const auto& ctx = tc::internal::WindowRequestAccess::context(window);
+        return {double(ctx.fbWidth), double(ctx.fbHeight)};
+    }
     return {double(window.getWidth()), double(window.getHeight())};
 }
 

@@ -67,6 +67,11 @@ public:
         }));
         update();
     }
+    void cleanup() override {
+        recorder_->stop();
+        player_->stop();
+        listeners_.clear();
+    }
     void update() override {
         player_->update();
         record_->setLabel(isRecording() ? "Stop" : "Record");
