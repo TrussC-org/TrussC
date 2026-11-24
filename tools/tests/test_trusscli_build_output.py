@@ -8,6 +8,7 @@ formats are covered by test_trusscli_output_filter.py.
 """
 
 import os
+import json
 from pathlib import Path
 import stat
 import subprocess
@@ -21,6 +22,7 @@ CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli")).resolve()
 
 FAKE_CMAKE = r"""#!/bin/sh
 # Fake cmake: `--build` prints a scripted build, anything else a configure.
+echo "$*" >> cmake-calls
 case " $* " in
 *" --build "*)
     echo "[ 25%] Building CXX object CMakeFiles/app.dir/main.cpp.o"
@@ -37,7 +39,11 @@ case " $* " in
 *)
     echo "-- Configuring done"
     mkdir -p build-linux
-    echo "CMAKE_BUILD_TYPE:STRING=RelWithDebInfo" > build-linux/CMakeCache.txt
+    type=RelWithDebInfo
+    for arg in "$@"; do
+        case "$arg" in -DCMAKE_BUILD_TYPE=*) type="${arg#*=}" ;; esac
+    done
+    echo "CMAKE_BUILD_TYPE:STRING=$type" > build-linux/CMakeCache.txt
     touch build-linux/Makefile
     echo '[{"file": "main.cpp"}, {"file": "tcApp.cpp"}, {"file": "other.cpp"}]' > build-linux/compile_commands.json
     exit "${FAKE_CONFIGURE_RC:-0}"
@@ -165,6 +171,92 @@ class BuildOutputTests(unittest.TestCase):
         result = self.cli("run", "-p", self.project, "--verbose")
         self.assertIn("[ 25%] Building CXX object", result.stdout)
         self.assertNotIn("Done:", result.stdout)
+
+    def presets(self):
+        return json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))
+
+    def set_vendor(self, value):
+        data = self.presets()
+        data["vendor"] = value
+        (self.project / "CMakePresets.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def calls(self):
+        return (self.project / "cmake-calls").read_text(encoding="utf-8").splitlines()
+
+    def test_remembers_release_for_build_and_run_then_replaces_it(self):
+        self.set_vendor({"trussc": {"ide": "cmake"}, "custom": {"keep": 123}})
+        output = self.cli("build", "--release").stdout
+        self.assertIn("Build type: Release\n", output)
+        self.assertEqual(self.presets()["vendor"]["trussc"]["buildType"], "Release")
+        self.assertEqual(self.presets()["vendor"]["custom"], {"keep": 123})
+        self.assertIn("-DCMAKE_BUILD_TYPE=Release", self.calls()[0])
+        count = len(self.calls())
+        self.assertIn("Build type: Release (remembered)", self.cli("build").stdout)
+        app = self.project / "bin/sampleApp"
+        app.write_text("#!/bin/sh\necho launched\n", encoding="utf-8")
+        app.chmod(0o755)
+        result = self.cli("run")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Build type: Release (remembered)", result.stdout)
+        self.assertIn("launched", result.stdout)
+        self.assertEqual(len(self.calls()), count + 2)
+        self.assertTrue(all("--build" in call and "--config Release" in call
+                            for call in self.calls()[count:]))
+        for flag, value in (("--debug", "Debug"), ("--relwithdebinfo", "RelWithDebInfo")):
+            self.cli("build", flag)
+            self.assertEqual(self.presets()["vendor"]["trussc"]["buildType"], value)
+            self.assertIn("Build type: " + value + " (remembered)", self.cli("build").stdout)
+        self.cli("run", "--release")
+        self.assertEqual(self.presets()["vendor"]["trussc"]["buildType"], "Release")
+
+    def test_multi_config_uses_config_without_reconfigure(self):
+        build = self.project / "build-linux"
+        build.mkdir()
+        (build / "build.ninja").touch()
+        (build / "CMakeCache.txt").write_text(
+            "CMAKE_CONFIGURATION_TYPES:STRING=Debug;Release;RelWithDebInfo\n", encoding="utf-8")
+        for command in (("build", "--release"), ("build",), ("build", "--debug"), ("build",)):
+            result = self.cli(*command)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.calls()), 4)
+        self.assertTrue(all("--build" in call for call in self.calls()))
+        self.assertIn("--config Release", self.calls()[1])
+        self.assertIn("--config Debug", self.calls()[3])
+
+    def test_missing_or_malformed_vendor_defaults_without_rewriting(self):
+        for vendor in (None, [], "invalid", {"trussc": []}, {"trussc": "invalid"},
+                       {"trussc": {"buildType": 7}}, {"trussc": {"buildType": "Other"}}):
+            with self.subTest(vendor=vendor):
+                self.set_vendor(vendor)
+                before = (self.project / "CMakePresets.json").read_bytes()
+                result = self.cli("build")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("Build type: RelWithDebInfo\n", result.stdout)
+                self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
+
+    def test_dist_selects_its_type_without_replacing_memory(self):
+        self.cli("build", "--debug")
+        before = (self.project / "CMakePresets.json").read_bytes()
+        for args, value in (((), "RelWithDebInfo"), (("--release",), "Release")):
+            # Packaging can fail on the missing fixture executable after build.
+            self.cli("dist", *args)
+            self.assertIn("--config " + value, self.calls()[-1])
+            self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
+
+    def test_clean_and_cross_targets_leave_memory_unchanged(self):
+        self.cli("build", "--release")
+        before = (self.project / "CMakePresets.json").read_bytes()
+        self.cli("clean")
+        self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
+        self.assertIn("Build type: Release (remembered)", self.cli("build").stdout)
+        for target, value in (("--web", "MinSizeRel"), ("--android", "Release")):
+            result = self.cli("build", target, "--debug", "--dry-run")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("--config " + value, result.stdout)
+            self.assertNotIn("Build type:", result.stdout)
+            self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
+        self.cli("build", "--debug", "--dry-run")
+        self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
 
     def test_help_mentions_verbose_and_the_log(self):
         for command in ("build", "run"):

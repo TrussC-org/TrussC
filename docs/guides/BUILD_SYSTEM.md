@@ -101,16 +101,101 @@ reported with a warning and replaced by the default. `TC_WEB_BACKEND` is read
 the way CMake builds it: `"WGPU"` (or unset) is WebGPU, any other value is
 GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
-### Keeping `trusscli` in sync
+### Build with a project's pinned TrussC version
 
-`trusscli` is a compiled binary. When you update TrussC by pulling the latest
-source (`git pull`), the binary you already have is **not** rebuilt automatically,
-so it can fall out of step with the framework.
+The installed trusscli builds the sources selected by a project's `.trussc-version`.
+Share this file with the project so collaborators select the same sources.
+Features newer than the pinned TrussC version may not apply; features that would
+change the result stop with a message instead. Select a newer core to use them:
 
 ```bash
-# Pull + rebuild trusscli in one step (recommended)
+trusscli use v0.8.1
+trusscli build --release
+```
+
+For example, an addon pinned with `@ref` needs a core that can load external
+addon paths. An older core stops with `cannot load external addon paths
+(TRUSSC_ADDON_PATHS is unavailable); select a newer TrussC version`.
+Select a core with that support, such as `main`:
+
+```bash
+trusscli use main
+```
+
+`use` saves the selection and prepares its sources; `update` refreshes them and
+regenerates project files. Tags, branches, commit hashes, and forks
+(`owner/repo@ref`) are supported. `build` uses the prepared sources; if the cache
+is missing, prepare it explicitly:
+
+```bash
+trusscli update
+trusscli build --release
+```
+
+TrussC versions with the old `trussc/` layout (v0.1.0–v0.4.4) stop with
+“TrussC v0.4.4 predates the core/ layout; trusscli supports v0.5.0 and later.
+Run `trusscli use v0.5.0` (or newer).” The layout check also applies to forks
+and commits. A rejected `use` leaves the project's previous pin and local
+selection unchanged and does not publish the unsupported cache entry.
+Choose a supported version:
+
+```bash
+trusscli use v0.5.0
+```
+
+`use-local` saves a machine-local checkout override in project metadata and
+selects sources for the installed trusscli. This override takes precedence over the
+shared version file:
+
+```bash
+trusscli use-local /path/to/TrussC
+trusscli build --release
+```
+
+Return to the shared pin with `use-local --clear`. Remove both selections with
+`use --clear` to return to the current installation:
+
+```bash
+trusscli use-local --clear
+trusscli use --clear
+```
+
+Cached versions are shared across projects. Inspect them with `cache list` and
+remove an unused version with `cache remove <spec>`. Removing a selected cached
+version requires preparing it again before the next build:
+
+```bash
+trusscli cache list
+trusscli cache remove v0.8.1
+trusscli update
+```
+
+`cache autoremove` offers to remove versions unused for at least 90 days;
+`cache clear` offers to remove the whole cache. Both ask for confirmation:
+
+```bash
+trusscli cache autoremove
+trusscli cache clear
+```
+
+### Keeping `trusscli` in sync
+
+`trusscli` prints a reminder on every command when its binary inputs at HEAD
+have changed since it was configured: `tools/src`, `tools/CMakeLists.txt`,
+`tools/addons.make`, and `tools/icon`. Rebuild it with:
+
+```bash
 trusscli upgrade
 ```
+
+The comparison uses the installed checkout selected by `TRUSSC_DIR` or the
+executable location, independently of a project's pinned TrussC version.
+Commits affecting only core, addons, tests, or other tools files, and uncommitted
+edits anywhere, do not trigger the reminder. Without Git or known build metadata,
+the reminder stays silent. There is no tcApp API for this CLI check.
+
+`trusscli version` and `trusscli doctor` still show full Git describe strings;
+doctor's Version sync result compares the same binary inputs.
 
 On Windows, `upgrade` runs `tools/build_win.bat`, which sets up Visual Studio
 and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
@@ -118,17 +203,6 @@ and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
 `trusscli.exe.old` before building; the next start removes it. If the build
 fails, the previous executable is restored and manual rebuild instructions
 are printed.
-
-If you pull manually instead, run `trusscli upgrade` to rebuild afterwards. `trusscli`
-detects this drift and prints a reminder on startup when the source has changed
-since the binary was built:
-
-```
-Note: TrussC has changed since trusscli was built (trusscli v0.6.1 vs TrussC v0.7.0).
-      Run 'trusscli upgrade' to rebuild trusscli in sync.
-```
-
-`trusscli doctor` reports the same version-sync status in detail.
 
 ---
 
@@ -517,9 +591,25 @@ TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's displa
 
 The Project Generator automatically sets `CMAKE_OSX_DEPLOYMENT_TARGET=14.0` in both the `macos` and `xcode` presets.
 
-### Build Type
+### TrussC build types
 
 TrussC defaults to **RelWithDebInfo** (Release with Debug Info). This provides optimized performance (`-O2`) while keeping debug symbols for stack traces and breakpoint debugging. We believe this is the best default for creative coding — you get near-Release speed without losing the ability to debug.
+
+`trusscli build` and `trusscli run` remember the last explicit `--debug`,
+`--release`, or `--relwithdebinfo` flag for each native project. Without a flag,
+they reuse that type, or use RelWithDebInfo when none is saved. Each build
+prints its type, with `(remembered)` when reusing the saved selection.
+
+```bash
+trusscli build --release
+trusscli run
+```
+
+The machine-local choice lives in `CMakePresets.json` under
+`vendor.trussc.buildType`, alongside the `use-local` marker, and survives
+`trusscli update` and `trusscli clean`. Web uses MinSizeRel and Android uses
+Release independently of this choice. `dist` selects its own build type and
+leaves the saved choice unchanged. There is no tcApp API for this CLI setting.
 
 | Build Type | Optimization | Debug Symbols | assert() | Use Case |
 |---|---|---|---|---|
