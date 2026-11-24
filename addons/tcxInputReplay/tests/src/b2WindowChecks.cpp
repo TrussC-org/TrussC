@@ -235,6 +235,12 @@ void windowChecks() {
     // F9 may reveal the toolbar while the file is still playing.
     window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
     frame();
+    // The Runtime gate rejects injected 0x100, so notify the typed event over the toolbar directly.
+    tc::MouseEventArgs noButton;
+    noButton.button = 0x100;
+    window.events().mousePressed.notify(noButton);
+    check(s.toolbarButtons == 0, "button 0x100 gets no toolbar mask");
+    window.events().mouseReleased.notify(noButton);
     check(replay::play(path), "toolbar input guard starts another playback");
     s.timeline.start(s.timeline.session, 0);
     s.timeline.session.records.back().ms = clockMs() + 10000;
