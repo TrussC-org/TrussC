@@ -75,10 +75,38 @@ void RigidBody2D::setup() {
     owners->bodies.insert(this);
 }
 void RigidBody2D::onDestroy() {
+    if (auto owners = owners_.lock(); owners && b2StoreWorldId(owners->worldId) == b2StoreWorldId(worldId_) &&
+        B2_ID_EQUALS(owners->draggedBody, bodyId_)) World::clearDrag(*owners);
     if (b2Body_IsValid(id())) b2DestroyBody(bodyId_);
     bodyId_ = b2_nullBodyId;
     if (auto owners = owners_.lock()) owners->bodies.erase(this);
     shapes_.clear();
+    shapeFlags_.clear();
+    appliedShapeCount_ = 0;
+    appliedSensorListeners_ = false;
+    appliedHitListeners_ = false;
+}
+void RigidBody2D::rememberShape(b2ShapeId shape, const b2ShapeDef& def) {
+    shapes_.push_back(shape);
+    shapeFlags_.push_back({shape, def.enableSensorEvents, def.enableHitEvents});
+}
+void RigidBody2D::updateEventFlags(bool worldSensorListeners) {
+    const bool hit = onHit.listenerCount() != 0;
+    const bool sensorChanged = worldSensorListeners != appliedSensorListeners_;
+    const bool hitChanged = hit != appliedHitListeners_;
+    // Leave raw overrides alone until the corresponding listener state changes.
+    const size_t start = sensorChanged || hitChanged ? 0 : appliedShapeCount_;
+    for (size_t i = start; i < shapeFlags_.size(); ++i) {
+        const auto& flags = shapeFlags_[i];
+        if (!b2Shape_IsValid(flags.id)) continue;
+        if (sensorChanged || i >= appliedShapeCount_)
+            b2Shape_EnableSensorEvents(flags.id, flags.sensor || worldSensorListeners);
+        if (hitChanged || i >= appliedShapeCount_)
+            b2Shape_EnableHitEvents(flags.id, flags.hit || hit);
+    }
+    appliedShapeCount_ = shapeFlags_.size();
+    appliedSensorListeners_ = worldSensorListeners;
+    appliedHitListeners_ = hit;
 }
 b2ShapeId RigidBody2D::addCircle(float radius, const b2ShapeDef& def) {
     if (!b2Body_IsValid(id())) return b2_nullShapeId;
@@ -87,8 +115,10 @@ b2ShapeId RigidBody2D::addCircle(float radius, const b2ShapeDef& def) {
         return b2_nullShapeId;
     }
     b2Circle circle = {{0.0f, 0.0f}, radius / pixelsPerMeter};
-    auto shape = b2CreateCircleShape(bodyId_, &def, &circle);
-    shapes_.push_back(shape);
+    auto eventDef = def;
+    eventDef.enableContactEvents = true;
+    auto shape = b2CreateCircleShape(bodyId_, &eventDef, &circle);
+    rememberShape(shape, def);
     return shape;
 }
 b2ShapeId RigidBody2D::addBox(float width, float height, const b2ShapeDef& def) {
@@ -98,8 +128,10 @@ b2ShapeId RigidBody2D::addBox(float width, float height, const b2ShapeDef& def) 
         return b2_nullShapeId;
     }
     auto polygon = b2MakeBox(width / (2.0f * pixelsPerMeter), height / (2.0f * pixelsPerMeter));
-    auto shape = b2CreatePolygonShape(bodyId_, &def, &polygon);
-    shapes_.push_back(shape);
+    auto eventDef = def;
+    eventDef.enableContactEvents = true;
+    auto shape = b2CreatePolygonShape(bodyId_, &eventDef, &polygon);
+    rememberShape(shape, def);
     return shape;
 }
 std::vector<b2ShapeId> RigidBody2D::addPolygon(const tc::Path& path, const b2ShapeDef& def) {
@@ -125,11 +157,12 @@ std::vector<b2ShapeId> RigidBody2D::addPolygon(const tc::Path& path, const b2Sha
     }
     std::vector<b2ShapeId> created;
     auto batchDef = def;
+    batchDef.enableContactEvents = true;
     batchDef.updateBodyMass = false;
     for (const auto& poly : polygons) {
         auto shape = b2CreatePolygonShape(bodyId_, &batchDef, &poly);
         created.push_back(shape);
-        shapes_.push_back(shape);
+        rememberShape(shape, def);
     }
     if (!created.empty()) b2Body_UpdateMassFromShapes(bodyId_);
     return created;

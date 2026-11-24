@@ -108,6 +108,36 @@ void burstAndIdle() {
     sg_shutdown();
 }
 
+void idleWithoutUploads() {
+    sg_desc desc = {};
+    sg_setup(&desc);
+    sg_enable_stats();
+    {
+        Pool pool;
+        std::array<sg_buffer, Pool::frameSets> buffers = {};
+        for (uint64_t frame = 0; frame < Pool::frameSets; ++frame) {
+            buffers[frame] = pool.acquire(16, false, frame).buffer;
+            sg_commit();
+        }
+        const auto before = sg_query_stats().total.buffers;
+        bool exactLifetime = true;
+        for (uint64_t frame = Pool::frameSets; frame <= Pool::idleFrames + Pool::frameSets; ++frame) {
+            pool.retireIdle(frame);
+            for (uint64_t used = 0; used < Pool::frameSets; ++used) {
+                exactLifetime &= (sg_query_buffer_state(buffers[used]) == SG_RESOURCESTATE_VALID)
+                    == (frame - used < Pool::idleFrames);
+            }
+            sg_commit();
+        }
+        const auto after = sg_query_stats().total.buffers;
+        check("retirement without uploads preserves each slot until its idle threshold", exactLifetime);
+        check("idle maintenance creates no buffers", after.allocated == before.allocated);
+        check("idle maintenance releases every staging slot", after.alive == 0 &&
+            after.deallocated == before.deallocated + Pool::frameSets);
+    }
+    sg_shutdown();
+}
+
 void allocationFailure() {
     sg_desc desc = {};
     desc.buffer_pool_size = 1;
@@ -129,6 +159,7 @@ int main() {
     // A fresh owner and device must not carry handles/cursor/capacity over.
     lifetime();
     burstAndIdle();
+    idleWithoutUploads();
     allocationFailure();
     return failures ? 1 : 0;
 }

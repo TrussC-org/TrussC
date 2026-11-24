@@ -294,6 +294,37 @@ class GlyphApp : public App {
             compare("4x/8x minification with mips", expected, got);
         }
     }
+    // Absolute vertical alignment: layoutChecks only compares drawString with
+    // GlyphBatch, which share one layout, so an offset in that layout passes
+    // there. Each column box is one em wide; its center/edges must land on the
+    // anchor.
+    void verticalAnchorChecks() {
+        const TcyMode latinMode = font_.getTcyLatinMode();
+        font_.setWritingMode(WritingMode::Horizontal);
+        const float advance = font_.getWidth("M");
+        const float em = float(font_.getSize());
+        font_.setWritingMode(WritingMode::VerticalRL);
+        font_.setTcyLatin(TcyMode::Upright);   // upright: center = drawX + advance / 2
+        const auto centers = [&](const std::string& text, Direction h) {
+            std::vector<float> out;
+            font_.forEachGlyph(text, 96, 96, h, Direction::Center, [&](const Font::PlacedGlyph& glyph) {
+                out.push_back(glyph.drawX + advance / 2);
+            });
+            return out;
+        };
+        const auto one = centers("M", Direction::Center);
+        std::printf("VERTICAL_ANCHOR center=%.2f\n", one.empty() ? -1.0f : one[0]);
+        check("vertical Center: one column centered on the anchor",
+              one.size() == 1 && std::abs(one[0] - 96) <= 1);
+        const auto left = centers("M", Direction::Left);
+        check("vertical Left: block left edge on the anchor",
+              left.size() == 1 && std::abs(left[0] - em / 2 - 96) <= 1);
+        const auto two = centers("M\nM", Direction::Center);
+        check("vertical Center: two-column block centered on the anchor",
+              two.size() == 2 && std::abs((two[0] + two[1]) / 2 - 96) <= 1);
+        font_.setTcyLatin(latinMode);
+        font_.setWritingMode(WritingMode::Horizontal);
+    }
     void stringPositionChecks() {
         const std::string text = "abc\nAg";
         for (bool transformed : {false, true}) {
@@ -719,7 +750,7 @@ public:
     void runOffscreenChecks() {
         setup();
         if (onlyEasycam) { cameraCheck(); completed = true; return; }
-        scissorChecks(); pageOrderChecks(); layoutChecks(); stringPositionChecks(); batchSettingsChecks(); cameraCheck();
+        scissorChecks(); pageOrderChecks(); layoutChecks(); verticalAnchorChecks(); stringPositionChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
         for (int frame = 0; frame < 2; ++frame) {
@@ -738,7 +769,7 @@ public:
         if (mipBench) { mipBenchmark(); completed = true; exitApp(); return; }
         if (onlyEasycam) { cameraCheck(); completed = true; exitApp(); return; }
         if (frame_ == 0) {
-            scissorChecks(); pageOrderChecks(); layoutChecks(); stringPositionChecks(); batchSettingsChecks(); cameraCheck();
+            scissorChecks(); pageOrderChecks(); layoutChecks(); verticalAnchorChecks(); stringPositionChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
             reference_.allocate(extent, extent);
             retain(true);

@@ -458,7 +458,7 @@ def update_target_flags(pg_bin, web):
         return ["--web", "--no-android", "--no-ios"] if supported else ["--web"]
     return ["--no-web", "--no-android", "--no-ios"] if supported else []
 
-def find_examples(root_dir):
+def find_examples(root_dir, exclude_addons=()):
     examples_dir = os.path.join(root_dir, "examples")
     addons_dir = os.path.join(root_dir, "addons")
     
@@ -472,6 +472,8 @@ def find_examples(root_dir):
 
     if os.path.exists(addons_dir):
         for addon in os.listdir(addons_dir):
+            if addon in exclude_addons:
+                continue
             addon_path = os.path.join(addons_dir, addon)
             if os.path.isdir(addon_path):
                 for item in os.listdir(addon_path):
@@ -491,7 +493,7 @@ def note_skipped(name):
         Colors.print(f"Skipping {name} (daily-only; pass --include-daily)", Colors.YELLOW)
     SKIPPED_DAILY.add(name)
 
-def find_addon_tests(root_dir, include_daily=False, addons=None):
+def find_addon_tests(root_dir, include_daily=False, addons=None, exclude_addons=()):
     # Behavioral test harnesses bundled with monorepo addons: addons/*/tests/
     # (a console TrussC project whose main() returns non-zero on failure). Same
     # convention as standalone addon repos (ci-actions runs tests/ if present).
@@ -505,6 +507,8 @@ def find_addon_tests(root_dir, include_daily=False, addons=None):
     test_paths = []
     if os.path.exists(addons_dir):
         for addon in sorted(os.listdir(addons_dir)):
+            if addon in exclude_addons:
+                continue
             if addons is not None and addon not in addons:
                 continue
             addon_dir = os.path.join(addons_dir, addon)
@@ -1177,6 +1181,7 @@ def main():
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--one-per-addon', action='store_true', help="Build the first example-* of each bundled addon (per-addon dependency compile coverage)")
     parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist. Harnesses with a daily-only marker are skipped unless --include-daily is given.")
+    parser.add_argument('--exclude-addons', nargs='+', default=[], help="Skip named addons in example and addon-test discovery")
     parser.add_argument('--addons', nargs='+', help="With --addon-tests-only: select addon names instead of the full suite")
     parser.add_argument('--include-daily', action='store_true', help="With --addon-tests-only or --core-tests-only: also run harnesses marked daily-only (the daily workflow passes this)")
     parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). Daily-only harnesses are skipped unless --include-daily is given. No-op if none exist. With --web also, with --web-only instead: build the ones with a web-test marker for WebAssembly and run them under node.")
@@ -1247,7 +1252,7 @@ def main():
     # behavioral gate meant to run on every CI, separate from the example
     # builds. No-op (exit 0) when no addon ships a tests/ dir.
     if args.addon_tests_only:
-        tests = find_addon_tests(ROOT_DIR, include_daily=args.include_daily, addons=args.addons)
+        tests = find_addon_tests(ROOT_DIR, include_daily=args.include_daily, addons=args.addons, exclude_addons=args.exclude_addons)
         if not tests:
             Colors.print("No addon tests found (addons/*/tests/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
@@ -1322,7 +1327,7 @@ def main():
         addons_dir = os.path.join(ROOT_DIR, "addons")
         seen = set()
         example_dirs = []
-        for path in find_examples(ROOT_DIR):
+        for path in find_examples(ROOT_DIR, exclude_addons=args.exclude_addons):
             if not path.startswith(addons_dir + os.sep):
                 continue
             addon = os.path.relpath(path, addons_dir).split(os.sep)[0]
@@ -1330,7 +1335,7 @@ def main():
                 seen.add(addon)
                 example_dirs.append(path)
     else:
-        example_dirs = find_examples(ROOT_DIR)
+        example_dirs = find_examples(ROOT_DIR, exclude_addons=args.exclude_addons)
 
     if not example_dirs:
         Colors.print("No example directories found!", Colors.RED)

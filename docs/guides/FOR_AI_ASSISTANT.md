@@ -338,7 +338,8 @@ draw per consecutive run on the same atlas page (A/B/A uses three draws).
 ASCII is built in. Apps / addons register additional glyphs for any
 Unicode codepoint via `tc::bitmapfont::`. The atlas is allocated **lazily**
 and grows tier-by-tier — headless apps and apps that never call
-`drawBitmapString` pay 0 KB of GPU memory.
+`drawBitmapString` get no atlas image (graphics apps still create one
+small sampler at startup).
 
 ```cpp
 using namespace bitmapfont;
@@ -1407,7 +1408,266 @@ With the CMake Tools extension in VSCode / Cursor, **you can't build until you s
 
 ### What makes TrussC fast and lightweight?
 
-The foundation — a thin wrapper over each OS's native API + C++ — gives a **high performance ceiling, and lets you reach down into the native layer when needed** (high optimization freedom). Commercial frameworks with license fees or OS limits tend to hit a ceiling on optimization; TrussC leaves that open. At the same time you can **deliberately build low-memory apps** — again, thanks to being low-level. Defaults lean toward a small footprint (e.g. the bitmap-font atlas is lazily allocated — 0KB GPU if you never call `drawBitmapString`; IBL/PBR allocate only when used), and you can lower the draw rate with `setFps` / `EVENT_DRIVEN` / `setIndependentFps` (which also saves power and extends runtime). "Thinness" feeds all of this: optimization freedom, low memory, and portability.
+The foundation — a thin wrapper over each OS's native API + C++ — gives a **high performance ceiling, and lets you reach down into the native layer when needed** (high optimization freedom). Commercial frameworks with license fees or OS limits tend to hit a ceiling on optimization; TrussC leaves that open. At the same time you can **deliberately build low-memory apps** — again, thanks to being low-level. Defaults lean toward a small footprint (e.g. the bitmap-font atlas image is created only when `drawBitmapString` is first called; IBL/PBR allocate only when used), and you can lower the draw rate with `setFps` / `EVENT_DRIVEN` / `setIndependentFps` (which also saves power and extends runtime). "Thinness" feeds all of this: optimization freedom, low memory, and portability.
+
+### How do I save power and battery? (setFps / EVENT_DRIVEN)
+
+Drawing less often saves the most power and battery: lower the frame rate, or draw only when something on screen changes.
+
+A fixed, lower rate is the simplest step:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+Event-driven drawing skips frames until you call `redraw()`. Between those frames the loop still wakes each display tick, but the GPU does almost no work. For example:
+```cpp
+void tcApp::setup() {
+    setFps(EVENT_DRIVEN);
+}
+void tcApp::mousePressed(Vec2 pos, int button) {
+    marker = pos;
+    redraw();
+}
+```
+
+- To keep logic and timers at a steady rate while drawing on demand, use `setIndependentFps(60, EVENT_DRIVEN)`.
+- `setFps()`, `setIndependentFps()` and `redraw()` act on the current window (inside a window's callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target another window from anywhere on the main thread.
+- Sentinels: `VSYNC` (-1, follow the display = default) and `EVENT_DRIVEN` (0). `getFpsSettings()` reads the current rates.
+
+On desktop, a hidden window (minimized or fully covered) stops drawing but keeps calling `update()`. To slow updates too, change the rate in an `occludedChanged` listener:
+```cpp
+EventListener visibilityListener; // tcApp member
+void tcApp::setup() {
+    visibilityListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
+        setFps(e.occluded ? 5 : VSYNC);
+    });
+}
+```
+
+A headless app has no drawing at all; lower its update rate in `main.cpp` (see HEADLESS_LINUX.md):
+```cpp
+return runHeadlessApp<tcApp>(HeadlessSettings().setFps(10));
+```
+
+### Screen won't update in event-driven mode? (forgot redraw)
+
+In event-driven mode (`setFps(EVENT_DRIVEN)` or `setIndependentFps(update, EVENT_DRIVEN)`), `draw()` runs only when a frame is requested, so changing state without `redraw()` leaves the old picture on screen (a common trap). TrussC also draws on its own when the window is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame, which can hide the bug until later.
+
+Call `redraw()` right where the visible state changes:
+```cpp
+void tcApp::keyPressed(int key) {
+    showGrid = !showGrid;
+    redraw();
+}
+```
+
+`redraw(count)` asks for several frames, for example to finish a short animation. It keeps the larger of the pending count and `count`; it does not add them.
+
+### How do I make my app faster? (draw calls, meshes, text)
+
+Most speed comes from doing less work per frame: build geometry and text once, keep it on the GPU, and rebuild it only when it changes. Each item below links to the API card with the full rules.
+
+Many points or a fixed shape: build a `Mesh` once and draw it every frame. Mesh keeps its GPU buffers and uploads again only after you edit it (`Mesh::draw`).
+```cpp
+Mesh cloud; // tcApp member
+void tcApp::setup() {
+    cloud.setMode(PrimitiveMode::Points);
+    for (int i = 0; i < 100000; i++) {
+        cloud.addVertex(random(-300.0f, 300.0f), random(-300.0f, 300.0f), random(-300.0f, 300.0f));
+    }
+}
+void tcApp::draw() {
+    cloud.draw();
+}
+```
+- Editing functions mark the mesh changed automatically. If you keep a reference to a vertex array across frames and write through it later, call `cloud.markGpuDirty();` after writing.
+
+Thick lines that rarely change: keep a `StrokeMesh`. `beginStroke()`, `drawStroke()` and `Path::drawStroke()` rebuild a StrokeMesh on the CPU on every call.
+```cpp
+StrokeMesh outline; // tcApp member
+void tcApp::setup() {
+    outline.setWidth(6);
+    outline.addVertex(40, 120);
+    outline.addVertex(150, 40);
+    outline.addVertex(260, 120);
+    outline.update();
+}
+void tcApp::draw() {
+    outline.draw();
+}
+```
+- `draw()` does not call `update()`. After changing the stroke, call `outline.update();` once; an unchanged `update()` does nothing (`StrokeMesh::update`).
+
+Lots of text: `Font::drawString` lays the text out again on every call. `GlyphBatch` builds it once and draws it many times (`GlyphBatch`).
+```cpp
+Font font;        // tcApp member
+GlyphBatch label; // tcApp member
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 24);
+    label.setFont(font);
+    label.add("Score", 20, 40);
+}
+void tcApp::draw() {
+    label.draw();
+}
+```
+
+Heavy per-pixel or per-particle work: move it to the GPU with `Shader`, `FullscreenShader` or `ComputeShader` (C++ only; see `examples/compute/computeParticlesExample`).
+
+Very many draw calls per frame on Metal, WebGPU or Vulkan: each draw takes a slice of the uniform buffer (about 4 MiB per 8,000 draw calls). Metal and WebGPU grow it once with a log notice; Vulkan does not grow it, so reserve enough at startup (`RuntimeSettings::reserveUniformBuffer`):
+```cpp
+int main() {
+    WindowSettings settings;
+    RuntimeSettings runtime;
+    runtime.reserveUniformBuffer(8 * 1024 * 1024);
+    return runApp<tcApp>(settings, runtime);
+}
+```
+
+- Fbo mipmaps cost extra GPU passes at every `end()`. Leave them off (the default) unless the Fbo is drawn much smaller than its size: `fbo.allocate(1920, 1080);` (`Fbo::allocate`).
+- Input feels late on Windows: `settings.setMaxFrameLatency(1);` gives the lowest input latency on D3D11, at the cost of less CPU/GPU overlap (`WindowSettings::setMaxFrameLatency`).
+- Video decoding speed depends on the codec and the OS; see "Which video formats play fast on each OS?" in this section.
+
+### How do I reduce memory use? (fonts, sound, video, buffers)
+
+TrussC allocates most resources only when they are first used, so memory mostly follows what your app loads: fonts, sounds, videos and images.
+
+Fonts keep only the glyphs drawn so far. Oversampling multiplies atlas memory by about n², and mipmaps add about one third. To use the least, turn both down before loading and check the result (`Font::setOversampling`, `Font::setMipmaps`, `Font::getMemoryUsage`):
+```cpp
+void tcApp::setup() {
+    font.setOversampling(1);
+    font.setMipmaps(false);
+    font.load(TC_FONT_SANS, 24);
+}
+void tcApp::keyPressed(int key) {
+    logNotice("Font") << font.getMemoryUsage();
+}
+```
+- `font.clearAtlas();` drops cached glyphs. Fonts with the same file, size and settings share one atlas, so it clears theirs too, and a `GlyphBatch` using the font must be rebuilt afterwards (`Font::clearAtlas`).
+
+Long music: `Sound::loadStream` decodes while playing instead of keeping the whole file in memory.
+```cpp
+Sound music; // tcApp member
+void tcApp::setup() {
+    music.loadStream("music.mp3");
+    music.play();
+}
+```
+- Web has no streaming; `loadStream` logs a warning and loads the whole file instead (`Sound::loadStream`).
+
+Video audio on Linux streams through a small buffer by default. `video.setAudioStreaming(false);` before `load()` loads the whole track for sample-accurate loops and seeks, at the cost of memory (`VideoPlayer::setAudioStreaming`).
+
+After a one-off scene that drew a huge amount of 2D geometry, release the idle drawing buffers between frames. They are created again on the next draw (`releaseSglBuffers`):
+```cpp
+void tcApp::update() {
+    if (leftHeavyScene) {
+        releaseSglBuffers();
+        leftHeavyScene = false;
+    }
+}
+```
+
+- GPU-compressed textures (`Texture::allocateCompressed`, HAP video) stay compressed in GPU memory.
+- `RuntimeSettings::reserveUniformBuffer` costs twice its size on Metal, WebGPU and Vulkan (one copy per frame in flight).
+- On Windows, each extra back buffer from `setMaxFrameLatency` uses about 8 MB at 1080p.
+
+### Which video formats play fast on each OS? (hardware decoding, HAP)
+
+`VideoPlayer` uses each OS's own video system, so decoding speed depends on the OS and the codec more than on TrussC.
+
+- macOS and iOS use AVFoundation, Windows uses Media Foundation, and Web uses the browser's video element. They choose hardware decoding on their own.
+- Linux uses FFmpeg. `setUseHwAccel` (on by default) tries CUDA, VAAPI, VDPAU, V4L2M2M and DRM in order and falls back to software decoding.
+
+Check which path a clip actually uses after loading (`VideoPlayer::setUseHwAccel`):
+```cpp
+void tcApp::setup() {
+    video.load("clip.mp4");
+    logNotice("Video") << video.isUsingHwAccel() << " " << video.getHwAccelName();
+}
+```
+
+- Linux hardware decoding keeps frames as NV12 on the GPU and skips the CPU color conversion, so `getPixels()` returns `nullptr` on that path. Draw with the player itself: `video.draw(0, 0);`.
+
+When you need a video's pixels on the CPU, draw it into an Fbo and read the Fbo back. This works with every decoder, including hardware decoding and HAP, and copies only the frames you ask for (`Fbo::readPixels`):
+```cpp
+VideoPlayer video; // tcApp member
+Fbo fbo;           // tcApp member
+Pixels pixels;     // tcApp member
+void tcApp::setup() {
+    video.load("clip.mp4");
+    fbo.allocate(video.getWidth(), video.getHeight());
+}
+void tcApp::update() {
+    video.update();
+    if (video.isFrameNew()) {
+        fbo.begin();
+        video.draw(0, 0);
+        fbo.end();
+        if (fbo.readPixels(pixels)) {
+            // use pixels
+        }
+    }
+}
+```
+- `readPixels()` returns false on WebGPU and inside another active Fbo. There, keep the frame on the GPU: `fbo.getTexture().draw(0, 0);`.
+
+- Raspberry Pi 4 decodes H.264 in hardware through V4L2M2M. Raspberry Pi 5 has no H.264 hardware decoder, and TrussC currently decodes HEVC in software there too, so prefer modest resolutions or HAP on Pi 5.
+- Rotated clips (portrait phone videos) cost extra CPU on the Linux software path, about half a core at 1080p30 on a Raspberry Pi 5. Re-encode them upright once: `ffmpeg -i in.mp4 -c:a copy out.mp4` (`VideoPlayer::getRotation`).
+
+HAP (`tcxHap` addon) stores frames as GPU-compressed (BC) textures. The CPU only unpacks a light compression layer and the GPU samples the frames directly, so CPU use stays very low. It suits many videos at once or very high resolutions; files are large. It needs a GPU that supports the movie's BC format and fails to load cleanly without it (for example on the iOS Simulator):
+```cpp
+tcx::hap::HapPlayer movie; // tcApp member
+void tcApp::setup() {
+    movie.load("clip_hap.mov");
+    movie.play();
+}
+void tcApp::update() {
+    movie.update();
+}
+void tcApp::draw() {
+    movie.draw(0, 0);
+}
+```
+
+### Which build type is fastest or smallest? (Debug, RelWithDebInfo, Release)
+
+`trusscli build` uses RelWithDebInfo (-O2 with debug info) by default, which is fast enough for everyday work and still debuggable. Release mainly removes debug info and makes the binary smaller; the speed gain over the default is usually small.
+
+```bash
+trusscli build --release   # -O3, no debug info: use for distribution (DISTRIBUTION.md)
+trusscli build --debug     # -O0 -g: slow, for stepping through code in a debugger
+```
+
+- The three flags are mutually exclusive and apply to native builds only. Web projects build as MinSizeRel (-Os, smallest download) and Android as Release.
+- A smaller binary also comes from adding only the addons you use: addons not listed in `addons.make` are neither built nor linked.
+
+### General techniques for faster code (SoA, reuse, rebuild on change)
+
+These are general C++ habits rather than TrussC features, and they help in every hot loop.
+
+Store each value in its own array (structure of arrays, SoA) instead of an array of objects. The data stays in cache, and array functions such as `mean` and `minMax` can use SIMD:
+```cpp
+vector<float> speeds; // tcApp member
+void tcApp::update() {
+    float average = mean(speeds);
+}
+```
+
+Avoid `new` / `delete` and growing containers every frame. Reserve once and reuse:
+```cpp
+vector<Vec2> trail; // tcApp member
+void tcApp::setup() {
+    trail.reserve(1000);
+}
+void tcApp::update() {
+    trail.clear();
+}
+```
+- `clear()` keeps the reserved capacity, so later `push_back` calls in the same frame do not allocate.
+
+Rebuild only when the data changes. Mesh, StrokeMesh and GlyphBatch all work this way: build in `setup()` or when an input changes, and only draw in `draw()`.
 
 ### Can I make a console / headless app (no draw)?
 
@@ -1421,20 +1681,7 @@ Heavy dependencies are **split into addons.** Even official features that are he
 
 ### Are physics / many objects too heavy?
 
-Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics** (Jolt Physics) is fast even on the CPU because it's C++, and **handles hundreds of objects on wasm (web) without falling over.** Avoiding "web is slow" is possible because of the thin native layer + C++ foundation.
-
-### Can I run for hours / keep power low on mobile? (FPS control)
-
-TrussC keeps resource use small, so power draw is low — lightness helps battery, not just frame rate. Lowering draw frequency helps most:
-- `setFps(60)` for a fixed rate; `setFps(EVENT_DRIVEN)` for "draw only when `redraw()` is called."
-- `setFps()`, `setIndependentFps()` and `redraw()` target the current window (inside a window’s callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target that window from anywhere on the main thread.
-- `setIndependentFps(updateFps, drawFps)` separates update and draw rates. e.g. `setIndependentFps(60, EVENT_DRIVEN)` runs logic/timers steadily at 60fps but draws only when the screen changes via `redraw()` — an idle UI barely touches the GPU.
-- Sentinels: `VSYNC` (-1, monitor sync = default) and `EVENT_DRIVEN` (0). `redraw(count = 1)` requests a draw; `getFpsSettings()` reads the current rate.
-A barely-redrawing UI can run for many hours on mobile.
-
-### Screen won't update in event-driven mode? (forgot redraw)
-
-The top power-saving recommendation is **event-driven** (`setFps(EVENT_DRIVEN)` or `setIndependentFps(update, EVENT_DRIVEN)`). The catch: in this mode `draw()` only runs **when you call `redraw()`.** So if you change UI state but forget `redraw()`, the screen won't change and you'll go "huh, nothing happened" (a common trap). Make it a habit to **call `redraw()` on every change that affects appearance.** Do that consistently and an idle UI uses near-zero GPU.
+Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics** (Jolt Physics) is fast even on the CPU because it's C++; in our own projects it has **handled hundreds of objects on wasm (web)** without trouble. Avoiding "web is slow" is possible because of the thin native layer + C++ foundation.
 
 ### Optimizing / reusing shaders? (sokol-shdc)
 
@@ -1442,11 +1689,15 @@ Offloading heavy work to the GPU is the standard move. Thanks to **sokol-shdc**,
 
 ### Optimizations possible because it's low-level?
 
-Because TrussC is header-only and all-source, **you can optimize the foundation itself.** Real examples: changing the (deferred) draw buffer from a fixed size to **dynamic growth**, and adding a **10-bit color** render target. Such sokol-derived modifications are collected in `sokol_gl_tc.h` (a fork of sokol_gl). These are parts you can't touch in a proprietary environment — TrussC's escape-hatch strength.
+Because TrussC ships as full source, including its sokol fork, **you can optimize the foundation itself.** Real examples: changing the (deferred) draw buffer from a fixed size to **dynamic growth**, and adding a **10-bit color** render target. Such sokol-derived modifications are collected in `sokol_gl_tc.h` (a fork of sokol_gl). These are parts you can't touch in a proprietary environment — TrussC's escape-hatch strength.
 
-### How low-end can it run? (target floor + power evidence)
+### How low-end can it run? (Raspberry Pi, phones, battery)
 
-The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers are tuned for it). On Raspberry Pi, **native-API video playback** works too. For always-on UI tools, event-driven brings idle power to near zero — e.g. TrussC's own "TrussC Project Generator" (the trusscli GUI) barely uses battery when left running. Always-on display apps on a 2025-era phone, and wearable-tracking-style apps, have run for nearly a day / ~10 hours on mid-range devices. Low-level + C++ + small defaults is what makes it "scale down."
+Graphics apps need OpenGL ES 3.0 or newer, so on Raspberry Pi that means a Pi 4 or Pi 5; both are regular test devices. Older VideoCore IV boards such as the Pi Zero and Pi 3 only offer OpenGL ES 2.0, so they cannot run graphics apps; a headless app (`runHeadlessApp`) needs no GPU and still runs there. Video on Raspberry Pi is covered in "Which video formats play fast on each OS?" in this section.
+
+Field experience from the TrussC authors, not measured guarantees:
+- The TrussC Project Generator (the trusscli GUI) runs event-driven and barely uses battery when left open.
+- Always-on display apps on a 2025 mid-range phone, and wearable-tracking style apps, have run for about 10 hours up to most of a day.
 
 ## Node & Mod patterns
 
@@ -2501,6 +2752,7 @@ float angleDifferenceDeg(float deg1, float deg2)  // Returns the shortest signed
 void applyWindow(std::vector<float> & signal, WindowType type) [+1]  // Applies a window to a signal in place.
 float binToFrequency(int bin, int fftSize, int sampleRate)  // Converts an FFT bin index to a frequency.
 float ceil(float x) [std]  // Rounds a number toward positive infinity.
+std::optional<double> correlation(std::span<const float> x, std::span<const float> y)  // Returns the Pearson correlation of paired float values.
 float exp(float x) [std]  // Returns e raised to the given power.
 void fft(std::vector<std::complex<float>> & data)  // Transforms complex samples into a frequency spectrum in place.
 std::vector<float> fftMagnitude(const std::vector<std::complex<float>> & spectrum)  // Returns the magnitude of each spectrum bin.
@@ -2508,19 +2760,23 @@ std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>> & spect
 std::vector<float> fftPhase(const std::vector<std::complex<float>> & spectrum)  // Returns the phase angle of each spectrum bin.
 std::vector<float> fftPower(const std::vector<std::complex<float>> & spectrum)  // Returns the squared magnitude of each spectrum bin.
 std::vector<std::complex<float>> fftReal(const std::vector<float> & signal) [+1]  // Computes the frequency spectrum of a real-valued signal.
+std::optional<LineFit> fitLine(std::span<const float> x, std::span<const float> y)  // Fits y = slope * x + intercept by least squares.
 float floor(float x) [std]  // Rounds a number toward negative infinity.
 float fmod(float x, float y) [std]  // Returns the floating-point remainder of a division.
 float fract(float value)  // Returns the fractional part relative to the floor of a value.
 int frequencyToBin(float freq, int fftSize, int sampleRate)  // Converts a frequency to an FFT bin index.
+std::optional<std::vector<std::size_t>> histogram(std::span<const float> values, std::size_t bins, float low, float high)  // Counts values in equal-width bins over [low, high).
 void ifft(std::vector<std::complex<float>> & data)  // Transforms a complex spectrum back into samples in place.
 bool isPowerOfTwo(int n)  // Tests whether an integer is a positive power of two.
 float log(float x) [std]  // Returns the natural logarithm of a value.
 float max(float a, float b) [std]  // Returns the greater of two values.
 float mean(std::span<const float> values)  // Returns the arithmetic mean of the values.
+std::optional<float> median(std::span<const float> values)  // Returns the middle value, averaging the middle pair for an even count.
 float min(float a, float b) [std]  // Returns the lesser of two values.
 std::pair<float, float> minMax(std::span<const float> values)  // Returns the minimum and maximum as a pair of floats.
 float mse(std::span<const float> a, std::span<const float> b)  // Returns the mean squared difference between two inputs.
 int nextPowerOfTwo(int n)  // Returns the smallest positive power of two at least as large as a value.
+std::optional<float> percentile(std::span<const float> values, double p)  // Returns an interpolated percentile with a fraction p from 0 to 1.
 float pow(float x, float y) [std]  // Returns a base raised to an exponent.
 float rms(std::span<const float> values)  // Returns the root mean square of the values.
 float round(float x) [std]  // Rounds a number to the nearest integer value.
@@ -3754,6 +4010,11 @@ void Light::setSpecular(const Color & c) [+1]  // Sets the specular light color.
 void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Configures the light as a spot light.
 ```
 
+### LineFit — Least-squares line coefficients returned by fitLine, stored as doubles.
+
+```cpp
+```
+
 ### LoadResult — Represents the result of loading a resource.
 
 ```cpp
@@ -4507,10 +4768,10 @@ bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.
 void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
 int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
-int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
+int Serial::readBytes(void * buffer, int length) [+2] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
 bool Serial::setup(const std::string & portName, int baudRate) [+2] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
 bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
-int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
+int Serial::writeBytes(const void * buffer, int length) [+2] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
 ```
 
 ### SerialDeviceInfo — Holds information about one enumerated serial device.
@@ -4654,9 +4915,9 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
-bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
+bool StorageBuffer::read(void * destination, size_t bytes) [+2] [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
 void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
-bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
+bool StorageBuffer::update(const void * data, size_t size) [+2]  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
 ### StrokeMesh — Builds triangle geometry for variable-width polyline strokes.
@@ -4961,9 +5222,9 @@ bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Returns wh
 bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Joins an IPv4 multicast group for reception.
 bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leaves an IPv4 multicast group.
 void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes pending UDP datagrams.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
-bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+3] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
+bool UdpSocket::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
 void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.
