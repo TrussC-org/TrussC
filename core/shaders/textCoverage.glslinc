@@ -10,8 +10,11 @@ float textCoverage(vec2 texcoord) {
     // are in target pixels; every tap has a distinct x and a distinct y
     // (+-0.125, +-0.375), so with the neighboring pixels the taps sit evenly
     // every 1/4 pixel along both axes and a moving stroke no longer pops in and
-    // out of the single sample. The spread fades in from 1 to 2 texels per
-    // pixel, so 1:1 and magnified text keep the exact single sample.
+    // out of the single sample. At 1:1 and magnified the spread is 0: the exact
+    // single sample is kept, so grid-fitted 1:1 text still lands texel on pixel.
+    // Once minified it opens fully within 1/8 texel per pixel (by 1.125): a
+    // partly open spread leaves gaps between the taps, and a slow fade made
+    // ~1.5x minification shimmer more than full supersampling does.
     // Derivatives stay unconditional (outside the branch).
     vec2 dx = dFdx(texcoord);
     vec2 dy = dFdy(texcoord);
@@ -19,7 +22,7 @@ float textCoverage(vec2 texcoord) {
     vec2 gy = dy * 0.5;
     vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
     float texelsPerPixel = max(length(dx * size), length(dy * size));
-    float spread = clamp(texelsPerPixel - 1.0, 0.0, 1.0);
+    float spread = clamp((texelsPerPixel - 1.0) * 8.0, 0.0, 1.0);
     if (spread <= 0.0) return textureGrad(sampler2D(tex, smp), texcoord, gx, gy).r;
     vec2 ox = dx * spread;
     vec2 oy = dy * spread;
