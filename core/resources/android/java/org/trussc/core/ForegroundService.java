@@ -26,6 +26,8 @@ public final class ForegroundService extends Service {
             .setOngoing(true);
         Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
         if (launch != null) {
+            // Reuse the NativeActivity; CLEAR_TOP alone recreates a standard activity.
+            launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             builder.setContentIntent(PendingIntent.getActivity(this, 0, launch,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }

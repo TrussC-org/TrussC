@@ -6,6 +6,8 @@ using namespace tc;
 namespace {
 bool smoke = false;
 class BackgroundProbe : public App {
+    Rect updatesButton{12, 80, 220, 48};
+    Rect serviceButton{12, 140, 220, 48};
     EventListener visibility;
     std::chrono::steady_clock::time_point nextLog;
     uint64_t counter = 0;
@@ -28,7 +30,7 @@ public:
         visibility = events().occludedChanged.listen([](OccludedEventArgs& event) {
             logNotice("androidBackground") << "occluded=" << event.occluded;
         });
-        logNotice("androidBackground") << "ready; tap left: toggle updates; tap right or S: toggle service";
+        logNotice("androidBackground") << "ready; tap Updates or Service button; S: toggle service";
     }
     void update() override {
         ++counter;
@@ -50,14 +52,19 @@ public:
         if (smoke) exitApp();
     }
     void draw() override {
-        drawBitmapString("Tap left: toggle hidden updates", 12, 30);
-        drawBitmapString("Tap right: toggle foreground service", 12, 55);
+        drawRect(updatesButton.x, updatesButton.y, updatesButton.width, updatesButton.height);
+        drawRect(serviceButton.x, serviceButton.y, serviceButton.width, serviceButton.height);
+        setColor(0);
+        drawBitmapString("Updates: " + std::to_string(updatesEnabled), 24, 108);
+        drawBitmapString("Service: " + std::to_string(serviceEnabled), 24, 168);
+        setColor(1);
     }
     void mousePressed(const MouseEventArgs& event) override {
-        if (event.pos.x >= getWindowWidth() * 0.5f) {
+        if (serviceButton.contains(event.pos.x, event.pos.y)) {
             toggleService();
             return;
         }
+        if (!updatesButton.contains(event.pos.x, event.pos.y)) return;
         updatesEnabled = !updatesEnabled;
         setUpdateWhileHidden(updatesEnabled);
         logNotice("androidBackground") << "updates=" << updatesEnabled;
