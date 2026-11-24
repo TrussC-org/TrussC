@@ -5256,10 +5256,12 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().setSwapInterval(af::val<int>());
         (void)af::val<WindowSettings>().setTitle(af::val<const std::string>());
         (void)af::val<WindowSettings>().setVisible(af::val<bool>());
+        (void)af::val<WindowSettings>().setVulkanUploadSize(af::val<size_t>());
         (void)af::val<WindowSettings>().shaderPoolSize;
         (void)af::val<WindowSettings>().swapInterval;
         (void)af::val<WindowSettings>().title;
         (void)af::val<WindowSettings>().visible;
+        (void)af::val<WindowSettings>().vulkanUploadSize;
         (void)af::val<WindowSettings>().width;
     }
 };

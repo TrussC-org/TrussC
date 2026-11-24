@@ -28,6 +28,7 @@
 #include "sokol/sokol_glue.h"
 #include "sokol/util/sokol_gl_tc.h"
 #include "sokol/util/sokol_memtrack.h"
+#include "tc/gpu/detail/tcTransientUpload.h"
 
 // Standard libraries
 #include <cstdlib>
@@ -259,6 +260,7 @@ namespace internal {
         bool     atlasInitialized = false;
         int      rows = 0;                  // height of current atlas in cell rows
         uint64_t version = 0;               // last bitmapfont registryVersion() baked in
+        TransientUploadState uploadState;
     };
     BitmapFontAtlas& bitmapFontAtlas();
 
@@ -1324,45 +1326,41 @@ inline void ensureFontAtlas(int rows) {
     unsigned char* pixels = bitmapfont::generateAtlasPixels(effRows);
     int dataBytes = bitmapfont::ATLAS_WIDTH * height * 4;
 
+    bool uploaded = false;
     if (sizeOk) {
-        // Same dimensions — upload via staging copies. The image identity
-        // (sg_image handle) and view stay the same, so any queued sokol_gl
-        // commands referencing them keep working.
+        // Keep the current image and version until the staging copy succeeds.
         sg_range data = {pixels, static_cast<size_t>(dataBytes)};
-        internal::uploadImageData(atlas.texture, data);
+        uploaded = internal::uploadImageData(atlas.texture, data, 0, &atlas.uploadState);
     } else {
-        // Size changed (or first allocation). Recreate the image. The old
-        // image/view are destroyed deferred — sokol_gl commands recorded
-        // earlier this frame still reference them until the end-of-frame
-        // flush (drained in present() after sg_commit).
-        if (atlas.atlasInitialized) {
-            internal::deferGpuDestroy(atlas.view);
-            internal::deferGpuDestroy(atlas.texture);
-            atlas.atlasInitialized = false;
-        }
-
         sg_image_desc img_desc = {};
         img_desc.width  = bitmapfont::ATLAS_WIDTH;
         img_desc.height = height;
         img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.usage.copy_dst = true;   // persistent staging uploads
-        // (intentionally no initial data — sg expects an update call instead
-        //  for non-immutable images)
-        atlas.texture = sg_make_image(&img_desc);
+        img_desc.usage.copy_dst = true;
+        sg_image texture = sg_make_image(&img_desc);
 
         sg_range data = {pixels, static_cast<size_t>(dataBytes)};
-        internal::uploadImageData(atlas.texture, data);
-
-        sg_view_desc view_desc = {};
-        view_desc.texture.image = atlas.texture;
-        atlas.view = sg_make_view(&view_desc);
-
-        atlas.rows = effRows;
-        atlas.atlasInitialized = true;
+        uploaded = internal::uploadImageData(texture, data, 0, &atlas.uploadState);
+        if (uploaded) {
+            // Publish only a populated image. Earlier queued draws retain
+            // the old handles until the end-of-frame flush.
+            if (atlas.atlasInitialized) {
+                internal::deferGpuDestroy(atlas.view);
+                internal::deferGpuDestroy(atlas.texture);
+            }
+            sg_view_desc view_desc = {};
+            view_desc.texture.image = texture;
+            atlas.view = sg_make_view(&view_desc);
+            atlas.texture = texture;
+            atlas.rows = effRows;
+            atlas.atlasInitialized = true;
+        } else {
+            sg_destroy_image(texture);
+        }
     }
 
     delete[] pixels;
-    atlas.version = curRegistry;
+    if (uploaded) atlas.version = curRegistry;
 }
 
 // Grow the atlas to fit every glyph used by `text`. No-op if already large
@@ -2422,10 +2420,17 @@ struct WindowSettings {
         return *this;
     }
 
+    // Vulkan only; read once before graphics startup. 0 selects 64 MiB.
+    WindowSettings& setVulkanUploadSize(size_t bytes) {
+        vulkanUploadSize = bytes;
+        return *this;
+    }
+
     // Keep settings aggregate-initializable, like the existing public fields.
     int resourcePoolSize = 0;
     int shaderPoolSize = 0;
     int pipelinePoolSize = 0;
+    size_t vulkanUploadSize = 64 * 1024 * 1024;
 
     // Set through setParentWindow(); empty = no parent.
     TC_LUA_SKIP std::weak_ptr<Window> parentWindow = {};
