@@ -344,7 +344,7 @@ namespace internal {
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1 MiB on Metal/WebGPU
-    // (grows on overflow), 4 MiB on Vulkan (fixed capacity). Set this via
+    // (grows on overflow), 64 MiB on Vulkan (fixed capacity). Set this via
     // RuntimeSettings::reserveUniformBuffer to reserve capacity at startup.
     // Host-only, so a per-module copy is fine (tools/header_state_allowlist.txt):
     // the launcher sets it and setup() (tcGlobal.cpp) reads it.
@@ -2440,13 +2440,14 @@ struct WindowSettings {
 struct RuntimeSettings {
     int uniformBufferReserve = 0;  // 0 = backend default; GL/D3D11 ignore it.
 
-    // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
-    // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
+    // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1 MiB on
+    // Metal/WebGPU, 64 MiB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
     // the ring grows (with a notice log) when a frame overflows it,
     // so a sufficient reservation only skips the one-time grow hitch. Every
-    // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
-    // 8k draw calls per frame). Vulkan does NOT auto-grow: there an
-    // overflowing frame is still an error, so size this generously for very
+    // uniform block per draw takes a 256-byte-aligned slice of this ring buffer.
+    // 64 MiB fits 262,144 single-block draws, or 131,072 two-block draws
+    // when each block fits in 256 bytes. Vulkan does NOT auto-grow: overflow
+    // drops draws and logs an edge-triggered warning, so reserve more for
     // high draw-call scenes. GL/D3D11 ignore it — they have no such cap.
     // Metal/WebGPU/Vulkan allocate it x2 (in-flight frames).
     RuntimeSettings& reserveUniformBuffer(int bytes) {

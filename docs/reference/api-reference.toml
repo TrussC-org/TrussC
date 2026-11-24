@@ -69068,76 +69068,103 @@ int main() {
 
 ["RuntimeSettings::uniformBufferReserve"]
 description.en = "Specifies the app-wide GPU uniform buffer reservation in bytes."
-description.ja = "アプリケーション全体の GPU ユニフォームバッファー予約量をバイトで指定する。"
-description.ko = "앱 전체의 GPU 유니폼 버퍼 예약량을 바이트로 지정한다."
+description.ja = "アプリケーション全体の GPU ユニフォームバッファー予約量をバイトで指定します。"
+description.ko = "앱 전체의 GPU 유니폼 버퍼 예약량을 바이트로 지정합니다."
 details.en = '''
-- The field behind `reserveUniformBuffer()`; the default is `0`.
-- It is the size, in bytes, of the GPU buffer that holds each frame's shader uniforms. Every draw call takes a 256-byte-aligned slice of it, so scenes with many draw calls per frame need more (about 4 MiB per 8,000 draw calls).
-- `0` or less selects the backend default: 1 MiB on Metal and WebGPU, 4 MiB on Vulkan. GL and D3D11 ignore it, because they have no such limit.
-- On Metal and WebGPU the buffer grows, with a notice in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
-- Metal, WebGPU and Vulkan allocate it twice (for frames in flight), so a larger value costs twice its size in memory.
-- Graphics startup reads it once. Under hot reload it is not applied and the default is used (see `RuntimeSettings`).
+- The field behind `reserveUniformBuffer()`, initially `0`, stores the app-wide per-frame shader uniform reservation before `runApp()`. Vulkan defaults to 64 MiB and does not grow; Metal/WebGPU start at 1 MiB and grow on demand. GL/D3D11 have no such limit.
+- Overflow on Vulkan drops affected draws for that frame. One Warning names the current size and setter; consecutive overflowing frames stay quiet, then a clean frame reports recovery and the number of overflowing frames. Raise the reservation for heavier scenes:
+  ```cpp
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(128 * 1024 * 1024);
+  runApp<tcApp>(WindowSettings{}, runtime);
+  ```
+- Each uniform block per draw consumes a 256-byte-aligned slice: 64 × 1024 × 1024 / 256 = 262,144 draws with one block of at most 256 bytes, or 131,072 draws with two such blocks. Larger blocks and other rendering consume more of the shared budget.
+- `0` or less selects the default. Metal/WebGPU/Vulkan allocate two buffers for frames in flight. Vulkan's default costs 128 MiB of host-visible memory for the app's lifetime, separately from upload staging.
+- Graphics startup reads the reservation once. Hot reload uses the default; there is no API to change this reservation during hot reload.
 '''
 details.ja = '''
-- `reserveUniformBuffer()` が設定するフィールドです。既定値は `0` です。
-- 毎フレームのシェーダーのユニフォームを入れる GPU バッファーのサイズを、バイト単位で指定します。描画呼び出しのたびに 256 バイト単位で切り出して使うため、1 フレームの描画呼び出しが多いシーンほど多く必要です（描画呼び出し 8,000 回でおよそ 4 MiB）。
-- `0` 以下では、バックエンドの既定値（Metal と WebGPU は 1 MiB、Vulkan は 4 MiB）になります。GL と D3D11 にはこの上限がないため、無視されます。
-- Metal と WebGPU では、1 フレームで足りなくなるとログに通知（Notice）を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
-- Metal、WebGPU、Vulkan では、処理中のフレームの分も含めて 2 つ確保するため、メモリはこの値の 2 倍使います。
-- グラフィックスの起動時に 1 回だけ読まれます。ホットリロードでは適用されず、既定値が使われます（`RuntimeSettings` を参照）。
+- `runApp()` の前に、アプリ全体のフレームごとのシェーダーユニフォーム予約量を設定します。Vulkan の既定値は 64 MiB で、自動拡張しません。Metal/WebGPU は 1 MiB から必要に応じて拡張します。GL/D3D11 にはこの上限がありません。
+- Vulkan で超過すると、そのフレームの該当する描画が破棄されます。最初の Warning は現在のサイズと設定メソッドを示します。連続する超過フレームでは通知せず、超過しないフレームで超過フレーム数と復帰を Notice で通知します。重いシーンでは予約量を増やしてください。
+  ```cpp
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(128 * 1024 * 1024);
+  runApp<tcApp>(WindowSettings{}, runtime);
+  ```
+- 描画ごとのユニフォームブロックは 256 バイト境界の領域を使います。64 × 1024 × 1024 / 256 = 262,144 回（256 バイト以下のブロックが 1 個）、2 個なら 131,072 回の描画が目安です。大きいブロックや他の描画も同じ容量を使います。
+- `0` 以下では既定値を使います。Metal/WebGPU/Vulkan は処理中のフレーム用に 2 個確保します。Vulkan の既定値では、アップロード用ステージングとは別に、アプリの存続期間中 128 MiB のホスト可視メモリを予約します。
+- グラフィックス起動時に 1 回だけ読みます。ホットリロードでは既定値を使い、ホットリロード中に予約量を変更する API はありません。
 '''
 details.ko = '''
-- `reserveUniformBuffer()`가 설정하는 필드입니다. 기본값은 `0`입니다.
-- 매 프레임의 셰이더 유니폼을 담는 GPU 버퍼의 크기를 바이트 단위로 지정합니다. 그리기 호출마다 256바이트 단위로 잘라 쓰므로, 한 프레임의 그리기 호출이 많은 장면일수록 더 많이 필요합니다(그리기 호출 8,000번에 약 4 MiB).
-- `0` 이하이면 백엔드 기본값(Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB)이 됩니다. GL과 D3D11에는 이런 상한이 없으므로 무시됩니다.
-- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 알림(Notice)을 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
-- Metal, WebGPU, Vulkan에서는 처리 중인 프레임 몫까지 2개를 확보하므로 메모리를 이 값의 2배 사용합니다.
-- 그래픽 시작 시 한 번만 읽힙니다. 핫 리로드에서는 적용되지 않고 기본값이 사용됩니다(`RuntimeSettings` 참조).
+- `runApp()` 전에 앱 전체의 프레임별 셰이더 유니폼 예약량을 설정합니다. Vulkan 기본값은 64 MiB이며 자동으로 확장하지 않습니다. Metal/WebGPU는 1 MiB에서 시작하여 필요에 따라 확장합니다. GL/D3D11에는 이 제한이 없습니다.
+- Vulkan에서 초과하면 해당 프레임의 관련 그리기를 버립니다. 첫 Warning은 현재 크기와 설정 메서드를 표시합니다. 연속으로 초과하는 프레임에서는 알리지 않으며, 초과하지 않는 프레임에서 초과 프레임 수와 복구를 Notice로 알립니다. 무거운 장면에서는 예약량을 늘립니다.
+  ```cpp
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(128 * 1024 * 1024);
+  runApp<tcApp>(WindowSettings{}, runtime);
+  ```
+- 그리기마다 유니폼 블록은 256바이트 경계의 영역을 사용합니다. 64 × 1024 × 1024 / 256 = 262,144회(256바이트 이하 블록 하나), 블록 두 개이면 131,072회 그리기가 기준입니다. 더 큰 블록과 다른 렌더링도 같은 용량을 사용합니다.
+- `0` 이하는 기본값을 선택합니다. Metal/WebGPU/Vulkan은 처리 중인 프레임을 위해 버퍼 두 개를 할당합니다. Vulkan 기본값은 업로드 스테이징과 별도로 앱 수명 동안 호스트 가시 메모리 128 MiB를 예약합니다.
+- 그래픽 시작 시 한 번만 읽습니다. 핫 리로드에서는 기본값을 사용하며 핫 리로드 중 예약량을 변경하는 API는 없습니다.
 '''
 related = ["RuntimeSettings", "RuntimeSettings::reserveUniformBuffer"]
 snippet = '''
 // main.cpp
 int main() {
     RuntimeSettings runtime;
-    runtime.reserveUniformBuffer(8 * 1024 * 1024);   // many draw calls per frame
+    runtime.reserveUniformBuffer(128 * 1024 * 1024);
     return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
 }
 '''
 
 ["RuntimeSettings::reserveUniformBuffer"]
 description.en = "Sets the app-wide GPU uniform buffer reservation."
-description.ja = "アプリケーション全体の GPU ユニフォームバッファー予約量を設定する。"
-description.ko = "앱 전체의 GPU 유니폼 버퍼 예약량을 설정한다."
+description.ja = "アプリケーション全体の GPU ユニフォームバッファー予約量を設定します。"
+description.ko = "앱 전체의 GPU 유니폼 버퍼 예약량을 설정합니다."
 details.en = '''
-- Sets `uniformBufferReserve` and returns the same `RuntimeSettings&`, so calls can be chained. Call it before `runApp`.
-- It is the size, in bytes, of the GPU buffer that holds each frame's shader uniforms. Every draw call takes a 256-byte-aligned slice of it, so scenes with many draw calls per frame need more (about 4 MiB per 8,000 draw calls).
-- `0` or less selects the backend default: 1 MiB on Metal and WebGPU, 4 MiB on Vulkan. GL and D3D11 ignore it, because they have no such limit.
-- On Metal and WebGPU the buffer grows, with a notice in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
-- Metal, WebGPU and Vulkan allocate it twice (for frames in flight), so a larger value costs twice its size in memory.
-- Graphics startup reads it once. Under hot reload it is not applied and the default is used (see `RuntimeSettings`).
+- Sets the app-wide per-frame shader uniform reservation before `runApp()`. Vulkan defaults to 64 MiB and does not grow; Metal/WebGPU start at 1 MiB and grow on demand. GL/D3D11 have no such limit.
+- Overflow on Vulkan drops affected draws for that frame. One Warning names the current size and setter; consecutive overflowing frames stay quiet, then a clean frame reports recovery and the number of overflowing frames. Raise the reservation for heavier scenes:
+  ```cpp
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(128 * 1024 * 1024);
+  runApp<tcApp>(WindowSettings{}, runtime);
+  ```
+- Each uniform block per draw consumes a 256-byte-aligned slice: 64 × 1024 × 1024 / 256 = 262,144 draws with one block of at most 256 bytes, or 131,072 draws with two such blocks. Larger blocks and other rendering consume more of the shared budget.
+- `0` or less selects the default. Metal/WebGPU/Vulkan allocate two buffers for frames in flight. Vulkan's default costs 128 MiB of host-visible memory for the app's lifetime, separately from upload staging.
+- Graphics startup reads the reservation once. Hot reload uses the default; there is no API to change this reservation during hot reload.
+- Sets `uniformBufferReserve` and returns the same `RuntimeSettings&` for chaining.
 '''
 details.ja = '''
-- `uniformBufferReserve` を設定し、同じ `RuntimeSettings&` を返すため、続けて呼べます。`runApp` の前に呼んでください。
-- 毎フレームのシェーダーのユニフォームを入れる GPU バッファーのサイズを、バイト単位で指定します。描画呼び出しのたびに 256 バイト単位で切り出して使うため、1 フレームの描画呼び出しが多いシーンほど多く必要です（描画呼び出し 8,000 回でおよそ 4 MiB）。
-- `0` 以下では、バックエンドの既定値（Metal と WebGPU は 1 MiB、Vulkan は 4 MiB）になります。GL と D3D11 にはこの上限がないため、無視されます。
-- Metal と WebGPU では、1 フレームで足りなくなるとログに通知（Notice）を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
-- Metal、WebGPU、Vulkan では、処理中のフレームの分も含めて 2 つ確保するため、メモリはこの値の 2 倍使います。
-- グラフィックスの起動時に 1 回だけ読まれます。ホットリロードでは適用されず、既定値が使われます（`RuntimeSettings` を参照）。
+- `runApp()` の前に、アプリ全体のフレームごとのシェーダーユニフォーム予約量を設定します。Vulkan の既定値は 64 MiB で、自動拡張しません。Metal/WebGPU は 1 MiB から必要に応じて拡張します。GL/D3D11 にはこの上限がありません。
+- Vulkan で超過すると、そのフレームの該当する描画が破棄されます。最初の Warning は現在のサイズと設定メソッドを示します。連続する超過フレームでは通知せず、超過しないフレームで超過フレーム数と復帰を Notice で通知します。重いシーンでは予約量を増やしてください。
+  ```cpp
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(128 * 1024 * 1024);
+  runApp<tcApp>(WindowSettings{}, runtime);
+  ```
+- 描画ごとのユニフォームブロックは 256 バイト境界の領域を使います。64 × 1024 × 1024 / 256 = 262,144 回（256 バイト以下のブロックが 1 個）、2 個なら 131,072 回の描画が目安です。大きいブロックや他の描画も同じ容量を使います。
+- `0` 以下では既定値を使います。Metal/WebGPU/Vulkan は処理中のフレーム用に 2 個確保します。Vulkan の既定値では、アップロード用ステージングとは別に、アプリの存続期間中 128 MiB のホスト可視メモリを予約します。
+- グラフィックス起動時に 1 回だけ読みます。ホットリロードでは既定値を使い、ホットリロード中に予約量を変更する API はありません。
+- `uniformBufferReserve` を設定し、同じ `RuntimeSettings&` を返すため、続けて呼べます。
 '''
 details.ko = '''
-- `uniformBufferReserve`를 설정하고 같은 `RuntimeSettings&`를 반환하므로 이어서 호출할 수 있습니다. `runApp` 전에 호출하세요.
-- 매 프레임의 셰이더 유니폼을 담는 GPU 버퍼의 크기를 바이트 단위로 지정합니다. 그리기 호출마다 256바이트 단위로 잘라 쓰므로, 한 프레임의 그리기 호출이 많은 장면일수록 더 많이 필요합니다(그리기 호출 8,000번에 약 4 MiB).
-- `0` 이하이면 백엔드 기본값(Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB)이 됩니다. GL과 D3D11에는 이런 상한이 없으므로 무시됩니다.
-- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 알림(Notice)을 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
-- Metal, WebGPU, Vulkan에서는 처리 중인 프레임 몫까지 2개를 확보하므로 메모리를 이 값의 2배 사용합니다.
-- 그래픽 시작 시 한 번만 읽힙니다. 핫 리로드에서는 적용되지 않고 기본값이 사용됩니다(`RuntimeSettings` 참조).
+- `runApp()` 전에 앱 전체의 프레임별 셰이더 유니폼 예약량을 설정합니다. Vulkan 기본값은 64 MiB이며 자동으로 확장하지 않습니다. Metal/WebGPU는 1 MiB에서 시작하여 필요에 따라 확장합니다. GL/D3D11에는 이 제한이 없습니다.
+- Vulkan에서 초과하면 해당 프레임의 관련 그리기를 버립니다. 첫 Warning은 현재 크기와 설정 메서드를 표시합니다. 연속으로 초과하는 프레임에서는 알리지 않으며, 초과하지 않는 프레임에서 초과 프레임 수와 복구를 Notice로 알립니다. 무거운 장면에서는 예약량을 늘립니다.
+  ```cpp
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(128 * 1024 * 1024);
+  runApp<tcApp>(WindowSettings{}, runtime);
+  ```
+- 그리기마다 유니폼 블록은 256바이트 경계의 영역을 사용합니다. 64 × 1024 × 1024 / 256 = 262,144회(256바이트 이하 블록 하나), 블록 두 개이면 131,072회 그리기가 기준입니다. 더 큰 블록과 다른 렌더링도 같은 용량을 사용합니다.
+- `0` 이하는 기본값을 선택합니다. Metal/WebGPU/Vulkan은 처리 중인 프레임을 위해 버퍼 두 개를 할당합니다. Vulkan 기본값은 업로드 스테이징과 별도로 앱 수명 동안 호스트 가시 메모리 128 MiB를 예약합니다.
+- 그래픽 시작 시 한 번만 읽습니다. 핫 리로드에서는 기본값을 사용하며 핫 리로드 중 예약량을 변경하는 API는 없습니다.
+- `uniformBufferReserve`를 설정하고 같은 `RuntimeSettings&`를 반환하므로 이어서 호출할 수 있습니다.
 '''
 related = ["RuntimeSettings", "RuntimeSettings::uniformBufferReserve"]
 snippet = '''
 // main.cpp
 int main() {
     RuntimeSettings runtime;
-    runtime.reserveUniformBuffer(8 * 1024 * 1024);   // many draw calls per frame
+    runtime.reserveUniformBuffer(128 * 1024 * 1024);
     return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
 }
 '''

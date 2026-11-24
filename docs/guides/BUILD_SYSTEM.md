@@ -593,6 +593,33 @@ settings.setVulkanUploadSize(128 * 1024 * 1024);
 runApp<tcApp>(settings);
 ```
 
+### Vulkan per-frame uniform draw budget
+
+Vulkan reserves **64 MiB per frame** for shader uniforms by default, separately
+from its upload staging budget. Each uniform block per draw takes a
+256-byte-aligned slice. For blocks of at most 256 bytes, 64 × 1024 × 1024 / 256
+= **262,144 single-block draws**; a draw with two blocks uses two slices, allowing
+about **131,072 draws**. Larger blocks consume more space, and other rendering
+in the same frame shares this budget.
+
+Vulkan does not grow this buffer. Overflow drops affected draws for that frame
+and logs one Warning when an overflow episode starts. Consecutive overflowing
+frames stay quiet; the first clean frame logs one recovery Notice with the
+number of overflowing frames. Raise the reservation before startup for heavier
+scenes:
+
+```cpp
+RuntimeSettings runtime;
+runtime.reserveUniformBuffer(128 * 1024 * 1024);
+runApp<tcApp>(WindowSettings{}, runtime);
+```
+
+With two frames in flight, the default reserves **128 MiB of host-visible
+memory for the app's lifetime**; the example reserves 256 MiB. This is in
+addition to staging memory. `reserveUniformBuffer()` overrides the default;
+zero or less selects the default. GL and D3D11 have no such uniform ring limit.
+Metal and WebGPU start at 1 MiB per frame and grow on demand.
+
 ### macOS Deployment Target
 
 TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.

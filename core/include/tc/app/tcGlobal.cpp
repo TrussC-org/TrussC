@@ -125,6 +125,11 @@ thread_local bool shaderStreamBufferAllocation = false;
 
 // Constructed with the graphics device and emptied before sg_shutdown.
 std::unique_ptr<TextureUploadStaging> textureUploadStaging;
+#if defined(SOKOL_VULKAN)
+// Render-thread state, completed at the same boundary as sokol's uniform ring.
+bool uniformFrameOverflow = false;
+uint64_t uniformOverflowFrames = 0;
+#endif
 }
 
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
@@ -473,11 +478,20 @@ void setup() {
     sgdesc.sampler_pool_size = activeGraphicsPools.resources;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
     // Metal and WebGPU grow on demand; the reserve skips initial growth.
-    // Start with 1 MiB of app-produced uniforms. Vulkan keeps its fixed reserve.
+    // Start with 1 MiB on Metal/WebGPU. Vulkan keeps its fixed reserve.
     if (internal::gpuUniformBufferReserve > 0) {
         sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
     }
-    #if defined(SOKOL_METAL) || defined(SOKOL_WGPU)
+    #if defined(SOKOL_VULKAN)
+    else {
+        // Bound (Vulkan per-frame uniforms): 64 MiB per frame; with 2 frames in flight
+        // that reserves 128 MiB of host-visible memory for the app's lifetime.
+        // Vulkan does not grow it (Metal/WebGPU do).
+        sgdesc.uniform_buffer_size = 64 * 1024 * 1024;
+    }
+    internal::uniformFrameOverflow = false;
+    internal::uniformOverflowFrames = 0;
+    #elif defined(SOKOL_METAL) || defined(SOKOL_WGPU)
     else {
         sgdesc.uniform_buffer_size = 1024 * 1024;
     }
@@ -1315,6 +1329,15 @@ void internal::endGpuFrame() {
         window.sglOverflowReported = false;
     }
 
+#if defined(SOKOL_VULKAN)
+    if (uniformFrameOverflow) {
+        ++uniformOverflowFrames;
+    } else if (uniformOverflowFrames) {
+        logNotice("Vulkan") << "uniform buffer recovered after " << uniformOverflowFrames << " overflowing frames";
+        uniformOverflowFrames = 0;
+    }
+    uniformFrameOverflow = false;
+#endif
     sg_commit();
     // Only the committing owner completes immediate CPU work. Raw draws keep
     // their pass-consumption lifetime, including on upload-only boundaries.
@@ -2492,6 +2515,20 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
     const bool noLogger = loggerDestroyed.load();
     if (!noLogger) {
         try {
+#if defined(SOKOL_VULKAN)
+            if (tag && std::strcmp(tag, "sg") == 0 &&
+                logItem == SG_LOGITEM_VULKAN_UNIFORM_BUFFER_OVERFLOW) {
+                const bool first = !uniformFrameOverflow && uniformOverflowFrames == 0;
+                uniformFrameOverflow = true;
+                if (first) {
+                    const int bytes = sg_query_desc().uniform_buffer_size;
+                    logWarning("Vulkan") << "Vulkan per-frame uniform limit hit (" << bytes / (1024.0 * 1024.0)
+                        << " MiB per frame, " << bytes
+                        << " bytes); raise it with RuntimeSettings::reserveUniformBuffer() before runApp(); draws dropped";
+                }
+                return; // Like staging overflow, replace the repeated raw error.
+            }
+#endif
             // [TrussC] This item is emitted only after the V3D pre-resolve flush.
             // Match the tag too: other sokol modules have independent item IDs.
             if (tag && std::strcmp(tag, "sg") == 0 &&
