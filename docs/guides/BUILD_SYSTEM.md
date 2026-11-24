@@ -180,14 +180,22 @@ trusscli cache clear
 
 ### Keeping `trusscli` in sync
 
-`trusscli` is a compiled binary. When you update TrussC by pulling the latest
-source (`git pull`), the binary you already have is **not** rebuilt automatically,
-so it can fall out of step with the framework.
+`trusscli` prints a reminder on every command when its binary inputs at HEAD
+have changed since it was configured: `tools/src`, `tools/CMakeLists.txt`,
+`tools/addons.make`, and `tools/icon`. Rebuild it with:
 
 ```bash
-# Pull + rebuild trusscli in one step (recommended)
 trusscli upgrade
 ```
+
+The comparison uses the installed checkout selected by `TRUSSC_DIR` or the
+executable location, independently of a project's pinned TrussC version.
+Commits affecting only core, addons, tests, or other tools files, and uncommitted
+edits anywhere, do not trigger the reminder. Without Git or known build metadata,
+the reminder stays silent. There is no tcApp API for this CLI check.
+
+`trusscli version` and `trusscli doctor` still show full Git describe strings;
+doctor's Version sync result compares the same binary inputs.
 
 On Windows, `upgrade` runs `tools/build_win.bat`, which sets up Visual Studio
 and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
@@ -195,17 +203,6 @@ and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
 `trusscli.exe.old` before building; the next start removes it. If the build
 fails, the previous executable is restored and manual rebuild instructions
 are printed.
-
-If you pull manually instead, run `trusscli upgrade` to rebuild afterwards. `trusscli`
-detects this drift and prints a reminder on startup when the source has changed
-since the binary was built:
-
-```
-Note: TrussC has changed since trusscli was built (trusscli v0.6.1 vs TrussC v0.7.0).
-      Run 'trusscli upgrade' to rebuild trusscli in sync.
-```
-
-`trusscli doctor` reports the same version-sync status in detail.
 
 ---
 
@@ -594,9 +591,25 @@ TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's displa
 
 The Project Generator automatically sets `CMAKE_OSX_DEPLOYMENT_TARGET=14.0` in both the `macos` and `xcode` presets.
 
-### Build Type
+### TrussC build types
 
 TrussC defaults to **RelWithDebInfo** (Release with Debug Info). This provides optimized performance (`-O2`) while keeping debug symbols for stack traces and breakpoint debugging. We believe this is the best default for creative coding — you get near-Release speed without losing the ability to debug.
+
+`trusscli build` and `trusscli run` remember the last explicit `--debug`,
+`--release`, or `--relwithdebinfo` flag for each native project. Without a flag,
+they reuse that type, or use RelWithDebInfo when none is saved. Each build
+prints its type, with `(remembered)` when reusing the saved selection.
+
+```bash
+trusscli build --release
+trusscli run
+```
+
+The machine-local choice lives in `CMakePresets.json` under
+`vendor.trussc.buildType`, alongside the `use-local` marker, and survives
+`trusscli update` and `trusscli clean`. Web uses MinSizeRel and Android uses
+Release independently of this choice. `dist` selects its own build type and
+leaves the saved choice unchanged. There is no tcApp API for this CLI setting.
 
 | Build Type | Optimization | Debug Symbols | assert() | Use Case |
 |---|---|---|---|---|

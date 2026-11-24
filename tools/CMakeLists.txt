@@ -37,6 +37,19 @@ execute_process(
 if(NOT TRUSSCLI_VERSION_STR)
     set(TRUSSCLI_VERSION_STR "unknown")
 endif()
+# HEAD only: unrelated commits and working-tree edits do not change this id.
+execute_process(
+    COMMAND git rev-parse HEAD:tools/src HEAD:tools/CMakeLists.txt HEAD:tools/addons.make HEAD:tools/icon
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+    RESULT_VARIABLE TRUSSCLI_SOURCE_ID_RESULT
+    OUTPUT_VARIABLE TRUSSCLI_SOURCE_ID_STR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT TRUSSCLI_SOURCE_ID_RESULT STREQUAL "0" OR TRUSSCLI_VERSION_STR STREQUAL "unknown")
+    set(TRUSSCLI_SOURCE_ID_STR "")
+endif()
+string(REPLACE "\n" "|" TRUSSCLI_SOURCE_ID_STR "${TRUSSCLI_SOURCE_ID_STR}")
 string(TIMESTAMP TRUSSCLI_BUILD_DATE_STR "%Y-%m-%d")
 trussc_app(
     NAME trusscli
@@ -46,7 +59,7 @@ trussc_app(
 # These are only read in main.cpp. Directory-wide definitions also reach
 # TrussC and addons, changing their compile commands on each commit/day.
 set_source_files_properties(src/main.cpp PROPERTIES COMPILE_DEFINITIONS
-    "TRUSSCLI_VERSION=\"${TRUSSCLI_VERSION_STR}\";TRUSSCLI_BUILD_DATE=\"${TRUSSCLI_BUILD_DATE_STR}\"")
+    "TRUSSCLI_VERSION=\"${TRUSSCLI_VERSION_STR}\";TRUSSCLI_BUILD_DATE=\"${TRUSSCLI_BUILD_DATE_STR}\";TRUSSCLI_SOURCE_ID=\"${TRUSSCLI_SOURCE_ID_STR}\"")
 
 # Allow callers to place build output outside the source tree.
 foreach(prop RUNTIME_OUTPUT_DIRECTORY RUNTIME_OUTPUT_DIRECTORY_RELEASE
