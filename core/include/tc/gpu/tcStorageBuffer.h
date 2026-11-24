@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../utils/tcAnnotations.h"
+#include "detail/tcTransientUpload.h"
 #include "../utils/tcOnceGate.h"
 #include "../app/internal/tcAppConstruction.h"
 #include "internal/tcBufferReadback.h"
@@ -75,7 +76,7 @@ public:
         sg_write_buffer_desc write = {};
         write.src.data = {data, size};
         write.dst.buffer = staging_;
-        sg_write_buffer_transient(&write);
+        if (!uploadState_.write(write, "StorageBuffer")) return false;
         sg_copy_buffer_to_buffer_desc copy = {};
         copy.src.buffer = staging_;
         copy.dst.buffer = buffer_;
@@ -150,6 +151,7 @@ public:
         internal::deferGpuDestroy(staging_);
         view_ = {}; buffer_ = {}; staging_ = {};
         size_ = 0; updated_ = false;
+        uploadState_ = {};
     }
     bool isAllocated() const { return sg_isvalid() && buffer_.id && view_.id &&
         sg_query_buffer_state(buffer_) == SG_RESOURCESTATE_VALID &&
@@ -173,6 +175,7 @@ private:
     size_t size_ = 0;
     uint32_t uploadFrame_ = 0;
     bool updated_ = false;
+    internal::TransientUploadState uploadState_;
     // A request can warn after the StorageBuffer has been destroyed.
     std::shared_ptr<OnceGate> warnings_ = std::make_shared<OnceGate>(5.0);
     void warn(const char* message) {
@@ -184,6 +187,7 @@ private:
         return true;
     }
     void moveFrom(StorageBuffer&& other) {
+        uploadState_ = std::exchange(other.uploadState_, {});
         warnings_ = other.warnings_;
         buffer_ = std::exchange(other.buffer_, {});
         staging_ = std::exchange(other.staging_, {});

@@ -238,6 +238,10 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpErrorEventArgs::message;
     }
+    {
+        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
+        t["focused"] = &trussc::FocusEventArgs::focused;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

@@ -559,6 +559,40 @@ validation enabled. Stencil reference commands are checked without pixel
 readback; there is no Vulkan pixel readback API yet. Real GPUs and real display
 sessions still need verification; multiwindow remains deferred.
 
+### Vulkan per-frame upload budget
+
+On Vulkan, one frame can upload at most **64 MiB** of texture/buffer data from
+CPU to GPU by default, shared with transient draw uploads. Past that limit,
+an edge-triggered warning is logged, the upload is skipped, and the texture keeps
+its previous content. Each target warns once per overflow episode and reports
+"recovered after N skipped uploads" on its next successful upload. Earlier
+successful uploads in that frame remain applied.
+
+One 4K RGBA frame (4096 × 2160, about 32 MiB) fits; two in the same frame exceed
+64 MiB. For larger uploads, raise the limit before `runApp<tcApp>()`:
+
+```cpp
+WindowSettings settings;
+settings.setVulkanUploadSize(128 * 1024 * 1024);
+runApp<tcApp>(settings);
+```
+
+Graphics startup reads this setting once. With two frames in flight, the default
+reserves 128 MiB plus sokol's 4 MiB copy staging in host-visible memory for the
+app's lifetime. Increasing the limit increases that reservation proportionally.
+GL, Metal, and D3D11 have no such per-frame upload limit; the setter has no effect
+on other backends.
+
+ShaderStream, sgl, and ImGui vertex/index draws still use their existing transient
+write path: overflow drops those writes, so drawing can use old or uninitialized
+buffer contents. Raise `setVulkanUploadSize()` before startup as shown here:
+
+```cpp
+WindowSettings settings;
+settings.setVulkanUploadSize(128 * 1024 * 1024);
+runApp<tcApp>(settings);
+```
+
 ### macOS Deployment Target
 
 TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.

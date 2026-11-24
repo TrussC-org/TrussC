@@ -181,6 +181,7 @@ private:
         std::vector<std::unique_ptr<Buffers>> uploads;
         Buffers* gpu = nullptr;
         bool dirty = true;
+        internal::TransientUploadState uploadState;
         bool upload() {
             if (!dirty) return gpu != nullptr;
             // Bound (abi): sg_draw counts and buffer byte sizes use signed int.
@@ -222,7 +223,7 @@ private:
             sg_write_buffer_desc write{};
             write.src.data = {vertices.data(), bytes};
             write.dst.buffer = buffers->staging;
-            sg_write_buffer_transient(&write);
+            if (!uploadState.write(write, "GlyphBatch")) return false;
             sg_copy_buffer_to_buffer_desc copy{};
             copy.src.buffer = buffers->staging;
             copy.dst.buffer = buffers->vertices;

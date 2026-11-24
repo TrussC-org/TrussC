@@ -5549,6 +5549,7 @@ WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial wind
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
 WindowSettings & WindowSettings::setTitle(const std::string & t)  // Sets the initial window title.
 WindowSettings & WindowSettings::setVisible(bool enabled)  // Sets whether a window starts visible.
+WindowSettings & WindowSettings::setVulkanUploadSize(size_t bytes)  // Sets Vulkan's startup per-frame CPU-to-GPU upload limit; default 64 MiB, ignored by other backends.
 ```
 
 ### Xml — Wraps a pugixml document for loading, saving, and querying XML.

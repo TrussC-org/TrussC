@@ -381,7 +381,7 @@ int main() {
             ('storage', '!size || size % 4 || size > INT_MAX', 'false'),
             ('storage', '!data || !size || size > size_ || size % 4', 'false'),
             ('storage', 'updated_ && uploadFrame_ == frame', 'false'),
-            ('storage', 'sg_write_buffer_transient(&write);', '(void)write;'),
+            ('storage', 'if (!uploadState_.write(write, "StorageBuffer")) return false;', '(void)write;'),
             ('storage', 'sg_copy_buffer_to_buffer(&copy);', '(void)copy;'),
             ('storage', 'internal::suspendForImageUpload();', '(void)0;'),
             ('storage', 'desc.usage.copy_dst = true;', 'desc.usage.copy_dst = false;'),
