@@ -9,21 +9,35 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli")).resolve()
 NATIVE = {"linux": "linux", "darwin": "macos", "win32": "windows"}[sys.platform]
 
+
+def fixture_rmtree(path):
+    """Remove fixture repositories, including Windows read-only Git objects."""
+    def make_writable_and_retry(function, path, exception):
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=make_writable_and_retry)
+    else:
+        shutil.rmtree(path, onerror=make_writable_and_retry)
+
+
 @unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
 class VersionTests(unittest.TestCase):
     def setUp(self):
-        self.scratch = tempfile.TemporaryDirectory(prefix="trusscli-versions-")
-        self.addCleanup(self.scratch.cleanup)
-        self.base = Path(self.scratch.name).resolve()
+        self.base = Path(tempfile.mkdtemp(prefix="trusscli-versions-")).resolve()
+        self.addCleanup(fixture_rmtree, self.base)
         self.project = self.base / "project"
         (self.project / "src").mkdir(parents=True)
         (self.project / "src/main.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
@@ -117,7 +131,7 @@ class VersionTests(unittest.TestCase):
         return json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))["vendor"]["trussc"].get("localPath")
 
     def old_layout(self):
-        shutil.rmtree(self.source / "core")
+        fixture_rmtree(self.source / "core")
         (self.source / "trussc/cmake").mkdir(parents=True)
         (self.source / "trussc/cmake/trussc_app.cmake").write_text("# old layout\n", encoding="utf-8")
         self.advance()
@@ -273,7 +287,7 @@ class VersionTests(unittest.TestCase):
     def test_ref_path_cannot_follow_worktree_symlink_outside_cache(self):
         outside = self.base / "outside"
         outside.mkdir()
-        (self.source / "escape").symlink_to(outside, target_is_directory=True)
+        self.fixture_symlink(self.source / "escape", outside, target_is_directory=True)
         self.advance()
         self.git("-C", self.source, "tag", "parent")
         self.git("-C", self.source, "branch", "parent/escape/child")
@@ -298,7 +312,7 @@ class VersionTests(unittest.TestCase):
 
     @unittest.skipIf(sys.platform == "win32", "fixture uses /dev/zero")
     def test_version_manifest_rejects_special_file_symlink(self):
-        (self.project / ".trussc-version").symlink_to("/dev/zero")
+        self.fixture_symlink(self.project / ".trussc-version", "/dev/zero")
         output = self.cli("build", "--dry-run", success=False)
         self.assertIn("must be a regular file", output)
         self.assertFalse(self.cache.exists())
@@ -325,7 +339,7 @@ class VersionTests(unittest.TestCase):
             self.assertFalse(self.cache.exists())
         self.cli("update", "--ide", "cmake")
         self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/v1")
-        shutil.rmtree(self.root())
+        fixture_rmtree(self.root())
         self.cli("build", success=False)
         self.cli("update")
         self.assertTrue(self.root().is_dir())
@@ -416,6 +430,7 @@ class VersionTests(unittest.TestCase):
 
 @unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
 class TarballTests(unittest.TestCase):
+    fixture_symlink = VersionTests.fixture_symlink
     git = VersionTests.git
     advance = VersionTests.advance
     cli = VersionTests.cli
@@ -588,7 +603,7 @@ class TarballTests(unittest.TestCase):
 
     @unittest.skipIf(sys.platform == "win32", "fixture needs directory symlinks")
     def test_internal_symlink_is_supported(self):
-        (self.source / "alias").symlink_to("core", target_is_directory=True)
+        self.fixture_symlink(self.source / "alias", "core", target_is_directory=True)
         self.advance()
         self.archive("main")
         self.cli("use", "main")
@@ -611,7 +626,7 @@ class TarballTests(unittest.TestCase):
         outside.mkdir()
         versions = self.cache / "versions"
         versions.mkdir(parents=True)
-        (versions / "TrussC-org").symlink_to(outside, target_is_directory=True)
+        self.fixture_symlink(versions / "TrussC-org", outside, target_is_directory=True)
         self.assertIn("only real directories", self.cli("use", "v1", success=False))
         self.assertEqual(list(outside.iterdir()), [])
 
@@ -627,7 +642,7 @@ class TarballTests(unittest.TestCase):
         path = self.base / "no-git-bin"
         path.mkdir()
         for tool in ("curl", "tar", "gzip"):
-            (path / tool).symlink_to(shutil.which(tool))
+            self.fixture_symlink(path / tool, shutil.which(tool))
         self.env.pop("TRUSSC_FETCH")
         self.env["PATH"] = str(path)
         self.assertNotIn("Error:", self.cli("use", "v1"))
@@ -639,6 +654,7 @@ class TarballTests(unittest.TestCase):
 @unittest.skipIf(sys.platform == "win32", "fixture needs an executable Python script in PATH")
 class WindowsTarListingTests(unittest.TestCase):
     """Exercise acquisition and its stops with CRLF and localized BSD listings."""
+    fixture_symlink = VersionTests.fixture_symlink
     git = VersionTests.git
     advance = VersionTests.advance
     cli = VersionTests.cli
@@ -685,6 +701,49 @@ class WindowsTarListingTests(unittest.TestCase):
             "sys.exit(result.returncode)\n", encoding="utf-8")
         tool.chmod(0o755)
         self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
+
+
+class FixtureHelperTests(unittest.TestCase):
+    def test_symlink_permission_error_skips_fixture(self):
+        case = VersionTests()
+        with mock.patch('os.symlink', side_effect=OSError(1314, 'privilege not held')):
+            with self.assertRaisesRegex(unittest.SkipTest, 'fixture needs directory symlinks'):
+                case.fixture_symlink(Path('unused-link'), Path('unused-target'),
+                                     target_is_directory=True)
+
+    def test_rmtree_removes_read_only_tree(self):
+        tree = Path(tempfile.mkdtemp(prefix='trusscli-cleanup-'))
+        self.addCleanup(lambda: fixture_rmtree(tree) if tree.exists() else None)
+        objects = tree / 'objects'
+        objects.mkdir()
+        (objects / 'object').write_bytes(b'fixture')
+        (objects / 'object').chmod(stat.S_IREAD)
+        fixture_rmtree(tree)
+        self.assertFalse(tree.exists())
+
+    def test_rmtree_retries_both_python_callback_contracts(self):
+        for version, keyword in (((3, 11), 'onerror'), ((3, 12), 'onexc')):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as scratch:
+                path = Path(scratch) / 'object'
+                path.write_bytes(b'fixture')
+                path.chmod(stat.S_IREAD)
+                failure = PermissionError('read-only Git object')
+
+                def remove(tree, **callbacks):
+                    self.assertEqual(Path(tree), Path(scratch))
+                    self.assertEqual(list(callbacks), [keyword])
+
+                    def retry(filename):
+                        self.assertTrue(Path(filename).stat().st_mode & stat.S_IWRITE)
+                        os.unlink(filename)
+
+                    exception = failure if keyword == 'onexc' else (PermissionError, failure, None)
+                    callbacks[keyword](retry, str(path), exception)
+
+                with mock.patch.object(sys, 'version_info', version), \
+                     mock.patch.object(shutil, 'rmtree', side_effect=remove):
+                    fixture_rmtree(scratch)
+                self.assertFalse(path.exists())
 
 
 if __name__ == "__main__":
