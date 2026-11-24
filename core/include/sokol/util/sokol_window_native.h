@@ -90,6 +90,7 @@ static inline sapp_tc_window_desc _sapp_tc_normalize_main_window(const sapp_desc
     window.sample_count = d->sample_count > 0 ? d->sample_count : 1;
     window.no_high_dpi = !d->high_dpi;
     window.hidden = d->_tc_start_hidden;
+    window.borderless = d->_tc_borderless; // [TrussC] apply chrome before the first map (#1639)
     window.title = d->window_title ? d->window_title : "sokol";
     return window;
 }

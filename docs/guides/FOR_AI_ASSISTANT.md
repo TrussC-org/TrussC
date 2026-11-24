@@ -2857,7 +2857,7 @@ void setIndependentFps(float updateFps, float drawFps)  // Sets separate update 
 void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on and the screen saver stay inactive.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
-void setWindowDecorated(bool decorated)  // Controls the resolved Window's standard decorations.
+void setWindowDecorated(bool decorated)  // Shows or hides window decorations while keeping the client size on Windows, macOS and X11.
 void setWindowPosition(int x, int y) [macos,windows,linux]  // Moves the window to a screen position.
 void setWindowSize(int width, int height)  // Resizes the window in the current coordinate units.
 void setWindowSizeLogical(int width, int height)  // Resizes the current window using logical dimensions.
