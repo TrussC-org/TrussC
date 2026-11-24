@@ -5,6 +5,19 @@ int runInputReplayNodeChecks() {
     using namespace tc;
     internal::beginRuntimeRun();
     internal::beginFrameworkLifetime();
+    {
+        // A plain Node root (no App, no window): the Toolbar logs an Error and stays inactive.
+        auto root = std::make_shared<Node>();
+        auto bar = std::make_shared<tcx::inputreplay::Toolbar>(KEY_F9);
+        root->addChild(bar);
+        internal::setupNodeOnce(*bar);
+        bar->update();
+        bar->draw();
+        const auto path = std::filesystem::temp_directory_path() / "tc-inputreplay-no-app.jsonl";
+        inputReplayTest::check(bar->getChildren().empty() && !bar->startRecording(path) && !bar->isRecording() &&
+            !bar->play(path) && !bar->isPlaying() && !bar->isPointerOver() && !std::filesystem::exists(path),
+            "Toolbar under a plain Node root stays inactive");
+    }
     tcCoreTest::WindowFixture fixture(9501);
     internal::retainRuntimeWindow(fixture.window);
     auto& window = *fixture.window;

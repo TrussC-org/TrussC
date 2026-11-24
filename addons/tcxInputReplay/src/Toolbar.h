@@ -19,31 +19,39 @@ public:
     void setToggleKey(int key) { toggleKey_ = key; }
     void setRecordKey(int key) { recordKey_ = key; }
     bool startRecording(const std::filesystem::path& path) {
-        if (!recorder_->start(path)) return false;
+        if (!recorder_ || !recorder_->start(path)) return false;
         recordingPath_ = tc::getDataPath(path);
         return true;
     }
-    bool startRecording(RecordingMode, std::chrono::milliseconds duration) { return recorder_->start(duration); }
-    bool stopRecording() { return recorder_->stop(); }
-    bool flush(const std::filesystem::path& path) { return recorder_->flush(path); }
-    void mark(const std::string& name) { recorder_->mark(name); player_->mark(name); }
+    bool startRecording(RecordingMode, std::chrono::milliseconds duration) { return recorder_ && recorder_->start(duration); }
+    bool stopRecording() { return recorder_ && recorder_->stop(); }
+    bool flush(const std::filesystem::path& path) { return recorder_ && recorder_->flush(path); }
+    void mark(const std::string& name) { if (recorder_) { recorder_->mark(name); player_->mark(name); } }
     bool isRecording() const { return recorder_ && recorder_->isRecording(); }
     size_t getRecordedCount() { return recorder_ ? recorder_->count() : 0; }
     bool play(const std::filesystem::path& path, ScaleMode mode = ScaleMode::None) {
-        if (!player_->play(path, mode)) return false;
+        if (!player_ || !player_->play(path, mode)) return false;
         selectedPath_ = tc::getDataPath(path);
         return true;
     }
-    void stopPlayback() { player_->stop(); }
+    void stopPlayback() { if (player_) player_->stop(); }
     bool isPlaying() const { return player_ && player_->isPlaying(); }
     bool isPointerOver() {
-        if (!isVisible()) return false;
-        auto hit = tc::getRootNode()->findHitNodeFromScreen(tc::getMouseX(), tc::getMouseY()).node;
+        auto* root = tc::getRootNode();
+        if (!isVisible() || !root) return false;
+        auto hit = root->findHitNodeFromScreen(tc::getMouseX(), tc::getMouseY()).node;
         for (; hit; hit = hit->getParent()) if (hit.get() == this) return true;
         return false;
     }
     void setup() override {
-        auto& window = *static_cast<tc::App*>(tc::getRootNode())->getWindow();
+        // The Toolbar records the window of the App it is added under.
+        auto* app = dynamic_cast<tc::App*>(tc::getRootNode());
+        auto* appWindow = app ? app->getWindow() : nullptr;
+        if (!appWindow) {
+            tc::logError("tcxInputReplay") << "Toolbar must be added under an App with a window; it stays inactive";
+            return;
+        }
+        auto& window = *appWindow;
         recorder_ = std::make_unique<Recorder>(window);
         player_ = std::make_unique<Player>(window);
         const auto parent = std::dynamic_pointer_cast<tc::RectNode>(getParent());
@@ -72,11 +80,13 @@ public:
         update();
     }
     void cleanup() override {
+        if (!recorder_) return;
         recorder_->stop();
         player_->stop();
         listeners_.clear();
     }
     void update() override {
+        if (!player_) return;
         player_->update();
         record_->setLabel(isRecording() ? "Stop" : "Record");
         if (isRecording()) record_->setActiveColor({0.84f, 0.14f, 0.14f});
@@ -95,6 +105,7 @@ public:
         label_->setPath(selectedPath_);
     }
     void draw() override {
+        if (!recorder_) return;
         tc::fill();
         tc::setColor(0.16f, 0.17f, 0.20f);
         tc::drawRectRounded(0, 0, getWidth(), getHeight(), 6);
@@ -104,7 +115,7 @@ public:
         }
     }
     void keyPressed(const tc::KeyEventArgs& e) {
-        if (e.injected || e.isRepeat) return;
+        if (!recorder_ || e.injected || e.isRepeat) return;
         if (toggleKey_ && e.key == toggleKey_) setVisible(!isVisible());
         if (recordKey_ && e.key == recordKey_) toggleRecording();
     }
