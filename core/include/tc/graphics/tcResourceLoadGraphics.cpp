@@ -201,6 +201,21 @@ bool FontAtlasManager::initFromFontData(int fontSize, int fontIndex, const fs::p
     return true;
 }
 
+int FontAtlasManager::gapBaseRasterSize() const {
+    const double line = std::ceil(double(ascent_ - descent_) * oversample_);
+    return int(std::min(line + oversample_ - 1, double(maxAtlasSize_)));
+}
+
+int FontAtlasManager::getGlyphGap() const {
+    // Fixed once the face is loaded except through the oversampling, which may
+    // still change before the first glyph is rasterized.
+    if (cachedGap_ < 0 || cachedGapOversample_ != oversample_) {
+        cachedGap_ = glyphGap(gapBaseRasterSize());
+        cachedGapOversample_ = oversample_;
+    }
+    return cachedGap_;
+}
+
 size_t FontAtlasManager::createNewAtlas() {
     auto page = std::make_shared<AtlasState>();
     AtlasState& atlas = *page;
@@ -214,7 +229,7 @@ size_t FontAtlasManager::createNewAtlas() {
     const double boxWidth = std::ceil(bx1 * rasterScale) - std::floor(bx0 * rasterScale);
     const double boxHeight = std::ceil(by1 * rasterScale) - std::floor(by0 * rasterScale);
     const double height = std::max(boxHeight, std::ceil(double(ascent_ - descent_) * oversample_));
-    const int gap = glyphGap(int(std::min(std::max(boxWidth, height) + oversample_ - 1, double(maxAtlasSize_))));
+    const int gap = getGlyphGap();
     const double cellWidth = std::max(16.0, std::ceil((boxWidth + oversample_ - 1 + gap) / 16) * 16);
     const double cellHeight = std::max(16.0, std::ceil((height + oversample_ - 1 + gap) / 16) * 16);
     const int inset = alignGlyphOffset(GLYPH_PADDING);
@@ -287,7 +302,7 @@ void FontAtlasManager::processCompaction() {
             size_t i = first;
             for (; i < last; ++i) {
                 const auto& glyph = moves[i];
-                const int gap = glyphGap(std::max(glyph.width, glyph.height));
+                const int gap = getGlyphGap();
                 if (x + glyph.width + gap > side) {
                     x = alignGlyphOffset(GLYPH_PADDING);
                     y = alignGlyphOffset(y + row);
