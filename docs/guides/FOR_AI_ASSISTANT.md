@@ -3211,7 +3211,7 @@ void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a d
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
-void setAndroidForegroundService(bool enabled)  // Opts in to Android mediaPlayback foreground service for background playback; no wake lock or automatic notification permission request.
+void setAndroidForegroundService(bool enabled)  // Opts in to Android mediaPlayback foreground service for background playback; visible opt-in requests notification permission on Android 13+ without delaying the service. No wake lock is acquired.
 void setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
 void setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
