@@ -73,11 +73,29 @@ public:
 
     bool toolbarVisible = true, visibilityBeforePlayback = true, playbackVisibilitySaved = false;
     bool hotKeyEnabled = true, toolbarFrameSeen = false;
+    bool toolbarPlaybackInput = false;
+    unsigned toolbarButtons = 0;
     int hotKey = tc::KEY_F9;
     ImGuiContext* toolbarContext = nullptr;
     ImGuiID toolbarHook = 0, shutdownHook = 0;
     std::filesystem::path selectedPath, recordingPath, temporaryRecording, pendingSave;
 
+    bool toolbarOwns(ImGuiWindow* candidate) const {
+        return candidate && candidate->RootWindow->ID == ImHashStr("Input replay");
+    }
+    bool toolbarPointerOwner(tc::Window* target) const {
+        if (target != window) return false;
+        return toolbarContext && toolbarVisible && !toolbarPlaybackInput &&
+            (toolbarOwns(toolbarContext->HoveredWindow) ||
+             (toolbarContext->ActiveId && toolbarOwns(toolbarContext->ActiveIdWindow)));
+    }
+    bool toolbarPointer(tc::Window* target) const {
+        return (target == window && toolbarButtons) || toolbarPointerOwner(target);
+    }
+    bool toolbarKeyboard(tc::Window* target) const {
+        return target == window && toolbarContext && toolbarVisible && !toolbarPlaybackInput &&
+            toolbarOwns(toolbarContext->NavWindow) && toolbarContext->IO.WantCaptureKeyboard;
+    }
     void restoreToolbar() {
         if (playbackVisibilitySaved) toolbarVisible = visibilityBeforePlayback;
         playbackVisibilitySaved = false;
@@ -248,33 +266,45 @@ inline void setup(std::vector<WindowMapping> mappings = {}) {
     constexpr int priority = -30;
     for (const auto& mapping : s.mappings) {
         const auto keyName = mapping.key;
+        auto* target = mapping.window;
         auto& e = mapping.window->events();
 
-        // ImGui consumes typed input at -20. Capture before that, independent of setup order.
+        // Record before ImGui consumes typed input at -20; exclude only our toolbar.
         s.listeners.push_back(e.rawEvent.listen([&s](const sapp_event& event) {
             s.touchDispatch = event.type == SAPP_EVENTTYPE_TOUCHES_BEGAN || event.type == SAPP_EVENTTYPE_TOUCHES_MOVED ||
                 event.type == SAPP_EVENTTYPE_TOUCHES_ENDED || event.type == SAPP_EVENTTYPE_TOUCHES_CANCELLED;
-        }, priority));
-        auto moved = [&s, keyName](const auto& event) {
-            if (!s.touchDispatch) s.record(keyName, "mouseMoved", detail::pointer(event));
+        }, -30));
+        auto moved = [&s, keyName, target](const auto& event) {
+            if (!s.touchDispatch && !s.toolbarPointer(target)) s.record(keyName, "mouseMoved", detail::pointer(event));
         };
         s.listeners.push_back(e.mouseMoved.listen(moved, priority));
         s.listeners.push_back(e.mouseDragged.listen(moved, priority));
-        auto button = [&s, keyName](const char* type, const tc::MouseEventArgs& event) {
+        auto button = [&s, keyName, target](const char* type, const tc::MouseEventArgs& event) {
             if (s.touchDispatch) return;
+            const unsigned mask = 1u << event.button;
+            const bool pressed = std::string_view(type) == "mousePressed";
+            const bool skip = pressed ? s.toolbarPointerOwner(target) :
+                (target == s.window && (s.toolbarButtons & mask));
+            if (target == s.window) {
+                if (pressed && skip) s.toolbarButtons |= mask;
+                if (!pressed) s.toolbarButtons &= ~mask;
+            }
+            if (skip) return;
             auto j = detail::pointer(event);
             j["button"] = event.button;
             s.record(keyName, type, std::move(j));
         };
         s.listeners.push_back(e.mousePressed.listen([button](const tc::MouseEventArgs& event) { button("mousePressed", event); }, priority));
         s.listeners.push_back(e.mouseReleased.listen([button](const tc::MouseEventArgs& event) { button("mouseReleased", event); }, priority));
-        s.listeners.push_back(e.mouseScrolled.listen([&s, keyName](const tc::ScrollEventArgs& event) {
+        s.listeners.push_back(e.mouseScrolled.listen([&s, keyName, target](const tc::ScrollEventArgs& event) {
+            if (s.toolbarPointer(target)) return;
             auto j = detail::pointer(event);
             j["scrollX"] = event.scroll.x;
             j["scrollY"] = event.scroll.y;
             s.record(keyName, "mouseScrolled", std::move(j));
         }, priority));
-        auto key = [&s, keyName](const char* type, const tc::KeyEventArgs& event) {
+        auto key = [&s, keyName, target](const char* type, const tc::KeyEventArgs& event) {
+            if (s.toolbarKeyboard(target)) return;
             auto j = detail::provenance(event);
             detail::modifiers(j, event);
             j["key"] = event.key;
@@ -283,7 +313,8 @@ inline void setup(std::vector<WindowMapping> mappings = {}) {
         };
         s.listeners.push_back(e.keyPressed.listen([key](const tc::KeyEventArgs& event) { key("keyPressed", event); }, priority));
         s.listeners.push_back(e.keyReleased.listen([key](const tc::KeyEventArgs& event) { key("keyReleased", event); }, priority));
-        s.listeners.push_back(e.charInput.listen([&s, keyName](const tc::CharEventArgs& event) {
+        s.listeners.push_back(e.charInput.listen([&s, keyName, target](const tc::CharEventArgs& event) {
+            if (s.toolbarKeyboard(target)) return;
             auto j = detail::provenance(event);
             detail::modifiers(j, event);
             j["codepoint"] = event.codepoint;
@@ -303,7 +334,7 @@ inline void setup(std::vector<WindowMapping> mappings = {}) {
             s.toolbarVisible = !s.toolbarVisible;
             tc::redraw();
         }
-    }, priority));
+    }, -30));
     s.listeners.push_back(e.filesDropped.listen([&s](const tc::DragDropEventArgs& event) { s.selectDrop(event); }, priority));
     s.listeners.push_back(e.update.listen([&s] { s.update(); }, priority));
     detail::installToolbar();
@@ -436,6 +467,7 @@ inline bool play(const std::filesystem::path& path, ScaleMode mode = ScaleMode::
         s.playbackVisibilitySaved = true;
         s.visibilityBeforePlayback = s.toolbarVisible;
         s.toolbarVisible = false;
+        s.toolbarPlaybackInput = true;
         return true;
     } catch (const std::exception& e) { s.error(e.what()); return false; }
 }
@@ -566,8 +598,12 @@ inline void drawToolbar() {
     if (!s.toolbarVisible) return;
     const auto& io = ImGui::GetIO();
     ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, 4}, ImGuiCond_Always, {0.5f, 0});
-    if (ImGui::Begin("Input replay", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
+    const bool ignoreInput = s.timeline.active || s.toolbarPlaybackInput;
+    const auto flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+        (ignoreInput ? ImGuiWindowFlags_NoInputs : 0);
+    ImGui::BeginDisabled(ignoreInput);
+    if (ImGui::Begin("Input replay", nullptr, flags)) {
         if (ImGui::Button(s.recording() ? "Stop recording" : "Record")) toolbarRecord();
         if (hasPendingSave()) {
             ImGui::SameLine();
@@ -589,6 +625,7 @@ inline void drawToolbar() {
         else ImGui::TextUnformatted(s.recording() ? "Recording" : "Idle");
     }
     ImGui::End();
+    ImGui::EndDisabled();
 }
 inline void installToolbar() {
     auto& s = state();
@@ -608,6 +645,11 @@ inline void installToolbar() {
     hook.Callback = [](ImGuiContext*, ImGuiContextHook*) {
         state().toolbarFrameSeen = true;
         drawToolbar();
+        // update() can restore visibility before NewFrame processes the last
+        // replayed click. Keep ignoring input through its trickled queue tail.
+        auto& s = state();
+        if (!s.timeline.active && ImGui::GetCurrentContext()->InputEventsQueue.empty())
+            s.toolbarPlaybackInput = false;
     };
     s.toolbarHook = ImGui::AddContextHook(s.toolbarContext, &hook);
     hook.Type = ImGuiContextHookType_Shutdown;
@@ -630,6 +672,8 @@ inline void removeToolbar() {
         s.toolbarContext = nullptr;
     }
     s.toolbarFrameSeen = false;
+    s.toolbarPlaybackInput = false;
+    s.toolbarButtons = 0;
 }
 }
 
