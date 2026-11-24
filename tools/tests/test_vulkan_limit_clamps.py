@@ -1,6 +1,7 @@
 """Vulkan device limits clamp in unsigned before casting (AMD reports UINT32_MAX)."""
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -22,6 +23,10 @@ def production_lines():
     return minimum, lines
 
 
+COMPILER = shutil.which("c++") or shutil.which("clang++") or shutil.which("g++")
+
+
+@unittest.skipUnless(COMPILER, "needs a C++ compiler (c++, clang++ or g++) on PATH")
 class VulkanLimitClampTests(unittest.TestCase):
     def test_unsigned_max_clamps_to_sokol_constants(self):
         minimum, lines = production_lines()
@@ -58,7 +63,7 @@ class VulkanLimitClampTests(unittest.TestCase):
             cpp = Path(tmp) / "clamp.cpp"
             exe = Path(tmp) / "clamp"
             cpp.write_text(source, encoding="utf-8")
-            subprocess.run(["c++", "-std=c++17", "-I", str(ROOT / "core/include"), str(cpp), "-o", str(exe)],
+            subprocess.run([COMPILER, "-std=c++17", "-I", str(ROOT / "core/include"), str(cpp), "-o", str(exe)],
                            check=True)
             self.assertEqual(subprocess.run([str(exe)]).returncode, 0)
 
