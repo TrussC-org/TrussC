@@ -117,10 +117,19 @@ class CompactCheckApp : public App {
     vector<uint8_t> before_, main_;
     size_t case_ = 0;
     const CompactGapCase& gapCase() const { return compactGapCases[case_]; }
+    // Smallest drawn glyph size (px) at which compaction must not change the
+    // image. Padded quads (#1644) read half a gap past each glyph, plus the tap
+    // spread and one mip texel, so a repacked neighbor stays out only while a
+    // pixel covers less than about twice the gap: with the 6-texel font gap,
+    // 8 texels per pixel is identical after compaction (measured on Metal),
+    // and 16 differs where compaction packs a neighbor 8 texels away.
+    double threshold() const {
+        return std::max(gapCase().threshold, gapCase().side / (2.0 * manager_->getGlyphGap()));
+    }
     float comparisonScale(int row) const {
         if (row == 0) return 1;
         if (row < 7) return std::ldexp(1.0f, -row - 1);
-        return float(gapCase().threshold / gapCase().side * (row == 7 ? 1.0001 : .99));
+        return float(threshold() / gapCase().side * (row == 7 ? 1.0001 : .99));
     }
     int frame_ = 0;
     uint64_t generation_ = 0;
@@ -219,7 +228,7 @@ public:
                 for (int y = 8 + row * rowHeight; y < 8 + row * rowHeight + rowHeight; ++y)
                     for (int x = engine * (width / 2); x < engine * (width / 2) + width / 2; ++x)
                         ink |= before_[(size_t(y) * width + x) * 4 + 3] != 0;
-                const bool asserted = gapCase().side * comparisonScale(row) >= gapCase().threshold;
+                const bool asserted = gapCase().side * comparisonScale(row) >= threshold();
                 printf("COMPACT_INK side=%d row=%d engine=%d ink=%d %s\n", gapCase().side, row, engine, ink, asserted ? "asserted" : "recorded");
                 if (asserted) check("compact display: asserted comparison contains ink", ink);
             }
@@ -239,12 +248,16 @@ public:
             const double pixels = gapCase().side * comparisonScale(row);
             for (int engine = 0; engine < 2; ++engine) for (int reference = 0; reference < 2; ++reference) {
                 const auto& baseline = reference ? main_ : before_;
-                const double threshold = reference ? std::max(gapCase().threshold, gapCase().mainThreshold) : gapCase().threshold;
+                const double threshold = reference ? std::max(this->threshold(), gapCase().mainThreshold) : this->threshold();
                 // Row 7 sits at the exact two-sided boundary (x1.0001). Metal, D3D11 and
                 // Mesa/NVIDIA GL show up to 2/255 on single pixels there from per-glyph
                 // filter/LOD rounding; it stays with the glyph drawn alone, so it is not
                 // bleed (neighbors added at most one level). Record it; assert rows 0-6.
-                const bool asserted = pixels >= threshold && row != 7;
+                // The main layout packs glyphs 2 texels apart; a padded quad
+                // (#1644) reaches its neighbor there even at 1:1, so it is
+                // recorded for comparison only. "before" (the current packer
+                // gap) carries the invariant.
+                const bool asserted = pixels >= threshold && row != 7 && reference == 0;
                 int maxDifference = 0, different = 0, aboveTolerance = 0;
                 for (int y = 8 + row * rowHeight; y < 8 + (row + 1) * rowHeight; ++y)
                     for (int x = engine * (width / 2); x < (engine + 1) * (width / 2); ++x) {
