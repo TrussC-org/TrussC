@@ -52334,10 +52334,22 @@ platform_note.ko = '''
 category = "window_input"
 keywords = ["open", "file", "picker", "browse", "chooser"]
 of = ["ofSystemLoadDialog"]
-description.en = "Shows a file or folder selection dialog."
-description.ja = "ファイルまたはフォルダーの選択ダイアログを表示する。"
-description.ko = "파일 또는 폴더 선택 대화상자를 표시한다."
+description.en = "Selects a file or folder, with an extension-list overload for case-insensitive file filtering."
+description.ja = "ファイルやフォルダーを選択します。拡張子リストを受け取る形式では、大文字と小文字を区別せずファイルを絞り込みます。"
+description.ko = "파일이나 폴더를 선택합니다. 확장자 목록을 받는 형식은 대소문자를 구분하지 않고 파일을 필터링합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` as the last argument. Use extensions without dots; matching ignores case and an empty list keeps the original behavior. Folder selection ignores the list.
+
+Select allowed file types:
+```cpp
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
+    }
+}
+```
+
 - Arguments are `title`, `message`, `defaultPath` for the initial directory, and `folderSelection`. Text and path arguments default to empty values, and `folderSelection` defaults to `false`.
 - Selects one file, or one folder when `folderSelection` is `true`; this function does not read the selected file.
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and the final path component in `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
@@ -52345,6 +52357,18 @@ details.en = '''
 - While it waits, all windows pause. [`loadDialogAsync`](#loadDialogAsync) takes a callback instead of returning the result.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を最後の引数に受け取ります。ドットなしの拡張子を指定します。大文字と小文字は区別せず、空のリストは従来どおりに動作します。フォルダーの選択ではリストを使いません。
+
+選択する拡張子を指定します。
+```cpp
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
+    }
+}
+```
+
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、`folderSelection` です。文字列とパスのデフォルトは空で、`folderSelection` のデフォルトは `false` です。
 - ファイルを 1 個選択します。`folderSelection` が `true` ならフォルダーを 1 個選択します。この関数自体は選択したファイルを読み込みません。
 - 選択後は、`success = true`、フルパスの `filePath`、パスの最後の要素を格納した `fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
@@ -52352,6 +52376,18 @@ details.ja = '''
 - 待機中はすべてのウィンドウが停止します。[`loadDialogAsync`](#loadDialogAsync) は結果を返す代わりにコールバックで受け取ります。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 마지막 인수으로 받습니다. 점 없이 확장자를 지정합니다. 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 폴더 선택에서는 목록을 사용하지 않습니다.
+
+선택할 확장자를 지정합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
+    }
+}
+```
+
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, `folderSelection`입니다. 문자열과 경로의 기본값은 비어 있으며, `folderSelection`의 기본값은 `false`입니다.
 - 파일 하나를 선택합니다. `folderSelection`이 `true`이면 폴더 하나를 선택합니다. 이 함수 자체는 선택한 파일을 읽지 않습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, 경로의 마지막 요소를 담은 `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
@@ -52375,10 +52411,10 @@ platform_note.ko = '''
 - iOS는 오류를 로그에 기록하고 빈 결과를 반환합니다. `loadDialogAsync()`를 사용해야 합니다. Android는 선택기가 구현되어 있지 않아 빈 결과를 반환합니다. Web/WASM은 경고를 로그에 기록하고 빈 결과를 반환합니다.
 '''
 snippet = '''
-void tcApp::setup() {
-    auto result = loadDialog("Open a text file");
-    if (result.success) {
-        logNotice() << loadTextFile(result.filePath);
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
     }
 }
 '''
@@ -52386,10 +52422,21 @@ void tcApp::setup() {
 ["loadDialogAsync"]
 category = "window_input"
 keywords = ["open", "file", "picker", "callback"]
-description.en = "Shows a file or folder picker with a result callback."
-description.ja = "結果コールバック付きのファイルまたはフォルダー選択ダイアログを表示する。"
-description.ko = "결과 콜백이 있는 파일 또는 폴더 선택 대화상자를 표시한다."
+description.en = "Selects a file or folder, with an extension-list overload for case-insensitive file filtering."
+description.ja = "ファイルやフォルダーを選択します。拡張子リストを受け取る形式では、大文字と小文字を区別せずファイルを絞り込みます。"
+description.ko = "파일이나 폴더를 선택합니다. 확장자 목록을 받는 형식은 대소문자를 구분하지 않고 파일을 필터링합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` before `callback`. Use extensions without dots; matching ignores case and an empty list keeps the original behavior. Folder selection ignores the list.
+
+Select allowed file types:
+```cpp
+void tcApp::setup() {
+    loadDialogAsync("Open image", "", {}, false, {"png", "jpg"}, [](const FileDialogResult& result) {
+        if (result.success) logNotice() << result.filePath;
+    });
+}
+```
+
 - Takes `title`, `message`, `defaultPath`, `folderSelection`, and `callback`, with no default arguments; `defaultPath` is the initial directory, and `folderSelection` selects folders when `true` or files when `false`.
 - Pass `{}` for no initial directory; paths are passed to the platform picker without resolution through `getDataPath()`.
 - The `void(const FileDialogResult&)` callback receives `success = true`, the selected full `filePath`, and its `fileName` on selection; cancellation or failure gives `success = false` and empty paths. The picker does not read the selected file.
@@ -52398,6 +52445,17 @@ details.en = '''
 - See `alertDialogAsync` for shared threading, callback timing, and app run lifetime rules.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を `callback` の直前に受け取ります。ドットなしの拡張子を指定します。大文字と小文字は区別せず、空のリストは従来どおりに動作します。フォルダーの選択ではリストを使いません。
+
+選択する拡張子を指定します。
+```cpp
+void tcApp::setup() {
+    loadDialogAsync("Open image", "", {}, false, {"png", "jpg"}, [](const FileDialogResult& result) {
+        if (result.success) logNotice() << result.filePath;
+    });
+}
+```
+
 - `title`、`message`、`defaultPath`、`folderSelection`、`callback` を受け取り、既定の引数はありません。`defaultPath` は初期ディレクトリで、`folderSelection` が `true` ならフォルダー、`false` ならファイルを選択します。
 - 初期ディレクトリを指定しない場合は `{}` を渡してください。パスは `getDataPath()` で解決せず、プラットフォームの選択画面へ渡します。
 - 選択時は `void(const FileDialogResult&)` コールバックに `success = true`、選択したフルパス `filePath`、ファイル名 `fileName` を渡します。キャンセルや失敗では `success = false` となり、パスは空になります。選択したファイルの読み込みは行いません。
@@ -52406,6 +52464,17 @@ details.ja = '''
 - 共通のスレッドの扱い、コールバックのタイミング、アプリの実行期間に関する規則は `alertDialogAsync` を参照してください。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 `callback` 바로 앞으로 받습니다. 점 없이 확장자를 지정합니다. 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 폴더 선택에서는 목록을 사용하지 않습니다.
+
+선택할 확장자를 지정합니다.
+```cpp
+void tcApp::setup() {
+    loadDialogAsync("Open image", "", {}, false, {"png", "jpg"}, [](const FileDialogResult& result) {
+        if (result.success) logNotice() << result.filePath;
+    });
+}
+```
+
 - `title`, `message`, `defaultPath`, `folderSelection`, `callback`을 받으며 기본 인수는 없습니다. `defaultPath`는 초기 디렉터리이며 `folderSelection`이 `true`이면 폴더를, `false`이면 파일을 선택합니다.
 - 초기 디렉터리를 지정하지 않으려면 `{}`를 전달하세요. 경로는 `getDataPath()`로 해석하지 않고 플랫폼 선택 화면에 전달합니다.
 - 선택하면 `void(const FileDialogResult&)` 콜백에 `success = true`, 선택한 전체 경로 `filePath`, 파일 이름 `fileName`을 전달합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다. 선택한 파일을 읽지는 않습니다.
@@ -54461,10 +54530,20 @@ related = ["isPrivate", "getLocalIp"]
 category = "window_input"
 keywords = ["file", "picker", "browse", "export"]
 of = ["ofSystemSaveDialog"]
-description.en = "Shows a file save dialog."
-description.ja = "ファイルの保存ダイアログを表示する。"
-description.ko = "파일 저장 대화상자를 표시한다."
+description.en = "Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation."
+description.ja = "保存先を選択します。拡張子リストを受け取る形式では、許可された拡張子がなければ上書き確認の前に追加します。"
+description.ko = "저장 위치를 선택합니다. 확장자 목록을 받는 형식은 허용된 확장자가 없으면 덮어쓰기 확인 전에 추가합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` as the last argument. Use extensions without dots; matching ignores case and an empty list keeps the original behavior. If none matches the typed name, the first extension is appended before confirming replacement.
+
+Choose the recording extension:
+```cpp
+void tcApp::setup() {
+    auto result = saveDialog("Save recording", "", {}, "session.jsonl", {"jsonl"});
+    if (result.success) logNotice() << result.filePath;
+}
+```
+
 - Arguments are `title`, `message`, `defaultPath` for the initial directory, and `defaultName` for the initial filename; all default to empty values.
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
 - Selects a destination without writing the file. Check `success`, then save data to `filePath` with a file-writing API.
@@ -54472,6 +54551,16 @@ details.en = '''
 - While it waits, all windows pause. [`saveDialogAsync`](#saveDialogAsync) takes a callback instead of returning the result.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を最後の引数に受け取ります。ドットなしの拡張子を指定します。大文字と小文字は区別せず、空のリストは従来どおりに動作します。入力した名前に一致する拡張子がなければ、上書きを確認する前に先頭の拡張子を追加します。
+
+記録ファイルの拡張子を指定します。
+```cpp
+void tcApp::setup() {
+    auto result = saveDialog("Save recording", "", {}, "session.jsonl", {"jsonl"});
+    if (result.success) logNotice() << result.filePath;
+}
+```
+
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、初期ファイル名を指定する `defaultName` です。デフォルトはすべて空です。
 - 選択後は、`success = true`、フルパスの `filePath`、`fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
 - 保存先を選ぶだけで、ファイルには書き込みません。`success` を確認してから、ファイル書き込み API で `filePath` にデータを保存してください。
@@ -54479,6 +54568,16 @@ details.ja = '''
 - 待機中はすべてのウィンドウが停止します。[`saveDialogAsync`](#saveDialogAsync) は結果を返す代わりにコールバックで受け取ります。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 마지막 인수으로 받습니다. 점 없이 확장자를 지정합니다. 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 입력한 이름에 일치하는 확장자가 없으면 덮어쓰기를 확인하기 전에 첫 확장자를 추가합니다.
+
+기록 파일의 확장자를 지정합니다.
+```cpp
+void tcApp::setup() {
+    auto result = saveDialog("Save recording", "", {}, "session.jsonl", {"jsonl"});
+    if (result.success) logNotice() << result.filePath;
+}
+```
+
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, 초기 파일명을 지정하는 `defaultName`입니다. 기본값은 모두 비어 있습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
 - 저장할 위치만 선택하며 파일을 쓰지는 않습니다. `success`를 확인한 뒤 파일 쓰기 API로 `filePath`에 데이터를 저장해야 합니다.
@@ -54513,10 +54612,22 @@ void tcApp::setup() {
 ["saveDialogAsync"]
 category = "window_input"
 keywords = ["file", "picker", "callback"]
-description.en = "Shows a save destination picker with a result callback."
-description.ja = "結果コールバック付きの保存先選択ダイアログを表示する。"
-description.ko = "결과 콜백이 있는 저장 위치 선택 대화상자를 표시한다."
+description.en = "Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation."
+description.ja = "保存先を選択します。拡張子リストを受け取る形式では、許可された拡張子がなければ上書き確認の前に追加します。"
+description.ko = "저장 위치를 선택합니다. 확장자 목록을 받는 형식은 허용된 확장자가 없으면 덮어쓰기 확인 전에 추가합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` before `callback`. Use extensions without dots; matching ignores case and an empty list keeps the original behavior. If none matches the typed name, the first extension is appended before confirming replacement.
+
+Choose the recording extension:
+```cpp
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
+```
+
 - Takes `title`, `message`, `defaultPath`, `defaultName`, and `callback`, with no default arguments; `defaultPath` is the initial directory and `defaultName` is the initial filename.
 - Pass `{}` for an unspecified directory or filename; paths are passed to the platform picker without resolution through `getDataPath()`.
 - On desktop platforms, selects a destination without writing your data; after a successful result, write the data to `result.filePath`.
@@ -54525,6 +54636,18 @@ details.en = '''
 - See `loadDialogAsync` for result reference lifetime and the shared iOS picker restriction, and `alertDialogAsync` for threading, callback timing, and app run lifetime rules.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を `callback` の直前に受け取ります。ドットなしの拡張子を指定します。大文字と小文字は区別せず、空のリストは従来どおりに動作します。入力した名前に一致する拡張子がなければ、上書きを確認する前に先頭の拡張子を追加します。
+
+記録ファイルの拡張子を指定します。
+```cpp
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
+```
+
 - `title`、`message`、`defaultPath`、`defaultName`、`callback` を受け取り、既定の引数はありません。`defaultPath` は初期ディレクトリ、`defaultName` は初期ファイル名です。
 - ディレクトリやファイル名を指定しない場合は `{}` を渡してください。パスは `getDataPath()` で解決せず、プラットフォームの選択画面へ渡します。
 - デスクトップでは保存先を選ぶだけで、データは書き込みません。成功した結果を受け取った後に `result.filePath` へデータを書き込んでください。
@@ -54533,6 +54656,18 @@ details.ja = '''
 - 結果の参照の有効期間と iOS の選択画面の共有制限は `loadDialogAsync`、スレッドの扱い、コールバックのタイミング、アプリの実行期間に関する規則は `alertDialogAsync` を参照してください。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 `callback` 바로 앞으로 받습니다. 점 없이 확장자를 지정합니다. 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 입력한 이름에 일치하는 확장자가 없으면 덮어쓰기를 확인하기 전에 첫 확장자를 추가합니다.
+
+기록 파일의 확장자를 지정합니다.
+```cpp
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
+```
+
 - `title`, `message`, `defaultPath`, `defaultName`, `callback`을 받으며 기본 인수는 없습니다. `defaultPath`는 초기 디렉터리이고 `defaultName`은 초기 파일 이름입니다.
 - 디렉터리나 파일 이름을 지정하지 않으려면 `{}`를 전달하세요. 경로는 `getDataPath()`로 해석하지 않고 플랫폼 선택 화면에 전달합니다.
 - 데스크톱에서는 저장 위치만 선택하며 데이터를 기록하지 않습니다. 성공 결과를 받은 뒤 `result.filePath`에 데이터를 기록하세요.
@@ -54555,6 +54690,14 @@ platform_note.ko = '''
 - iOS는 내보내기용 `UIDocumentPickerViewController`를 사용하며 `title`, `message`, `defaultPath`는 사용하지 않습니다.
 - Windows와 Linux는 `message`를 사용하지 않습니다. Windows는 네이티브 IFileDialog 선택 화면을 사용합니다.
 - Android는 JNI Intent가 구현되지 않아 선택 화면 없이 즉시 빈 결과를 전달합니다. Web/WASM은 경고를 로그에 출력하고 빈 결과를 전달합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
 '''
 
 ["saveJson"]
