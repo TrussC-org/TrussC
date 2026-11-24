@@ -190,11 +190,13 @@ private:
 // subpixel phase), and a quad thinner than a pixel ("一", "ー") could miss
 // every pixel center and vanish.
 //
-// The gap is a quarter of the glyph's larger raster side (it was an eighth):
-// half of it pads the quad, and the other half keeps the padded quad's mip
-// footprint clear of the neighbors. With an eighth, the padding reached the
-// neighbors' mip spread on small atlases (a 24 px font drawn 3x smaller picked
-// up ~9% of its ink from neighbors, vs ~1% unpadded).
+// The gap is one value per font (FontAtlasManager::getGlyphGap): a quarter of
+// the font's raster line height (it was an eighth of each glyph's own box). One value means every neighbor pair is at least one gap apart, so two
+// half-gap pads meet in the middle and never reach the other glyph; per-glyph
+// gaps let a big glyph's pad reach a small neighbor packed close to it. A
+// quarter (not an eighth) keeps the padded quad's mip footprint clear of the
+// neighbors: with an eighth, a 24 px font drawn 3x smaller picked up ~13% of
+// its ink from neighbors.
 inline int glyphAtlasGap(int rasterSize) { return std::max(2, (rasterSize + 3) / 4); }
 
 struct GlyphQuad {
@@ -202,17 +204,24 @@ struct GlyphQuad {
     float u0, v0, u1, v1;
 };
 inline GlyphQuad paddedGlyphQuad(const GlyphInfo& glyph, float x, float y, float w, float h,
-                                 float atlasWidth, float atlasHeight) {
+                                 float atlasWidth, float atlasHeight, int glyphGap) {
     GlyphQuad q{x, y, w, h,
                 glyph.getU0() * atlasWidth, glyph.getV0() * atlasHeight,
                 glyph.getU1() * atlasWidth, glyph.getV1() * atlasHeight};
     const float tw = q.u1 - q.u0, th = q.v1 - q.v0;
     if (tw <= 0.0f || th <= 0.0f) return q;
-    const float gap = (float)glyphAtlasGap((int)std::lround(std::max(tw, th)));
-    const float m = std::floor(gap * 0.5f);
-    const float mx = m * w / tw, my = m * h / th;
-    q.x -= mx; q.y -= my; q.w += 2.0f * mx; q.h += 2.0f * my;
-    q.u0 -= m; q.u1 += m; q.v0 -= m; q.v1 += m;
+    // The packer leaves at least one gap after every glyph and below every row,
+    // and half a gap of slack to the page's right and bottom edges. Each side
+    // is still clamped to the page: a glyph that only fits a full-size page
+    // flush to its edge keeps no pad on that side (clamp-to-edge sampling would
+    // smear its own edge texels instead).
+    const float m = std::floor(glyphGap * 0.5f);
+    const float l = std::min(m, q.u0), r = std::min(m, atlasWidth - q.u1);
+    const float t = std::min(m, q.v0), b = std::min(m, atlasHeight - q.v1);
+    const float sx = w / tw, sy = h / th;
+    q.x -= l * sx; q.w += (l + r) * sx;
+    q.y -= t * sy; q.h += (t + b) * sy;
+    q.u0 -= l; q.u1 += r; q.v0 -= t; q.v1 += b;
     return q;
 }
 
@@ -438,6 +447,7 @@ public:
         }
         fontInfo_ = {};
         fontSize_ = 0;
+        cachedGap_ = -1;
         scale_ = ascent_ = descent_ = lineGap_ = spaceAdvance_ = 0;
         mipsBuilt_ = false;
         pageLimitWarned_.reset();
@@ -663,13 +673,24 @@ public:
 
     size_t getLoadedGlyphCount() const { return glyphs_.size(); }
 
+    // The empty gap the packer leaves after every glyph and below every row, in
+    // atlas texels: one value for the whole font (see internal::paddedGlyphQuad),
+    // a quarter of the raster line height at the current oversampling.
+    int getGlyphGap() const;
+
 private:
     friend struct FontAtlasCompactionTestAccess;
     static constexpr int INITIAL_ATLAS_SIZE = 256;
     static constexpr int GLYPH_PADDING = 2;
-    // The gap never lowers raster oversampling or rejects a bitmap that fits;
-    // packing reserves it between glyphs and uses whatever slack remains at page edges.
+    // The gap never lowers raster oversampling or rejects a bitmap that fits.
     static int glyphGap(int size) { return std::max(GLYPH_PADDING, glyphAtlasGap(size)); }
+    // Raster line height (ascent - descent) at the current oversampling, plus
+    // the prefilter margin, capped at the page size: the base of getGlyphGap().
+    // Not the face's bounding box -- one outlier glyph makes that several em
+    // wide (Noto Sans JP: 3.9 em), which would inflate every glyph's gap.
+    int gapBaseRasterSize() const;
+    mutable int cachedGap_ = -1;          // getGlyphGap() for cachedGapOversample_
+    mutable int cachedGapOversample_ = 0;
     // Align the raster/UV rectangle's top-left, after the leading padding.
     // Cursor steps round trailing padding up too, preserving mip phase to L4.
     static int alignGlyphOffset(int value) { return (value + 15) & ~15; }
@@ -865,14 +886,20 @@ private:
                                << " (oversampling " << oversample_ << ")";
         }
 
-        const int gap = glyphGap(std::max(glyphWidth, glyphHeight));
+        const int gap = getGlyphGap();
         paddedWidth = glyphWidth + gap;
         paddedHeight = glyphHeight + gap;
+        // Room a glyph wants before a page's right/bottom edge: half a gap, for
+        // the padded quad (internal::paddedGlyphQuad). Only a glyph that fits
+        // nowhere with it -- a full-size page that cannot grow -- is placed
+        // flush, so the gap never rejects a bitmap that fits.
+        int edgeWidth = glyphWidth + gap / 2;
+        int edgeHeight = glyphHeight + gap / 2;
 
         // Find atlas that can fit glyph
         size_t targetAtlas = atlases_.size();
         for (size_t i = 0; i < atlases_.size(); i++) {
-            if (tryFitGlyph(i, glyphWidth, glyphHeight)) {
+            if (tryFitGlyph(i, edgeWidth, edgeHeight)) {
                 targetAtlas = i;
                 break;
             }
@@ -892,8 +919,13 @@ private:
             }
 
             // Expand until it fits
-            while (!tryFitGlyph(targetAtlas, glyphWidth, glyphHeight)) {
+            while (!tryFitGlyph(targetAtlas, edgeWidth, edgeHeight)) {
                 if (!expandAtlas(targetAtlas)) {
+                    if (tryFitGlyph(targetAtlas, glyphWidth, glyphHeight)) {
+                        edgeWidth = glyphWidth;
+                        edgeHeight = glyphHeight;
+                        break;
+                    }
                     logWarning() << "FontAtlasManager: cannot fit glyph for U+" << std::hex << codepoint << std::dec;
                     outInfo.valid_ = false;
                     return false;
@@ -904,7 +936,7 @@ private:
         AtlasState& atlas = *atlases_[targetAtlas];
 
         // Move to next row if current row overflows
-        if (atlas.currentX_ + glyphWidth > atlas.width_) {
+        if (atlas.currentX_ + edgeWidth > atlas.width_) {
             atlas.currentY_ = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_);
             atlas.rowHeight_ = 0;
 
@@ -1983,6 +2015,7 @@ protected:
         const sg_sampler sampler = internal::fontSamplers().mipped;
 
         const float s = 1.0f / dpiScale_;
+        const int glyphGap = atlasManager_->getGlyphGap();
         const size_t atlasCount = atlasManager_->getAtlasCount();
 
         for (size_t atlasIdx = 0; atlasIdx < atlasCount; ++atlasIdx) {
@@ -2011,7 +2044,7 @@ protected:
                 const float aw = (float)page.getWidth(), ah = (float)page.getHeight();
                 const internal::GlyphQuad q = internal::paddedGlyphQuad(*g,
                     pg.drawX + g->getXoff() * s * pg.scaleX, pg.baselineY + g->getYoff() * s,
-                    g->getWidth() * s * pg.scaleX, g->getHeight() * s, aw, ah);
+                    g->getWidth() * s * pg.scaleX, g->getHeight() * s, aw, ah, glyphGap);
                 const float gx = q.x, gy = q.y, gw = q.w, gh = q.h;
                 const float u0 = q.u0 / aw, u1 = q.u1 / aw, v0 = q.v0 / ah, v1 = q.v1 / ah;
 

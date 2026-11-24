@@ -269,7 +269,7 @@ private:
         const internal::GlyphQuad q = internal::paddedGlyphQuad(*glyph,
             placed.drawX + glyph->getXoff() * s * placed.scaleX, placed.baselineY + glyph->getYoff() * s,
             glyph->getWidth() * s * placed.scaleX, glyph->getHeight() * s,
-            (float)atlas.getWidth(), (float)atlas.getHeight());
+            (float)atlas.getWidth(), (float)atlas.getHeight(), font_.atlasManager_->getGlyphGap());
         const Vec2 corners[] = {{q.x,q.y}, {q.x+q.w,q.y}, {q.x+q.w,q.y+q.h}, {q.x,q.y+q.h}};
         const Vec2 uv[] = {{q.u0,q.v0}, {q.u1,q.v0}, {q.u1,q.v1}, {q.u0,q.v1}};
         const float c = std::cos(placed.rotationCw), si = std::sin(placed.rotationCw);
