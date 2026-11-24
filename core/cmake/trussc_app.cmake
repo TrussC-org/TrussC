@@ -1038,6 +1038,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                     --ks-pass pass:android --key-pass pass:android
                     --out "${_TC_APK_OUT}" "${_TC_ALIGNED}"
                 COMMENT "[${PROJECT_NAME}] Packaging APK → ${_TC_APK_OUT}"
+                VERBATIM
             )
             message(STATUS "[${PROJECT_NAME}] APK auto-packaging enabled")
         else()
