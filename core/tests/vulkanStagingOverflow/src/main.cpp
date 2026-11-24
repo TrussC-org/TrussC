@@ -123,13 +123,81 @@ struct UploadApp : App {
         }
     }
 };
+// Untextured points isolate uniform capacity from Vulkan descriptor capacity.
+bool smallUniformReserve = false;
+struct UniformApp : App {
+    Fbo target;
+    Mesh point;
+    EventListener logs;
+    int frame = 0, warnings = 0, recoveries = 0, errors = 0;
+    void setup() override {
+        sg_enable_stats();
+        const int expected = smallUniformReserve ? 4096 : 64 * 1024 * 1024;
+        if (sg_query_backend() == SG_BACKEND_VULKAN)
+            check("uniform startup reserve", sg_query_desc().uniform_buffer_size == expected);
+        target.allocate(8, 8, 1);
+        point.setMode(PrimitiveMode::Points);
+        point.addVertex(0, 0, 0);
+        setPointStyle(PointStyle::Square);
+        logs = getLogger().onLog.listen([this, expected](LogEventArgs& e) {
+            if (e.message.find("Vulkan per-frame uniform limit hit") != std::string::npos) {
+                ++warnings;
+                check("uniform warning is actionable", e.level == LogLevel::Warning &&
+                    e.message.find("RuntimeSettings::reserveUniformBuffer()") != std::string::npos &&
+                    e.message.find(std::to_string(expected) + " bytes") != std::string::npos);
+            }
+            if (e.message.find("uniform buffer recovered after") != std::string::npos) {
+                ++recoveries;
+                check("uniform recovery counts frames", e.level == LogLevel::Notice &&
+                    e.message.find(recoveries == 1 ? "3 overflowing frames" : "1 overflowing frames") != std::string::npos);
+            }
+            if (e.level == LogLevel::Error || e.level == LogLevel::Fatal) ++errors;
+        });
+    }
+    void draw() override {
+        const bool vkSmall = smallUniformReserve && sg_query_backend() == SG_BACKEND_VULKAN;
+        // Three overflowing frames, one clean frame, then another episode.
+        const bool heavy = smallUniformReserve ? (frame < 3 || frame == 4) : frame == 0;
+        const int expectedWarnings[] = {0, 1, 1, 1, 1, 2, 2};
+        const int expectedRecoveries[] = {0, 0, 0, 0, 1, 1, 2};
+        check("uniform warning cadence at frame boundary", warnings == (vkSmall ? expectedWarnings[frame] : 0));
+        check("uniform recovery cadence at frame boundary", recoveries == (vkSmall ? expectedRecoveries[frame] : 0));
+        if (frame == 6) {
+            check("uniform overflow replaces raw errors", errors == 0);
+            completed = true;
+            exitApp(failures ? 1 : 0);
+            return;
+        }
+        target.begin();
+        const auto before = sg_query_stats().cur_frame;
+        for (int i = 0; i < (heavy ? 20000 : 1); ++i) point.draw();
+        target.end();
+        const auto after = sg_query_stats().cur_frame;
+        if (heavy) {
+            check("20k draws submitted", after.num_draw - before.num_draw >= 20000);
+            check("one uniform block per draw", after.num_apply_uniforms - before.num_apply_uniforms >= 20000);
+        }
+        ++frame;
+    }
+};
+
 }
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    if (argc > 1 && (std::string(argv[1]) == "--uniform-default" || std::string(argv[1]) == "--uniform-small")) {
+        smallUniformReserve = std::string(argv[1]) == "--uniform-small";
+        RuntimeSettings runtime;
+        if (smallUniformReserve) runtime.reserveUniformBuffer(4096);
+        return tcCoreTest::runDisplayTest<UniformApp>(WindowSettings{}.setSize(64, 64).setSwapInterval(0), failures, [] {
+            check("uniform frames completed", completed);
+        }, runtime);
+    }
     return tcCoreTest::runDisplayTest<UploadApp>(WindowSettings{}.setSize(64, 64), failures, [] {
         check("ten upload frames completed", completed);
     });
 #else
+    (void)argc;
+    (void)argv;
     std::puts("SKIP: vulkanStagingOverflow checks Linux Vulkan and GL");
     return 0;
 #endif
