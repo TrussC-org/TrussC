@@ -2131,7 +2131,7 @@ protected:
         // -------- Horizontal alignment of column block --------
         // Columns are placed right→left; column 0 has its right edge at colX0
         // and each column is one em wide (glyphs center at colX - em/2), with
-        // colSpacing between neighbouring columns. The block's ink extent is
+        // colSpacing between neighboring columns. The block's ink extent is
         // therefore (numCols - 1) * colSpacing + em, from the right edge of
         // column 0 to the left edge of the last column.
         const float totalW = (float)(numCols - 1) * colSpacing + em;
