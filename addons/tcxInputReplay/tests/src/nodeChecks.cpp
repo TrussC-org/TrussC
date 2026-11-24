@@ -3,7 +3,10 @@
 #include "../../../../core/tests/common/tcInjectedWindowTest.h"
 int runInputReplayNodeChecks() {
     using namespace tc;
+    internal::beginRuntimeRun();
+    internal::beginFrameworkLifetime();
     tcCoreTest::WindowFixture fixture(9501);
+    internal::retainRuntimeWindow(fixture.window);
     auto& window = *fixture.window;
     tcCoreTest::InjectedWindow native(window, 9501);
     auto& context = internal::WindowRequestAccess::context(window);

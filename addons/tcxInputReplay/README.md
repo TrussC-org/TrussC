@@ -29,7 +29,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 }
 ```
 
-The toolbar is placed once at its parent's top center. Move it with the normal Node API. Record becomes a red Stop button while recording; Play becomes a blue Stop button while playing. Open or dropping a `.jsonl` file selects a recording, and hovering over its filename shows the full path. Save appears when a toolbar recording has stopped; it uses the OS save dialog. Canceling the dialog keeps the recording available to save again. Temporary recordings remain in the data directory's `input-replay` folder.
+The toolbar is placed once at its parent's top center. Move it with the normal Node API. Record becomes a red Stop button while recording; Play becomes a blue Stop button while playing. Open or dropping a `.jsonl` file selects a recording, and hovering over its filename shows the full path. Toolbar Stop (including a ring flush) immediately opens the OS save dialog. Saving moves the staging file from the data directory's `input-replay` folder to the chosen path; across volumes, it copies then deletes the staging file. Cancel deletes the staging file. Save appears only after a failed save so you can retry. Code calls to `stopRecording()` and `flush()` never open a dialog.
 
 ## Record input to a file or ring
 

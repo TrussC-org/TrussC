@@ -1,6 +1,9 @@
 #pragma once
 #include <tcxInputReplay.h>
 #include <cstdio>
+#include "tc/utils/internal/tcAsyncDialog.h"
+#include "tc/utils/tcResourceLoad.h"
+#include <set>
 namespace inputReplayTest {
 using namespace tc;
 using namespace tcx::inputreplay;
@@ -18,6 +21,19 @@ inline void native(Window& window, sapp_event_type type, float x = 20, float y =
     event.key_code = sapp_keycode(key);
     internal::dispatchWindowEventForTests(&event, window);
 }
+inline int saveDialogs = 0;
+inline FileDialogResult saveChoice;
+inline internal::DialogDismiss dialogPresenter(const internal::DialogInputs& inputs, internal::DialogCompletion done) {
+    check(inputs.kind == internal::DialogKind::Save, "toolbar requests save dialog");
+    ++saveDialogs;
+    done(saveChoice);
+    return {};
+}
+inline void deliverDialogs() {
+    // Present, then deliver the injected result through the real async mailbox.
+    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+}
 class Smoke : public App {
 public:
     std::shared_ptr<Toolbar> toolbar;
@@ -33,6 +49,9 @@ public:
     }
     void runChecks() {
         auto& w = *getWindow();
+        internal::setDialogPresenterForTests(dialogPresenter);
+        saveDialogs = 0;
+        saveChoice = {};
         check(toolbar->getChildren().size() == 5, "four Button Nodes and one Label Node");
         check(!mcp::hasTool("tcx_inputreplay_start_recording"), "MCP is opt-in");
         const auto pos = toolbar->getPos();
@@ -59,6 +78,8 @@ public:
         toolbar->mark("scene");
         native(w, SAPP_EVENTTYPE_KEY_DOWN, 0, 0, 'A');
         check(toolbar->stopRecording(), "stop file recording");
+        deliverDialogs();
+        check(saveDialogs == 0, "code stopRecording opens no dialog");
         std::ifstream file(path);
         auto session = detail::load(file);
         check(session.windows.size() == 1 && session.records.size() == 5, "single-window JSONL v1 with mark and end");
@@ -82,6 +103,10 @@ public:
         check(toolbar->isPointerOver() && appClicks == appBefore, "isPointerOver excludes toolbar press from App dots");
         native(w, SAPP_EVENTTYPE_MOUSE_UP, x, 20);
         check(!toolbar->isRecording(), "Record Button stops recording");
+        saveChoice.success = true;
+        saveChoice.filePath = path;
+        deliverDialogs();
+        saveChoice = {};
         std::ifstream clicked(path);
         session = detail::load(clicked);
         check(session.records.size() == 2 && session.records[0].type == "mousePressed", "toolbar press faithfully recorded before stop");
@@ -98,7 +123,10 @@ public:
         native(w, SAPP_EVENTTYPE_MOUSE_DOWN);
         native(w, SAPP_EVENTTYPE_MOUSE_UP);
         check(toolbar->getRecordedCount() == 2, "ring count");
+        const auto dialogsBeforeFlush = saveDialogs;
         check(toolbar->flush(path) && !toolbar->isRecording(), "flush ring and stop");
+        deliverDialogs();
+        check(saveDialogs == dialogsBeforeFlush, "code flush opens no dialog");
         check(toolbar->startRecording(path), "start touch recording");
         sapp_event touch{};
         touch.num_touches = 1;
@@ -118,6 +146,7 @@ public:
         native(w, SAPP_EVENTTYPE_KEY_UP, 0, 0, KEY_F8);
         native(w, SAPP_EVENTTYPE_KEY_DOWN, 0, 0, KEY_F8);
         check(!toolbar->isRecording(), "record key stops");
+        deliverDialogs();
         toolbar->registerMcpTools();
         check(mcp::hasTool("tcx_inputreplay_start_recording"), "explicit MCP registration");
         auto other = std::make_shared<Toolbar>();
@@ -130,6 +159,84 @@ public:
         toolbar->stopRecording();
         removeChild(other);
         std::filesystem::remove(path);
+        saveChecks();
+        internal::setDialogPresenterForTests(nullptr);
+    }
+    void saveChecks() {
+        auto& w = *getWindow();
+        auto click = [&](size_t index) {
+            toolbar->update();
+            auto button = toolbar->getChildren().at(index);
+            const auto pos = toolbar->getPos() + button->getPos();
+            native(w, SAPP_EVENTTYPE_MOUSE_DOWN, pos.x + 10, pos.y + 10);
+            native(w, SAPP_EVENTTYPE_MOUSE_UP, pos.x + 10, pos.y + 10);
+        };
+        const auto directory = getDataPath("input-replay");
+        auto files = [&] {
+            std::set<std::filesystem::path> paths;
+            if (std::filesystem::exists(directory))
+                for (const auto& entry : std::filesystem::directory_iterator(directory)) paths.insert(entry.path());
+            return paths;
+        };
+        auto start = [&] {
+            const auto before = files();
+            click(0);
+            for (const auto& file : files()) if (!before.contains(file)) return file;
+            check(false, "toolbar creates staging file");
+            return std::filesystem::path{};
+        };
+        const auto target = path;
+        auto source = start();
+        check(toolbar->isRecording() && std::filesystem::exists(source), "Record creates staging recording");
+        const auto beforeStop = saveDialogs;
+        saveChoice.success = true;
+        saveChoice.filePath = target;
+        click(0);
+        deliverDialogs();
+        toolbar->update();
+        check(saveDialogs == beforeStop + 1, "toolbar Stop opens save dialog immediately");
+        check(!std::filesystem::exists(source) && std::filesystem::exists(target), "save moves staging file to target");
+        check(!toolbar->getChildren().at(1)->isVisible(), "successful save hides Save button");
+        std::filesystem::remove(target);
+
+        source = start();
+        saveChoice = {};
+        click(0);
+        deliverDialogs();
+        toolbar->update();
+        check(!std::filesystem::exists(source) && !std::filesystem::exists(target), "Cancel deletes staging file without target");
+        check(!toolbar->getChildren().at(1)->isVisible(), "Cancel hides Save button");
+
+        source = start();
+        // A file cannot be used as a destination directory.
+        saveChoice.success = true;
+        saveChoice.filePath = source / "invalid.jsonl";
+        click(0);
+        deliverDialogs();
+        toolbar->update();
+        check(std::filesystem::exists(source) && toolbar->getChildren().at(1)->isVisible(), "failed save retains staging and shows Save");
+        saveChoice.filePath = target;
+        click(1);
+        deliverDialogs();
+        toolbar->update();
+        check(!std::filesystem::exists(source) && std::filesystem::exists(target) &&
+            !toolbar->getChildren().at(1)->isVisible(), "Save retry moves file and hides Save");
+        std::filesystem::remove(target);
+
+        check(toolbar->startRecording(RecordingMode::Ring, std::chrono::seconds(5)), "start ring for toolbar flush");
+        const auto beforeRing = files();
+        const auto dialogsBeforeRing = saveDialogs;
+        saveChoice = {};
+        click(0);
+        deliverDialogs();
+        check(!toolbar->isRecording() && saveDialogs == dialogsBeforeRing + 1, "toolbar ring flush opens dialog");
+        check(files() == beforeRing, "ring Cancel removes staging file");
+
+        check(toolbar->startRecording(target), "start caller-owned file");
+        click(0);
+        deliverDialogs();
+        check(std::filesystem::exists(target), "toolbar Cancel preserves caller-owned recording");
+        std::filesystem::remove(target);
     }
     void draw() override { clear(0.12f); drawCircle(110, 120, 6); }
 };

@@ -154,12 +154,14 @@ private:
     bool ringRecording_ = false, touchDispatch_ = false, nativeDrop_ = false;
     uint64_t start_ = 0, frameStart_ = 0;
     size_t count_ = 0;
+    // No public per-Window DPI or update-count getter exists.
     auto& context() { return tc::internal::WindowRequestAccess::context(window_); }
     uint64_t elapsed() const { return detail::clockMs() - start_; }
     uint64_t frame() { return context().updateCount - frameStart_; }
     void begin() { start_ = detail::clockMs(); frameStart_ = context().updateCount; count_ = 0; }
     detail::Json header() {
         const auto size = detail::windowSize(window_);
+        // pixelPerfect has no public getter; the setting is shared by all windows.
         return {{"type", "header"}, {"version", 1}, {"app", window_.getTitle()}, {"trussc", tc::getVersion()},
             {"fps", (std::max)(0.0, tc::getFrameRate())}, {"started", std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count())},
             {"windows", detail::Json::array({{{"key", "main"}, {"width", size.width}, {"height", size.height},

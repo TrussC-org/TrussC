@@ -18,7 +18,11 @@ public:
     explicit Toolbar(int toggleKey = 0) : toggleKey_(toggleKey) { enableEvents(); setSize(550, 32); }
     void setToggleKey(int key) { toggleKey_ = key; }
     void setRecordKey(int key) { recordKey_ = key; }
-    bool startRecording(const std::filesystem::path& path) { return recorder_->start(path); }
+    bool startRecording(const std::filesystem::path& path) {
+        if (!recorder_->start(path)) return false;
+        recordingPath_ = tc::getDataPath(path);
+        return true;
+    }
     bool startRecording(RecordingMode, std::chrono::milliseconds duration) { return recorder_->start(duration); }
     bool stopRecording() { return recorder_->stop(); }
     bool flush(const std::filesystem::path& path) { return recorder_->flush(path); }
@@ -39,7 +43,7 @@ public:
         return false;
     }
     void setup() override {
-        auto& window = *tc::internal::currentWindow();
+        auto& window = *static_cast<tc::App*>(tc::getRootNode())->getWindow();
         recorder_ = std::make_unique<Recorder>(window);
         player_ = std::make_unique<Player>(window);
         const auto parent = std::dynamic_pointer_cast<tc::RectNode>(getParent());
@@ -80,7 +84,7 @@ public:
         play_->setLabel(isPlaying() ? "Stop" : "Play");
         if (isPlaying()) play_->setActiveColor({0.05f, 0.48f, 0.80f});
         else play_->clearActiveColor();
-        save_->setVisible(!isRecording() && !pendingSave_.empty());
+        save_->setVisible(!isRecording() && retrySave_);
         float x = 8;
         for (const auto& button : {record_, save_, play_, open_}) {
             if (!button->isVisible()) continue;
@@ -145,7 +149,8 @@ private:
     std::shared_ptr<Button> record_, save_, play_, open_;
     std::shared_ptr<Label> label_;
     std::vector<tc::EventListener> listeners_;
-    std::filesystem::path selectedPath_, pendingSave_;
+    std::filesystem::path selectedPath_, pendingSave_, recordingPath_, stagingFile_;
+    bool retrySave_ = false;
     std::filesystem::path stagingPath() {
         const auto directory = tc::getDataPath("input-replay");
         std::filesystem::create_directories(directory);
@@ -164,27 +169,53 @@ private:
     void toggleRecording() {
         try {
             if (!isRecording()) {
+                if (!pendingSave_.empty() && pendingSave_ == stagingFile_) std::filesystem::remove(pendingSave_);
+                pendingSave_.clear();
+                retrySave_ = false;
                 const auto path = stagingPath();
-                if (startRecording(path)) pendingSave_ = path;
-            } else if (recorder_->isRing()) {
+                if (startRecording(path)) stagingFile_ = path;
+                else std::filesystem::remove(path);
+                return;
+            }
+            if (recorder_->isRing()) {
                 const auto path = stagingPath();
-                if (flush(path)) pendingSave_ = path;
-            } else stopRecording();
+                if (!flush(path)) { std::filesystem::remove(path); return; }
+                stagingFile_ = pendingSave_ = path;
+            } else {
+                if (!stopRecording()) return;
+                pendingSave_ = recordingPath_;
+            }
+            save();
         } catch (const std::exception& e) { tc::logError("tcxInputReplay") << e.what(); }
     }
     void save() {
         if (pendingSave_.empty() || isRecording()) return;
+        retrySave_ = false;
         auto weak = std::weak_ptr<Toolbar>(std::static_pointer_cast<Toolbar>(shared_from_this()));
         const auto source = pendingSave_;
-        tc::saveDialogAsync("Save input recording", "", {}, "session.jsonl", [weak, source](const tc::FileDialogResult& choice) {
+        const bool staged = source == stagingFile_;
+        tc::saveDialogAsync("Save input recording", "", {}, "session.jsonl", [weak, source, staged](const tc::FileDialogResult& choice) {
             auto self = weak.lock();
-            if (!self || !choice.success) return;
+            if (!self) return;
             std::error_code error;
-            if (source != choice.filePath)
-                std::filesystem::copy_file(source, choice.filePath, std::filesystem::copy_options::overwrite_existing, error);
-            if (error) { tc::logError("tcxInputReplay") << error.message(); return; }
-            self->selectedPath_ = choice.filePath;
+            if (!choice.success) {
+                if (staged) std::filesystem::remove(source, error);
+            } else if (source != choice.filePath) {
+                // Explicit recording paths belong to the caller; only move staging files.
+                if (staged) std::filesystem::rename(source, choice.filePath, error);
+                if (!staged || error) {
+                    std::filesystem::copy_file(source, choice.filePath, std::filesystem::copy_options::overwrite_existing, error);
+                    if (staged && !error) std::filesystem::remove(source, error);
+                }
+            }
+            if (error) {
+                tc::logError("tcxInputReplay") << error.message();
+                self->retrySave_ = true;
+                return;
+            }
+            if (choice.success) self->selectedPath_ = choice.filePath;
             self->pendingSave_.clear();
+            if (staged) self->stagingFile_.clear();
         });
     }
     void open() {

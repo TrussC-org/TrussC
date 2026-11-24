@@ -23,6 +23,7 @@ inline uint64_t clockMs() {
 }
 
 inline Size windowSize(tc::Window& window) {
+    // No public per-Window framebuffer size or pixelPerfect getter exists.
     if (tc::internal::pixelPerfectMode()) {
         const auto& ctx = tc::internal::WindowRequestAccess::context(window);
         return {double(ctx.fbWidth), double(ctx.fbHeight)};
