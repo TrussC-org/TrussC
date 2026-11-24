@@ -406,10 +406,30 @@ class VersionTests(unittest.TestCase):
         self.cli("use", "v1")
         before = {name: (self.project / name).read_bytes()
                   for name in (".trussc-version", "CMakePresets.json")}
-        self.cli("use", "missing", success=False)
+        cached = {p.relative_to(self.cache): p.read_bytes() if p.is_file() else None
+                  for p in self.cache.rglob("*")}
+        output = self.cli("use", "missing", success=False)
+        self.assertEqual(self.last_result.returncode, 1)
+        self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
+                         "Error: Ref 'missing' was not found in TrussC-org/TrussC.")
+        self.assertIn("Check the tag or branch name", output)
         for name, contents in before.items():
             self.assertEqual((self.project / name).read_bytes(), contents)
+        self.assertEqual({p.relative_to(self.cache): p.read_bytes() if p.is_file() else None
+                          for p in self.cache.rglob("*")}, cached)
         self.cli("build", "--dry-run")
+
+    def test_missing_commit_and_repository_failure_are_distinct(self):
+        self.cli("use", "v1")
+        ref = "0" * 40
+        self.cli("use", ref, success=False)
+        self.assertEqual(self.last_result.returncode, 1)
+        self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
+                         f"Error: Ref '{ref}' was not found in TrussC-org/TrussC.")
+        (self.base / "remotes/TrussC-org/TrussC.git").rename(self.base / "unavailable.git")
+        output = self.cli("use", "missing", success=False)
+        self.assertIn("Error: TrussC version Git command failed:", output)
+        self.assertNotIn("was not found", output)
 
     def test_opt_in_and_local_path_validation(self):
         self.cli("update")
@@ -466,6 +486,33 @@ class TarballTests(unittest.TestCase):
                  "--output=" + str(target), revision or ref)
         with tarfile.open(target) as archive:
             return archive.extractfile(prefix + ".git_archival.txt").read().decode().strip()[10:]
+
+    @unittest.skipIf(sys.platform == "win32", "fixture needs an executable curl script")
+    def test_unavailable_ref_preserves_previous_selection(self):
+        self.cli("use", "v1")
+        # Keep acquisition offline: model curl's HTTP result on the file:// fixture path.
+        tools = self.base / "http-status-tools"
+        tools.mkdir()
+        curl = tools / "curl"
+        real_curl = shutil.which("curl")
+        self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
+        for status, code in ((404, 22), (401, 22), (403, 22), (500, 22), (0, 7)):
+            with self.subTest(status=status):
+                curl.write_text(
+                    "#!" + sys.executable + "\nimport subprocess, sys\n"
+                    "if 'missing' not in sys.argv[-1]:\n"
+                    "    sys.exit(subprocess.call([" + repr(real_curl) + "] + sys.argv[1:]))\n"
+                    "assert '--write-out' in sys.argv\n"
+                    f"sys.stderr.write('fixture download failed\\n')\n"
+                    f"sys.stdout.write('\\n{status:03d}')\nsys.exit({code})\n", encoding="utf-8")
+                curl.chmod(0o755)
+                if status == 404:
+                    VersionTests.test_unavailable_ref_preserves_previous_selection(self)
+                else:
+                    output = self.cli("use", "missing", success=False)
+                    self.assertEqual(self.last_result.returncode, 1)
+                    self.assertIn("Error: TrussC archive download failed: fixture download failed", output)
+                    self.assertNotIn("was not found", output)
 
     def test_tags_branches_commits_forks_and_tag_priority(self):
         for spec, owner, ref, revision in (

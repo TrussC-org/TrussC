@@ -55,6 +55,12 @@ class AddonVersionTests(VersionTests):
         self.git("-C", self.addon, "add", ".")
         self.git("-C", self.addon, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "addon revision")
 
+    def test_addon_unavailable_ref_names_repository(self):
+        self.cli("addon", "add", "alice/tcxFixture@missing", success=False)
+        self.assertEqual(self.last_result.returncode, 1)
+        self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
+                         "Error: Ref 'missing' was not found in alice/tcxFixture.")
+
     def paths(self):
         data = json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))
         return data["vendor"]["trussc"]["addonPaths"]
