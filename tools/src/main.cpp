@@ -40,6 +40,11 @@
 #include <windows.h>
 #endif
 
+// Unit-level builds that do not embed source metadata stay silent.
+#ifndef TRUSSCLI_SOURCE_ID
+#define TRUSSCLI_SOURCE_ID ""
+#endif
+
 using namespace std;
 using namespace tc;
 namespace fs = std::filesystem;
@@ -599,18 +604,49 @@ static string queryTrussCVersion(const string& tcRoot) {
     return out;
 }
 
+// Same four HEAD objects and separator as tools/CMakeLists.txt. Never inspect
+// the working tree or a project's separately selected TrussC version.
+static string queryTrusscliSourceId(const string& tcRoot) {
+    if (tcRoot.empty() || checkGit().status != CheckStatus::OK) return "";
+    // Discard git's stderr; the null device needs no writable temp location.
+    auto closeFile = [](FILE* file) { fclose(file); };
+    unique_ptr<FILE, decltype(closeFile)> errors(fopen(TC_DEV_NULL, "w"), closeFile);
+    if (!errors) return "";
+    string output;
+    const int code = runCaptured({"git", "-C", tcRoot, "rev-parse",
+        "HEAD:tools/src", "HEAD:tools/CMakeLists.txt", "HEAD:tools/addons.make", "HEAD:tools/icon"},
+        [&](const char* data, size_t size) { output.append(data, size); }, errors.get());
+    if (code != 0) return "";
+    istringstream objects(output);
+    string id, object;
+    for (int i = 0; i < 4; ++i) {
+        if (!(objects >> object)) return "";
+        if (i) id += '|';
+        id += object;
+    }
+    return id;
+}
+
+static bool hasTrusscliSourceDrift(const string& tcRoot) {
+    if (string(TRUSSCLI_VERSION) == "unknown" || string(TRUSSCLI_SOURCE_ID).empty()) return false;
+    const string current = queryTrusscliSourceId(tcRoot);
+    return !current.empty() && current != TRUSSCLI_SOURCE_ID;
+}
+
 static CheckResult checkVersionMismatch(const string& tcRoot) {
     CheckResult r{"Version sync", CheckStatus::OK, "", "", true};
     const string built = TRUSSCLI_VERSION;
     const string current = queryTrussCVersion(tcRoot);
 
-    if (current.empty()) {
+    const string builtId = TRUSSCLI_SOURCE_ID;
+    const string currentId = queryTrusscliSourceId(autoDetectTcRoot());
+    if (built == "unknown" || builtId.empty() || currentId.empty()) {
         r.status = CheckStatus::Warning;
-        r.detail = "could not query TrussC version";
+        r.detail = "could not query trusscli source id (trusscli " + built + " vs TrussC " + current + ")";
         return r;
     }
-    if (built == current) {
-        r.detail = "trusscli " + built + " == TrussC " + current;
+    if (builtId == currentId) {
+        r.detail = "trusscli " + built + " / TrussC " + current + " (source ids match)";
         return r;
     }
 
@@ -638,17 +674,15 @@ static void printVersion() {
          << " (built " << TRUSSCLI_BUILD_DATE << ")\n";
 
     const string tcRoot = projectTcRoot(autoDetectProjectRoot(""));
+    const string current = queryTrussCVersion(tcRoot);
     if (tcRoot.empty()) {
         cout << "TrussC   (not found)\n";
-        return;
-    }
-    const string current = queryTrussCVersion(tcRoot);
-    if (current.empty()) {
+    } else if (current.empty()) {
         cout << "TrussC   (version unknown) at " << tcRoot << "\n";
-        return;
+    } else {
+        cout << "TrussC   " << current << " at " << tcRoot << "\n";
     }
-    cout << "TrussC   " << current << " at " << tcRoot << "\n";
-    if (current != built) {
+    if (hasTrusscliSourceDrift(autoDetectTcRoot())) {
         cout << "  note: TrussC has changed since trusscli was built — "
              << "run 'trusscli upgrade' to sync\n";
     }
@@ -663,17 +697,12 @@ static void printVersionHelp() {
          << "  -h, --help                 Show this help\n";
 }
 
-// Print a one-line nudge to stderr when the running trusscli was built from a
-// different TrussC revision than the source tree it now points at (e.g. after a
-// manual `git pull`). Non-fatal — it only reminds the user to `trusscli upgrade`
-// so the binary is rebuilt in sync. Silent when the version can't be determined
-// (no git, "unknown" build, etc.) so it never nags where the check is moot.
+// Print the reminder on every command when the binary's HEAD inputs differ.
+// Missing source metadata (including tarball installs) stays silent.
 static void warnIfVersionDrift(const string& tcRoot) {
-    if (tcRoot.empty()) return;
+    if (!hasTrusscliSourceDrift(tcRoot)) return;
     const string built = TRUSSCLI_VERSION;
-    if (built == "unknown") return;
     const string current = queryTrussCVersion(tcRoot);
-    if (current.empty() || current == built) return;
 
     cerr << "Note: TrussC has changed since trusscli was built "
          << "(trusscli " << built << " vs TrussC " << current << ").\n"
@@ -3483,8 +3512,9 @@ static void printBuildHelp() {
          << "      --android              Build for Android\n"
          << "      --ios                  Build for iOS\n"
          << "      --debug                Build type: Debug (-O0 -g)\n"
-         << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
+         << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g)\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
+         << "                            Native: remember type flags; otherwise reuse the saved type (default RelWithDebInfo).\n"
          << "      --clean                Clean before building (--clean-first)\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
@@ -3730,11 +3760,11 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
     return 0;
 }
 
-static int cmdBuild(const vector<string>& args) {
+static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     string explicitPath;
     string explicitTcRoot;
     string targetPreset;
-    string buildType;       // "" = default (RelWithDebInfo); else Debug/Release/RelWithDebInfo
+    string buildType;       // Empty means use the remembered native type, or RelWithDebInfo.
     bool clean = false;
     bool mcp = false;
     bool warnings = false;
@@ -3785,10 +3815,6 @@ static int cmdBuild(const vector<string>& args) {
             return 1;
         }
     }
-
-    // Resolve the effective build type. An explicit flag wins; otherwise fall
-    // back to RelWithDebInfo (the project default baked into trussc_app.cmake).
-    string effectiveType = buildType.empty() ? "RelWithDebInfo" : buildType;
 
     string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
     if (projectPath.empty()) {
@@ -3876,6 +3902,31 @@ static int cmdBuild(const vector<string>& args) {
         const auto& vendors = presetData["vendor"];
         if (vendors.is_object() && vendors.contains("trussc") && vendors["trussc"].is_object()) addonVendor = vendors["trussc"];
     }
+    string effectiveType = buildType.empty() ? "RelWithDebInfo" : buildType;
+    const bool nativeBuild = kNativePreset && targetPreset == kNativePreset;
+    bool remembered = false;
+    if (nativeBuild) {
+        const auto savedType = addonVendor.value("buildType", Json());
+        if (rememberType && buildType.empty() && savedType.is_string()) {
+            const string value = savedType.get<string>();
+            if (value == "Debug" || value == "Release" || value == "RelWithDebInfo") {
+                effectiveType = value;
+                remembered = true;
+            }
+        }
+        cout << "Build type: " << effectiveType << (remembered ? " (remembered)" : "") << "\n";
+        if (rememberType && !buildType.empty() && !dryRun && presetData.is_object()) {
+            auto updated = presetData;
+            if (!updated["vendor"].is_object()) updated["vendor"] = Json::object();
+            if (!updated["vendor"]["trussc"].is_object()) updated["vendor"]["trussc"] = Json::object();
+            updated["vendor"]["trussc"]["buildType"] = buildType;
+            writeGeneratedFile(presetsFile, updated.dump(2));
+        }
+    } else if (targetPreset == "web") {
+        effectiveType = "MinSizeRel";
+    } else if (targetPreset == "android") {
+        effectiveType = "Release";
+    }
     const auto localAddons = addonVendor.value("addonLocalPaths", Json::object());
     const auto savedAddons = addonVendor.value("addonPaths", Json::object());
     for (const auto& line : readProjectAddons(projectPath)) {
@@ -3943,7 +3994,7 @@ static int cmdBuild(const vector<string>& args) {
     // (the cwd is the project now; projectPath may be relative)
     ConfigureInputs cfgIn = inspectBuildFolder(".", targetPreset,
                                                kNativePreset ? kNativePreset : "");
-    cfgIn.requestedBuildType = buildType;
+    cfgIn.requestedBuildType = nativeBuild ? effectiveType : buildType;
     cfgIn.mcp = mcp;
     cfgIn.warnings = warnings;
     ConfigurePlan plan = planConfigure(cfgIn);
@@ -4096,8 +4147,9 @@ static void printRunHelp() {
          << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
          << "                             Backends: labwc, x11. Example: --session labwc\n"
          << "      --debug                Build type: Debug (-O0 -g)\n"
-         << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
+         << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g)\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
+         << "                            Native: remember type flags; otherwise reuse the saved type (default RelWithDebInfo).\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
@@ -4961,7 +5013,7 @@ static int cmdDist(const vector<string>& args) {
         vector<string> buildArgs = {release ? "--release" : "--relwithdebinfo", "-p", projectDir.string()};
         if (verbose) buildArgs.push_back("--verbose");
         if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
-        if (int rc = cmdBuild(buildArgs)) return rc;
+        if (int rc = cmdBuild(buildArgs, false)) return rc;
         cout << "\n";
     } else {
         const string type = readCacheValue(buildDir / "CMakeCache.txt", "CMAKE_BUILD_TYPE");

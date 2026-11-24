@@ -317,6 +317,39 @@ class VersionTests(unittest.TestCase):
         self.assertIn("must be a regular file", output)
         self.assertFalse(self.cache.exists())
 
+    @unittest.skipUnless(shutil.which("ninja"), "needs Ninja Multi-Config")
+    def test_multi_config_remembers_type_without_reconfigure(self):
+        self.cli("use-local", self.source)
+        self.cli("clean")
+        presets_file = self.project / "CMakePresets.json"
+        data = json.loads(presets_file.read_text(encoding="utf-8"))
+        native = next(p for p in data["configurePresets"] if p["name"] == NATIVE)
+        native["generator"] = "Ninja Multi-Config"
+        presets_file.write_text(json.dumps(data), encoding="utf-8")
+        cmake_file = self.project / "CMakeLists.txt"
+        with cmake_file.open("a", encoding="utf-8") as file:
+            file.write('\nfile(APPEND "${CMAKE_SOURCE_DIR}/configure-calls" "configure\\n")\n')
+        self.cli("build", "--release")
+        marker = self.project / "configure-calls"
+        before = marker.read_text(encoding="utf-8")
+        self.assertIn("Build type: Release (remembered)", self.cli("build"))
+        self.assertEqual(marker.read_text(encoding="utf-8"), before)
+        self.cli("build", "--debug")
+        self.assertEqual(marker.read_text(encoding="utf-8"), before)
+        self.assertIn("Build type: Debug (remembered)", self.cli("build"))
+        self.assertEqual(marker.read_text(encoding="utf-8"), before)
+
+    def test_native_build_type_survives_update_and_clean(self):
+        self.cli("use-local", self.source)
+        self.cli("build", "--release")
+        presets_file = self.project / "CMakePresets.json"
+        self.assertEqual(json.loads(presets_file.read_text(encoding="utf-8"))["vendor"]["trussc"]["buildType"], "Release")
+        self.cli("update")
+        self.assertEqual(json.loads(presets_file.read_text(encoding="utf-8"))["vendor"]["trussc"]["buildType"], "Release")
+        self.cli("clean")
+        self.assertEqual(json.loads(presets_file.read_text(encoding="utf-8"))["vendor"]["trussc"]["buildType"], "Release")
+        self.assertIn("Build type: Release (remembered)", self.cli("build"))
+
     def test_branch_refreshes_only_on_update_and_build_uses_commit(self):
         self.cli("use", "main")
         self.advance()
