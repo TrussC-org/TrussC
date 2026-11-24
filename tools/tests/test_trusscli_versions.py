@@ -411,7 +411,7 @@ class VersionTests(unittest.TestCase):
         output = self.cli("use", "missing", success=False)
         self.assertEqual(self.last_result.returncode, 1)
         self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
-                         "Error: TrussC ref 'missing' was not found in TrussC-org/TrussC.")
+                         "Error: Ref 'missing' was not found in TrussC-org/TrussC.")
         self.assertIn("Check the tag or branch name", output)
         for name, contents in before.items():
             self.assertEqual((self.project / name).read_bytes(), contents)
@@ -425,7 +425,7 @@ class VersionTests(unittest.TestCase):
         self.cli("use", ref, success=False)
         self.assertEqual(self.last_result.returncode, 1)
         self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
-                         f"Error: TrussC ref '{ref}' was not found in TrussC-org/TrussC.")
+                         f"Error: Ref '{ref}' was not found in TrussC-org/TrussC.")
         (self.base / "remotes/TrussC-org/TrussC.git").rename(self.base / "unavailable.git")
         output = self.cli("use", "missing", success=False)
         self.assertIn("Error: TrussC version Git command failed:", output)

@@ -59,7 +59,7 @@ class AddonVersionTests(VersionTests):
         self.cli("addon", "add", "alice/tcxFixture@missing", success=False)
         self.assertEqual(self.last_result.returncode, 1)
         self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
-                         "Error: TrussC ref 'missing' was not found in alice/tcxFixture.")
+                         "Error: Ref 'missing' was not found in alice/tcxFixture.")
 
     def paths(self):
         data = json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))

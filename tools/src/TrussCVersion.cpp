@@ -145,7 +145,7 @@ static GitResult git(std::vector<std::string> args) {
 }
 
 static std::string missingRefMessage(const Spec& spec) {
-    return "TrussC ref '" + spec.ref + "' was not found in " + spec.owner + "/" + spec.repo +
+    return "Ref '" + spec.ref + "' was not found in " + spec.owner + "/" + spec.repo +
         ".\nCheck the tag or branch name, or use an existing commit ID.";
 }
 
