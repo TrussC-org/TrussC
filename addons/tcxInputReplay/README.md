@@ -52,7 +52,7 @@ void tcApp::configureReplay() {
 }
 ```
 
-Playback hides the toolbar and restores its previous visibility when it ends or is stopped. The hotkey still toggles it during playback. Replayed input can operate ImGui, including the toolbar; there is no API to isolate the toolbar from replayed input.
+Playback hides the toolbar and restores its previous visibility when it ends or is stopped. The hotkey still toggles it during playback. During file playback, the toolbar ignores input, including queued replay events processed after playback ends.
 
 The addon loads tcxImGui automatically. Apps using `imguiBegin()` / `imguiEnd()` share that frame automatically; otherwise the addon starts its own frame before rendering. No manual toolbar draw call is needed. The toolbar is attached to the setup window's ImGui context; keep that context initialized until app cleanup (there is no API to reattach after an explicit `imguiShutdown()`).
 
@@ -95,7 +95,7 @@ void tcApp::keyPressed(int key) {
 }
 ```
 
-Mouse moves, drags (stored once as moves), buttons, scroll, keys including repeat, characters, modifiers, touch IDs/cancellation/pressure and file-drop paths are recorded. Injected input retains `injected` and `tag`; this addon's synchronous replay is omitted. Touch-generated mouse input is omitted because touch injection recreates it. Capture precedes ImGui's typed input consumption.
+Mouse moves, drags (stored once as moves), buttons, scroll, keys including repeat, characters, modifiers, touch IDs/cancellation/pressure and file-drop paths are recorded. Injected input retains `injected` and `tag`; this addon's synchronous replay is omitted. Touch-generated mouse input is omitted because touch injection recreates it. Mouse and keyboard input consumed by the replay toolbar, including clicks released outside it, is not recorded. Touch events and other ImGui input are recorded.
 
 File drops contain paths as data; playback does not recreate files. The addon has no file-restoration API. Core's file-drop arguments have no provenance API, so recorded drops use `injected: false` and an empty tag. The synchronous replay guard still prevents re-recording them. Scroll position is saved as data; the injection API uses the destination window's current pointer position and has no explicit scroll-position argument.
 

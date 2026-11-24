@@ -93,6 +93,157 @@ void windowChecks() {
         } else replay::stopPlayback();
         check(!s.timeline.active && s.toolbarVisible == visible, "end or stop restores prior visibility");
     }
+    // Reproduce an old file's final Stop click, including ImGui's queued tail
+    // after update() has already consumed end and restored the toolbar.
+    // Settle the existing manager frame, then advance only ImGui: virtual
+    // windows have no native display on which to update the OS cursor.
+    window.events().onRender.notify();
+    bool appUi = false;
+    int appActivations = 0;
+    bool focusAppText = false;
+    char appText[16] = {};
+    auto frame = [&] {
+        ImGui::NewFrame();
+        if (appUi) {
+            ImGui::SetNextWindowPos({20, 180});
+            ImGui::SetNextWindowSize({200, 100});
+            ImGui::Begin("App controls");
+            if (ImGui::Button("App button")) ++appActivations;
+            if (focusAppText) ImGui::SetKeyboardFocusHere();
+            ImGui::InputText("Text", appText, sizeof(appText));
+            ImGui::End();
+        }
+        ImGui::EndFrame();
+    };
+    s.toolbarVisible = true;
+    frame();
+    auto* toolbar = ImGui::FindWindowByName("Input replay");
+    const tc::Vec2 buttonPos{toolbar->Pos.x + 20, toolbar->Pos.y + 12};
+    window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
+    frame();
+    auto press = Json{{"type", "mousePressed"}, {"ms", 0}, {"frame", 0}, {"window", "main"},
+        {"x", buttonPos.x}, {"y", buttonPos.y}, {"button", 0}, {"mods", 0}, {"injected", false}, {"tag", ""}};
+    auto release = press;
+    release["type"] = "mouseReleased";
+    {
+        std::ofstream file(path);
+        file << recordingHeader(s).dump() << '\n' << press.dump() << '\n' << release.dump() << '\n'
+             << Json{{"type", "end"}, {"ms", 0}, {"frame", 0}}.dump() << '\n';
+    }
+    check(replay::play(path), "legacy toolbar Stop click file plays");
+    s.timeline.start(s.timeline.session, 0);
+    s.update();
+    check(!s.timeline.active && s.toolbarVisible, "final click and end consumed before toolbar draw");
+    for (int i = 0; i < 5; ++i) frame();
+    check(!s.recording() && !s.timeline.active, "queued Stop click does not start recording after playback");
+    check(!s.toolbarPlaybackInput, "toolbar input restored after replay queue drains");
+
+    // The actual ImGui consumer owns press through release, even outside UI.
+    window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
+    frame();
+    check(replay::startRecording(replay::RecordingMode::Ring, std::chrono::minutes(1)), "consumed input recording starts");
+    int appButtons = 0;
+    auto appPress = window.events().mousePressed.listen([&](const tc::MouseEventArgs&) { ++appButtons; });
+    auto appRelease = window.events().mouseReleased.listen([&](const tc::MouseEventArgs&) { ++appButtons; });
+    window.injectInput(tc::InputEvent::mousePressed(buttonPos, tc::MouseButton::Left));
+    s.toolbarContext->HoveredWindow = nullptr; // Pointer has left the toolbar before release.
+    ImGui::GetIO().WantCaptureMouse = false;
+    window.injectInput(tc::InputEvent::mouseReleased({0, 100}, tc::MouseButton::Left));
+    check(appButtons == 0 && s.ring.records.empty(), "toolbar-consumed press and outside release omitted from recording and app");
+    replay::stopRecording();
+    frame();
+    frame();
+    frame();
+    int appKeys = 0;
+    auto appKey = window.events().keyPressed.listen([&](const tc::KeyEventArgs&) { ++appKeys; });
+    int appChars = 0;
+    auto appChar = window.events().charInput.listen([&](const tc::CharEventArgs&) { ++appChars; });
+    window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
+    frame();
+    window.injectInput(tc::InputEvent::mousePressed(buttonPos, tc::MouseButton::Left));
+    frame();
+    window.injectInput(tc::InputEvent::mouseReleased(buttonPos, tc::MouseButton::Left));
+    for (int i = 0; i < 5; ++i) frame();
+    check(s.recording() && s.toolbarContext->NavWindow == toolbar && !ImGui::GetIO().WantCaptureKeyboard,
+        "real Record click leaves toolbar navigation without keyboard capture");
+    const auto beforeTyping = replay::getRecordedCount();
+    window.injectInput(tc::InputEvent::keyPressed('A'));
+    window.injectInput(tc::InputEvent::charInput('a'));
+    window.injectInput(tc::InputEvent::keyReleased('A'));
+    check(appKeys == 1 && appChars == 1 && replay::getRecordedCount() == beforeTyping + 3,
+        "typing after Record reaches app and records keys and characters");
+    replay::stopRecording();
+    std::filesystem::remove(s.temporaryRecording);
+    s.temporaryRecording.clear();
+    appUi = true;
+    for (int i = 0; i < 5; ++i) frame();
+    const tc::Vec2 appPos{40, 210};
+    window.injectInput(tc::InputEvent::mouseMoved(appPos));
+    frame();
+    check(s.toolbarContext->HoveredWindow == ImGui::FindWindowByName("App controls"), "app ImGui window is hovered in toolbar context");
+    replay::startRecording(replay::RecordingMode::Ring, std::chrono::minutes(1));
+    window.injectInput(tc::InputEvent::mousePressed(appPos, tc::MouseButton::Left));
+    frame();
+    window.injectInput(tc::InputEvent::mouseReleased(appPos, tc::MouseButton::Left));
+    check(appButtons == 0 && s.ring.records.size() == 2, "non-toolbar ImGui click is consumed but still recorded");
+    focusAppText = true;
+    frame();
+    focusAppText = false;
+    frame();
+    frame();
+    window.injectInput(tc::InputEvent::keyPressed('A'));
+    window.injectInput(tc::InputEvent::charInput('a'));
+    window.injectInput(tc::InputEvent::keyReleased('A'));
+    check(appKeys == 1 && s.ring.records.size() == 5, "non-toolbar ImGui keys and characters are still recorded");
+    replay::stopRecording();
+    frame();
+    for (int i = 0; i < 5; ++i) frame();
+    window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
+    frame();
+    replay::startRecording(replay::RecordingMode::Ring, std::chrono::minutes(1));
+    tc::TouchEventArgs touch;
+    touch.numTouches = 1;
+    touch.touches[0].id = 1;
+    touch.touches[0].x = toolbar->Pos.x + toolbar->Size.x - 4;
+    touch.touches[0].y = toolbar->Pos.y + toolbar->Size.y - 4;
+    touch.touches[0].changed = true;
+    window.injectInput(tc::InputEvent::touchPressed(touch));
+    window.injectInput(tc::InputEvent::touchMoved(touch));
+    window.injectInput(tc::InputEvent::touchReleased(touch));
+    check(s.ring.records.size() == 3 && s.ring.records.front().data["type"] == "touchPressed" &&
+        s.ring.records.back().data["type"] == "touchReleased", "touch over toolbar is recorded");
+    replay::stopRecording();
+    for (int i = 0; i < 5; ++i) frame();
+    window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
+    frame();
+    window.injectInput(tc::InputEvent::mousePressed(buttonPos, tc::MouseButton::Right));
+    frame();
+    window.injectInput(tc::InputEvent::mouseMoved(appPos));
+    frame();
+    replay::startRecording(replay::RecordingMode::Ring, std::chrono::minutes(1));
+    const auto beforeClick = appActivations;
+    window.injectInput(tc::InputEvent::mousePressed(appPos, tc::MouseButton::Left));
+    frame();
+    window.injectInput(tc::InputEvent::mouseReleased(appPos, tc::MouseButton::Left));
+    frame();
+    check(appActivations == beforeClick + 1 && s.ring.records.size() == 2 &&
+        s.ring.records.front().data["type"] == "mousePressed" && s.ring.records.back().data["type"] == "mouseReleased",
+        "left app ImGui click records while right is held on toolbar");
+    window.injectInput(tc::InputEvent::mouseReleased(appPos, tc::MouseButton::Right));
+    replay::stopRecording();
+    frame();
+    // F9 may reveal the toolbar while the file is still playing.
+    window.injectInput(tc::InputEvent::mouseMoved(buttonPos));
+    frame();
+    check(replay::play(path), "toolbar input guard starts another playback");
+    s.timeline.start(s.timeline.session, 0);
+    s.timeline.session.records.back().ms = clockMs() + 10000;
+    key(tc::KEY_F7);
+    s.update();
+    for (int i = 0; i < 5; ++i) frame();
+    check(s.toolbarVisible && s.timeline.active && !s.recording(), "visible toolbar ignores clicks during file playback");
+    replay::stopPlayback();
+    frame();
     int drops = 0;
     auto listener = window.events().filesDropped.listen([&](const tc::DragDropEventArgs&) { ++drops; });
     s.selectedPath.clear();
