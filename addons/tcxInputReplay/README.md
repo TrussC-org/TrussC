@@ -4,6 +4,8 @@ A small input recorder and replay toolbar built from plain Nodes. Add `Toolbar` 
 
 This addon uses `Window::injectInput`. If you want to build your own input-injection tool, read `Player.h`.
 
+The example draws a light-blue mouse trail and orange click dots that fade over time, making playback visible.
+
 ## Add the toolbar to an App
 
 Include `<tcxInputReplay.h>` and use the example's `using namespace std;`, `using namespace tc;`, and `using namespace tcx;`. Declare these members in `tcApp`:
@@ -30,6 +32,8 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 ```
 
 The toolbar is placed once at its parent's top center. Move it with the normal Node API. Record becomes a red Stop button while recording; Play becomes a blue Stop button while playing. Open or dropping a `.jsonl` file selects a recording, and hovering over its filename shows the full path. Toolbar Stop (including a ring flush) immediately opens the OS save dialog. Saving moves the staging file from the data directory's `input-replay` folder to the chosen path; across volumes, it copies then deletes the staging file. Cancel deletes the staging file. Save appears only after a failed save so you can retry. Code calls to `stopRecording()` and `flush()` never open a dialog.
+
+Names without an extension gain `.jsonl`. If that appended path already exists, a Warning names the path and Save lets you choose another name; the pending recording stays intact.
 
 ## Record input to a file or ring
 

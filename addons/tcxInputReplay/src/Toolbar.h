@@ -200,20 +200,32 @@ private:
             std::error_code error;
             if (!choice.success) {
                 if (staged) std::filesystem::remove(source, error);
-            } else if (source != choice.filePath) {
-                // Explicit recording paths belong to the caller; only move staging files.
-                if (staged) std::filesystem::rename(source, choice.filePath, error);
-                if (!staged || error) {
-                    std::filesystem::copy_file(source, choice.filePath, std::filesystem::copy_options::overwrite_existing, error);
-                    if (staged && !error) std::filesystem::remove(source, error);
+            } else {
+                auto target = choice.filePath;
+                if (!target.has_extension()) {
+                    target += ".jsonl";
+                    // The OS confirmed only the typed name, not this appended path.
+                    if (std::filesystem::exists(target, error)) {
+                        tc::logWarning("tcxInputReplay") << "File already exists: " << target;
+                        self->retrySave_ = true;
+                        return;
+                    }
                 }
+                if (!error && source != target) {
+                    // Explicit recording paths belong to the caller; only move staging files.
+                    if (staged) std::filesystem::rename(source, target, error);
+                    if (!staged || error) {
+                        std::filesystem::copy_file(source, target, std::filesystem::copy_options::overwrite_existing, error);
+                        if (staged && !error) std::filesystem::remove(source, error);
+                    }
+                }
+                if (!error) self->selectedPath_ = target;
             }
             if (error) {
                 tc::logError("tcxInputReplay") << error.message();
                 self->retrySave_ = true;
                 return;
             }
-            if (choice.success) self->selectedPath_ = choice.filePath;
             self->pendingSave_.clear();
             if (staged) self->stagingFile_.clear();
         });
