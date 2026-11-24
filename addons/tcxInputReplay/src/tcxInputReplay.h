@@ -281,7 +281,9 @@ inline void setup(std::vector<WindowMapping> mappings = {}) {
         s.listeners.push_back(e.mouseDragged.listen(moved, priority));
         auto button = [&s, keyName, target](const char* type, const tc::MouseEventArgs& event) {
             if (s.touchDispatch) return;
-            const unsigned mask = 1u << event.button;
+            // Live input can carry buttons outside 0..31 (e.g. 0x100, no button): no mask, no tracking.
+            const int b = static_cast<int>(event.button);
+            const unsigned mask = b >= 0 && b < 32 ? 1u << b : 0u;
             const bool pressed = std::string_view(type) == "mousePressed";
             const bool skip = pressed ? s.toolbarPointerOwner(target) :
                 (target == s.window && (s.toolbarButtons & mask));
@@ -291,7 +293,7 @@ inline void setup(std::vector<WindowMapping> mappings = {}) {
             }
             if (skip) return;
             auto j = detail::pointer(event);
-            j["button"] = event.button;
+            j["button"] = b;
             s.record(keyName, type, std::move(j));
         };
         s.listeners.push_back(e.mousePressed.listen([button](const tc::MouseEventArgs& event) { button("mousePressed", event); }, priority));
