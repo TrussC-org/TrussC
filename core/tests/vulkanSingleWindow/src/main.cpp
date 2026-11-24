@@ -157,6 +157,8 @@ struct GuardApp : App {
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
 #if defined(SOKOL_VULKAN)
+    // Include host lifecycle evidence from startup through teardown.
+    setConsoleLogLevel(LogLevel::Verbose);
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--msaa") expectedSamples = 4;
