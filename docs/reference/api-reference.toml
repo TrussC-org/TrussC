@@ -56329,20 +56329,47 @@ void tcApp::setup() {
 ["setWindowDecorated"]
 category = "window_system"
 keywords = ["borderless", "titlebar", "chrome", "frame", "decoration"]
-description.en = "Controls the resolved Window's standard decorations."
-description.ja = "対象 Window の標準装飾を切り替える。"
-description.ko = "대상 Window의 표준 장식을 전환한다."
+description.en = "Shows or hides window decorations while keeping the client size on Windows, macOS and X11."
+description.ja = "Windows・macOS・X11 で内容領域のサイズを保ちながら、ウィンドウの標準装飾を切り替えます。"
+description.ko = "Windows, macOS, X11에서 클라이언트 영역 크기를 유지하면서 창의 표준 장식을 전환합니다."
 details.en = '''
+- On Windows, macOS and X11, changing decorations keeps the client (drawable) size, including after a change requested while fullscreen takes effect on return to windowed mode.
+
+Hide the decorations:
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - Changing decoration while fullscreen keeps the window fullscreen. The requested decoration takes effect after leaving fullscreen.
 - Pass `false` to hide the title bar, borders, and window buttons, or `true` to restore standard decorations; keyboard focus and programmatic closing remain available.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
+- Windows・macOS・X11 では、装飾を変更しても内容（描画）領域のサイズを保ちます。フルスクリーン中に要求した変更を解除後に反映するときも同じです。
+
+装飾を非表示にします。
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - フルスクリーン中に装飾を変更してもフルスクリーンを維持します。指定した装飾は解除後に反映します。
 - `false` でタイトルバー、枠、ウィンドウボタンを隠し、`true` で標準装飾に戻します。キーボードフォーカスとプログラムからの終了は引き続き使えます。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
+- Windows, macOS, X11에서는 장식을 변경해도 클라이언트(그리기) 영역 크기를 유지합니다. 전체화면 중 요청한 변경을 창 모드로 돌아온 뒤 적용할 때도 동일합니다.
+
+장식을 숨깁니다.
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - 전체화면 중에 장식을 변경해도 전체화면을 유지합니다. 요청한 장식은 전체화면을 종료한 뒤 적용합니다.
 - `false`이면 제목 표시줄, 테두리, 윈도우 버튼을 숨기고 `true`이면 표준 장식을 복원합니다. 키보드 포커스와 프로그램을 통한 종료는 계속 사용할 수 있습니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).

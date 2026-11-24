@@ -1446,6 +1446,16 @@ The framework retains equal sg/sgl pool capacities and the public default 1024;
 there is no eviction or upstream issue. Tests: `sglPoolLimits`, `sglVertexLayout`,
 and the unchanged display suite / renderRegression pixel comparison.
 
+## Borderless client size (#1639)
+
+[TrussC] `sapp_desc._tc_borderless` and `_sapp_tc_normalize_main_window`
+forward launch decorations to the shared desktop constructors before mapping.
+Runtime decoration changes preserve the current client size: X11 queues one
+`XResizeWindow` request after the Motif property change, Win32 adjusts the outer
+rectangle for the new style at the current DPI, and macOS restores the content
+size after changing the style mask. Existing fullscreen deferral is retained.
+Tests: `runtimeSettings` and `tools/tests/test_window_decoration.py`.
+
 ## Per-draw stencil references (#1512, part 2b)
 
 [TrussC fork] `sgl_tc_stencil_ref(uint8_t)` supplies CPU recording state per

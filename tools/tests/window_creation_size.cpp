@@ -27,7 +27,7 @@ struct Descriptor {
     int _tc_event_cb = 0;
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
-    bool borderless=false, high_dpi = true, no_high_dpi = false;
+    bool borderless=false, _tc_borderless=false, high_dpi = true, no_high_dpi = false;
     int swap_interval = 1, max_frame_latency = 0, _tc_draw_while_hidden = 0;
     bool fullscreen = false, hidden = false, _tc_start_hidden = false;
     int event_cb = 0, tick_cb = 0;
