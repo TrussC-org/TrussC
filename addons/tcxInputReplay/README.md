@@ -1,270 +1,75 @@
 # tcxInputReplay
 
-[English](README.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
+A small input recorder and replay toolbar built from plain Nodes. Add `Toolbar` to an App to record mouse, keyboard, touch, and file-drop input in that window. Playback injects events on their recorded schedule and waits at scene marks. JSONL version 1 remains compatible with existing single-window recordings; there is no ImGui dependency.
 
-Record TrussC windows' input and replay it in real time to revisit an interactive session after code changes. Scene marks let playback wait for the app when scene timing changes. This is an opt-in debugging addon; input alone is not a deterministic snapshot of the app. There is no full-state snapshot API.
+This addon uses `Window::injectInput`. If you want to build your own input-injection tool, read `Player.h`.
 
-Add `tcxInputReplay` to `addons.make` and include `<tcxInputReplay.h>`. All calls run on the main thread. Call `setup()` once in `tcApp::setup()`; it selects that window and releases its scoped listeners on app cleanup.
+The example draws a light-blue mouse trail and orange click dots that fade over time, making playback visible.
+
+## Add the toolbar to an App
+
+Include `<tcxInputReplay.h>` and use the example's `using namespace std;`, `using namespace tc;`, and `using namespace tcx;`. Declare these members in `tcApp`:
+
+```cpp
+shared_ptr<inputreplay::Toolbar> replay;
+vector<Vec2> dots;
+```
+
+Add the toolbar in `setup()`. Use `isPointerOver()` in the App's mouse handler to keep toolbar clicks out of the drawing:
 
 ```cpp
 void tcApp::setup() {
-    tcx::inputreplay::setup();
+    // F9 shows and hides the toolbar. With no argument, no key is assigned.
+    replay = make_shared<inputreplay::Toolbar>(KEY_F9);
+    // Optional: start and stop recording from the keyboard (no key by default).
+    // replay->setRecordKey(KEY_F8);
+    addChild(replay);
+}
+void tcApp::mousePressed(Vec2 pos, int button) {
+    if (replay->isPointerOver()) return;   // the click is for the toolbar
+    dots.push_back(pos);
 }
 ```
 
-## Use the input replay toolbar
+The toolbar is placed once at its parent's top center. Move it with the normal Node API. Record becomes a red Stop button while recording; Play becomes a blue Stop button while playing. Open or dropping a `.jsonl` file selects a recording, and hovering over its filename shows the full path. Toolbar Stop (including a ring flush) immediately opens the OS save dialog. Saving moves the staging file from the data directory's `input-replay` folder to the chosen path; across volumes, it copies then deletes the staging file. Cancel deletes the staging file. Save appears only after a failed save so you can retry. Code calls to `stopRecording()` and `flush()` never open a dialog.
 
-`setup()` adds a small toolbar at the top center of its window. Record starts a temporary file; Stop recording opens the native save dialog and saves JSONL. Cancel discards a toolbar recording. When code started a file recording, cancel keeps the original file. Stopping a ring from the toolbar offers the same save dialog. Code calls to `stopRecording()` and `flush()` never open dialogs.
+Names without an extension gain `.jsonl`. If that appended path already exists, a Warning names the path and Save lets you choose another name; the pending recording stays intact.
+
+## Record input to a file or ring
+
+File paths resolve against the App's data directory. File recording closes with an end record:
 
 ```cpp
-void tcApp::setup() {
-    tcx::inputreplay::setup();
-}
+replay->startRecording("session.jsonl");
+replay->stopRecording();
 ```
 
-Failed saves keep the recording and leave Save available for retry; the Error log includes its path. Toolbar saving requires a desktop file dialog. On Web and Android, Save keeps the staging file and logs a Warning with its path on each attempt. Use code to close a file recording or save a ring without a dialog:
+Ring recording retains the latest duration in memory. Flush writes that interval and stops recording; `stopRecording()` discards an active ring:
 
 ```cpp
-void tcApp::saveCapture() {
-    tcx::inputreplay::stopRecording();
-}
+replay->startRecording(inputreplay::RecordingMode::Ring, chrono::seconds(30));
+replay->flush("last-30-seconds.jsonl");
 ```
 
-For a ring, save directly to a chosen path:
+`isRecording()` reports either mode. `getRecordedCount()` counts input events, excluding headers, marks, and end records. In ring mode it counts only retained input. Each Toolbar records only its own window, including toolbar clicks. Injected events are omitted.
+
+## Play input and synchronize scenes
+
+Play uses the same window as the Toolbar. `ScaleMode::None` keeps coordinates, `Stretch` scales each axis, and `Fit` preserves aspect ratio with centered letterboxing:
 
 ```cpp
-void tcApp::saveCapture() {
-    tcx::inputreplay::flush("session.jsonl");
-}
+replay->play("session.jsonl", inputreplay::ScaleMode::Fit);
+replay->mark("scene");
 ```
 
-Toolbar staging files live in the `setFlushDirectory()` folder (default: `input-replay` under the data folder), with owner-only permissions on POSIX. A crash or cleanup with an unsaved recording can leave a staging file there. Starting a new recording discards the previous unsaved staging file with a Warning.
+Call `mark("scene")` at the corresponding scene transition while recording and while playing. Playback waits for the next matching mark; an early mark skips the remainder of the previous scene. `stopPlayback()` stops playback and `isPlaying()` reports its state. Replayed events carry `injected = true` and the source tag `"replayed"`; Buttons and toolbar hotkeys ignore them.
 
+## Enable MCP controls explicitly
 
-Open chooses a recording; the toolbar shows its filename and hovering it shows the full path. Dropping files selects the first `.jsonl` path (case sensitive) on the setup window, without starting playback. The app still receives every drop, recording continues, and the drop is recorded normally. Other extensions are ignored by the addon. Open and drop select a path; Play validates and starts it.
-
-F9 toggles only toolbar visibility, is enabled by default, and ignores key repeat. On macOS, press it with fn, or change the key. Use core's integer key constants to change it or disable it for an app that already uses that key.
+Only a Toolbar whose `registerMcpTools()` is called is controlled by the addon's MCP tools:
 
 ```cpp
-void tcApp::configureReplay() {
-    tcx::inputreplay::setHotKey(tc::KEY_F8);
-    tcx::inputreplay::setHotKeyEnabled(false);
-}
+replay->registerMcpTools();
 ```
 
-Playback hides the toolbar and restores its previous visibility when it ends or is stopped. The hotkey still toggles it during playback. During file playback, the toolbar ignores input, including queued replay events processed after playback ends.
-
-The addon loads tcxImGui automatically. Apps using `imguiBegin()` / `imguiEnd()` share that frame automatically; otherwise the addon starts its own frame before rendering. No manual toolbar draw call is needed. The toolbar is attached to the setup window's ImGui context; keep that context initialized until app cleanup (there is no API to reattach after an explicit `imguiShutdown()`).
-
-
-Hot-reload builds must list tcxImGui explicitly in `addons.make`:
-
-```makefile
-tcxInputReplay
-tcxImGui
-```
-
-## Record and replay input
-
-Paths resolve through `getDataPath()`. Start recording with a destination path, then stop to write the end record.
-
-```cpp
-void tcApp::keyPressed(int key) {
-    if (key == 'R') tcx::inputreplay::startRecording("session.jsonl");
-    if (key == 'S') tcx::inputreplay::stopRecording();
-}
-```
-
-Play a complete recording with its original coordinates, or select a scaling mode.
-
-```cpp
-void tcApp::keyPressed(int key) {
-    if (key == 'P') tcx::inputreplay::play("session.jsonl", tcx::inputreplay::ScaleMode::Fit);
-}
-```
-
-- `play(path)` defaults to `ScaleMode::None`; a different window size logs a Warning.
-- `ScaleMode::Stretch` scales x and y separately from recorded dimensions to current dimensions.
-- `ScaleMode::Fit` preserves aspect ratio and centers the recorded canvas. Positions outside the recorded canvas pass through unchanged, rather than being moved into the letterbox.
-- Dimensions and coordinates use logical points normally and framebuffer pixels in pixelPerfect mode. A resize applies new factors from the next input event. Scroll deltas do not scale.
-- Different DPI or pixelPerfect metadata logs a Warning. The addon has no API to change DPI or pixelPerfect mode; configure matching settings before launch. `None` retains the recorded numeric coordinates.
-
-```cpp
-void tcApp::keyPressed(int key) {
-    if (key == 'P') tcx::inputreplay::play("session.jsonl", tcx::inputreplay::ScaleMode::None);
-}
-```
-
-Mouse moves, drags (stored once as moves), buttons, scroll, keys including repeat, characters, modifiers, touch IDs/cancellation/pressure and file-drop paths are recorded. Injected input retains `injected` and `tag`; this addon's synchronous replay is omitted. Touch-generated mouse input is omitted because touch injection recreates it. Mouse and keyboard input consumed by the replay toolbar, including clicks released outside it, is not recorded. Touch events and other ImGui input are recorded.
-
-File drops contain paths as data; playback does not recreate files. The addon has no file-restoration API. Core's file-drop arguments have no provenance API, so recorded drops use `injected: false` and an empty tag. The synchronous replay guard still prevents re-recording them. Scroll position is saved as data; the injection API uses the destination window's current pointer position and has no explicit scroll-position argument.
-
-## Count recorded input
-
-`getRecordedCount()` returns input records written in the current recording (retained inputs in Ring mode), excluding marks and header/end lines, or 0 when stopped; use it to set your own limit.
-
-```cpp
-void tcApp::update() {
-    if (tcx::inputreplay::getRecordedCount() > 100000)
-        tcx::inputreplay::stopRecording();
-}
-```
-
-## Retain recent input in a ring
-
-Ring recording keeps the last N minutes in memory for incident capture. No file is opened until flush. An optional explicit capacity also bounds the input/mark count: this keeps at most five minutes and 100,000 input/mark records.
-
-```cpp
-void tcApp::beginCapture() {
-    tcx::inputreplay::startRecording(tcx::inputreplay::RecordingMode::Ring, std::chrono::minutes(5), 100000);
-}
-```
-
-The duration is positive `std::chrono::milliseconds`; chrono minutes/seconds convert directly. Capacity excludes header/end, must be positive, and defaults to unbounded. Older complete records are evicted by duration and, when specified, capacity.
-
-`flush(path)` writes the retained segment and stops recording, including on a file error. It creates parent folders and opens no dialog. Restart explicitly to capture another incident.
-
-```cpp
-void tcApp::saveIncident() {
-    tcx::inputreplay::flush("incidents/session.jsonl");
-}
-```
-
-`flush()` uses a Unix-microsecond timestamped filename in `input-replay` under the data folder. Set the folder after setup if desired.
-
-```cpp
-void tcApp::configureCapture() {
-    tcx::inputreplay::setFlushDirectory("incidents");
-}
-```
-
-Save with the automatic name:
-
-```cpp
-void tcApp::saveIncident() {
-    tcx::inputreplay::flush();
-}
-```
-
-Flush writes a valid header/end and rebases time/frame to the first retained record. If the first mark was evicted, playback starts at the retained segment; it cannot restore the earlier scene. There is no app-state restoration API. `stopRecording()` discards a ring; save it with `flush()` instead.
-
-```cpp
-void tcApp::saveIncident() {
-    tcx::inputreplay::flush();
-}
-```
-
-Calling flush while stopped logs a Warning every time. File recording continues to use `startRecording(path)` and `stopRecording()`; flush is for ring recording. Start the ring before flushing.
-
-```cpp
-void tcApp::beginCapture() {
-    tcx::inputreplay::startRecording(tcx::inputreplay::RecordingMode::Ring, std::chrono::minutes(5), 100000);
-}
-```
-
-## Map multiple windows explicitly
-
-`setup()` still maps `main` to its current window. To capture multiple windows, create them first and pass stable keys with Window pointers to setup. Declare `std::shared_ptr<tc::Window> preview;` in tcApp and assign the result of `tc::createWindow(settings)` before this setup call.
-
-```cpp
-void tcApp::setup() {
-    tcx::inputreplay::setup({{"main", getWindow()}, {"preview", preview.get()}});
-}
-```
-
-Only mapped windows are captured. Use the same keys when replaying, even if Window creation order or titles change. Missing, closed or duplicate keys/destinations reject setup/play; a mapped window closing stops playback with an Error, including while waiting at a mark. Map each open destination once before recording or playback.
-
-```cpp
-void tcApp::setup() {
-    tcx::inputreplay::setup({{"main", getWindow()}, {"preview", preview.get()}});
-}
-```
-
-Mapping stays fixed until app cleanup; there is no live remapping API. Input coordinates and scaling use each key's own recorded and current dimensions. Core's open-window registry tracks lifetime; transient native IDs and titles are never persisted as keys.
-
-## Control input replay through MCP
-
-Setup registers five tools at `Control` level. Registering them does not grant access or start a server. Enable the existing MCP Control grant in a debug app to use them.
-
-```cpp
-void tcApp::enableRemoteDebugging() {
-    if (debugBuild) tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
-}
-```
-
-| Tool | Arguments |
-| --- | --- |
-| `tcx_inputreplay_start_recording` | `path` for a file; omit it for a ring, with optional `durationMs` (default 300000) and `capacity` (unbounded by default) |
-| `tcx_inputreplay_stop_recording` | none; discards a ring |
-| `tcx_inputreplay_play` | `path`, optional `scale`: `none`, `stretch`, `fit` |
-| `tcx_inputreplay_stop_playback` | none |
-| `tcx_inputreplay_flush` | optional `path`; omission uses the configured folder |
-
-Control functions return `bool`; tools return `status: "ok"` or error text. MCP calls themselves are not recorded. This is a debugging tool: avoid enabling it in distributed apps. Guard setup and the Control grant in your debug build.
-
-```cpp
-void tcApp::setup() {
-    if (debugBuild) tcx::inputreplay::setup();
-}
-```
-
-Declare a build-controlled `bool debugBuild` member; only call `enableRemoteDebugging()` in that debug build.
-
-## Synchronize scenes with marks
-
-Call the same mark when the app reaches each scene, during both recording and playback.
-
-```cpp
-void tcApp::enterScene() {
-    tcx::inputreplay::mark("scene2");
-}
-```
-
-Playback waits indefinitely at the next recorded mark for the matching app mark. An early matching mark drops the remaining inputs in the previous scene; a late mark releases the wait. Either restarts the clock at that mark, and subsequent input uses its recorded offset from the mark. Other names do not advance playback. Marks do not restore app state: there is no API to reconstruct a scene from a recording.
-
-Real input mixes with replayed input in arrival order and does not stop playback. Stop explicitly when the app needs to.
-
-```cpp
-void tcApp::stopDemo() {
-    tcx::inputreplay::stopPlayback();
-}
-```
-
-Natural completion emits `onPlaybackEnd()`. Keep the RAII listener as a `tcApp` member; explicit stop and errors do not emit it. The app can loop by starting playback in this callback.
-
-```cpp
-void tcApp::setup() {
-    tcx::inputreplay::setup();
-    endListener = tcx::inputreplay::onPlaybackEnd().listen([] {
-        tcx::inputreplay::play("session.jsonl");
-    });
-}
-```
-
-Declare `tc::EventListener endListener;` in `tcApp`. Repeated setup/start/stop calls log a Warning every time. File and injection failures log Error and stop recording/playback. Recording cleanup writes an end record when possible.
-
-## Keep recording files private
-
-Recorded characters can include passwords. Treat recordings as sensitive files and stop recording before entering secrets. The addon has no redaction or encryption API.
-
-```cpp
-void tcApp::beforePasswordEntry() {
-    tcx::inputreplay::stopRecording();
-}
-```
-
-Input alone does not reproduce random state, clocks, network, cameras or sensors. Restore those app-specific conditions separately; the addon has no snapshot API for them.
-
-## JSON Lines version 1
-
-UTF-8, one object per line. The first object is a header with `type: "header"`, `version: 1`, `app`, `trussc`, `started` (Unix milliseconds as a string), `fps`, and a `windows` array with unique keys (default `key: "main"`), `width`, `height`, `dpi`, `pixelPerfect`. Width/height are the recording's App coordinate extents.
-
-Every subsequent record has `type`, elapsed `ms` and relative `frame`. Input also has its mapped `window` key (default `"main"`), `injected` and `tag`. Mouse input has `x`, `y`, `mods` (shift=1, ctrl=2, alt=4, super=8); buttons add `button` (0–2), scroll adds `scrollX`, `scrollY`. Keys have `key`, `mods`, `repeat`; characters have `codepoint`, `mods`, `repeat`. Touch has `canceled` and `touches` (`id`, `x`, `y`, `pressure`, `changed`). Drops have `x`, `y`, `files`. Marks have `name`; the final record has `type: "end"`.
-
-Playback validates the whole file before injecting anything, reporting errors with a line number. Timestamps and frames must be nondecreasing. Invalid/missing fields, non-finite or out-of-domain values, unknown versions/event kinds, missing end records and trailing records fail validation. Failed or interrupted recordings can be incomplete; there is no recovery API.
-
-## Example and tests
-
-`example-inputReplay` shows recording on R, stopping on S, playback on P and a scene mark on M. `tests` runs headlessly and covers file validation, exact bounds, round trips, scaling and fake-clock marks. `tests-display --display-check` records injected input and compares replay delivery on a display (Xvfb works on Linux).
-
-`tests` also covers toolbar controls, dialogs through injected file choices, drop selection and auto-hide. `tests-display --toolbar-check` and `--toolbar-app-check` verify drawing without and with an app ImGui frame on a display server. Native dialog interaction requires a human check.
+The five Control-level tools are `tcx_inputreplay_start_recording` (optional `path`, otherwise ring with optional `durationMs`), `tcx_inputreplay_stop_recording`, `tcx_inputreplay_play` (`path`, optional `scale`), `tcx_inputreplay_stop_playback`, and `tcx_inputreplay_flush` (`path`). The most recent explicit registration selects the controlled instance. Recording and playback otherwise use no global addon state.

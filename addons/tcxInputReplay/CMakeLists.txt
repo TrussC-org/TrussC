@@ -1,7 +1,4 @@
 cmake_minimum_required(VERSION 3.16)
-if(NOT TARGET tcxImGui)
-    _tc_load_addon(tcxImGui)
-endif()
 add_library(tcxInputReplay INTERFACE)
 target_include_directories(tcxInputReplay INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(tcxInputReplay INTERFACE TrussC tcxImGui)
+target_link_libraries(tcxInputReplay INTERFACE TrussC)

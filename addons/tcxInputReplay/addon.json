@@ -1,8 +1,8 @@
 {
-  "description": "Input recording and replay with ring capture, window mapping and scene marks",
+  "description": "Input recording and replay with a Node toolbar, ring capture and scene marks",
   "author": "tettou771",
   "license": "MIT",
   "category": "utilities",
-  "dependencies": ["tcxImGui"],
+  "dependencies": [],
   "keywords": ["input", "record", "replay", "debug", "testing"]
 }
