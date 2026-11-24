@@ -178,6 +178,44 @@ private:
     bool valid_ = false;
 };
 
+// One glyph's drawn quad: position (x, y, w, h in layout units) and UVs in
+// atlas TEXELS. Both glyph paths (Font::drawString and GlyphBatch) build their
+// quads here, so they stay pixel-identical.
+//
+// The quad is grown into the empty gap the packer reserves around every glyph
+// (half of it on each side, so neighbors are never reached), with the UVs
+// grown at the same texel-to-unit ratio, so the glyph itself does not move. A
+// minified glyph's filtered coverage spreads past its tight bitmap: a tight
+// quad clipped that spread at its edge (ink that comes and goes with the
+// subpixel phase), and a quad thinner than a pixel ("一", "ー") could miss
+// every pixel center and vanish.
+//
+// The gap is a quarter of the glyph's larger raster side (it was an eighth):
+// half of it pads the quad, and the other half keeps the padded quad's mip
+// footprint clear of the neighbors. With an eighth, the padding reached the
+// neighbors' mip spread on small atlases (a 24 px font drawn 3x smaller picked
+// up ~9% of its ink from neighbors, vs ~1% unpadded).
+inline int glyphAtlasGap(int rasterSize) { return std::max(2, (rasterSize + 3) / 4); }
+
+struct GlyphQuad {
+    float x, y, w, h;
+    float u0, v0, u1, v1;
+};
+inline GlyphQuad paddedGlyphQuad(const GlyphInfo& glyph, float x, float y, float w, float h,
+                                 float atlasWidth, float atlasHeight) {
+    GlyphQuad q{x, y, w, h,
+                glyph.getU0() * atlasWidth, glyph.getV0() * atlasHeight,
+                glyph.getU1() * atlasWidth, glyph.getV1() * atlasHeight};
+    const float tw = q.u1 - q.u0, th = q.v1 - q.v0;
+    if (tw <= 0.0f || th <= 0.0f) return q;
+    const float gap = (float)glyphAtlasGap((int)std::lround(std::max(tw, th)));
+    const float m = std::floor(gap * 0.5f);
+    const float mx = m * w / tw, my = m * h / th;
+    q.x -= mx; q.y -= my; q.w += 2.0f * mx; q.h += 2.0f * my;
+    q.u0 -= m; q.u1 += m; q.v0 -= m; q.v1 += m;
+    return q;
+}
+
 // ---------------------------------------------------------------------------
 // Atlas state
 // ---------------------------------------------------------------------------
@@ -631,7 +669,7 @@ private:
     static constexpr int GLYPH_PADDING = 2;
     // The gap never lowers raster oversampling or rejects a bitmap that fits;
     // packing reserves it between glyphs and uses whatever slack remains at page edges.
-    static int glyphGap(int size) { return std::max(GLYPH_PADDING, (size + 7) / 8); }
+    static int glyphGap(int size) { return std::max(GLYPH_PADDING, glyphAtlasGap(size)); }
     // Align the raster/UV rectangle's top-left, after the leading padding.
     // Cursor steps round trailing padding up too, preserving mip phase to L4.
     static int alignGlyphOffset(int value) { return (value + 15) & ~15; }
@@ -1968,16 +2006,20 @@ protected:
                 if (!g || !g->isValid() || g->getAtlasIndex() != atlasIdx) continue;
                 if (g->getWidth() <= 0 || g->getHeight() <= 0) continue;
 
-                float gx = pg.drawX + g->getXoff() * s * pg.scaleX;
-                float gy = pg.baselineY + g->getYoff() * s;
-                float gw = g->getWidth() * s * pg.scaleX;
-                float gh = g->getHeight() * s;
+                // Padded quad (see internal::paddedGlyphQuad), UVs back to normalized.
+                const auto& page = atlasManager_->getAtlas(atlasIdx);
+                const float aw = (float)page.getWidth(), ah = (float)page.getHeight();
+                const internal::GlyphQuad q = internal::paddedGlyphQuad(*g,
+                    pg.drawX + g->getXoff() * s * pg.scaleX, pg.baselineY + g->getYoff() * s,
+                    g->getWidth() * s * pg.scaleX, g->getHeight() * s, aw, ah);
+                const float gx = q.x, gy = q.y, gw = q.w, gh = q.h;
+                const float u0 = q.u0 / aw, u1 = q.u1 / aw, v0 = q.v0 / ah, v1 = q.v1 / ah;
 
                 if (pg.rotationCw == 0.f) {
-                    sgl_v2f_t2f(gx,      gy,      g->getU0(), g->getV0());
-                    sgl_v2f_t2f(gx + gw, gy,      g->getU1(), g->getV0());
-                    sgl_v2f_t2f(gx + gw, gy + gh, g->getU1(), g->getV1());
-                    sgl_v2f_t2f(gx,      gy + gh, g->getU0(), g->getV1());
+                    sgl_v2f_t2f(gx,      gy,      u0, v0);
+                    sgl_v2f_t2f(gx + gw, gy,      u1, v0);
+                    sgl_v2f_t2f(gx + gw, gy + gh, u1, v1);
+                    sgl_v2f_t2f(gx,      gy + gh, u0, v1);
                 } else {
                     // Rotate around pivot. Screen Y-down: positive rotationCw
                     // rotates clockwise visually. Specialized for θ=π/2 this
@@ -1996,10 +2038,10 @@ protected:
                     rot(gx + gw, gy,      v1x, v1y);
                     rot(gx + gw, gy + gh, v2x, v2y);
                     rot(gx,      gy + gh, v3x, v3y);
-                    sgl_v2f_t2f(v0x, v0y, g->getU0(), g->getV0());
-                    sgl_v2f_t2f(v1x, v1y, g->getU1(), g->getV0());
-                    sgl_v2f_t2f(v2x, v2y, g->getU1(), g->getV1());
-                    sgl_v2f_t2f(v3x, v3y, g->getU0(), g->getV1());
+                    sgl_v2f_t2f(v0x, v0y, u0, v0);
+                    sgl_v2f_t2f(v1x, v1y, u1, v0);
+                    sgl_v2f_t2f(v2x, v2y, u1, v1);
+                    sgl_v2f_t2f(v3x, v3y, u0, v1);
                 }
             }
 
