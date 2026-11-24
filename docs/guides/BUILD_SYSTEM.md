@@ -103,46 +103,48 @@ GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 ### Build with a project's pinned TrussC version
 
-A project's `.trussc-version` selects the TrussC sources and, for versions with
-`tools/trusscli-protocol` set to `1`, that version's own trusscli. Share this file
-with the project so collaborators build with the same version. `use` saves the
-selection and prepares it; `update` refreshes it and regenerates project files.
-Tags, branches, commit hashes, and forks (`owner/repo@ref`) are supported:
+The installed trusscli builds the sources selected by a project's `.trussc-version`.
+Share this file with the project so collaborators select the same sources.
+Features newer than the pinned TrussC version may not apply; features that would
+change the result stop with a message instead. Select a newer core to use them:
 
 ```bash
 trusscli use v0.8.1
 trusscli build --release
 ```
 
-For tags, `use` and `update` first try the selected repository's release asset:
-`trusscli-<tag>-<os>-<arch>.tar.gz` and `trusscli-<tag>-SHA256SUMS.txt`.
-They verify SHA-256, extract the executable (the app bundle on macOS), and run
-`--version` with a ten-second timeout before installing it into the cached
-version's `tools/bin/`. Assets cover Linux x86_64, macOS arm64, and Windows x86_64.
-Other architectures, missing assets, and failed checks fall back to building
-that version's CLI from source, with one reason line. Branches and commit pins
-always build locally. The first fallback build takes a few minutes; prepare it
-ahead of time from the project directory:
+For example, an addon pinned with `@ref` needs a core that can load external
+addon paths. An older core stops with `cannot load external addon paths
+(TRUSSC_ADDON_PATHS is unavailable); select a newer TrussC version`.
+Select a core with that support, such as the `next/trusscli-versions` branch:
 
 ```bash
-trusscli update
+trusscli use next/trusscli-versions
 ```
 
-`build` delegates its arguments to the cached version's executable and returns
-its exit code. It never downloads or builds a missing delegate; prepare a missing
-delegate explicitly:
+`use` saves the selection and prepares its sources; `update` refreshes them and
+regenerates project files. Tags, branches, commit hashes, and forks
+(`owner/repo@ref`) are supported. `build` uses the prepared sources; if the cache
+is missing, prepare it explicitly:
 
 ```bash
 trusscli update
 trusscli build --release
 ```
 
-Updating a branch that has moved refreshes its sources and rebuilds its delegate.
-Versions without the protocol marker print a notice and build with the current
-trusscli. There is no API to add delegation support to an older release.
+TrussC versions with the old `trussc/` layout (v0.1.0–v0.4.4) stop with
+“TrussC v0.4.4 predates the core/ layout; trusscli supports v0.5.0 and later.
+Run `trusscli use v0.5.0` (or newer).” The layout check also applies to forks
+and commits. A rejected `use` leaves the project's previous pin and local
+selection unchanged and does not publish the unsupported cache entry.
+Choose a supported version:
+
+```bash
+trusscli use v0.5.0
+```
 
 `use-local` saves a machine-local checkout override in project metadata and
-builds with the **current trusscli**. This override takes precedence over the
+selects sources for the installed trusscli. This override takes precedence over the
 shared version file:
 
 ```bash

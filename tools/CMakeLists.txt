@@ -48,7 +48,7 @@ trussc_app(
 set_source_files_properties(src/main.cpp PROPERTIES COMPILE_DEFINITIONS
     "TRUSSCLI_VERSION=\"${TRUSSCLI_VERSION_STR}\";TRUSSCLI_BUILD_DATE=\"${TRUSSCLI_BUILD_DATE_STR}\"")
 
-# Allow delegate acquisition and verification to stage output before publishing.
+# Allow callers to place build output outside the source tree.
 foreach(prop RUNTIME_OUTPUT_DIRECTORY RUNTIME_OUTPUT_DIRECTORY_RELEASE
              RUNTIME_OUTPUT_DIRECTORY_DEBUG RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO
              RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL)

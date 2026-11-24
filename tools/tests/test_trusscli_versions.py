@@ -3,8 +3,6 @@
 Run through tcbuild.sh: one check configures and builds a tiny fixture app.
 All Git writes are confined to temporary fake repositories, never this checkout.
 """
-import hashlib
-import platform
 import io
 import tarfile
 import json
@@ -20,53 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli")).resolve()
 NATIVE = {"linux": "linux", "darwin": "macos", "win32": "windows"}[sys.platform]
 
-DELEGATE_STUB = r"""
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-int main(int argc, char** argv) {
-    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        if (getenv("TRUSSC_DELEGATED_ROOT")) return 98;
-        const char* probe = getenv("TRUSSC_STUB_PROBE");
-        if (probe && strcmp(probe, "sleep") == 0) {
-#ifdef _WIN32
-            Sleep(60000);
-#else
-            sleep(60);
-#endif
-        }
-        return probe && strcmp(probe, "fail") == 0 ? 127 : 0;
-    }
-    const char* output = getenv("TRUSSC_STUB_OUTPUT");
-    FILE* file = fopen(output, "w");
-    if (!file) return 99;
-    fprintf(file, "%s\n", getenv("TRUSSC_DELEGATED_ROOT"));
-    for (int i = 1; i < argc; ++i) fprintf(file, "%s\n", argv[i]);
-    fclose(file);
-    puts("delegate stdout");
-    fputs("delegate stderr\n", stderr);
-    const char* code = getenv("TRUSSC_STUB_EXIT");
-    return code ? atoi(code) : 0;
-}
-"""
-
-
 @unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
 class VersionTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.release_scratch = tempfile.TemporaryDirectory(prefix="trusscli-release-stub-")
-        cls.addClassCleanup(cls.release_scratch.cleanup)
-        source = Path(cls.release_scratch.name).resolve() / "stub.c"
-        source.write_text(DELEGATE_STUB, encoding="utf-8")
-        cls.release_stub = source.with_name("stub.exe" if sys.platform == "win32" else "stub")
-        subprocess.run([os.environ.get("CC", "cc"), str(source), "-o", str(cls.release_stub)], check=True)
-
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory(prefix="trusscli-versions-")
         self.addCleanup(self.scratch.cleanup)
@@ -147,261 +100,101 @@ class VersionTests(unittest.TestCase):
     def local(self):
         return json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))["vendor"]["trussc"].get("localPath")
 
-    def publish_delegate(self, broken=False):
-        tools = self.source / "tools"
-        tools.mkdir(exist_ok=True)
-        (tools / "trusscli-protocol").write_text("1\n", encoding="utf-8")
-        (tools / "CMakeLists.txt").write_text(
-            'cmake_minimum_required(VERSION 3.20)\nproject(stub C)\n'
-            'add_executable(trusscli stub.c)\n'
-            'if(APPLE)\nset_target_properties(trusscli PROPERTIES MACOSX_BUNDLE TRUE)\nendif()\n',
-            encoding="utf-8")
-        (tools / "stub.c").write_text("invalid C\n" if broken else DELEGATE_STUB, encoding="utf-8")
+    def old_layout(self):
+        shutil.rmtree(self.source / "core")
+        (self.source / "trussc/cmake").mkdir(parents=True)
+        (self.source / "trussc/cmake/trussc_app.cmake").write_text("# old layout\n", encoding="utf-8")
         self.advance()
-        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main")
-        self.env["TRUSSC_STUB_OUTPUT"] = str(self.base / "delegate argv")
-
-    def delegate_binary(self, root=None):
-        relative = {"darwin": "trusscli.app/Contents/MacOS/trusscli",
-                    "win32": "trusscli.exe"}.get(sys.platform, "trusscli")
-        return (root or self.root()) / "tools/bin" / relative
-
-    def release(self, ref="vRelease", owner="TrussC-org", unsafe=False, dotted=False, locked=False, stub=None):
-        base = Path(self.env["TRUSSC_GITHUB_BASE_URL"].removeprefix("file://"))
-        folder = base / owner / "TrussC/releases/download" / ref
-        folder.mkdir(parents=True, exist_ok=True)
-        arch = {"amd64": "x86_64", "aarch64": "arm64"}.get(platform.machine().lower(), platform.machine().lower())
-        asset = folder / f"trusscli-{ref}-{NATIVE}-{arch}.tar.gz"
-        with tarfile.open(asset, "w:gz") as archive:
-            if locked:
-                directory = tarfile.TarInfo("locked")
-                directory.type = tarfile.DIRTYPE
-                directory.mode = 0
-                archive.addfile(directory)
-            name = "../outside" if unsafe else str(self.delegate_binary(Path("root")).relative_to("root/tools/bin"))
-            if dotted:
-                root = tarfile.TarInfo("./")
-                root.type = tarfile.DIRTYPE
-                root.mode = 0o755
-                archive.addfile(root)
-                name = "./" + name
-            info = tarfile.TarInfo(name)
-            data = (stub or self.release_stub).read_bytes()
-            info.size = len(data)
-            info.mode = 0o644  # Acquisition must add Unix execute permissions.
-            archive.addfile(info, io.BytesIO(data))
-        sums = folder / f"trusscli-{ref}-SHA256SUMS.txt"
-        sums.write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n", encoding="utf-8")
-        return asset, sums
-
-    def release_source(self):
-        self.publish_delegate()
-        self.git("-C", self.source, "tag", "vRelease")
-        for owner in ("TrussC-org", "tettou771"):
-            self.git("-C", self.source, "push", self.base / f"remotes/{owner}/TrussC.git", "main", "vRelease")
-
-    def test_release_tag_and_fork_download_without_build(self):
-        self.release_source()
-        for owner in ("TrussC-org", "tettou771"):
-            with self.subTest(owner=owner):
-                self.release(owner=owner, dotted=owner == "tettou771")
-                output = self.cli("use", f"{owner}/TrussC@vRelease")
-                self.assertNotIn("first time takes", output)
-                self.assertTrue(self.delegate_binary().is_file())
-                self.assertFalse((self.root() / "tools/trusscli-build.log").exists())
-                self.assertFalse((self.root() / "tools/build-trusscli").exists())
-                self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
-                self.assertEqual(self.delegate_binary().read_bytes(), self.release_stub.read_bytes())
-                self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
-
-    def test_packaged_release_round_trip(self):
-        self.release_source()
-        arch = {"amd64": "x86_64", "aarch64": "arm64"}.get(platform.machine().lower(), platform.machine().lower())
-        folder = self.base / "remotes/TrussC-org/TrussC/releases/download/vRelease"
-        bin_dir = self.base / "release-bin"
-        binary = self.delegate_binary(Path("root")).relative_to("root/tools/bin")
-        (bin_dir / binary).parent.mkdir(parents=True)
-        shutil.copy2(self.release_stub, bin_dir / binary)
-        script = ROOT / "tools/package_trusscli_release.py"
-        subprocess.run([sys.executable, "-I", str(script), "package", "--tag", "vRelease",
-                        "--os", NATIVE, "--arch", arch, "--bin-dir", str(bin_dir), "--out", str(folder)], check=True)
-        subprocess.run([sys.executable, "-I", str(script), "checksums", "--tag", "vRelease", "--dir", str(folder)], check=True)
-        self.assertNotIn("first time takes", self.cli("use", "vRelease"))
-        self.assertEqual(self.delegate_binary().read_bytes(), self.release_stub.read_bytes())
-        self.assertFalse((self.root() / "tools/trusscli-build.log").exists())
-        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
-
-    def test_release_probe_failures_build_local_delegate(self):
-        self.release_source()
-        source = self.base / "release-only.c"
-        source.write_text(DELEGATE_STUB.replace('"delegate stdout"', '"release-only delegate stdout"'), encoding="utf-8")
-        stub = source.with_suffix(".exe" if sys.platform == "win32" else ".bin")
-        subprocess.run([os.environ.get("CC", "cc"), str(source), "-o", str(stub)], check=True)
-        for probe, reason in (("fail", "exit 127"), ("sleep", "timeout")):
-            with self.subTest(probe=probe):
-                self.env["TRUSSC_CACHE_DIR"] = str(self.cache / probe)
-                self.env["TRUSSC_STUB_PROBE"] = probe
-                self.release(stub=stub)
-                output = self.cli("use", "vRelease")
-                self.assertEqual(output.count("building it from source"), 1, output)
-                self.assertIn("does not run here (" + reason + ")", output)
-                self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
-                self.assertTrue(self.delegate_binary().is_file())
-                self.assertNotEqual(self.delegate_binary().read_bytes(), stub.read_bytes())
-                self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
-                self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
-        self.env.pop("TRUSSC_STUB_PROBE")
-
-    def test_release_probe_spawn_failure_builds_local_delegate(self):
-        self.release_source()
-        stub = self.base / "invalid-binary"
-        stub.write_bytes(b"This is not an executable format.\n")
-        stub.chmod(0o755)
-        self.release(stub=stub)
-        output = self.cli("use", "vRelease")
-        reasons = [line for line in output.splitlines() if "building it from source" in line]
-        self.assertEqual(len(reasons), 1, output)
-        self.assertIn("does not run here (cannot start)", reasons[0])
-        self.assertNotIn("failed to spawn", output)
-        self.assertNotIn(".trusscli-release-", output)
-        self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
-        self.assertTrue(self.delegate_binary().is_file())
-        self.assertNotEqual(self.delegate_binary().read_bytes(), stub.read_bytes())
-        self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
-        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
-
-    def test_release_failures_fall_back_once(self):
-        self.release_source()
-        for failure, reason in (("mismatch", "SHA-256 mismatch"), ("asset", "asset"),
-                                ("checksum", "checksum download"), ("release", "asset"),
-                                ("unsafe", "unsafe TrussC archive path"),
-                                ("permissions", "unsafe trusscli archive directory permissions"),
-                                ("large-asset", "asset"), ("large-checksum", "checksum download")):
-            with self.subTest(failure=failure):
-                self.env["TRUSSC_CACHE_DIR"] = str(self.cache / failure)
-                asset, sums = self.release(unsafe=failure == "unsafe", locked=failure == "permissions")
-                if failure == "large-asset":
-                    with asset.open("r+b") as file:
-                        file.truncate(64 * 1024 * 1024 + 1)
-                elif failure == "large-checksum":
-                    sums.write_bytes(b"x" * (64 * 1024 + 1))
-                elif failure == "mismatch":
-                    sums.write_text("0" * 64 + "  " + asset.name + "\n", encoding="utf-8")
-                elif failure == "asset":
-                    asset.rename(asset.with_name("other-platform.tar.gz"))
-                elif failure == "checksum":
-                    sums.unlink()
-                elif failure == "release":
-                    shutil.rmtree(asset.parent)
-                output = self.cli("use", "vRelease")
-                lines = [line for line in output.splitlines() if "building it from source" in line]
-                self.assertEqual(len(lines), 1, output)
-                self.assertIn(reason, lines[0])
-                self.assertEqual(output.count("first time takes a few minutes"), 1)
-                self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
-                self.assertTrue(self.delegate_binary().is_file())
-                self.assertEqual(list((self.root() / "tools").glob(".trusscli-release-*")), [])
-                self.assertFalse((self.root() / "tools/outside").exists())
-
-    def test_branch_and_commit_ignore_release_and_vendor_is_unchanged(self):
-        self.release_source()
         commit = self.git("-C", self.source, "rev-parse", "HEAD").strip()
-        for ref in ("main", commit):
-            with self.subTest(ref=ref):
-                self.release(ref)
-                output = self.cli("use", ref)
-                self.assertNotIn("release asset", output)
-                self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
-                # Preserve the serialized vendor object, including localPath and addon marks.
-                presets = self.project / "CMakePresets.json"
-                text = presets.read_text(encoding="utf-8")
-                vendor = '{"trussc": {"addonLocalPaths": {"tcxFixture": "fixture addon"}, "addonPaths": {"tcxFixture": "resolved fixture"}, "addonOrder": ["tcxFixture"]}, "fixture": [1, 2]}'
-                data = json.loads(text)
-                # Write deliberately noncanonical whitespace to catch any rewrite.
-                data.pop("vendor")
-                text = json.dumps(data, indent=2)[:-1] + ', "vendor": ' + vendor + '}\n'
-                presets.write_text(text, encoding="utf-8")
-                before = presets.read_bytes()
-                self.cli("build", "--dry-run")
-                self.assertEqual(presets.read_bytes(), before)
-                # The real delegate's build path also preserves local selection marks.
-                vendor = '{"trussc": {"localPath": ' + json.dumps(str(self.source)) + ', "addonLocalPaths": {"tcxFixture": "fixture addon"}, "addonPaths": {"tcxFixture": "resolved fixture"}, "addonOrder": ["tcxFixture"]}}'
-                data["vendor"] = json.loads(vendor)
-                text = json.dumps(data, indent=2)
-                presets.write_text(text, encoding="utf-8")
-                before = presets.read_bytes()
-                self.env["TRUSSC_DELEGATED_ROOT"] = str(self.root())
-                try:
-                    self.cli("build", "--dry-run")
-                    self.assertEqual(presets.read_bytes(), before)
-                finally:
-                    self.env.pop("TRUSSC_DELEGATED_ROOT")
+        self.git("-C", self.source, "tag", "v0.4.4")
+        for owner in ("TrussC-org", "tettou771"):
+            self.git("-C", self.source, "push", self.base / "remotes" / owner / "TrussC.git", "main", "v0.4.4")
+        if self.env.get("TRUSSC_FETCH") == "tarball":
+            for ref in ("main", "v0.4.4", commit):
+                self.archive(ref)
+            self.archive("v0.4.4", owner="tettou771")
+        return commit
 
-    def test_delegate_acquisition_arguments_streams_exit_and_missing_binary(self):
-        self.publish_delegate()
-        output = self.cli("use", "main")
-        self.assertEqual(output.count("first time takes a few minutes"), 1)
-        self.assertTrue(self.delegate_binary().is_file())
-        self.assertFalse((self.root() / "tools/build-trusscli").exists())
-        self.assertNotIn("first time takes a few minutes", self.cli("update"))
-        self.assertIn("Delegate trusscli", self.cli("doctor"))
-        args = ["build", "--dry-run", "-p", str(self.project), "--release", "-j", "2", "--future-build-option"]
-        self.env["TRUSSC_STUB_EXIT"] = "23"
-        result = subprocess.run([str(CLI), *args], cwd=self.project, env=self.env,
-                                capture_output=True, text=True, encoding="utf-8", timeout=20)
-        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-        self.assertIn("delegate stdout", result.stdout)
-        self.assertIn("delegate stderr", result.stderr)
-        received = (self.base / "delegate argv").read_text(encoding="utf-8").splitlines()
-        self.assertEqual(received, [str(self.root()), *args])
-        self.delegate_binary().unlink()
-        (self.base / "delegate argv").unlink()
-        self.assertIn("run `trusscli update`", self.cli("build", success=False))
-        self.assertFalse((self.base / "delegate argv").exists())
-        self.assertFalse((self.root() / "tools/build-trusscli").exists())
-        self.assertEqual(self.cli("update").count("first time takes a few minutes"), 1)
+    def test_old_layout_use_preserves_selection_and_leaves_no_cache_entry(self):
+        commit = self.old_layout()
+        for existing in (False, True):
+            if existing:
+                self.cli("use", "v1")
+                self.cli("use-local", self.cache / "versions/TrussC-org/TrussC/v1")
+            if existing:
+                for name in (".trussc-version", "CMakePresets.json"):
+                    path = self.project / name
+                    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+            before = {name: (self.project / name).read_bytes() if (self.project / name).exists() else None
+                      for name in (".trussc-version", "CMakePresets.json")}
+            for ref in ("v0.4.4", "main", commit, "tettou771/TrussC@v0.4.4"):
+                with self.subTest(existing=existing, ref=ref):
+                    output = self.cli("use", ref, success=False)
+                    self.assertIn("predates the core/ layout; trusscli supports v0.5.0 and later.", output)
+                    self.assertIn("Run `trusscli use v0.5.0` (or newer).", output)
+                    for name, contents in before.items():
+                        path = self.project / name
+                        self.assertEqual(path.read_bytes() if path.exists() else None, contents)
+                    owner, version = (ref.split("/", 1)[0], "v0.4.4") if "@" in ref else ("TrussC-org", ref)
+                    self.assertFalse((self.cache / "versions" / owner / "TrussC" / version).exists())
+            self.assertEqual(list(self.cache.rglob(".trussc-download-*")), [])
 
-    def test_delegate_branch_refresh_rebuilds_and_failure_removes_old_binary(self):
-        self.publish_delegate()
+    def test_old_layout_update_preserves_existing_cached_tree(self):
         self.cli("use", "main")
+        root = self.root()
+        before = (root / "core/cmake/trussc_app.cmake").read_bytes()
+        self.old_layout()
+        self.assertIn("predates the core/ layout", self.cli("update", success=False))
+        self.assertEqual((root / "core/cmake/trussc_app.cmake").read_bytes(), before)
+        self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8"), "main\n")
+        self.cli("build", "--dry-run")
+
+    def test_directory_layout_marker_rejected_before_cache_publication(self):
+        self.cli("use", "main")
+        root = self.root()
+        before = (root / "core/cmake/trussc_app.cmake").read_bytes()
+        old_commit = self.git("-C", root, "rev-parse", "HEAD")
+        (self.source / "core/cmake/trussc_app.cmake").unlink()
+        (self.source / "core/cmake/trussc_app.cmake").mkdir()
+        (self.source / "core/cmake/trussc_app.cmake/entry").write_text("# directory marker\n", encoding="utf-8")
+        (self.source / "trussc").mkdir()
+        (self.source / "trussc/entry").write_text("# old layout\n", encoding="utf-8")
         self.advance()
-        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main")
-        self.assertEqual(self.cli("update").count("first time takes a few minutes"), 1)
-        self.publish_delegate(broken=True)
-        output = self.cli("update", success=False)
-        self.assertIn("delegate trusscli build failed; log:", output)
-        self.assertTrue((self.root() / "tools/trusscli-build.log").is_file())
-        self.assertFalse(self.delegate_binary().exists())
-        self.assertIn("run `trusscli update`", self.cli("build", success=False))
+        self.git("-C", self.source, "tag", "directory-marker")
+        self.git("-C", self.source, "push", self.base / "remotes/TrussC-org/TrussC.git", "main", "directory-marker")
+        selection = {name: (self.project / name).read_bytes()
+                     for name in (".trussc-version", "CMakePresets.json")}
+        self.assertIn("predates the core/ layout", self.cli("use", "directory-marker", success=False))
+        self.assertFalse((root.parent / "directory-marker").exists())
+        self.assertIn("predates the core/ layout", self.cli("update", success=False))
+        self.assertEqual(self.git("-C", root, "rev-parse", "HEAD"), old_commit)
+        self.assertEqual((root / "core/cmake/trussc_app.cmake").read_bytes(), before)
+        for name, contents in selection.items():
+            self.assertEqual((self.project / name).read_bytes(), contents)
+        self.cli("build", "--dry-run")
 
-    def test_delegate_first_use_build_failure_and_recursion_guard(self):
-        self.publish_delegate(broken=True)
-        self.assertIn("delegate trusscli build failed; log:", self.cli("use", "main", success=False))
-        # No presets have been written yet; inspect the selected cache directly.
-        root = self.cache / "versions/TrussC-org/TrussC/main"
-        self.assertFalse(self.delegate_binary(root).exists())
-        self.publish_delegate()
-        self.cli("update")
-        # The delegate must use the supplied root, even with an unavailable pin.
-        (self.project / ".trussc-version").write_text("missing\n", encoding="utf-8")
-        self.env["TRUSSC_DELEGATED_ROOT"] = str(root)
-        output = self.cli("build", "--dry-run")
-        self.assertIn("-DTRUSSC_DIR=" + str(root / "core"), output)
-        self.assertNotIn("delegate stdout", output)
-        self.assertFalse((self.base / "delegate argv").exists())
-
-    def test_no_marker_notice_repeats_and_local_selection_does_not_delegate(self):
+    def test_use_replaces_oversized_previous_pin(self):
+        (self.project / ".trussc-version").write_bytes(b"v1" + b" " * 4095)
         self.cli("use", "v1")
-        for _ in range(2):
-            self.assertIn("v1 has no trusscli delegation support; building with this trusscli",
-                          self.cli("build", "--dry-run"))
-        self.publish_delegate()
-        self.cli("use-local", self.source)
-        self.assertNotIn("first time takes a few minutes", self.cli("update"))
-        output = self.cli("build", "--dry-run")
-        self.assertIn("-DTRUSSC_DIR=" + str(self.source / "core"), output)
-        self.assertNotIn("delegation support", output)
-        self.assertFalse((self.base / "delegate argv").exists())
+        self.assertEqual((self.project / ".trussc-version").read_bytes(), b"v1\n")
+        self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/v1")
+
+    def test_installed_cli_builds_sources_without_version_tools(self):
+        self.cli("use", "v1")
+        self.assertIn(str(self.root()), self.cli("build", "--dry-run"))
+        self.assertFalse((self.root() / "tools").exists())
+        presets = self.project / "CMakePresets.json"
+        data = json.loads(presets.read_text(encoding="utf-8"))
+        data["vendor"]["fixture"] = {"keep": [1, 2]}
+        presets.write_text(json.dumps(data, indent=3), encoding="utf-8")
+        before = presets.read_bytes()
+        self.cli("build", "--dry-run")
+        self.assertEqual(presets.read_bytes(), before)
+        # The selected sources may have tools of their own; builds use the installed CLI.
+        tools = self.root() / "tools"
+        tools.mkdir()
+        (tools / "CMakeLists.txt").write_text('message(FATAL_ERROR "unexpected tools build")\n', encoding="utf-8")
+        self.cli("build", "--dry-run")
 
     def test_tags_branches_commits_forks_and_tag_priority(self):
         for spec, commit, owner, ref in (("v1", self.initial, "TrussC-org", "v1"),
@@ -579,10 +372,14 @@ class VersionTests(unittest.TestCase):
                 self.assertFalse(self.cache.exists())
                 self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
 
-    def test_unavailable_ref_stops_without_fallback(self):
+    def test_unavailable_ref_preserves_previous_selection(self):
+        self.cli("use", "v1")
+        before = {name: (self.project / name).read_bytes()
+                  for name in (".trussc-version", "CMakePresets.json")}
         self.cli("use", "missing", success=False)
-        self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8").strip(), "missing")
-        self.assertIn("run `trusscli update`", self.cli("build", success=False))
+        for name, contents in before.items():
+            self.assertEqual((self.project / name).read_bytes(), contents)
+        self.cli("build", "--dry-run")
 
     def test_opt_in_and_local_path_validation(self):
         self.cli("update")
@@ -621,19 +418,11 @@ class TarballTests(unittest.TestCase):
         # A short URL pointing at the branch must not override the qualified tag.
         self.archive("shared", revision="refs/heads/shared")
 
-    publish_delegate = VersionTests.publish_delegate
-    delegate_binary = VersionTests.delegate_binary
-
-    def test_archive_delegate_is_built_once_and_refreshed_with_source(self):
-        self.publish_delegate()
-        self.archive("main")
-        self.assertEqual(self.cli("use", "main").count("first time takes a few minutes"), 1)
-        self.assertNotIn("first time takes a few minutes", self.cli("update"))
-        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
-        self.advance()
-        self.archive("main")
-        self.assertEqual(self.cli("update").count("first time takes a few minutes"), 1)
-        self.assertTrue(self.delegate_binary().is_file())
+    test_use_replaces_oversized_previous_pin = VersionTests.test_use_replaces_oversized_previous_pin
+    old_layout = VersionTests.old_layout
+    test_old_layout_use_preserves_selection_and_leaves_no_cache_entry = VersionTests.test_old_layout_use_preserves_selection_and_leaves_no_cache_entry
+    test_old_layout_update_preserves_existing_cached_tree = VersionTests.test_old_layout_update_preserves_existing_cached_tree
+    test_installed_cli_builds_sources_without_version_tools = VersionTests.test_installed_cli_builds_sources_without_version_tools
 
     def archive_path(self, ref, owner="TrussC-org"):
         return self.archives / owner / "TrussC/archive" / (ref + ".tar.gz")
@@ -684,6 +473,7 @@ class TarballTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in root.parent.iterdir()), ["main"])
 
     def test_missing_and_truncated_archives_leave_no_version(self):
+        before = (self.project / "CMakePresets.json").read_bytes()
         for ref in ("missing", "truncated"):
             with self.subTest(ref=ref):
                 if ref == "truncated":
@@ -693,7 +483,8 @@ class TarballTests(unittest.TestCase):
                 root = self.cache / "versions/TrussC-org/TrussC" / ref
                 self.assertFalse(root.exists())
                 self.assertEqual(list(root.parent.iterdir()), [])
-                self.assertIn("run `trusscli update`", self.cli("build", "--dry-run", success=False))
+                self.assertFalse((self.project / ".trussc-version").exists())
+                self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
 
     def test_unsafe_archive_entries_are_rejected_before_extraction(self):
         for entry, target in (("TrussC-fixture/../outside", None), ("/absolute", None),
@@ -826,35 +617,6 @@ class TarballTests(unittest.TestCase):
         self.assertNotIn("Error:", self.cli("use", "v1"))
         self.assertFalse((self.cache / "repos").exists())
         self.assertIn("(v1)", self.cli("build", "--dry-run"))
-
-
-@unittest.skipUnless(CLI.is_file(), "build this tree's CLI and set TRUSSCLI")
-class ArchiveReleaseTests(unittest.TestCase):
-    setUpClass = classmethod(VersionTests.setUpClass.__func__)
-    setUp = TarballTests.setUp
-    git = VersionTests.git
-    advance = VersionTests.advance
-    cli = VersionTests.cli
-    root = VersionTests.root
-    publish_delegate = VersionTests.publish_delegate
-    delegate_binary = VersionTests.delegate_binary
-    archive_path = TarballTests.archive_path
-    archive = TarballTests.archive
-    release = VersionTests.release
-
-    def test_qualified_tag_downloads_but_short_branch_archive_builds(self):
-        self.publish_delegate()
-        self.git("-C", self.source, "tag", "vRelease")
-        self.archive("vRelease", path="refs/tags/vRelease")
-        self.release()
-        output = self.cli("use", "vRelease")
-        self.assertNotIn("first time takes", output)
-        self.assertFalse((self.root() / "tools/trusscli-build.log").exists())
-        self.assertIn("delegate stdout", self.cli("build", "--dry-run"))
-        self.archive("main")
-        self.release("main")
-        self.assertIn("Building this version's trusscli", self.cli("use", "main"))
-        self.assertTrue((self.root() / "tools/trusscli-build.log").exists())
 
 
 if __name__ == "__main__":
