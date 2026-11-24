@@ -139,7 +139,7 @@ class CacheTests(AddonVersionTests):
         self.assertTrue(self.addon_worktree.exists())
         self.assertTrue(self.addon_tarball.exists())
         bare = self.cache / "repos/TrussC-org/TrussC.git"
-        self.assertNotIn(str(self.worktree), self.git("--git-dir=" + str(bare), "worktree", "list"))
+        self.assertNotIn(self.worktree.as_posix(), self.git("--git-dir=" + str(bare), "worktree", "list"))
         self.assertEqual(outside.read_text(encoding="utf-8"), "untouched")
         (self.project / "addons.make").write_text("alice/tcxFixture@v1\n", encoding="utf-8")
         (self.project / ".trussc-version").write_text("v1.0.0\n", encoding="utf-8")
@@ -157,7 +157,7 @@ class CacheTests(AddonVersionTests):
         self.assertFalse(self.addon_worktree.exists())
         self.assertFalse(self.addon_tarball.exists())
         bare = self.cache / "repos/alice/tcxFixture.git"
-        self.assertNotIn(str(self.addon_worktree), self.git("--git-dir=" + str(bare), "worktree", "list"))
+        self.assertNotIn(self.addon_worktree.as_posix(), self.git("--git-dir=" + str(bare), "worktree", "list"))
         (self.project / "addons.make").write_text("alice/tcxFixture@v1\n", encoding="utf-8")
         (self.project / ".trussc-version").write_text("v1.0.0\n", encoding="utf-8")
         self.cli("update")
@@ -230,7 +230,7 @@ class CacheTests(AddonVersionTests):
                            ("alice/tcxFixture", self.addon_worktree)):
             bare = self.cache / "repos" / (name + ".git")
             self.assertTrue(bare.is_dir())
-            self.assertNotIn(str(root), self.git("--git-dir=" + str(bare), "worktree", "list"))
+            self.assertNotIn(root.as_posix(), self.git("--git-dir=" + str(bare), "worktree", "list"))
         (self.project / ".trussc-version").write_text("v1.0.0\n", encoding="utf-8")
         (self.project / "addons.make").write_text("alice/tcxFixture@v1\n", encoding="utf-8")
         self.cli("update")
@@ -290,7 +290,7 @@ class CacheTests(AddonVersionTests):
         marker.unlink()
         target = self.base / "keep"
         target.write_text("untouched", encoding="utf-8")
-        marker.symlink_to(target)
+        self.fixture_symlink(marker, target)
         for _ in range(2):
             self.assertIn("Warning: cannot record cache usage", self.cli("build", "--dry-run"))
         self.assertEqual(target.read_text(encoding="utf-8"), "untouched")
@@ -307,7 +307,7 @@ class CacheTests(AddonVersionTests):
         target = self.base / "cache-target"
         target.mkdir()
         link = self.base / "cache-link"
-        link.symlink_to(target, target_is_directory=True)
+        self.fixture_symlink(link, target, target_is_directory=True)
         for suffix in ("", "/"):
             with self.subTest(suffix=suffix):
                 self.env["TRUSSC_CACHE_DIR"] = str(link) + suffix

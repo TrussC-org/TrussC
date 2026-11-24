@@ -61,10 +61,26 @@ class VersionTests(unittest.TestCase):
             self.git("clone", "--bare", self.source, remote)
         self.cache = self.base / "cache with spaces"
         self.env = dict(os.environ, HOME=str(self.base / "home"), USERPROFILE=str(self.base / "home"),
+                        LOCALAPPDATA=str(self.base / "home/AppData/Local"),
+                        APPDATA=str(self.base / "home/AppData/Roaming"),
+                        XDG_CACHE_HOME=str(self.base / "home/.cache"),
+                        XDG_CONFIG_HOME=str(self.base / "home/.config"),
+                        XDG_DATA_HOME=str(self.base / "home/.local/share"),
                         TRUSSC_DIR=str(self.source), TRUSSC_CACHE_DIR=str(self.cache),
                         TRUSSC_GITHUB_BASE_URL=(self.base / "remotes").as_uri(),
                         GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                         GIT_ALLOW_PROTOCOL="file", GIT_TERMINAL_PROMPT="0")
+
+    def registry_path(self):
+        # Match registryCachePath(): macOS also uses XDG_CACHE_HOME, not Library.
+        key = "LOCALAPPDATA" if sys.platform == "win32" else "XDG_CACHE_HOME"
+        return Path(self.env[key]) / "trusscli/registry.json"
+
+    def fixture_symlink(self, link, target, *, target_is_directory=False):
+        try:
+            link.symlink_to(target, target_is_directory=target_is_directory)
+        except OSError:
+            self.skipTest("fixture needs directory symlinks")
 
     def git(self, *args):
         result = subprocess.run(["git", *map(str, args)], capture_output=True, text=True, encoding="utf-8",
@@ -181,7 +197,7 @@ class VersionTests(unittest.TestCase):
 
     def test_installed_cli_builds_sources_without_version_tools(self):
         self.cli("use", "v1")
-        self.assertIn(str(self.root()), self.cli("build", "--dry-run"))
+        self.assertIn(self.root().as_posix(), self.cli("build", "--dry-run"))
         self.assertFalse((self.root() / "tools").exists())
         presets = self.project / "CMakePresets.json"
         data = json.loads(presets.read_text(encoding="utf-8"))
@@ -228,7 +244,7 @@ class VersionTests(unittest.TestCase):
                 for worktree, expected in acquired.items():
                     self.assertEqual(self.git("-C", worktree, "rev-parse", "HEAD").strip(), expected)
                 output = self.cli("build", "--dry-run")
-                self.assertIn("-DTRUSSC_DIR=" + str(root / "core"), output)
+                self.assertIn("-DTRUSSC_DIR=" + (root / "core").as_posix(), output)
                 self.assertIn(commit, output)
 
     def test_colliding_ref_paths_do_not_reuse_other_worktrees(self):
@@ -346,15 +362,15 @@ class VersionTests(unittest.TestCase):
         (self.project / ".trussc-version").write_text("main\n", encoding="utf-8")
         out = self.cli("build", "--dry-run")
         self.assertIn(self.moved, out)
-        self.assertIn("-DTRUSSC_DIR=" + str(self.cache / "versions/TrussC-org/TrussC/main/core"), out)
+        self.assertIn("-DTRUSSC_DIR=" + (self.cache / "versions/TrussC-org/TrussC/main/core").as_posix(), out)
         self.cli("use-local", self.source)
         (self.project / ".trussc-version").write_text("unavailable\n", encoding="utf-8")
-        self.assertIn(str(self.source), self.cli("build", "--dry-run"))
+        self.assertIn(self.source.as_posix(), self.cli("build", "--dry-run"))
 
     def test_read_only_commands_follow_selection_and_root_alias_is_persistent(self):
         self.cli("use", "v1")
-        out = self.cli("info", "project", "--json")
-        self.assertIn(str(self.root()), out)
+        self.cli("info", "project", "--json")
+        self.assertEqual(Path(json.loads(self.last_result.stdout)["tc_root"]), self.root())
         self.cli("info", "project", "--json", "--tc-root", self.source)
         json.loads(self.last_result.stdout)
         self.assertEqual(self.local(), self.source.as_posix())
@@ -453,7 +469,7 @@ class TarballTests(unittest.TestCase):
                 self.assertFalse((self.cache / "repos").exists())
                 output = self.cli("build", "--dry-run")
                 self.assertIn("(" + expected + ")", output)
-                self.assertIn("-DTRUSSC_DIR=" + str(root / "core"), output)
+                self.assertIn("-DTRUSSC_DIR=" + (root / "core").as_posix(), output)
 
     def test_branch_refresh_and_failed_update_preserves_previous_tree(self):
         original = self.archive("main")

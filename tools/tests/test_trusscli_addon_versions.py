@@ -44,7 +44,7 @@ class AddonVersionTests(VersionTests):
             target = self.base / "remotes" / owner / "tcxFixture.git"
             target.parent.mkdir(parents=True)
             self.git("clone", "--bare", self.addon, target)
-        registry = self.base / "home/.cache/trusscli/registry.json"
+        registry = self.registry_path()
         registry.parent.mkdir(parents=True)
         registry.write_text(json.dumps({"addons": [{"name": "tcxFixture", "owner": "alice", "url": "https://github.com/alice/tcxFixture.git"}]}), encoding="utf-8")
         self.cli("use", "v1.0.0")
@@ -123,7 +123,7 @@ class AddonVersionTests(VersionTests):
         (self.addon / "addon.json").write_text(json.dumps({"dependencies": ["tcxFixture@v1"]}), encoding="utf-8")
         self.commit_addon()
         self.git("clone", "--bare", self.addon, self.base / "remotes/alice/tcxParent.git")
-        registry = self.base / "home/.cache/trusscli/registry.json"
+        registry = self.registry_path()
         body = registry.read_text(encoding="utf-8")
         commands = self.base / "commands"
         commands.mkdir()
@@ -138,7 +138,7 @@ class AddonVersionTests(VersionTests):
             marker.unlink(missing_ok=True)
             self.cli(*command)
             self.assertTrue(marker.exists())
-            self.assertTrue(self.paths()["tcxFixture"].endswith("/alice/tcxFixture/v1"))
+            self.assertTrue(Path(self.paths()["tcxFixture"]).as_posix().endswith("/alice/tcxFixture/v1"))
 
     def test_addon_dependency_identity_resolves_owner_and_default_ref(self):
         parent = self.local_addons({"tcxParent": []})["tcxParent"]
@@ -214,7 +214,7 @@ class AddonVersionTests(VersionTests):
         installed = self.root() / "addons/tcxFixture"
         (installed / ".git").mkdir(parents=True)
         (installed / "addon.json").write_text(json.dumps({"url": "https://github.com/alice/tcxFixture.git"}), encoding="utf-8")
-        (self.base / "home/.cache/trusscli/registry.json").unlink()
+        self.registry_path().unlink()
         commands = self.base / "commands"
         commands.mkdir()
         marker = self.base / "curl-called"
@@ -224,7 +224,7 @@ class AddonVersionTests(VersionTests):
         self.env["PATH"] = str(commands) + os.pathsep + self.env["PATH"]
         self.cli("addon", "add", "tcxFixture@v1")
         self.assertFalse(marker.exists(), "installed metadata must avoid a registry request")
-        self.assertTrue(self.paths()["tcxFixture"].endswith('/alice/tcxFixture/v1'))
+        self.assertTrue(Path(self.paths()["tcxFixture"]).as_posix().endswith('/alice/tcxFixture/v1'))
         self.cli("build", "--dry-run")
         self.assertFalse(marker.exists(), "build must never request the registry")
 
@@ -242,7 +242,7 @@ class AddonVersionTests(VersionTests):
         output = self.cli("addon", "add-local", "tcxLocal", self.addon)
         self.assertEqual(Path(self.paths()["tcxLocal"]), self.addon)
         self.assertIn("tcxLocal\n", (self.project / "addons.make").read_text(encoding="utf-8"))
-        self.assertNotIn(str(self.addon), (self.project / "addons.make").read_text(encoding="utf-8"))
+        self.assertNotIn(self.addon.as_posix(), (self.project / "addons.make").read_text(encoding="utf-8"))
         self.assertNotIn("Fetching addon registry", output)
         self.cli("build")
 
@@ -275,7 +275,7 @@ class AddonVersionTests(VersionTests):
         self.assertIn("tcxFixture@different conflicts with project tcxFixture@v1", output)
         for _ in range(2):
             self.assertIn("project wins", self.cli("build", "--dry-run"))
-        self.assertTrue(self.paths()["tcxFixture"].endswith('/v1'))
+        self.assertTrue(Path(self.paths()["tcxFixture"]).as_posix().endswith('/v1'))
 
     def test_addon_transitive_pin_is_fetched_and_loaded(self):
         parent = self.base / "parent"
@@ -287,7 +287,7 @@ class AddonVersionTests(VersionTests):
         data["vendor"]["trussc"]["addonLocalPaths"] = {"tcxParent": str(parent)}
         presets.write_text(json.dumps(data), encoding="utf-8")
         self.cli("update")
-        self.assertTrue(self.paths()["tcxFixture"].endswith('/v1'))
+        self.assertTrue(Path(self.paths()["tcxFixture"]).as_posix().endswith('/v1'))
         self.assertNotIn("tcxFixture", (self.project / "addons.make").read_text(encoding="utf-8"))
         self.cli("build")
 
