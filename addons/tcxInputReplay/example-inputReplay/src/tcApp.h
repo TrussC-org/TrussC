@@ -9,5 +9,7 @@ class tcApp : public App {
 public:
     void setup() override;
     void draw() override;
-    void keyPressed(int key) override;
+    void mousePressed(Vec2 pos, int button) override;
+    shared_ptr<inputreplay::Toolbar> replay;
+    vector<Vec2> dots;
 };

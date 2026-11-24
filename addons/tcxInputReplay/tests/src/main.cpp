@@ -266,10 +266,8 @@ void timing() {
     check(t.next(UINT64_MAX - 190)->ms == 10, "clock arithmetic near uint64 bound");
 }
 } // namespace
-int runInputReplayWindowChecks();
 int runInputReplayRingChecks();
-int runInputReplayB1WindowChecks();
-int runInputReplayB2WindowChecks();
+int runInputReplayNodeChecks();
 int main() {
     sg_desc graphics = {};
     sg_setup(&graphics);
@@ -279,9 +277,7 @@ int main() {
     largeRecording();
     std::printf("%d checks, %d failures\n", checks, failures);
     const int ringFailures = runInputReplayRingChecks();
-    const int windowFailures = runInputReplayWindowChecks();
-    const int b1Failures = runInputReplayB1WindowChecks();
-    const int b2Failures = runInputReplayB2WindowChecks();
+    const int nodeFailures = runInputReplayNodeChecks();
     sg_shutdown();
-    return failures || ringFailures || windowFailures || b1Failures || b2Failures ? 1 : 0;
+    return failures || ringFailures || nodeFailures ? 1 : 0;
 }

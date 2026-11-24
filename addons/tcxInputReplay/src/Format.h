@@ -1,3 +1,5 @@
+// JSONL v1 validation, scaling, ring storage, and scene timing.
+// Shared by the recorder and player; existing recordings stay compatible.
 #pragma once
 
 #include <TrussC.h>
@@ -6,6 +8,7 @@
 #include <climits>
 #include <deque>
 #include <map>
+#include <chrono>
 
 namespace tcx::inputreplay {
 
@@ -14,6 +17,15 @@ enum class ScaleMode { None, Stretch, Fit };
 namespace detail {
 using Json = tc::Json;
 struct Size { double width = 0, height = 0; };
+inline uint64_t clockMs() {
+    return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+inline Size windowSize(tc::Window& window) {
+    return {double(window.getWidth()), double(window.getHeight())};
+}
+
 
 inline tc::Vec2 scalePosition(tc::Vec2 p, Size recorded, Size current, ScaleMode mode) {
     if (mode == ScaleMode::None || recorded.width <= 0 || recorded.height <= 0 ||
