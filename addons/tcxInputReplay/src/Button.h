@@ -8,7 +8,7 @@ public:
     Button(std::string label, std::function<void()> onClick)
         : label_(std::move(label)), onClick_(std::move(onClick)) {
         enableEvents();
-        setSize(70, 28);
+        setSize(70, 20);
     }
     void setLabel(const std::string& label) { label_ = label; }
     void setActiveColor(tc::Color color) { color_ = color; }
@@ -21,7 +21,7 @@ public:
         color.b = (std::min)(1.0f, color.b * shade);
         tc::setColor(color);
         tc::fill();
-        tc::drawRectRounded(0, 0, getWidth(), getHeight(), 5);
+        tc::drawRectRounded(0, 0, getWidth(), getHeight(), 4);
         tc::setColor(1.0f);
         tc::drawBitmapString(label_, getWidth() / 2, getHeight() / 2, tc::Direction::Center, tc::Direction::Center);
     }

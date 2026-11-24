@@ -15,7 +15,7 @@
 namespace tcx::inputreplay {
 class Toolbar : public tc::RectNode {
 public:
-    explicit Toolbar(int toggleKey = 0) : toggleKey_(toggleKey) { enableEvents(); setSize(550, 44); }
+    explicit Toolbar(int toggleKey = 0) : toggleKey_(toggleKey) { enableEvents(); setSize(550, 32); }
     void setToggleKey(int key) { toggleKey_ = key; }
     void setRecordKey(int key) { recordKey_ = key; }
     bool startRecording(const std::filesystem::path& path) { return recorder_->start(path); }
@@ -70,28 +70,28 @@ public:
     void update() override {
         player_->update();
         record_->setLabel(isRecording() ? "Stop" : "Record");
-        if (isRecording()) record_->setActiveColor({0.90f, 0.15f, 0.15f});
+        if (isRecording()) record_->setActiveColor({0.84f, 0.14f, 0.14f});
         else record_->clearActiveColor();
         play_->setLabel(isPlaying() ? "Stop" : "Play");
-        if (isPlaying()) play_->setActiveColor({0.15f, 0.45f, 0.90f});
+        if (isPlaying()) play_->setActiveColor({0.15f, 0.50f, 0.88f});
         else play_->clearActiveColor();
         save_->setVisible(!isRecording() && !pendingSave_.empty());
         float x = 8;
         for (const auto& button : {record_, save_, play_, open_}) {
             if (!button->isVisible()) continue;
-            button->setPos(x, 8);
+            button->setPos(x, 6);
             x += 76;
         }
-        label_->setPos(x, 8);
+        label_->setPos(x, 6);
         label_->setPath(selectedPath_);
     }
     void draw() override {
         tc::fill();
         tc::setColor(0.16f, 0.17f, 0.20f);
-        tc::drawRectRounded(0, 0, getWidth(), getHeight(), 7);
+        tc::drawRectRounded(0, 0, getWidth(), getHeight(), 6);
         if (recorder_->isRing()) {
             tc::setColor(1.0f);
-            tc::drawBitmapString("Ring: " + std::to_string(getRecordedCount()), 464, 22, tc::Direction::Left, tc::Direction::Center);
+            tc::drawBitmapString("Ring: " + std::to_string(getRecordedCount()), 464, getHeight() / 2, tc::Direction::Left, tc::Direction::Center);
         }
     }
     void keyPressed(const tc::KeyEventArgs& e) {
