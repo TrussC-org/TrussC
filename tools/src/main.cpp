@@ -608,8 +608,9 @@ static string queryTrussCVersion(const string& tcRoot) {
 // the working tree or a project's separately selected TrussC version.
 static string queryTrusscliSourceId(const string& tcRoot) {
     if (tcRoot.empty() || checkGit().status != CheckStatus::OK) return "";
+    // Discard git's stderr; the null device needs no writable temp location.
     auto closeFile = [](FILE* file) { fclose(file); };
-    unique_ptr<FILE, decltype(closeFile)> errors(tmpfile(), closeFile);
+    unique_ptr<FILE, decltype(closeFile)> errors(fopen(TC_DEV_NULL, "w"), closeFile);
     if (!errors) return "";
     string output;
     const int code = runCaptured({"git", "-C", tcRoot, "rev-parse",
