@@ -116,10 +116,10 @@ trusscli build --release
 For example, an addon pinned with `@ref` needs a core that can load external
 addon paths. An older core stops with `cannot load external addon paths
 (TRUSSC_ADDON_PATHS is unavailable); select a newer TrussC version`.
-Select a core with that support, such as the `next/trusscli-versions` branch:
+Select a core with that support, such as `main`:
 
 ```bash
-trusscli use next/trusscli-versions
+trusscli use main
 ```
 
 `use` saves the selection and prepares its sources; `update` refreshes them and
