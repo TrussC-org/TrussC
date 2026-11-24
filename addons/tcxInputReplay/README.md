@@ -14,7 +14,7 @@ void tcApp::setup() {
 
 ## Use the input replay toolbar
 
-`setup()` adds a small toolbar at the top center of its window. Record starts a temporary file; Stop recording opens the native save dialog and saves JSONL. Cancel discards a toolbar recording. When code started a file recording, cancel keeps the original file. Stopping a ring from the toolbar offers the same save dialog. Code calls to `stopRecording()` and `flush()` never open dialogs.
+`setup()` adds a small toolbar at the top center of its window. Record starts a temporary file; Stop recording opens the native save dialog and saves JSONL. Cancel discards a toolbar recording. When code started a file recording, cancel keeps the original file. Stopping a ring from the toolbar offers the same save dialog. Code calls to `stopRecording()` and `flush()` never open dialogs. While recording, Record turns red and reads Stop recording; during playback, Play turns blue and reads Stop playback. A ring recording also shows how many inputs it retains (`Ring: N`).
 
 ```cpp
 void tcApp::setup() {

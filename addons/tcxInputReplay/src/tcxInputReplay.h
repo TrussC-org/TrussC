@@ -595,6 +595,20 @@ inline void toolbarOpen() {
         if (choice.success) state().selectedPath = choice.filePath;
     });
 }
+// Tints the button that reflects the current state (red: recording, blue: playback).
+inline bool stateButton(const char* label, bool active, float r, float g, float b) {
+    if (!active) return ImGui::Button(label);
+    // Keep the tint at full opacity while playback disables the toolbar.
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(r, g, b, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(r + 0.1f, g + 0.1f, b + 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(r * 0.8f, g * 0.8f, b * 0.8f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+    const bool pressed = ImGui::Button(label);
+    ImGui::PopStyleColor(4);
+    ImGui::PopStyleVar();
+    return pressed;
+}
 inline void drawToolbar() {
     auto& s = state();
     if (!s.toolbarVisible) return;
@@ -606,13 +620,14 @@ inline void drawToolbar() {
         (ignoreInput ? ImGuiWindowFlags_NoInputs : 0);
     ImGui::BeginDisabled(ignoreInput);
     if (ImGui::Begin("Input replay", nullptr, flags)) {
-        if (ImGui::Button(s.recording() ? "Stop recording" : "Record")) toolbarRecord();
+        if (stateButton(s.recording() ? "Stop recording" : "Record", s.recording(), 0.90f, 0.15f, 0.15f))
+            toolbarRecord();
         if (hasPendingSave()) {
             ImGui::SameLine();
             if (ImGui::Button("Save")) toolbarSave();
         }
         ImGui::SameLine();
-        if (ImGui::Button(s.timeline.active ? "Stop playback" : "Play")) {
+        if (stateButton(s.timeline.active ? "Stop playback" : "Play", s.timeline.active, 0.15f, 0.45f, 0.90f)) {
             if (s.timeline.active) stopPlayback();
             else if (!s.selectedPath.empty()) play(s.selectedPath);
         }
@@ -622,9 +637,10 @@ inline void drawToolbar() {
         const auto name = tc::pathToUtf8(s.selectedPath.filename());
         ImGui::TextUnformatted(name.empty() ? "No file" : name.c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tc::pathToUtf8(s.selectedPath).c_str());
-        ImGui::SameLine();
-        if (s.ringRecording) ImGui::Text("Ring: %zu", s.ring.records.size());
-        else ImGui::TextUnformatted(s.recording() ? "Recording" : "Idle");
+        if (s.ringRecording) {
+            ImGui::SameLine();
+            ImGui::Text("Ring: %zu", s.ring.records.size());
+        }
     }
     ImGui::End();
     ImGui::EndDisabled();
