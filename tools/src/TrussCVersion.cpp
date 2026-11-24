@@ -144,8 +144,16 @@ static GitResult git(std::vector<std::string> args) {
     return result;
 }
 
-static std::string checkedGit(std::vector<std::string> args, bool objectId = false) {
+static std::string missingRefMessage(const Spec& spec) {
+    return "TrussC ref '" + spec.ref + "' was not found in " + spec.owner + "/" + spec.repo +
+        ".\nCheck the tag or branch name, or use an existing commit ID.";
+}
+
+static std::string checkedGit(std::vector<std::string> args, bool objectId = false,
+                              const Spec* resolving = nullptr) {
     auto result = git(std::move(args));
+    // rev-parse --quiet returns 1 for an unresolved ref; other Git errors stay distinct.
+    if (resolving && result.first == 1) throw std::runtime_error(missingRefMessage(*resolving));
     if (result.first != 0) throw std::runtime_error("TrussC version Git command failed: " + result.diagnostic + result.second);
     while (!result.second.empty() && (result.second.back() == '\n' || result.second.back() == '\r')) {
         result.second.pop_back();
@@ -394,12 +402,19 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
         // Bound (remote acquisition): cap transfer size and duration for update/use.
         return archiveCommand({"curl", "--location", "--fail", "--silent", "--show-error",
                     "--max-filesize", "1073741824", "--max-time", "300", "--output", archive.string(),
+                    "--write-out", "\n%{http_code}",
                     "--url", base + "/archive/" + encode(ref) + ".tar.gz"});
     };
     // Explicit tag URL wins even when a branch has the same name. The short URL
     // is also used by file:// fixtures and resolves branches/commits on GitHub.
     auto downloaded = spec.commit ? download(spec.ref) : download("refs/tags/" + spec.ref);
     if (!spec.commit && downloaded.first != 0) downloaded = download(spec.ref);
+    auto statusStart = downloaded.second.rfind('\n');
+    auto httpStatus = statusStart == std::string::npos ? "" : downloaded.second.substr(statusStart + 1);
+    if (statusStart != std::string::npos) downloaded.second.resize(statusStart);
+    if (downloaded.first == 22 && httpStatus == "404") {
+        throw std::runtime_error(missingRefMessage(spec) + "\nDetail: " + downloaded.second);
+    }
     if (downloaded.first != 0) throw std::runtime_error("TrussC archive download failed: " + downloaded.second);
     extractArchive(archive, tree);
     if (!addon) checkLayout(spec, tree);
@@ -469,9 +484,17 @@ static void fetchVersion(const Spec& spec, const fs::path& destination, bool add
     }
     // Servers may allow a reachable commit that is not a branch/tag tip.
     if (spec.commit && git({"--git-dir=" + bare.string(), "cat-file", "-e", revision + "^{commit}"}).first != 0) {
-        checkedGit({"--git-dir=" + bare.string(), "fetch", url, revision});
+        auto fetched = git({"--git-dir=" + bare.string(), "fetch", url, revision});
+        if (fetched.first != 0) {
+            if (fetched.diagnostic.find("not our ref " + revision) != std::string::npos ||
+                fetched.diagnostic.find("couldn't find remote ref " + revision) != std::string::npos) {
+                throw std::runtime_error(missingRefMessage(spec) + "\nDetail: " + fetched.diagnostic);
+            }
+            throw std::runtime_error("TrussC version Git command failed: " + fetched.diagnostic + fetched.second);
+        }
     }
-    auto commit = checkedGit({"--git-dir=" + bare.string(), "rev-parse", "--verify", revision + "^{commit}"}, true);
+    auto commit = checkedGit({"--git-dir=" + bare.string(), "rev-parse", "--verify", "--quiet",
+                              revision + "^{commit}"}, true, &spec);
     // Inspect the acquired Git tree before changing or publishing a worktree.
     if (!addon && git({"--git-dir=" + bare.string(), "cat-file", "-t", commit + ":core/cmake/trussc_app.cmake"}).second.rfind("blob", 0) != 0 &&
         git({"--git-dir=" + bare.string(), "cat-file", "-t", commit + ":trussc"}).second.rfind("tree", 0) == 0) {
