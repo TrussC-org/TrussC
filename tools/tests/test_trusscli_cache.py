@@ -103,8 +103,8 @@ class CacheTests(AddonVersionTests):
         outside.mkdir()
         sentinel = outside / "keep"
         sentinel.write_text("untouched", encoding="utf-8")
-        (self.worktree / "outside").symlink_to(outside, target_is_directory=True)
-        (self.cache / "outside").symlink_to(outside, target_is_directory=True)
+        self.fixture_symlink(self.worktree / "outside", outside, target_is_directory=True)
+        self.fixture_symlink(self.cache / "outside", outside, target_is_directory=True)
         self.assertIn("interactively in a terminal", self.command("clear"))
         self.assertTrue(self.worktree.exists())
         for answer in ("n", ""):
@@ -126,7 +126,7 @@ class CacheTests(AddonVersionTests):
                 marker.write_text(str(today - datetime.timedelta(days=age)) + "\n", encoding="utf-8")
         outside = self.base / "keep"
         outside.write_text("untouched", encoding="utf-8")
-        (self.worktree / "link").symlink_to(outside)
+        self.fixture_symlink(self.worktree / "link", outside)
         for answer in (None, "n", ""):
             output = self.command("autoremove", answer)
             self.assertIn("@v1.0.0 worktree", output)
@@ -197,7 +197,7 @@ class CacheTests(AddonVersionTests):
 
     def test_cache_tarball_update_does_not_copy_through_metadata_symlink(self):
         self.fixture_cache()
-        (self.addon / ".last-used").symlink_to("src/value.h")
+        self.fixture_symlink(self.addon / ".last-used", "src/value.h")
         self.commit_addon()
         archive = self.base / "remotes/alice/tcxFixture/archive/feature/next.tar.gz"
         self.git("-C", self.addon, "archive", "--format=tar.gz", "--prefix=fixture/",
@@ -214,7 +214,7 @@ class CacheTests(AddonVersionTests):
         outside = self.base / "keep"
         outside.mkdir()
         (outside / "sentinel").write_text("untouched", encoding="utf-8")
-        (self.worktree / "outside").symlink_to(outside, target_is_directory=True)
+        self.fixture_symlink(self.worktree / "outside", outside, target_is_directory=True)
         cases = [(self.worktree, ("v1.0.0",)),
                  (self.tarball, ("main",)),
                  (self.addon_worktree, ("--addon", "tcxFixture@v1")),
@@ -268,7 +268,7 @@ class CacheTests(AddonVersionTests):
                      (str(self.source),), ("--addon", str(self.addon))):
             output = self.cli("cache", "remove", *args, success=False)
             # Local absolute paths are rejected by the existing parsers.
-            if not args[-1].startswith("/"):
+            if not os.path.isabs(args[-1]):
                 self.assertIn(args[-1], output)
                 self.assertIn("trusscli cache list", output)
             self.assertEqual(self.command("list"), before)

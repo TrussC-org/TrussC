@@ -7,7 +7,7 @@ import subprocess
 import tarfile
 import unittest
 
-from test_trusscli_versions import VersionTests, CLI, NATIVE
+from test_trusscli_versions import VersionTests, CLI, NATIVE, fixture_rmtree
 
 
 class AddonVersionTests(VersionTests):
@@ -18,7 +18,9 @@ class AddonVersionTests(VersionTests):
         shutil.copyfile(root / "core/cmake/use_addon.cmake", self.source / "core/cmake/use_addon.cmake")
         (self.source / "core/cmake/trussc_app.cmake").write_text(
             'include(${CMAKE_CURRENT_LIST_DIR}/use_addon.cmake)\nadd_library(TrussC INTERFACE)\n'
-            'macro(trussc_app)\nadd_executable(fixture src/main.cpp)\napply_addons(fixture)\nendmacro()\n', encoding="utf-8")
+            'macro(trussc_app)\nadd_executable(fixture src/main.cpp)\napply_addons(fixture)\n'
+            'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/fixture-links.txt" '
+            'CONTENT "$<TARGET_PROPERTY:fixture,LINK_LIBRARIES>")\nendmacro()\n', encoding="utf-8")
         bundled = self.source / "addons/tcxBundled"
         bundled.mkdir(parents=True)
         (bundled / "addon.json").write_text('{}', encoding="utf-8")
@@ -99,7 +101,7 @@ class AddonVersionTests(VersionTests):
         self.assertNotIn("[tcxFixture]", output)
         cache = (self.project / f"build-{NATIVE}/CMakeCache.txt").read_text(encoding="utf-8")
         self.assertRegex(cache, r"TRUSSC_ADDON_PATHS:[^=]+=\{\}")
-        self.assertNotIn("tcxFixture", (self.project / f"build-{NATIVE}/CMakeFiles/fixture.dir/link.txt").read_text(encoding="utf-8"))
+        self.assertNotIn("tcxFixture", (self.project / f"build-{NATIVE}/fixture-links.txt").read_text(encoding="utf-8"))
 
     def test_addon_static_dependencies_link_parent_before_middle_before_leaf(self):
         paths = self.local_addons({"tcxParent": ["tcxZMiddle"], "tcxZMiddle": ["tcxALeaf"], "tcxALeaf": []})
@@ -174,7 +176,7 @@ class AddonVersionTests(VersionTests):
     def test_addon_build_rejects_nested_unacquired_ref(self):
         for archive in (False, True):
             if archive:
-                shutil.rmtree(self.cache / "addons")
+                fixture_rmtree(self.cache / "addons")
                 self.env["TRUSSC_FETCH"] = "tarball"
                 file = self.base / "remotes/alice/tcxFixture/archive/v1.tar.gz"
                 file.parent.mkdir(parents=True)
@@ -248,10 +250,10 @@ class AddonVersionTests(VersionTests):
 
     def test_addon_build_never_fetches_and_missing_version(self):
         self.cli("addon", "add", "tcxFixture@v1")
-        shutil.rmtree(self.base / "remotes")
+        fixture_rmtree(self.base / "remotes")
         (self.project / "src/main.cpp").write_text('#include "value.h"\nint main() { return ADDON_VALUE == 1 ? 0 : 1; }\n', encoding="utf-8")
         self.cli("build")
-        executable = self.project / "build-linux/fixture"
+        executable = self.project / f"build-{NATIVE}/fixture"
         self.assertEqual(subprocess.run([str(executable)], check=False).returncode, 0)
         for _ in range(2):
             self.assertIn("requires TrussC", self.cli("build", "--dry-run"))
@@ -339,7 +341,7 @@ class AddonVersionTests(VersionTests):
         self.env.pop("TRUSSC_FETCH")
         outside = self.base / "outside"
         outside.mkdir()
-        (self.cache / "addons/bob").symlink_to(outside, target_is_directory=True)
+        self.fixture_symlink(self.cache / "addons/bob", outside, target_is_directory=True)
         self.assertIn("cache path must stay", self.cli("addon", "add", "bob/tcxFixture@v1", success=False))
 
 
