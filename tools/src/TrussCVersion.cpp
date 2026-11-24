@@ -316,7 +316,10 @@ static void extractArchive(const fs::path& archive, const fs::path& tree) {
     constexpr uint64_t expandedLimit = uint64_t{2} * 1024 * 1024 * 1024;
     uint64_t expandedSize = 0;
     while (std::getline(nameLines, name)) {
-        if (!std::getline(detailLines, detail) || detail.empty() || !safePath(name)) {
+        if (!name.empty() && name.back() == '\r') name.pop_back();
+        const bool hasDetail = static_cast<bool>(std::getline(detailLines, detail));
+        if (!detail.empty() && detail.back() == '\r') detail.pop_back();
+        if (!hasDetail || detail.empty() || !safePath(name)) {
             throw std::runtime_error("unsafe TrussC archive path");
         }
         std::istringstream fields(detail);
