@@ -1321,6 +1321,27 @@ static void printUpdateHelp() {
          << "hidden; errors still show) and saved to <build folder>/build.log.\n";
 }
 
+// Keep configure filtering and build.log presentation in the CLI.
+static projectOps::ConfigureOutputCallback projectConfigureOutput() {
+    return [](const string& projectPath, const string& buildDir, const string& output,
+              int result) {
+        const string logDisplay = buildDir + "/build.log";
+        const fs::path logPath = fs::path(projectPath) / logDisplay;
+        // CMake creates the build folder; when it did not (or printed
+        // nothing), there is nothing to save.
+        ofstream logFile;
+        if (!output.empty() && fs::is_directory(logPath.parent_path())) {
+            logFile.open(logPath, ios::binary | ios::trunc);
+        }
+        BuildOutputFilter::Options options;
+        options.phase = BuildOutputFilter::Phase::Configure;
+        options.logDisplayPath = logFile.is_open() ? logDisplay : "";
+        BuildOutputFilter filter(cout, logFile.is_open() ? &logFile : nullptr, options);
+        filter.write(output.data(), output.size());
+        filter.end(result != 0 ? 1 : 0, -1);
+    };
+}
+
 static int cmdUpdate(const vector<string>& args, bool fetchVersion = true, bool versionAcquired = false) {
     string projectPath;
     GenerationFlags flags;
@@ -1378,26 +1399,7 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true, bool 
     input.fetchVersion = fetchVersion;
     input.versionAcquired = versionAcquired;
     input.addonLookup = registryAddonLookup();
-    // Keep configure filtering and build.log presentation in the CLI.
-    if (!verbose) {
-        input.configureOutput = [](const string& projectPath, const string& buildDir, const string& output,
-                                                     int result) {
-            const string logDisplay = buildDir + "/build.log";
-            const fs::path logPath = fs::path(projectPath) / logDisplay;
-            // CMake creates the build folder; when it did not (or printed
-            // nothing), there is nothing to save.
-            ofstream logFile;
-            if (!output.empty() && fs::is_directory(logPath.parent_path())) {
-                logFile.open(logPath, ios::binary | ios::trunc);
-            }
-            BuildOutputFilter::Options options;
-            options.phase = BuildOutputFilter::Phase::Configure;
-            options.logDisplayPath = logFile.is_open() ? logDisplay : "";
-            BuildOutputFilter filter(cout, logFile.is_open() ? &logFile : nullptr, options);
-            filter.write(output.data(), output.size());
-            filter.end(result != 0 ? 1 : 0, -1);
-        };
-    }
+    if (!verbose) input.configureOutput = projectConfigureOutput();
     auto result = projectOps::update(input, printProjectMessage);
     if (!result.success) cerr << "Error: " << result.failureReason << "\n";
     return result.success ? 0 : 1;
@@ -1421,26 +1423,18 @@ static int cmdUse(const vector<string>& args, bool local) {
         else { cerr << "Error: expected one selection or --clear\n"; return 1; }
     }
     if (value.empty()) { cerr << "Error: a selection or --clear is required\n"; return 1; }
-    if (projectPath.empty()) projectPath = autoDetectProjectRoot("");
-    if (projectPath.empty() || !fs::is_directory(fs::path(projectPath) / "src")) {
-        cerr << "Error: not inside a TrussC project\n"; return 1;
+    projectOps::UpdateInput update;
+    update.projectPath = projectPath;
+    update.executablePath = getExecutablePath();
+    update.addonLookup = registryAddonLookup();
+    update.configureOutput = projectConfigureOutput();
+    projectOps::Result result;
+    if (local) result = projectOps::useLocal({update, value, value == "--clear"}, printProjectMessage);
+    else result = projectOps::use({update, value, value == "--clear"}, printProjectMessage);
+    if (!result.success) {
+        cerr << "Error: " << (result.failureSummary.empty() ? result.failureReason : result.failureSummary) << "\n";
     }
-    auto versionFile = fs::path(projectPath) / ".trussc-version";
-    const bool selectingVersion = !local && value != "--clear";
-    // Acquire and check the new sources before changing either project selection.
-    if (selectingVersion) {
-        auto spec = trusscVersion::parse(value);
-        auto root = trusscVersion::acquire(spec, true);
-        if (spec.shortCommit) value.replace(value.size() - spec.ref.size(), spec.ref.size(), fs::path(root).filename().string());
-    }
-    if (local) trusscVersion::setLocalPath(projectPath, value == "--clear" ? "" : value);
-    else {
-        if (value == "--clear") fs::remove(versionFile);
-        else writeGeneratedFile(versionFile.string(), value + "\n");
-        trusscVersion::setLocalPath(projectPath, "");
-    }
-    // The selected TrussC was already fetched; addons still refresh in update.
-    return cmdUpdate({"-p", projectPath}, true, selectingVersion);
+    return result.success ? 0 : 1;
 }
 
 // =============================================================================

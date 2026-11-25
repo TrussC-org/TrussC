@@ -63,7 +63,8 @@ int main(int argc, char** argv) {
         else if (std::string(argv[4]) == "keep") settings.addonSelected = {1, 0, 0, 0};
         else settings.addonSelected = {0, 0, 0, 0};
     }
-    if (std::string(argv[3]) == "operation") {
+    const std::string mode = argv[3];
+    if (mode == "operation" || mode == "use" || mode == "use-local") {
         projectOps::UpdateInput input;
         input.projectPath = argv[2];
         input.tcRoot = argv[1];
@@ -73,14 +74,24 @@ int main(int argc, char** argv) {
             projectOps::diagnostic("registry callback fixture", projectOps::MessageKind::Diagnostic);
             return addonVersions::Source{};
         };
-        if (argc == 5) input.requirePlainProject = true;
+        if (argc == 5 && mode == "operation") input.requirePlainProject = true;
         tc::Json events = tc::Json::array();
         std::ostringstream printed;
         auto* previousOut = std::cout.rdbuf(printed.rdbuf());
         auto* previousErr = std::cerr.rdbuf(printed.rdbuf());
-        auto result = projectOps::update(input, [&](const std::string& text, projectOps::MessageKind kind) {
+        auto log = [&](const std::string& text, projectOps::MessageKind kind) {
             events.push_back({{"message", text}, {"warning", kind == projectOps::MessageKind::Warning}});
-        });
+        };
+        projectOps::Result result;
+        if (mode == "operation") result = projectOps::update(input, log);
+        else {
+            // Selection operations resolve their own source, rather than saving
+            // the driver's framework as an update override.
+            input.tcRoot.clear();
+            const std::string selection = argc == 5 ? argv[4] : "";
+            if (mode == "use") result = projectOps::use({input, selection, selection == "--clear"}, log);
+            else result = projectOps::useLocal({input, selection, selection == "--clear"}, log);
+        }
         std::cout.rdbuf(previousOut);
         std::cerr.rdbuf(previousErr);
         if (!printed.str().empty()) return 4;

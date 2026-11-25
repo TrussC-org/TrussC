@@ -31,13 +31,30 @@ struct UpdateInput {
     ConfigureOutputCallback configureOutput;
 };
 
+struct UseInput {
+    UpdateInput update; // Regeneration context and presentation callbacks.
+    std::string spec;
+    bool clear = false;
+};
+
+struct UseLocalInput {
+    UpdateInput update;
+    std::string path;
+    bool clear = false;
+};
+
 struct Result {
     bool success = false;
     std::string failureReason;
+    // Original final error when a separately logged spawn diagnostic enriches
+    // failureReason. The CLI keeps its existing two-message presentation.
+    std::string failureSummary;
     std::vector<std::string> warnings;
     std::vector<std::string> logLines;
 };
 
+Result use(const UseInput& input, const LogCallback& log = {});
+Result useLocal(const UseLocalInput& input, const LogCallback& log = {});
 Result update(const UpdateInput& input, const LogCallback& log = {});
 std::string detectProjectRoot(const std::string& startPath = "");
 std::string detectTcRoot(const std::filesystem::path& executablePath);
