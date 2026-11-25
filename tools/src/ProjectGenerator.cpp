@@ -3,6 +3,7 @@
 #include "GeneratedFile.h"
 #include "BuildSetup.h"
 #include "TrussC.h"
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -311,12 +312,43 @@ string ProjectGenerator::getTrusscDirValue(const string& projectPath) {
 // User-specific CMake config should go in local.cmake (auto-loaded by trussc_app()).
 // CMakePresets.json holds paths and build presets (also regenerated).
 
-void ProjectGenerator::writeAddonsMake(const string& destPath) {
+static string addonNameFromLine(const string& line) {
+    auto start = line.find_first_not_of(" \t\r\n");
+    if (start == string::npos || line[start] == '#') return {};
+    auto end = line.find_last_not_of(" \t\r\n");
+    return line.substr(start, end - start + 1);
+}
+
+void ProjectGenerator::writeAddonsMake(const string& destPath, bool preserveExisting) {
     string addonsMakePath = destPath + "/addons.make";
     ostringstream addonsFile;
-    addonsFile << "# TrussC addons - one addon per line\n";
+    vector<bool> present(settings_.addons.size(), false);
+    ifstream existing;
+    if (preserveExisting) existing.open(addonsMakePath);
+    if (preserveExisting && !existing && fs::exists(addonsMakePath)) {
+        throw runtime_error("Failed to read " + addonsMakePath);
+    }
+    if (existing.is_open()) {
+        string line;
+        while (getline(existing, line)) {
+            const string name = addonNameFromLine(line);
+            auto found = find(settings_.addons.begin(), settings_.addons.end(), name);
+            if (found == settings_.addons.end()) {
+                // The GUI does not own unknown lines; keep their positions.
+                addonsFile << line << "\n";
+            } else {
+                size_t index = found - settings_.addons.begin();
+                present[index] = true;
+                if (settings_.addonSelected[index]) addonsFile << line << "\n";
+            }
+        }
+        if (existing.bad()) throw runtime_error("Failed to read " + addonsMakePath);
+        existing.close();  // Release the Windows file handle before atomic replacement.
+    } else {
+        addonsFile << "# TrussC addons - one addon per line\n";
+    }
     for (size_t i = 0; i < settings_.addons.size(); i++) {
-        if (settings_.addonSelected[i]) {
+        if (settings_.addonSelected[i] && !present[i]) {
             addonsFile << settings_.addons[i] << "\n";
         }
     }
@@ -798,6 +830,49 @@ string ProjectGenerator::validateProject(const string& projectPath) {
     return "";
 }
 
+string ProjectGenerator::updateFromGui(const string& projectPath) {
+    const string cliRequired =
+        "This project uses a pinned TrussC version or external addons. Use "
+        "`trusscli update -p <path>` (GUI support is planned for v0.9.1).";
+    try {
+        if (fs::exists(fs::path(projectPath) / ".trussc-version")) return cliRequired;
+        // use-local is currently saved in CMakePresets.json; also honor the
+        // user preset location so either override stays untouched.
+        for (const char* file : {"CMakePresets.json", "CMakeUserPresets.json"}) {
+            ifstream input(fs::path(projectPath) / file);
+            if (!input) continue;
+            auto data = Json::parse(input, nullptr, false);
+            if (!data.is_object() || !data.contains("vendor")) continue;
+            const auto& vendor = data["vendor"];
+            if (!vendor.is_object() || !vendor.contains("trussc")) continue;
+            const auto& trussc = vendor["trussc"];
+            if (trussc.contains("localPath") ||
+                (trussc.contains("addonLocalPaths") && !trussc["addonLocalPaths"].empty())) {
+                return cliRequired;
+            }
+        }
+        auto addonsPath = fs::path(projectPath) / "addons.make";
+        ifstream input(addonsPath);
+        if (!input && fs::exists(addonsPath)) throw runtime_error("Failed to read " + addonsPath.string());
+        string line;
+        while (getline(input, line)) {
+            const string name = addonNameFromLine(line);
+            if (name.empty()) continue;
+            auto installed = fs::path(settings_.tcRoot) / "addons" / name;
+            if (name.compare(0, 3, "tcx") != 0 || name.find_first_of("/@\\") != string::npos ||
+                find(settings_.addons.begin(), settings_.addons.end(), name) == settings_.addons.end() ||
+                !fs::is_directory(installed) || fs::exists(installed / ".git")) {
+                return cliRequired;
+            }
+        }
+        if (input.bad()) throw runtime_error("Failed to read " + addonsPath.string());
+        input.close();
+        return update(projectPath);
+    } catch (const exception& e) {
+        return e.what();
+    }
+}
+
 string ProjectGenerator::update(const string& projectPath_) {
     warnings_.clear();
     // Resolve project paths against the CLI working directory.
@@ -810,7 +885,7 @@ string ProjectGenerator::update(const string& projectPath_) {
 
         // Update addons.make
         log("Updating addons.make...");
-        writeAddonsMake(projectPath);
+        writeAddonsMake(projectPath, true);
 
         // User-specific CMake config goes in local.cmake.
         log("Writing CMakeLists.txt...");

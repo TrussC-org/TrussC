@@ -998,7 +998,7 @@ void tcApp::doUpdateProject() {
     });
 
     // Update project
-    string error = generator.update(importedProjectPath);
+    string error = generator.updateFromGui(importedProjectPath);
     if (!error.empty()) {
         setStatus(error, true);
         redraw();
