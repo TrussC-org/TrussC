@@ -187,6 +187,21 @@ class CleanTests(unittest.TestCase):
                 else:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("not a TrussC project", result.stderr)
+                    missing = {(): "CMakeLists.txt and addons.make",
+                               ("CMakeLists.txt",): "addons.make",
+                               ("addons.make",): "CMakeLists.txt"}[markers]
+                    self.assertIn(f"(missing {missing})", result.stderr)
+                self.assertFalse(destination.exists())
+
+    def test_cp_accepts_every_addon_example(self):
+        examples = sorted(path for path in (ROOT / "addons").glob("*/example*")
+                          if (path / "src").is_dir())
+        self.assertIn(ROOT / "addons/tcxInputReplay/example-inputReplay", examples)
+        for example in examples:
+            with self.subTest(example=example.relative_to(ROOT).as_posix()):
+                destination = self.base / "copies" / example.name
+                result = self.cli("cp", example, destination, "--dry-run", "--no-git")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertFalse(destination.exists())
 
 

@@ -1,3 +1,4 @@
+#include "OperationLog.h"
 #include "TrussCVersion.h"
 #include "AddonVersions.h"
 #include "ProcessCapture.h"
@@ -448,7 +449,7 @@ static fs::path fetchTarball(const Spec& spec, fs::path destination, const std::
                                               fs::exists(destination / ".git"))) {
                     throw std::runtime_error("TrussC ref conflicts with an existing cache directory: " + destination.string());
                 }
-                std::cout << "Resolved " << spec.ref << " to " << commit << '\n';
+                projectOps::diagnostic("Resolved " + spec.ref + " to " + commit);
                 downloaded = download(commit);
             } else {
                 downloaded = download(spec.ref);
@@ -573,7 +574,7 @@ static fs::path fetchVersion(const Spec& spec, fs::path destination, bool addon,
     if (shortCommit) {
         destination = destination.parent_path() / commit;
         checkCachePath(destination);
-        std::cout << "Resolved " << spec.ref << " to " << commit << '\n';
+        projectOps::diagnostic("Resolved " + spec.ref + " to " + commit);
     }
     if (fs::exists(destination)) {
         checkExistingWorktree(spec, bare, destination, addon);
@@ -630,7 +631,7 @@ static void markUsed(const fs::path& root) {
         file.close();
         if (!file) throw std::runtime_error("cannot write .last-used");
     } catch (const std::exception& error) {
-        std::cerr << "Warning: cannot record cache usage for " << root.string() << ": " << error.what() << '\n';
+        projectOps::diagnostic("cannot record cache usage for " + root.string() + ": " + error.what(), projectOps::MessageKind::Warning);
     }
 }
 
@@ -644,7 +645,7 @@ void markCachedUsed(const fs::path& path) {
             !fs::is_regular_file(fs::symlink_status(path / ".git_archival.txt"))) return;
         markUsed(path);
     } catch (const std::exception& error) {
-        std::cerr << "Warning: cannot record cache usage for " << path.string() << ": " << error.what() << '\n';
+        projectOps::diagnostic("cannot record cache usage for " + path.string() + ": " + error.what(), projectOps::MessageKind::Warning);
     }
 }
 
