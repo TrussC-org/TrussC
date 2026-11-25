@@ -3,6 +3,7 @@
 #include "GeneratedFile.h"
 #include "BuildSetup.h"
 #include "AddonVersions.h"
+#include "BuildPreferences.h"
 #include "TrussCVersion.h"
 #include "TrussC.h"
 #include <algorithm>
@@ -457,6 +458,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
     Json presets;
     presets["version"] = 6;
+    const int jobs = trusscliBuild::parallelBuildJobs();
     presets["configurePresets"] = Json::array();
     presets["buildPresets"] = Json::array();
 
@@ -476,7 +478,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json macosBuildPreset;
     macosBuildPreset["name"] = "macos";
     macosBuildPreset["configurePreset"] = "macos";
-    macosBuildPreset["jobs"] = 4;
+    macosBuildPreset["jobs"] = jobs;
     presets["buildPresets"].push_back(macosBuildPreset);
 
     // NOTE: Xcode project is generated via direct `cmake -G Xcode` invocation
@@ -503,6 +505,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json windowsBuildPreset;
     windowsBuildPreset["name"] = "windows";
     windowsBuildPreset["configurePreset"] = "windows";
+    windowsBuildPreset["jobs"] = jobs;
     presets["buildPresets"].push_back(windowsBuildPreset);
 
 #else
@@ -521,7 +524,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json linuxBuildPreset;
     linuxBuildPreset["name"] = "linux";
     linuxBuildPreset["configurePreset"] = "linux";
-    linuxBuildPreset["jobs"] = 4;
+    linuxBuildPreset["jobs"] = jobs;
     presets["buildPresets"].push_back(linuxBuildPreset);
 #endif
 
@@ -560,7 +563,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json androidBuildPreset;
         androidBuildPreset["name"] = "android";
         androidBuildPreset["configurePreset"] = "android";
-        androidBuildPreset["jobs"] = 4;
+        androidBuildPreset["jobs"] = jobs;
         presets["buildPresets"].push_back(androidBuildPreset);
     }
 
@@ -582,6 +585,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json iosBuildPreset;
         iosBuildPreset["name"] = "ios";
         iosBuildPreset["configurePreset"] = "ios";
+        iosBuildPreset["jobs"] = jobs;
         presets["buildPresets"].push_back(iosBuildPreset);
     }
 #endif
@@ -625,7 +629,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json webBuildPreset;
         webBuildPreset["name"] = "web";
         webBuildPreset["configurePreset"] = "web";
-        webBuildPreset["jobs"] = 4;
+        webBuildPreset["jobs"] = jobs;
         presets["buildPresets"].push_back(webBuildPreset);
     }
 
@@ -645,13 +649,26 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     }
     presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
     const auto& vendor = presets["vendor"]["trussc"];
-    if (vendor.contains("addonPaths")) {
+    if (vendor.contains("addonPaths") && !vendor["addonPaths"].empty()) {
         for (auto& preset : presets["configurePresets"]) {
             preset["cacheVariables"]["TRUSSC_ADDON_PATHS"] = vendor["addonPaths"].dump();
             preset["cacheVariables"]["TRUSSC_ADDON_ORDER"] = vendor.value("addonOrder", "");
         }
     }
 
+    // A regenerated native preset must configure with the same type as build/run.
+#if defined(_WIN32)
+    const string native = "windows";
+#elif defined(__APPLE__)
+    const string native = "macos";
+#else
+    const string native = "linux";
+#endif
+    for (auto& preset : presets["configurePresets"]) {
+        if (preset["name"] == native) {
+            preset["cacheVariables"]["CMAKE_BUILD_TYPE"] = trusscliBuild::rememberedNativeBuildType(vendor);
+        }
+    }
 
     writeGeneratedFile(destPath + "/CMakePresets.json", presets.dump(2));
 }
@@ -1362,16 +1379,13 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
 
     // Use vcvarsall.bat to set up VS environment, then run cmake
     // CMAKE_MAKE_PROGRAM is set in CMakeUserPresets.json
-    // Set the initial default before project() chooses MSVC's Debug default.
-    // Existing caches retain the build type selected by the user.
-    string buildType = fs::exists(fs::path(path) / buildDirForPreset(preset) / "CMakeCache.txt")
-        ? "" : " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+    // CMakePresets.json supplies the remembered native build type.
     // vcvarsall.bat looks for vswhere.exe on PATH and cmd.exe prints a
     // "not recognized" error when it is missing; the Installer folder fixes that.
     const string vswhereDir = VsDetector::findVswhereDir();
     const string pathPrefix = vswhereDir.empty() ? ""
         : "set \"PATH=" + vswhereDir + ";%PATH%\" && ";
-    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
+    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
 
     auto [result, output] = executeCommand(cmd);
     logConfigureOutput(buildDirForPreset(preset), output, result);

@@ -12,9 +12,46 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Defaults preserve interactive builds.
+NO_DEPS=false
+NON_INTERACTIVE=false
+NO_LAUNCH=false
+JOBS=""
+usage() {
+    cat <<EOF
+Usage: $0 [options]
+  --no-deps          Skip dependency installation (no-op on macOS)
+  --jobs N           Use N parallel build jobs (positive integer)
+  --non-interactive  Decline installation prompts and skip close waits
+  --no-launch        Do not launch the GUI after building
+  -h, --help         Show this help
+EOF
+}
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --no-deps) NO_DEPS=true ;;
+        --non-interactive) NON_INTERACTIVE=true ;;
+        --no-launch) NO_LAUNCH=true ;;
+        --jobs)
+            if [[ ! "${2:-}" =~ ^[0-9]+$ || ! "${2:-}" =~ [1-9] ]]; then
+                echo "ERROR: --jobs requires a positive integer." >&2
+                usage
+                exit 1
+            fi
+            JOBS="$2"
+            shift
+            ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "ERROR: Unknown option: $1" >&2; usage; exit 1 ;;
+    esac
+    shift
+done
+
 if [ "$(uname)" != "Darwin" ]; then
     echo "ERROR: This script is for macOS. On Linux use tools/build_linux.sh; on Windows use tools/build_win.bat."
-    read -p "Press Enter to close..."
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -p "Press Enter to close..."
+    fi
     exit 1
 fi
 
@@ -52,14 +89,18 @@ if [ $? -ne 0 ]; then
     echo "Please make sure CMake is installed."
     echo "  brew install cmake"
     echo ""
-    read -p "Press Enter to close..."
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -p "Press Enter to close..."
+    fi
     exit 1
 fi
 
 # Build
 # Unix Makefiles treats a bare --parallel as make -j (unlimited). Match the
 # machine's CPU count by default, while honoring CMake's explicit job override.
-JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(sysctl -n hw.ncpu)}"
+if [ -z "$JOBS" ]; then
+    JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(sysctl -n hw.ncpu)}"
+fi
 echo ""
 echo "Building (parallel jobs: $JOBS)..."
 cmake --build . --config MinSizeRel --parallel "$JOBS"
@@ -67,7 +108,9 @@ if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: Build failed!"
     echo ""
-    read -p "Press Enter to close..."
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -p "Press Enter to close..."
+    fi
     exit 1
 fi
 
@@ -85,7 +128,11 @@ if [ "$CURRENT_LINK" = "$BIN_TARGET" ]; then
     INSTALL_PATH_LINK="skip"
 else
     echo ""
-    read -r -p "Add trusscli to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -r -p "Add trusscli to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+    else
+        INSTALL_PATH_LINK="n"
+    fi
 fi
 case "$INSTALL_PATH_LINK" in
     [yY]|[yY][eE][sS])
@@ -128,7 +175,11 @@ if grep -q 'trusscli completion' "$SHELL_RC" 2>/dev/null; then
     echo "Shell completion already configured."
 else
     echo ""
-    read -r -p "Enable tab completion for trusscli? [y/N]: " INSTALL_COMPLETION
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -r -p "Enable tab completion for trusscli? [y/N]: " INSTALL_COMPLETION
+    else
+        INSTALL_COMPLETION="n"
+    fi
     case "$INSTALL_COMPLETION" in
         [yY]|[yY][eE][sS])
             echo "" >> "$SHELL_RC"
@@ -147,5 +198,7 @@ echo "=========================================="
 echo "  Build completed successfully!"
 echo "=========================================="
 echo ""
-echo "Launching TrussC Project Generator..."
-open "$SCRIPT_DIR/trusscli.app"
+if [ "$NO_LAUNCH" = false ]; then
+    echo "Launching TrussC Project Generator..."
+    open "$SCRIPT_DIR/trusscli.app"
+fi

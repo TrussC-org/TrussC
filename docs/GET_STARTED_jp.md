@@ -123,6 +123,8 @@ Linux の JPEG に stb フォールバックはありません。他の画像形
 
 **Linux:** `./tools/build_linux.sh` を実行（依存パッケージは自動でチェック・インストール）
 
+依存パッケージ導入済みの無人ビルドには `./tools/build_linux.sh --no-deps --jobs 2 --non-interactive --no-launch` を使います（macOS は `./tools/build_mac.command`、`--no-deps` は何もしません）。
+
 ---
 
 ## 3. プロジェクトの作成

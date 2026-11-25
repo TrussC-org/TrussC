@@ -151,6 +151,8 @@ Build the project creation tool (first time only).
 
 **Linux:** Run `./tools/build_linux.sh` (dependencies are installed automatically)
 
+For unattended builds with dependencies already installed, run `./tools/build_linux.sh --no-deps --jobs 2 --non-interactive --no-launch` (macOS: use `./tools/build_mac.command`; `--no-deps` is a no-op).
+
 ---
 
 ## 3. Create a Project

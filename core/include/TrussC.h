@@ -1563,8 +1563,17 @@ bool isWindowOccluded();
 
 // Keep drawing hidden windows for Spout / Syphon / NDI or recording.
 // Sets every existing window and the default for new windows (initially false).
-// Screen output while hidden is up to the OS.
+// Screen output while hidden is up to the OS; no effect on iOS/Android.
 void setDrawWhileHidden(bool allow);
+
+// Continue updates while hidden: desktop default true, iOS/Android default false.
+// Sets every existing window and the default for new windows, independently of draw.
+// Android background updates must avoid GPU work; iOS background ticks are not supported.
+void setUpdateWhileHidden(bool allow);
+
+// Opt in to Android's mediaPlayback foreground service while the app is visible.
+// Does not request notification permission or acquire a wake lock.
+void setAndroidForegroundService(bool enabled);
 
 // ---------------------------------------------------------------------------
 // Cursor

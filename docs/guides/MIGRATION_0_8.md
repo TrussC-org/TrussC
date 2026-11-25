@@ -218,12 +218,18 @@ Remove any manual child/Mod updates or timer processing that duplicated the fram
 
 ### A hidden window keeps updating but stops drawing
 
-While the OS reports a window as hidden (minimized, fully covered by other windows, or on another Space), `update()` keeps running at its normal rate and only `draw()` stops. The rule is the same for every window on every desktop OS. On iOS and Android, the app's suspension by the OS still pauses updates. In v0.7.7 the main window kept updating and drawing while hidden, and other windows paused both. So:
+While the OS reports a window as hidden (minimized, fully covered by other windows, or on another Space), `update()` keeps running at its normal rate and only `draw()` stops. The rule is the same for every window on every desktop OS. On iOS and Android, suspension pauses updates by default. In v0.7.7 the main window kept updating and drawing while hidden, and other windows paused both. So:
 
 - A hidden main window no longer draws.
 - A hidden secondary window now keeps updating.
 
-Work such as sending OSC from `update()` keeps running while the window is hidden. An option to pause updates while hidden is planned for a later v0.8.x release.
+Desktop work such as sending OSC from `update()` keeps running while hidden by default. Use `setUpdateWhileHidden(false)` to pause it, or `Window::setUpdateWhileHidden(false)` for one window. Drawing and updating are independent; paused updates resume without a catch-up burst.
+
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
 
 The new `occludedChanged` event tells you when a window becomes hidden or visible.
 

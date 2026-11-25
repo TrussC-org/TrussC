@@ -2407,6 +2407,10 @@ SOKOL_APP_API_DECL const void* sapp_x11_get_display(void);
 
 /* Android: get native activity handle */
 SOKOL_APP_API_DECL const void* sapp_android_get_native_activity(void);
+#if defined(__ANDROID__)
+// [TrussC] Internal CPU-only tick; null disables the hidden looper source.
+SOKOL_APP_API_DECL void sapp_tc_android_set_background_tick(void (*callback)(void));
+#endif
 
 // Modified by tettou771 for TrussC: skip the next present call (for event-driven rendering)
 SOKOL_APP_API_DECL void sapp_tc_skip_present(void);
@@ -3312,6 +3316,7 @@ typedef struct {
     _sapp_tc_android_resources_t pending;
     _sapp_tc_android_resources_t current;
     ALooper* looper;
+    void (*background_tick)(void); // [TrussC] opt-in, app thread only
     bool is_thread_started;
     bool is_thread_stopping;
     bool is_thread_stopped;
@@ -14722,6 +14727,22 @@ _SOKOL_PRIVATE bool _sapp_tc_android_should_update(void) {
     return !_sapp_tc.quit_ordered && is_in_front && has_surface;
 }
 
+// [TrussC] Choreographer stops with the display. A timed poll on the same
+// app looper supplies update-only ticks; no EGL/GL or first-frame setup here.
+SOKOL_API_IMPL void sapp_tc_android_set_background_tick(void (*callback)(void)) {
+    _sapp_tc.android.background_tick = callback;
+}
+_SOKOL_PRIVATE bool _sapp_tc_android_should_background_update(void) {
+    return _sapp_tc.android.background_tick && _sapp_tc.init_called &&
+        !_sapp_tc.cleanup_called && !_sapp_tc.quit_ordered &&
+        !_sapp_tc.android.is_thread_stopping && !_sapp_tc_android_should_update();
+}
+_SOKOL_PRIVATE void _sapp_tc_android_background_update(void) {
+    if (_sapp_tc_android_should_background_update()) {
+        _sapp_tc.android.background_tick();
+    }
+}
+
 #if __ANDROID_API__ >= 29
 _SOKOL_PRIVATE void _sapp_tc_android_frame_callback(int64_t frame_time_nanos, void* data) {
     _SOKOL_UNUSED(data);
@@ -14780,6 +14801,7 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
 
     /* upstream b633722: order quit once, then wait for Activity destruction. */
     bool quit_handled = false;
+    double next_background_tick = 0.0; // [TrussC] monotonic, no catch-up
     while (!_sapp_tc.android.is_thread_stopping) {
         if (_sapp_tc.quit_requested && !_sapp_tc.quit_ordered) {
             _sapp_tc_android_app_event(SAPP_EVENTTYPE_QUIT_REQUESTED);
@@ -14791,6 +14813,19 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
             _sapp_tc_android_shutdown();
             quit_handled = true;
         }
+        // [TrussC] Stay responsive to lifecycle/input while hidden. Timeout
+        // ticks have no catch-up loop; foreground frames stay on Choreographer.
+        if (_sapp_tc_android_should_background_update()) {
+            ALooper_pollOnce(16, NULL, NULL, NULL);
+            // Sensor/input callbacks must not starve updates by preventing a timeout.
+            const double now = _sapp_tc_timestamp_now(&_sapp_tc.timing.timestamp);
+            if (now >= next_background_tick) {
+                next_background_tick = now + 0.016;
+                _sapp_tc_android_background_update();
+            }
+            continue;
+        }
+        next_background_tick = 0.0;
         #if __ANDROID_API__ >= 29
             if (_sapp_tc.android.choreographer != NULL) {
                 // Posts _sapp_tc_android_frame_callback with the choreographer to start our frame
@@ -14817,8 +14852,9 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
         bool process_events = true;
         while (process_events && !_sapp_tc.android.is_thread_stopping) {
             const bool quit_pending = !quit_handled && (_sapp_tc.quit_requested || _sapp_tc.quit_ordered);
-            const bool block_until_event = !_sapp_tc.android.is_thread_stopping && !quit_pending && !_sapp_tc_android_should_update();
+            const bool block_until_event = !_sapp_tc.android.is_thread_stopping && !quit_pending && !_sapp_tc_android_should_update() && !_sapp_tc_android_should_background_update();
             process_events = ALooper_pollOnce(block_until_event ? -1 : 0, NULL, NULL, NULL) == ALOOPER_POLL_CALLBACK;
+            if (_sapp_tc_android_should_background_update()) break; // [TrussC] timed outer poll
         }
     }
 
@@ -15760,7 +15796,8 @@ int sapp_tc_window_framebuffer_height(sapp_tc_window win) { _SOKOL_UNUSED(win); 
 float sapp_tc_window_dpi_scale(sapp_tc_window win) { _SOKOL_UNUSED(win); return 1.0f; }
 int sapp_window_sample_count(sapp_tc_window win) { _SOKOL_UNUSED(win); return 1; }
 bool sapp_tc_window_occluded(sapp_tc_window win) {
-    return win.id == 0 && (!_sapp_tc.android.has_resumed || !_sapp_tc.android.has_focus);
+    return win.id == 0 && (!_sapp_tc.android.has_resumed || !_sapp_tc.android.has_focus ||
+        _sapp_tc.android.surface == EGL_NO_SURFACE); // [TrussC] no surface is hidden
 }
 void sapp_tc_window_set_title(sapp_tc_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
 double sapp_tc_window_frame_duration(sapp_tc_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }

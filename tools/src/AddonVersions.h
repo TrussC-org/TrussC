@@ -12,6 +12,7 @@ struct Source { std::string owner, url; };
 using Lookup = std::function<Source(const Spec&, bool)>;
 struct Paths : std::map<std::string, std::string> {
     std::string order; // CMake list, parents before dependencies.
+    std::map<std::string, std::string> resolvedPins; // Full commit IDs from remote acquisition only.
 };
 Paths resolve(const std::filesystem::path& project, const std::filesystem::path& trussc,
               bool fetch, const Lookup& lookup, const std::vector<std::string>* selection = nullptr);
