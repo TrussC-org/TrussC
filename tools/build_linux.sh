@@ -11,6 +11,11 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [ "$(uname)" != "Linux" ]; then
+    echo "ERROR: This script is for Linux. On macOS use tools/build_mac.command; on Windows use tools/build_win.bat."
+    exit 1
+fi
+
 echo "=========================================="
 echo "  trusscli Build Script"
 echo "=========================================="
