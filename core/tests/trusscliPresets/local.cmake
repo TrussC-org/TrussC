@@ -9,6 +9,9 @@ target_sources(${PROJECT_NAME} PRIVATE
     "${_TC_TRUSSCLI_SRC}/IdeHelper.cpp"
     "${_TC_TRUSSCLI_SRC}/VsDetector.cpp"
     "${_TC_TRUSSCLI_SRC}/GeneratedFile.cpp"
+    "${_TC_TRUSSCLI_SRC}/TrussCVersion.cpp"
+    "${_TC_TRUSSCLI_SRC}/AddonVersions.cpp"
+    "${_TC_TRUSSCLI_SRC}/ProcessCapture.cpp"
 )
 # Keep the private tools headers on this fixture when built into allCoreTests.
 set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"

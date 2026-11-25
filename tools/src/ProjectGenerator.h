@@ -91,7 +91,11 @@ public:
     static std::string validateProject(const std::string& projectPath);
 
     // Update existing project
-    std::string update(const std::string& projectPath);
+    std::string update(const std::string& projectPath, bool resolveInstalledAddons = false);
+
+    // GUI selections cover only local addons. Refuse projects that need the
+    // CLI's version/addon resolution before any files or builds are changed.
+    std::string updateFromGui(const std::string& projectPath);
 
     // Write only CMakePresets.json into an existing project, from the current
     // settings (no addons.make, CMakeLists.txt, IDE files or configure).
@@ -145,7 +149,7 @@ private:
     void runCMakeConfigure(const std::string& path);
 
     // Write addons.make
-    void writeAddonsMake(const std::string& destPath);
+    void writeAddonsMake(const std::string& destPath, bool preserveExisting = false);
 
     // Regenerate the standard CMake file, naming changed targets explicitly.
     void writeCMakeLists(const std::string& projectPath);
