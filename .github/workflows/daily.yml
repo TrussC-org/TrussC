@@ -201,14 +201,10 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
-            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
-            sed -i '' 's/open /#open /g' tools/build_mac.command
-            ./tools/build_mac.command
+            ./tools/build_mac.command --non-interactive --no-launch
           elif [ "$RUNNER_OS" == "Linux" ]; then
             chmod +x tools/build_linux.sh
-            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-            sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-            ./tools/build_linux.sh
+            ./tools/build_linux.sh --non-interactive --no-launch
           elif [ "$RUNNER_OS" == "Windows" ]; then
             TC_NO_LAUNCH=1 ./tools/build_win.bat
           fi
@@ -398,9 +394,7 @@ jobs:
         run: |
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
-          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-          ./tools/build_linux.sh
+          ./tools/build_linux.sh --non-interactive --no-launch
           TC_BUILD
 
       - name: Check build warnings (daily_tools_web)
