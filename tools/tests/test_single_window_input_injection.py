@@ -57,8 +57,16 @@ int emscripten_run_script_int(const char*) { return 1; }
 constexpr bool supportsSecondaryWindows() { return false; }
 struct Operations { bool (*sendEvent)(sapp_tc_window, void*, sapp_event*); };
 struct Binding { sapp_tc_window handle{}; const Operations* operations=nullptr; void* user=nullptr; bool bound=false, focused=false; };
-struct Window { Binding binding; bool isOpen() const { return binding.bound; } } window;
-struct WindowRequestAccess { static Binding& binding(Window& w) { return w.binding; } };
+struct WindowContext { bool updateWhileHidden=false; };
+struct Window {
+    Binding binding; WindowContext context;
+    bool isOpen() const { return binding.bound; }
+    void setUpdateWhileHidden(bool allow) { context.updateWhileHidden=allow; }
+} window;
+struct WindowRequestAccess {
+    static Binding& binding(Window& w) { return w.binding; }
+    static WindowContext& context(Window& w) { return w.context; }
+};
 struct TouchEventArgs {};
 struct DragDropEventArgs { float x=0, y=0; };
 struct { bool bootstrapping=false; } coordinatorState;
