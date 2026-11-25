@@ -1,5 +1,7 @@
 # tcxInputReplay
 
+이 애드온은 실험적이며, JSONL 형식은 향후 버전에서 변경될 수 있습니다.
+
 일반 Node로 구성한 작은 입력 녹화 및 재생 도구 모음입니다. App에 `Toolbar`를 추가하면 해당 창의 마우스, 키보드, 터치, 파일 드롭 입력을 녹화합니다. 재생은 기록된 시간에 입력을 주입하고 장면 마크에서 기다립니다. 기존 단일 창 JSONL 버전 1과 호환되며 ImGui가 필요하지 않습니다.
 
 이 애드온은 `Window::injectInput`을 사용합니다. 직접 입력 주입 도구를 만들려면 `Player.h`를 읽어 보시기 바랍니다.
@@ -50,6 +52,8 @@ replay->stopRecording();
 replay->startRecording(inputreplay::RecordingMode::Ring, chrono::seconds(30));
 replay->flush("last-30-seconds.jsonl");
 ```
+
+[example-ringRecording](example-ringRecording)은 빠르게 드래그하면 공이 벽을 통과하는 버그를 포착하고 자동으로 저장한 뒤 재생 시 재현합니다.
 
 `isRecording()`은 두 모드의 녹화 상태를 반환합니다. `getRecordedCount()`는 헤더, 마크, 종료 레코드를 제외한 입력 수를 반환하며 링에서는 보관 중인 입력만 셉니다. 각 Toolbar는 자신의 창만 녹화하고 도구 모음 클릭도 포함합니다. 주입된 입력은 녹화하지 않습니다.
 
