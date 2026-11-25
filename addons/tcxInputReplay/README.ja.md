@@ -1,5 +1,7 @@
 # tcxInputReplay
 
+このアドオンは実験的なもので、JSONL 形式は今後のバージョンで変更される可能性があります。
+
 通常の Node で構成した、小さな入力録画・再生ツールバーです。App に `Toolbar` を追加すると、そのウィンドウのマウス、キーボード、タッチ、ファイルドロップの入力を録画できます。再生は記録した時刻に入力を注入し、シーンマークで待機します。既存の単一ウィンドウの JSONL バージョン 1 と互換性があり、ImGui は不要です。
 
 このアドオンは `Window::injectInput` を使っています。独自の入力注入ツールを作りたい場合は、`Player.h` を読んでください。
@@ -50,6 +52,8 @@ replay->stopRecording();
 replay->startRecording(inputreplay::RecordingMode::Ring, chrono::seconds(30));
 replay->flush("last-30-seconds.jsonl");
 ```
+
+[example-ringRecording](example-ringRecording) は、素早いドラッグでボールが壁をすり抜けるバグを捉え、自動で保存し、再生時に再現します。
 
 `isRecording()` は両モードの録画状態を返します。`getRecordedCount()` はヘッダー、マーク、終了レコードを除く入力数を返し、リングでは保持中の入力だけを数えます。各 Toolbar は自身のウィンドウだけを録画し、ツールバーへのクリックも含めます。注入された入力は録画しません。
 

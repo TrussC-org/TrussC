@@ -1,5 +1,7 @@
 # tcxInputReplay
 
+This addon is experimental, and the JSONL format may change in future versions.
+
 A small input recorder and replay toolbar built from plain Nodes. Add `Toolbar` to an App to record mouse, keyboard, touch, and file-drop input in that window. Playback injects events on their recorded schedule and waits at scene marks. JSONL version 1 remains compatible with existing single-window recordings; there is no ImGui dependency.
 
 This addon uses `Window::injectInput`. If you want to build your own input-injection tool, read `Player.h`.
@@ -50,6 +52,8 @@ Ring recording retains the latest duration in memory. Flush writes that interval
 replay->startRecording(inputreplay::RecordingMode::Ring, chrono::seconds(30));
 replay->flush("last-30-seconds.jsonl");
 ```
+
+[example-ringRecording](example-ringRecording) catches a bug where a fast drag slips the ball through a wall, saves it automatically, and reproduces it on playback.
 
 `isRecording()` reports either mode. `getRecordedCount()` counts input events, excluding headers, marks, and end records. In ring mode it counts only retained input. Each Toolbar records only its own window, including toolbar clicks. Injected events are omitted.
 
