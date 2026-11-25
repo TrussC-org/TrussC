@@ -861,7 +861,7 @@ string ProjectGenerator::updateFromGui(const string& projectPath) {
             auto installed = fs::path(settings_.tcRoot) / "addons" / name;
             if (name.compare(0, 3, "tcx") != 0 || name.find_first_of("/@\\") != string::npos ||
                 find(settings_.addons.begin(), settings_.addons.end(), name) == settings_.addons.end() ||
-                !fs::is_directory(installed) || fs::exists(installed / ".git")) {
+                !fs::is_directory(installed)) {
                 return cliRequired;
             }
         }

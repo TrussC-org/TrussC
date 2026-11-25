@@ -147,10 +147,14 @@ int main(int argc, char** argv) {
         }), encoding="utf-8")
         self.assert_refused()
 
-    def test_addon_clone_inside_framework_refuses(self):
+    def test_addon_clone_inside_framework_updates_like_a_local_addon(self):
+        # CLI update also uses the installed folder for a plain name, so the GUI keeps handling it.
         (self.framework / "addons/tcxClone/.git").mkdir()
         (self.project / "addons.make").write_text("tcxClone\n", encoding="utf-8")
-        self.assert_refused()
+        result = self.update()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.project / "addons.make").read_text(encoding="utf-8"),
+                         "tcxKeep\ntcxNew\n")
 
 
 if __name__ == "__main__":
