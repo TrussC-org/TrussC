@@ -27,7 +27,7 @@ struct Descriptor {
     int _tc_event_cb = 0;
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
-    bool borderless=false, high_dpi = true, no_high_dpi = false;
+    bool borderless=false, _tc_borderless=false, high_dpi = true, no_high_dpi = false;
     int swap_interval = 1, max_frame_latency = 0, _tc_draw_while_hidden = 0;
     bool fullscreen = false, hidden = false, _tc_start_hidden = false;
     int event_cb = 0, tick_cb = 0;
@@ -50,6 +50,8 @@ struct State {
     float window_scale = 1, dpi_scale = 1;
     int xwin = 1, fb_width = 0, fb_height = 0, win_width = 0, win_height = 0;
     bool surface_resize_pending=false;
+    bool fullscreen=false, fullscreen_requested=false, decoration_pending=false;
+    int windowed_width=0, windowed_height=0;
     bool (*events_enabled)() = nullptr;
 #ifdef TEST_WIN
     State* hwnd = nullptr;

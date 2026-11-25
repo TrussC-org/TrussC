@@ -7,9 +7,11 @@
 #ifdef _WIN32
 #include "BuildSetup.h"   // quoteWindowsArgument
 #include <windows.h>
+#include <io.h>
 #else
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -20,7 +22,7 @@ using namespace std;
 
 #ifdef _WIN32
 
-int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData) {
+int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile, const bool* cancel) {
     if (argv.empty()) return -1;
     // Text printed so far must come before the child's output, also through a pipe.
     cout.flush();
@@ -41,8 +43,9 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = writeEnd;   // stdout and stderr share one pipe: output stays in order
-    si.hStdError = writeEnd;
+    si.hStdOutput = writeEnd;   // By default stderr shares this pipe to preserve output order.
+    si.hStdError = stderrFile ? reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stderrFile))) : writeEnd;
+    if (stderrFile) SetHandleInformation(si.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
     PROCESS_INFORMATION pi = {};
     // Without a console (GUI launch), keep the child hidden as before.
     const DWORD flags = GetConsoleCP() != 0 ? 0 : CREATE_NO_WINDOW;
@@ -66,6 +69,10 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
             const DWORD wanted = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
             if (!ReadFile(readEnd, buffer, wanted, &count, nullptr) || count == 0) break;
             onData(buffer, count);
+            if (cancel && *cancel) {
+                TerminateProcess(pi.hProcess, 1);
+                break;
+            }
             continue;
         }
         if (exited) break;   // the child is gone and the pipe is drained
@@ -85,7 +92,7 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
 
 #else
 
-int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData) {
+int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile, const bool* cancel) {
     if (argv.empty()) return -1;
     // Text printed so far must come before the child's output, also through a pipe.
     cout.flush();
@@ -104,9 +111,9 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
 
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    // stdout and stderr share one pipe: output stays in order
+    // By default stderr shares stdout's pipe to preserve output order.
     int error = posix_spawn_file_actions_adddup2(&actions, fds[1], 1);
-    if (!error) error = posix_spawn_file_actions_adddup2(&actions, fds[1], 2);
+    if (!error) error = posix_spawn_file_actions_adddup2(&actions, stderrFile ? fileno(stderrFile) : fds[1], 2);
     pid_t pid = 0;
     if (!error) error = posix_spawnp(&pid, cargv[0], &actions, nullptr, cargv.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
@@ -130,7 +137,14 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
         }
         if (ready > 0) {
             const ssize_t count = read(fds[0], buffer, sizeof(buffer));
-            if (count > 0) { onData(buffer, static_cast<size_t>(count)); continue; }
+            if (count > 0) {
+                onData(buffer, static_cast<size_t>(count));
+                if (cancel && *cancel) {
+                    kill(pid, SIGKILL);
+                    break;
+                }
+                continue;
+            }
             if (count == 0) break;                       // every writer closed
             if (errno == EINTR || errno == EAGAIN) continue;
             break;

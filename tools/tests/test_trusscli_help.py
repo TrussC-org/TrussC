@@ -37,6 +37,8 @@ class HelpTests(unittest.TestCase):
         commands = [(name,) for name in self.listed_commands(self.cli("--help"))]
         commands += [("addon", name) for name in
                      self.listed_commands(self.cli("addon", "--help"))]
+        commands += [("cache", name) for name in
+                     self.listed_commands(self.cli("cache", "--help"))]
         # Completion is dispatched but not advertised in the top-level list.
         commands.append(("completion",))
         for command in commands:
@@ -55,6 +57,12 @@ class HelpTests(unittest.TestCase):
                 self.assertIn("-h, --help", output)
                 self.assertNotIn("(built ", output)
                 self.assertNotIn(str(ROOT), output)
+
+    def test_cache_remove_syntax_is_listed(self):
+        for args in (("--help",), ("cache", "--help")):
+            output = self.cli(*args)
+            self.assertIn("remove <spec>", output)
+            self.assertIn("remove --addon <spec>", output)
 
     def test_plain_version_matches_existing_aliases(self):
         output = self.cli("version")

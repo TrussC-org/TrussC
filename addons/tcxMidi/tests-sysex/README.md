@@ -19,8 +19,9 @@ addons/tcxMidi/tests-sysex/bin/tests-sysex
 For offline builds, copy libremidi v5.4.3 into a private directory, apply
 `cmake/PatchLibremidi.cmake`, and configure with
 `-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI=path/to/private/copy`.
-Only ALSA output and the CoreMIDI observer alias are patched; verification also requires the four restored input
-files to match upstream. Normal reconfiguration uses a fresh R5 source location.
+ALSA output, the CoreMIDI observer alias and the MSVC error callbacks are patched;
+verification also requires the four restored input files to match upstream.
+Normal reconfiguration uses a fresh R6 source location.
 Stale overrides/caches fail with the differing file and clean-source instructions.
 
 ```sh

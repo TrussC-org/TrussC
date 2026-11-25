@@ -1,5 +1,5 @@
 # Local patch for the SHA-pinned libremidi 5.4.3. No git or patch executable needed.
-# Input, ALSA output and CoreMIDI observer hashes are checked before any write; VERIFY_ONLY never modifies sources.
+# Input, ALSA output, CoreMIDI observer and error callback hashes are checked before any write; VERIFY_ONLY never modifies sources.
 # file(WRITE) uses native text mode, producing CRLF on Windows. CONFIGURE with
 # NEWLINE_STYLE UNIX writes LF in binary mode (available since CMake 3.18).
 # @ONLY preserves ${...}; these hash-pinned sources contain no @VAR@ references
@@ -24,7 +24,7 @@ foreach(input expected IN ZIP_LISTS input_files input_hashes)
         file(SHA256 "${LIBREMIDI_SOURCE_DIR}/${input}" actual)
     endif()
     if(NOT actual STREQUAL expected)
-        message(FATAL_ERROR "tcxMidi libremidi input differs from upstream: ${LIBREMIDI_SOURCE_DIR}/${input}. Use clean v5.4.3 sources, then apply PatchLibremidi.cmake for R4 only; replace the stale source override/cache.")
+        message(FATAL_ERROR "tcxMidi libremidi input differs from upstream: ${LIBREMIDI_SOURCE_DIR}/${input}. Use clean v5.4.3 sources, then apply PatchLibremidi.cmake for the current patches; replace the stale source override/cache.")
     endif()
 endforeach()
 set(path0 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/alsa_seq/midi_out.hpp")
@@ -43,6 +43,15 @@ set(patched1 "35725620d09241ebf2e8097bf2ad79d88ee4277bcba96b45f6c9e42bdf7264bd")
 if(NOT hash1 STREQUAL patched1)
     if(VERIFY_ONLY OR NOT hash1 STREQUAL original1)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 CoreMIDI observer patch: ${path1}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
+    endif()
+endif()
+set(path2 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/system_error2.hpp")
+file(SHA256 "${path2}" hash2)
+set(original2 "a1d75d62e6fec6bb33ad8f33b8ba6d8cc3670ff6d0c79c3a5ce9ef78bb927f55")
+set(patched2 "0938b6c88b6013497042992a3070ab20ff81874c049ce55191d8fbb80b92abae")
+if(NOT hash2 STREQUAL patched2)
+    if(VERIFY_ONLY OR NOT hash2 STREQUAL original2)
+        message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 MSVC error callback patch: ${path2}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
     endif()
 endif()
 if(VERIFY_ONLY)
@@ -441,4 +450,137 @@ private:
         message(FATAL_ERROR "libremidi patch result mismatch: ${path0}")
     endif()
     file(CONFIGURE OUTPUT "${path0}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
+endif()
+# Backport celtera/libremidi 1f62921ad0 (#277, TrussC #1574).
+if(hash2 STREQUAL original2)
+    file(READ "${path2}" contents)
+    string(REPLACE [==[struct default_error_constructors
+{
+  template <class T>
+  static error_value<> copy_constructor(const error& e) noexcept(
+      std::is_nothrow_copy_constructible<T>::value
+      && std::is_nothrow_move_constructible<T>::value
+      )
+  {
+    T value = error_cast<T>(e);
+    return error_value<>{std::move(value)};
+  }
+
+  template <class T>
+  static error_value<> move_constructor(error&& e) noexcept(
+      std::is_nothrow_move_constructible<T>::value
+      )
+  {
+    return error_value<>{error_cast<T>(std::move(e))};
+  }
+
+  template <class T>
+  static void destructor(error& e) noexcept
+  {
+    detail::erased_error& value = error_ref_access{e}.ref();
+    stdx::launder(reinterpret_cast<T*>(&value.storage))->~T();
+  }
+
+  template <class T>
+  constexpr static error_resource_management::copy_constructor copy() noexcept
+  {
+    return is_trivially_copy_constructible<T>::value ?
+               nullptr : &copy_constructor<T>;
+  }
+
+  template <class T>
+  constexpr static error_resource_management::move_constructor move() noexcept
+  {
+    return is_trivially_move_constructible<T>::value ?
+               nullptr : &move_constructor<T>;
+  }
+
+  template <class T>
+  constexpr static error_resource_management::destructor destroy() noexcept
+  {
+    return is_trivially_destructible<T>::value ?
+               nullptr : &destructor<T>;
+  }
+};
+
+} // end namespace detail
+
+template <class T>
+struct default_error_resource_management_t : error_resource_management
+{
+  constexpr default_error_resource_management_t() noexcept
+      :
+      error_resource_management{
+          detail::default_error_constructors::copy<T>(),
+          detail::default_error_constructors::move<T>(),
+          detail::default_error_constructors::destroy<T>()
+      }
+  {}
+};
+]==] [==[// Keep T at class scope: MSVC 14.52 loses the member template parameter
+// in the dependent noexcept specifications when taking the callback addresses.
+template <class T>
+struct default_error_constructors
+{
+  static error_value<> copy_constructor(const error& e) noexcept(
+      std::is_nothrow_copy_constructible<T>::value
+      && std::is_nothrow_move_constructible<T>::value
+      )
+  {
+    T value = error_cast<T>(e);
+    return error_value<>{std::move(value)};
+  }
+
+  static error_value<> move_constructor(error&& e) noexcept(
+      std::is_nothrow_move_constructible<T>::value
+      )
+  {
+    return error_value<>{error_cast<T>(std::move(e))};
+  }
+
+  static void destructor(error& e) noexcept
+  {
+    detail::erased_error& value = error_ref_access{e}.ref();
+    stdx::launder(reinterpret_cast<T*>(&value.storage))->~T();
+  }
+
+  constexpr static error_resource_management::copy_constructor copy() noexcept
+  {
+    return is_trivially_copy_constructible<T>::value ?
+               nullptr : &copy_constructor;
+  }
+
+  constexpr static error_resource_management::move_constructor move() noexcept
+  {
+    return is_trivially_move_constructible<T>::value ?
+               nullptr : &move_constructor;
+  }
+
+  constexpr static error_resource_management::destructor destroy() noexcept
+  {
+    return is_trivially_destructible<T>::value ?
+               nullptr : &destructor;
+  }
+};
+
+} // end namespace detail
+
+template <class T>
+struct default_error_resource_management_t : error_resource_management
+{
+  constexpr default_error_resource_management_t() noexcept
+      :
+      error_resource_management{
+          detail::default_error_constructors<T>::copy(),
+          detail::default_error_constructors<T>::move(),
+          detail::default_error_constructors<T>::destroy()
+      }
+  {}
+};
+]==] contents "${contents}")
+    string(SHA256 result "${contents}")
+    if(NOT result STREQUAL patched2)
+        message(FATAL_ERROR "libremidi patch result mismatch: ${path2}")
+    endif()
+    file(CONFIGURE OUTPUT "${path2}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()

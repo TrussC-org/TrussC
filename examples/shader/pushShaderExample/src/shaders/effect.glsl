@@ -16,7 +16,7 @@ layout(binding=1) uniform vs_params {
     vec2 _pad;
 };
 
-out vec2 uv;
+out vec2 pixelPosition;
 out vec4 vertColor;
 
 void main() {
@@ -24,13 +24,14 @@ void main() {
     vec2 ndc = (position.xy / screenSize) * 2.0 - 1.0;
     ndc.y = -ndc.y;  // Flip Y for OpenGL coordinate system
     gl_Position = vec4(ndc, position.z, 1.0);
-    uv = texcoord0;
+    // Keep the GL window's bottom-up gradient on every backend.
+    pixelPosition = vec2(position.x, screenSize.y - position.y);
     vertColor = color0;
 }
 @end
 
 @fs fs_rainbow
-in vec2 uv;
+in vec2 pixelPosition;
 in vec4 vertColor;
 
 layout(binding=0) uniform effect_params {
@@ -51,7 +52,7 @@ vec3 hsv2rgb(vec3 c) {
 
 void main() {
     // Rainbow effect based on position and time
-    float hue = fract(gl_FragCoord.x * 0.003 + gl_FragCoord.y * 0.003 + time * 0.5);
+    float hue = fract(pixelPosition.x * 0.003 + pixelPosition.y * 0.003 + time * 0.5);
     vec3 rainbow = hsv2rgb(vec3(hue, 0.8, 1.0));
 
     // Mix with vertex color

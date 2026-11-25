@@ -840,6 +840,28 @@ popShader();
 
 Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3), texcoord(vec2), color(vec4).
 
+### Shader coordinates on the main window
+
+On the main window (swapchain), `gl_FragCoord.y` increases upward from the
+bottom on GL and downward from the top on Metal, D3D11, and WebGPU. For the same
+effect on every backend, pass a pixel position from the vertex shader instead of
+reading `gl_FragCoord`. Shapes drawn under `pushShader()` (drawRect, drawCircle,
+drawTriangle, drawLine) have texture coordinates of (0, 0); texture coordinates
+are only usable with meshes and images that carry them, and with
+FullscreenShader. With the vertex shader's `screenSize` uniform:
+
+```glsl
+// vertex shader
+out vec2 pixelPosition;
+pixelPosition = vec2(position.x, screenSize.y - position.y);
+```
+
+```glsl
+// fragment shader
+in vec2 pixelPosition;
+float hue = fract((pixelPosition.x + pixelPosition.y) * 0.003);
+```
+
 ### Running an Fbo through your own shader
 
 Use two float Fbos for repeated passes: sample one and render into the other
@@ -867,7 +889,13 @@ Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mes
 flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom
 is positive on the former paths and negative on the latter. Use texture
 coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same
-everywhere.
+everywhere. With `uv` passed from the vertex shader's texture coordinates,
+build a gradient in the fragment shader:
+
+```glsl
+float hue = fract(uv.x + uv.y);
+```
+
 Independently opened sokol passes are outside TrussC's public-Fbo hook.
 
 Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
@@ -1363,6 +1391,8 @@ In Xcode: pick a device/simulator → **set a Development Team under Signing & C
 ### How does the build system work? (trusscli + CMake)
 
 Two layers. The core is built once as `libTrussC.a` and shared across all projects; apps only recompile their own delta (fast). `trusscli` (the project generator) handles create / update / IDE-file generation / per-platform enabling. `CMakeLists.txt` and `CMakePresets.json` are auto-generated, so **don't hand-edit them** — put addons in `addons.make` and project-specific CMake in `local.cmake`. Build with `trusscli build` (auto-selects native), or `cmake --preset <os>` + `cmake --build --preset <os>` (os = macos / windows / linux / web / android / ios).
+
+For a project pinned with `.trussc-version`, the installed `trusscli build` builds that version’s sources; prepare them with `trusscli update` (see [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version)).
 
 For a plain configure outside the repository, pass `-DTRUSSC_DIR=<TrussC-root>/core`. The generated CMakeLists retains the `../../../core` fallback and checks for `cmake/trussc_app.cmake` before including it. If missing, it stops with instructions to run `trusscli update`, configure with the host preset (`macos`, `linux`, or `windows`), or set `TRUSSC_DIR`.
 
@@ -2827,7 +2857,7 @@ void setIndependentFps(float updateFps, float drawFps)  // Sets separate update 
 void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on and the screen saver stay inactive.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
-void setWindowDecorated(bool decorated)  // Controls the resolved Window's standard decorations.
+void setWindowDecorated(bool decorated)  // Shows or hides window decorations while keeping the client size on Windows, macOS and X11.
 void setWindowPosition(int x, int y) [macos,windows,linux]  // Moves the window to a screen position.
 void setWindowSize(int width, int height)  // Resizes the window in the current coordinate units.
 void setWindowSizeLogical(int width, int height)  // Resizes the current window using logical dimensions.
@@ -4766,10 +4796,10 @@ bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.
 void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
 int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
-int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
+int Serial::readBytes(void * buffer, int length) [+2] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
 bool Serial::setup(const std::string & portName, int baudRate) [+2] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
 bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
-int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
+int Serial::writeBytes(const void * buffer, int length) [+2] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
 ```
 
 ### SerialDeviceInfo — Holds information about one enumerated serial device.
@@ -4913,9 +4943,9 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
-bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
+bool StorageBuffer::read(void * destination, size_t bytes) [+2] [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
 void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
-bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
+bool StorageBuffer::update(const void * data, size_t size) [+2]  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
 ### StrokeMesh — Builds triangle geometry for variable-width polyline strokes.
@@ -5220,9 +5250,9 @@ bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Returns wh
 bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Joins an IPv4 multicast group for reception.
 bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leaves an IPv4 multicast group.
 void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes pending UDP datagrams.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
-bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+3] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
+bool UdpSocket::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
 void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.

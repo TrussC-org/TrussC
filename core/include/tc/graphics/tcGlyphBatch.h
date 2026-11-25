@@ -263,15 +263,15 @@ private:
         auto& page = runs_[activeRuns_ - 1];
         const auto& atlas = font_.atlasManager_->getAtlas(index);
         const float s = 1.0f / font_.dpiScale_;
-        const float x = placed.drawX + glyph->getXoff() * s * placed.scaleX;
-        const float y = placed.baselineY + glyph->getYoff() * s;
-        const float w = glyph->getWidth() * s * placed.scaleX, h = glyph->getHeight() * s;
-        const Vec2 corners[] = {{x,y}, {x+w,y}, {x+w,y+h}, {x,y+h}};
+        // Padded quad shared with Font::drawString (internal::paddedGlyphQuad).
         // Texel coordinates survive atlas expansion; normalize in the shader
         // using the current page dimensions at draw time.
-        const float u0 = glyph->getU0() * atlas.getWidth(), u1 = glyph->getU1() * atlas.getWidth();
-        const float v0 = glyph->getV0() * atlas.getHeight(), v1 = glyph->getV1() * atlas.getHeight();
-        const Vec2 uv[] = {{u0,v0}, {u1,v0}, {u1,v1}, {u0,v1}};
+        const internal::GlyphQuad q = internal::paddedGlyphQuad(*glyph,
+            placed.drawX + glyph->getXoff() * s * placed.scaleX, placed.baselineY + glyph->getYoff() * s,
+            glyph->getWidth() * s * placed.scaleX, glyph->getHeight() * s,
+            (float)atlas.getWidth(), (float)atlas.getHeight(), font_.atlasManager_->getGlyphGap());
+        const Vec2 corners[] = {{q.x,q.y}, {q.x+q.w,q.y}, {q.x+q.w,q.y+q.h}, {q.x,q.y+q.h}};
+        const Vec2 uv[] = {{q.u0,q.v0}, {q.u1,q.v0}, {q.u1,q.v1}, {q.u0,q.v1}};
         const float c = std::cos(placed.rotationCw), si = std::sin(placed.rotationCw);
         for (int i = 0; i < 4; ++i) {
             const float dx = corners[i].x - placed.pivotX, dy = corners[i].y - placed.pivotY;
