@@ -12,16 +12,24 @@ void tcApp::keyPressed(int key) {
     dragging = false;
     status.clear();
 }
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    // Only a ball at home can be grabbed, so every drag starts from home.
+    dragging = ball == home && !replay->isPointerOver() && (e.pos - home).length() < radius;
+}
+void tcApp::mouseReleased(const MouseEventArgs& e) {
+    if (dragging) ball = home;
+    dragging = false;
+}
 void tcApp::mouseDragged(const MouseDragEventArgs& e) {
     if (!dragging) return;
     ball = e.pos;
     float wall = getWidth() / 2;
     // Bug: only checks where the ball lands, not the path it took.
-    if (ball.x >= wall - 18 && ball.x <= wall + 24) {
+    if (ball.x >= wall - radius && ball.x <= wall + wallWidth + radius) {
         ball = home;
         dragging = false;
     }
-    if (ball.x <= wall + 24) return;
+    if (ball.x <= wall + wallWidth + radius) return;
     dragging = false;
     status = e.injected ? "reproduced it" : "caught it";
     if (e.injected) return;
@@ -38,11 +46,11 @@ void tcApp::mouseDragged(const MouseDragEventArgs& e) {
 void tcApp::draw() {
     clear(0.07f, 0.08f, 0.10f);
     setColor(0.24f, 0.11f, 0.13f);
-    drawRect(getWidth() / 2 + 6, 0, getWidth() / 2 - 6, getHeight());
+    drawRect(getWidth() / 2 + wallWidth, 0, getWidth() / 2 - wallWidth, getHeight());
     setColor(0.80f, 0.82f, 0.85f);
-    drawRect(getWidth() / 2, 0, 6, getHeight());
+    drawRect(getWidth() / 2, 0, wallWidth, getHeight());
     setColor(1.0f, 0.62f, 0.38f);
-    drawCircle(ball, 18);
+    drawCircle(ball, radius);
     setColor(1.0f);
     drawBitmapString("Drag the ball  |  R: reset  |  F9: toolbar", 20, 70);
     drawBitmapString("FORBIDDEN AREA", getWidth() / 2 + 30, 110);
