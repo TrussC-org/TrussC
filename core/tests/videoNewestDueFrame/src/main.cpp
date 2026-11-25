@@ -29,7 +29,7 @@ bool nearlyEqual(double a, double b) { return std::abs(a - b) < 0.0001; }
 size_t openFdCount() {
     return std::distance(tc::fs::directory_iterator("/proc/self/fd"), tc::fs::directory_iterator{});
 }
-bool videoFixture(const tc::fs::path& path, const char* container = "avi", bool longGop = false, bool audio = false) {
+bool videoFixture(const tc::fs::path& path, const char* container = "avi", bool longGop = false, bool audio = false, int audioSamples = 1600) {
     AVFormatContext* f = nullptr;
     if (avformat_alloc_output_context2(&f, nullptr, container, path.c_str()) < 0) return false;
     const AVCodec* encoder = longGop ? avcodec_find_encoder_by_name("libx264") : avcodec_find_encoder(AV_CODEC_ID_FFV1);
@@ -85,12 +85,12 @@ bool videoFixture(const tc::fs::path& path, const char* container = "avi", bool 
         ok = avcodec_send_frame(c, frame) >= 0;
         drain();
         if (sound) {
-            av_new_packet(packet, 1600 * 2);
+            av_new_packet(packet, audioSamples * 2);
             std::memset(packet->data, 0, packet->size);
             packet->flags |= AV_PKT_FLAG_KEY;
             packet->stream_index = sound->index;
-            packet->pts = packet->dts = av_rescale_q(i * 1600, AVRational{1, 48000}, sound->time_base);
-            packet->duration = av_rescale_q(1600, AVRational{1, 48000}, sound->time_base);
+            packet->pts = packet->dts = av_rescale_q(i * audioSamples, AVRational{1, 48000}, sound->time_base);
+            packet->duration = av_rescale_q(audioSamples, AVRational{1, 48000}, sound->time_base);
             ok = ok && av_interleaved_write_frame(f, packet) >= 0;
             av_packet_unref(packet);
         }
@@ -297,6 +297,24 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     const auto withAudio = longGop.string() + ".mkv";
     check("long GOP PCM fixture", videoFixture(withAudio, "matroska", true, true));
     workerSeekChecks(withAudio, true);
+    tc::fs::remove(withAudio);
+    check("audio tail fixture", videoFixture(withAudio, "matroska", true, true, 1605));
+    {
+        tc::VideoPlayer player;
+        player.setDecodeThreads(1);
+        check("audio tail load", Access::loadHeadlessForTests(player, withAudio));
+        check("container includes audio tail", player.getDuration() > 10.02f);
+        Access::playHeadlessForTests(player);
+        player.setPaused(true);
+        player.setFrame(30);
+        check("audio tail initial paused seek", waitFor(player, [&] { return atFrame(player, 30); }));
+        player.setPosition(1.0f);
+        check("audio tail endpoint presents final picture", waitFor(player, [&] { return atFrame(player, 299); }));
+        for (int i = 0; i < 20; ++i) {
+            Access::updateHeadlessForTests(player);
+            check("audio tail endpoint stays paused", player.isPaused() && atFrame(player, 299));
+        }
+    }
     tc::fs::remove(withAudio);
     engine.close();
     const auto path = tc::fs::temp_directory_path() /

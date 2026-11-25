@@ -907,9 +907,12 @@ bool TCVideoPlayerImpl::probeHwOutputFormat() {
 
 bool TCVideoPlayerImpl::decodeNextFrame(double discardBefore) {
     char errbuf[128];
+    auto freeFrame = [](AVFrame* frame) { av_frame_free(&frame); };
+    std::unique_ptr<AVFrame, decltype(freeFrame)> lastPreroll(nullptr, freeFrame);
     const double seekTolerance = frameRate_ > 0.0
         ? std::min(av_q2d(timeBase_), 0.5 / frameRate_) : av_q2d(timeBase_);
     while (true) {
+        if (discardBefore >= 0.0 && (shouldStop_ || seekRequested_)) return true;
         // Drain the decoder first. HW backends (VAAPI/NVDEC) and streams with
         // B-frames keep several frames in flight, so output is often ready
         // before the next packet is fed. Pulling frames first prevents the
@@ -992,9 +995,13 @@ bool TCVideoPlayerImpl::decodeNextFrame(double discardBefore) {
             continue;
         }
 
-        if (ret == AVERROR_EOF) {
-            // Decoder fully drained after EOF was signalled upstream.
-            return false;
+        const bool atEnd = ret == AVERROR_EOF;
+        if (atEnd) {
+            if (!lastPreroll) return false;
+            // The container may outlast its video. Present the actual last
+            // picture when EOF arrives before the requested seek time.
+            av_frame_move_ref(frame_, lastPreroll.get());
+            ret = 0;
         }
         if (ret == AVERROR_INVALIDDATA) {
             warnInvalidData(false);
@@ -1018,11 +1025,19 @@ bool TCVideoPlayerImpl::decodeNextFrame(double discardBefore) {
         }
         double pts = frame_->pts == AV_NOPTS_VALUE ? 0.0 : frame_->pts * av_q2d(timeBase_);
         decodedPts_ = pts;
-        // Seek preroll is needed by the codec, but must never reach the queue.
+        // Skip seek preroll unless it is the final picture at EOF.
         // Allow timestamp rounding in normalized positions and frame stepping,
         // but never enough to admit the preceding frame at the nominal rate.
-        if (pts + seekTolerance < discardBefore) {
-            av_frame_unref(frame_);
+        if (!atEnd && pts + seekTolerance < discardBefore) {
+            // Bound (memory): retain one preroll picture for EOF fallback, without CPU transfer or conversion.
+            if (!lastPreroll) lastPreroll.reset(av_frame_alloc());
+            if (!lastPreroll) {
+                av_frame_unref(frame_);
+                decodeError("video seek frame allocation", AVERROR(ENOMEM));
+                return false;
+            }
+            av_frame_unref(lastPreroll.get());
+            av_frame_move_ref(lastPreroll.get(), frame_);
             continue;
         }
         AVFrame* srcFrame = frame_;
@@ -1078,6 +1093,7 @@ bool TCVideoPlayerImpl::decodeNextFrame(double discardBefore) {
         if (rotateRGBA)
             rotation_.apply(rotationBuffer_.data(), data.pixels.data(), encodedWidth_, encodedHeight_);
         std::lock_guard<std::mutex> lock(mutex_);
+        if (discardBefore >= 0.0 && (shouldStop_ || seekRequested_)) return true;
         frameQueue_.push(std::move(data));
         if (discardBefore >= 0.0) seekFrameReady_ = true;
         return true;
@@ -1337,9 +1353,8 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
 
 void TCVideoPlayerImpl::seekToTime(double seconds) {
     std::lock_guard<std::mutex> lock(mutex_);
-    // There is no picture at duration itself; end seeks select the last frame.
     if (frameRate_ > 0.0 && duration_ > 0.0)
-        seconds = std::clamp(seconds, 0.0, std::max(0.0, duration_ - 1.0 / frameRate_));
+        seconds = std::clamp(seconds, 0.0, duration_);
     requestSeek(seconds);
     const double now = clockSampleTime_;
     playbackStartTime_ = now - (speed_ > 0.0f ? seconds / speed_ : 0.0);
