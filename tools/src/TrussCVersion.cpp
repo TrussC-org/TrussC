@@ -423,6 +423,7 @@ static fs::path fetchTarball(const Spec& spec, fs::path destination, const std::
                 // The base override keeps API and archive fixtures on the same transport seam.
                 const std::string api = std::getenv("TRUSSC_GITHUB_BASE_URL") ? base
                     : "https://api.github.com/repos/" + spec.owner + "/" + spec.repo;
+                // Bound (remote commit lookup): cap the API response at 1 MiB and transfer time at 300 seconds.
                 auto resolved = archiveCommand({"curl", "--location", "--fail", "--silent", "--show-error",
                     "--max-filesize", "1048576", "--max-time", "300", "--output", response.string(),
                     "--write-out", "\n%{http_code}", "--url", api + "/commits/" + encode(spec.ref)});

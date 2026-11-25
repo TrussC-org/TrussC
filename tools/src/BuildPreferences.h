@@ -37,6 +37,7 @@ inline int parallelBuildJobs(int jobs = 0, bool quiet = true) {
         return jobs;
     }
 #if defined(__linux__) || defined(__APPLE__)
+    // Bound (build memory): allow one compile job per 1.5 GiB of RAM, with at least one job.
     const double bytesPerJob = 1.5 * 1024 * 1024 * 1024;
     double ramBytes = 0;
 #ifdef __linux__
@@ -59,6 +60,7 @@ inline int parallelBuildJobs(int jobs = 0, bool quiet = true) {
     if (ramBytes > 0) {
         int ramJobs = max(1, (int)(ramBytes / bytesPerJob));
         long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+        // Bound (build CPU): cap the RAM-based job count at online CPU count plus two.
         if (cpus > 0 && ramJobs >= (int)cpus + 2) {
             ramJobs = (int)cpus + 2;
         } else {
@@ -70,6 +72,7 @@ inline int parallelBuildJobs(int jobs = 0, bool quiet = true) {
         return ramJobs;
     }
 #endif
+    // Bound (build fallback): use CPU count plus two jobs when RAM detection is unavailable.
     return max(1u, std::thread::hardware_concurrency()) + 2;
 }
 

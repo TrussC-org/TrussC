@@ -820,15 +820,14 @@ static void writeAddonsMake(const string& projectPath,
     writeGeneratedFile(path, out.str());
 }
 
-// Acquisition keeps named refs, but expands short commit IDs in cache paths.
+// Save only commit IDs resolved by remote acquisition, never local overrides.
 static bool expandAddonPins(vector<string>& selected, const addonVersions::Paths& paths) {
     bool changed = false;
     for (auto& line : selected) {
         auto spec = addonVersions::parse(line);
-        if (spec.ref.empty() || !paths.contains(spec.name)) continue;
-        if (!trusscVersion::parse("placeholder/" + spec.name + "@" + spec.ref).shortCommit) continue;
-        auto ref = fs::path(paths.at(spec.name)).filename().string();
-        if (ref.size() != 40 || !trusscVersion::parse(ref).commit) continue;
+        auto resolved = paths.resolvedPins.find(spec.name);
+        if (resolved == paths.resolvedPins.end()) continue;
+        const auto& ref = resolved->second;
         line.replace(line.size() - spec.ref.size(), spec.ref.size(), ref);
         changed = true;
     }
@@ -2373,7 +2372,17 @@ static int cmdAddonAddLocal(const vector<string>& args) {
             writeAddonsMake(project, selected);
         }
     }
-    return cmdUpdate({"-p", project}, false);
+    bool resolveShortPin = false;
+    if (args[1] == "--clear") {
+        for (const auto& line : readProjectAddons(project)) {
+            auto spec = addonVersions::parse(line);
+            if (spec.name == args[0] && !spec.ref.empty()) {
+                // The remote short pin may never have been acquired while overridden.
+                resolveShortPin = trusscVersion::parse("placeholder/" + spec.name + "@" + spec.ref).shortCommit;
+            }
+        }
+    }
+    return cmdUpdate({"-p", project}, resolveShortPin);
 }
 
 static bool promptYesNo(const string& msg, bool defaultYes) {

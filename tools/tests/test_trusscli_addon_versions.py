@@ -74,6 +74,28 @@ class AddonVersionTests(VersionTests):
         self.cli("update")
         self.assertIn("alice/tcxFixture@" + self.addon_initial + "\n", (self.project / "addons.make").read_text(encoding="utf-8"))
 
+    def test_addon_local_override_preserves_remote_short_pin(self):
+        self.cli("addon", "add", "alice/tcxFixture@" + self.addon_latest)
+        cached = Path(self.paths()["tcxFixture"])
+        folder = self.base / ("a" * 40)
+        folder.mkdir()
+        shutil.copytree(cached / "src", folder / "src")
+        short = self.addon_initial[:7]
+        selection = "# TrussC addons - one addon per line\nalice/tcxFixture@" + short + "\n"
+        make = self.project / "addons.make"
+        for override in (cached, folder):
+            with self.subTest(override=override):
+                make.write_text(selection, encoding="utf-8")
+                self.cli("addon", "add-local", "tcxFixture", override)
+                self.assertEqual(make.read_text(encoding="utf-8"), selection)
+                self.cli("update")
+                self.assertEqual(make.read_text(encoding="utf-8"), selection)
+                self.assertEqual(Path(self.paths()["tcxFixture"]), override)
+                self.cli("addon", "add-local", "tcxFixture", "--clear")
+                selected = Path(self.paths()["tcxFixture"])
+                self.assertEqual(selected, self.cache / "addons/alice/tcxFixture" / self.addon_initial)
+                self.assertEqual((selected / "src/value.h").read_text(encoding="utf-8"), "#define ADDON_VALUE 1\n")
+
     def test_addon_tarball_short_commit_uses_api_full_id(self):
         # Third-party archives do not need TrussC archive metadata.
         commit = self.addon_initial

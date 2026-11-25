@@ -254,6 +254,10 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
                 }
             }
             path = trusscVersion::acquire(versionSpec, fetch, true, source.url);
+            const auto ref = path.filename().string();
+            if (fetch && versionSpec.shortCommit && ref.size() == 40 && trusscVersion::parse(ref).commit) {
+                result.resolvedPins[spec.name] = ref;
+            }
         }
         path = fs::absolute(path).lexically_normal();
         external |= !spec.owner.empty() || !spec.ref.empty() || path != fs::absolute(installed).lexically_normal();
