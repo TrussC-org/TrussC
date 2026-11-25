@@ -367,6 +367,17 @@ int main(int argc, char** argv) {
                                 encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_plain_operation_without_settings_bounds_addons_make(self):
+        path = self.project / "addons.make"
+        with path.open("wb") as output:
+            output.truncate(16 * 1024 * 1024 + 1)
+        before = self.snapshot()
+        result = self.update("operation", "plain")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["error"],
+                         "addons.make exceeds the 16777216-byte limit")
+        self.assertEqual(self.snapshot(), before)
+
     def test_oversized_project_and_addon_files_fail_before_writes(self):
         for relative, mode in (("addons.make", "gui"), ("addons.make", "generator"),
                                ("CMakePresets.json", "gui"), ("CMakeUserPresets.json", "gui"),

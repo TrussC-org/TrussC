@@ -233,7 +233,8 @@ static void parseAddonsMake(const string& projectPath,
     string addonsMakePath = projectPath + "/addons.make";
     if (!fs::exists(addonsMakePath)) return;
 
-    ifstream addonsFile(addonsMakePath);
+    // Bound (project addons.make): cap the file at the CLI's 16 MiB before scanning.
+    istringstream addonsFile(readGuiUpdateFile(addonsMakePath));
     string line;
     while (getline(addonsFile, line)) {
         size_t start = line.find_first_not_of(" \t");
