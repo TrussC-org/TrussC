@@ -1,0 +1,4 @@
+# Upload staging and uniform budget checks open a window (GL here, Vulkan in a Vulkan build).
+{test} --display
+{test} --uniform-default
+{test} --uniform-small

@@ -192,9 +192,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             check("uniform frames completed", completed);
         }, runtime);
     }
-    return tcCoreTest::runDisplayTest<UploadApp>(WindowSettings{}.setSize(64, 64), failures, [] {
-        check("ten upload frames completed", completed);
-    });
+    if (argc > 1 && std::string(argv[1]) == "--display") {
+        return tcCoreTest::runDisplayTest<UploadApp>(WindowSettings{}.setSize(64, 64), failures, [] {
+            check("ten upload frames completed", completed);
+        });
+    }
+    std::puts("SKIP: vulkanStagingOverflow opens a window; run it with --display (display-test)");
+    return 0;
 #else
     (void)argc;
     (void)argv;
