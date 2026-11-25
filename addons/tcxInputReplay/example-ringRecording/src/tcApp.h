@@ -10,7 +10,10 @@ public:
     void setup() override;
     void draw() override;
     void keyPressed(int key) override;
-    void mousePressed(const MouseEventArgs& e) override { dragging = !replay->isPointerOver() && (e.pos - ball).length() < 18; }
+    void mousePressed(const MouseEventArgs& e) override {
+        // Only a ball at home can be grabbed, so every drag starts from home.
+        dragging = ball == home && !replay->isPointerOver() && (e.pos - home).length() < 18;
+    }
     void mouseReleased(const MouseEventArgs& e) override {
         if (dragging) ball = home;
         dragging = false;

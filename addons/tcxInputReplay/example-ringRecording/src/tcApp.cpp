@@ -7,7 +7,7 @@ void tcApp::setup() {
 }
 void tcApp::keyPressed(int key) {
     if (key != 'r' && key != 'R') return;
-    // Replay reproduces only from the state recording started in; the ball is home at every press, so reset before Play.
+    // Replay reproduces only from the state recording started in; drags always start from home, so reset before Play.
     ball = home;
     dragging = false;
     status.clear();
