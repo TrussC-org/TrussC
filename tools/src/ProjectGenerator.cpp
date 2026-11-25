@@ -449,7 +449,7 @@ static void checkWebNinja(const ProjectSettings& settings) {
 #endif
 }
 
-void ProjectGenerator::writeCMakePresets(const string& destPath, bool clearAddonResolution) {
+void ProjectGenerator::writeCMakePresets(const string& destPath) {
     log("Writing CMakePresets.json...");
 
     // Get TRUSSC_DIR value for this project
@@ -644,11 +644,6 @@ void ProjectGenerator::writeCMakePresets(const string& destPath, bool clearAddon
         presets["vendor"]["trussc"] = Json::object();
     }
     presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
-    if (clearAddonResolution) {
-        // GUI preflight established that all selected addons use installed paths.
-        presets["vendor"]["trussc"].erase("addonPaths");
-        presets["vendor"]["trussc"].erase("addonOrder");
-    }
     const auto& vendor = presets["vendor"]["trussc"];
     if (vendor.contains("addonPaths")) {
         for (auto& preset : presets["configurePresets"]) {
@@ -916,7 +911,7 @@ string ProjectGenerator::updateFromGui(const string& projectPath) {
     }
 }
 
-string ProjectGenerator::update(const string& projectPath_, bool clearAddonResolution) {
+string ProjectGenerator::update(const string& projectPath_, bool resolveInstalledAddons) {
     warnings_.clear();
     // Resolve project paths against the CLI working directory.
     string projectPath = fs::absolute(projectPath_).string();
@@ -930,12 +925,19 @@ string ProjectGenerator::update(const string& projectPath_, bool clearAddonResol
         log("Updating addons.make...");
         writeAddonsMake(projectPath, true);
 
+        if (resolveInstalledAddons) {
+            // GUI preflight guarantees plain installed names, so no registry lookup is needed.
+            auto paths = addonVersions::resolve(projectPath, settings_.tcRoot, /*fetch=*/false,
+                [](const addonVersions::Spec&, bool) { return addonVersions::Source{}; });
+            addonVersions::saveResolved(projectPath, paths);
+        }
+
         // User-specific CMake config goes in local.cmake.
         log("Writing CMakeLists.txt...");
         writeCMakeLists(projectPath);
 
         // Write CMakePresets.json (OS-specific with TRUSSC_DIR)
-        writeCMakePresets(projectPath, clearAddonResolution);
+        writeCMakePresets(projectPath);
 
         // Clean build directories for this platform before regenerating
         cleanBuildDirectories(projectPath);

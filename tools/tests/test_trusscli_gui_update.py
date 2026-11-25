@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
     settings.addonSelected = {1, 0, 1, 0};
     if (argc == 5) {
         if (std::string(argv[4]) == "clone") settings.addonSelected[3] = 1;
+        else if (std::string(argv[4]) == "keep") settings.addonSelected = {1, 0, 0, 0};
         else settings.addonSelected = {0, 0, 0, 0};
     }
     ProjectGenerator generator(settings);
@@ -192,15 +193,18 @@ int main(int argc, char** argv) {
                 self.manifest("tcxBridge", [dependency])
                 self.assert_refused()
 
-    def test_plain_installed_dependencies_update_including_cycles(self):
-        (self.framework / "addons/tcxClone/.git").mkdir()
-        self.manifest("tcxClone", ["tcxNew"])
-        self.manifest("tcxNew", [{"name": "tcxKeep"}, "tcxBridge"])
-        self.manifest("tcxBridge", ["tcxNew"])
-        result = self.update(selection="clone")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((self.project / "addons.make").read_text(encoding="utf-8"),
-                         "tcxKeep\ntcxNew\ntcxClone\n")
+    def test_plain_installed_dependencies_stay_effective_until_root_is_unchecked(self):
+        (self.project / "addons.make").write_text("tcxKeep\n", encoding="utf-8")
+        self.manifest("tcxKeep", ["tcxBridge"])
+        # Installed clones also resolve locally, without a registry or fetch.
+        (self.framework / "addons/tcxBridge/.git").mkdir(parents=True)
+        for selection, expected in (("keep", "tcxKeep;tcxBridge"), ("empty", "")):
+            with self.subTest(selection=selection):
+                result = self.update(selection=selection)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((self.project / "addons.make").read_text(encoding="utf-8"),
+                                 "tcxKeep\n" if selection == "keep" else "")
+                self.assert_effective_addons(expected)
 
     def test_unchecked_addon_dependencies_do_not_block_removal(self):
         self.manifest("tcxRemove", ["alice/tcxExternal@v1"])
@@ -218,22 +222,33 @@ int main(int argc, char** argv) {
                 result = self.update(selection=selection)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 data = json.loads(presets.read_text(encoding="utf-8"))
-                self.assertNotIn("addonPaths", data["vendor"]["trussc"])
-                self.assertNotIn("addonOrder", data["vendor"]["trussc"])
                 self.assertEqual(data["vendor"]["trussc"]["custom"], "preserve")
-                script = self.base / "effective-addons.cmake"
-                lines = [f'set(CMAKE_CURRENT_SOURCE_DIR "{self.project.as_posix()}")',
-                         f'include("{(ROOT / "core/cmake/use_addon.cmake").as_posix()}")']
-                for preset in data["configurePresets"]:
-                    cache = preset.get("cacheVariables", {})
-                    for key in ("TRUSSC_ADDON_PATHS", "TRUSSC_ADDON_ORDER"):
-                        self.assertNotIn(key, cache)
-                        lines.append(f'set({key} [==[{cache.get(key, "")}]==])')
-                    lines.extend(['_tc_project_addons(actual)',
-                                  f'if(NOT "${{actual}}" STREQUAL "{expected}")',
-                                  'message(FATAL_ERROR "Effective addons: ${actual}")', 'endif()'])
-                script.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                subprocess.run(["cmake", "-P", str(script)], check=True, capture_output=True)
+                self.assert_effective_addons(expected)
+
+    def assert_effective_addons(self, expected):
+        data = json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))
+        vendor = data["vendor"]["trussc"]
+        names = expected.split(";") if expected else []
+        self.assertEqual(vendor["addonPaths"],
+                         {name: str(self.framework / "addons" / name) for name in names})
+        self.assertEqual(vendor["addonOrder"], expected)
+        script = self.base / "effective-addons.cmake"
+        lines = [f'set(CMAKE_CURRENT_SOURCE_DIR "{self.project.as_posix()}")',
+                 f'include("{(ROOT / "core/cmake/use_addon.cmake").as_posix()}")']
+        self.assertTrue(data["configurePresets"])
+        for preset in data["configurePresets"]:
+            cache = preset["cacheVariables"]
+            self.assertEqual(json.loads(cache["TRUSSC_ADDON_PATHS"]), vendor["addonPaths"])
+            self.assertEqual(cache["TRUSSC_ADDON_ORDER"], expected)
+            for key in ("TRUSSC_ADDON_PATHS", "TRUSSC_ADDON_ORDER"):
+                lines.append(f'set({key} [==[{cache[key]}]==])')
+            lines.extend(['_tc_project_addons(actual)',
+                          f'if(NOT "${{actual}}" STREQUAL "{expected}")',
+                          'message(FATAL_ERROR "Effective addons: ${actual}")', 'endif()'])
+        script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        result = subprocess.run(["cmake", "-P", str(script)], text=True, capture_output=True,
+                                encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_oversized_project_and_addon_files_fail_before_writes(self):
         for relative, mode in (("addons.make", "gui"), ("addons.make", "generator"),
