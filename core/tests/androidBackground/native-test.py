@@ -7,6 +7,23 @@ import tempfile
 root = Path(__file__).resolve().parents[3]
 header = (root / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
 
+# Source contracts only: Android SDK/device verification is still required.
+java = root / 'core/resources/android/java/org/trussc/core'
+permission = (java / 'NotificationPermission.java').read_text(encoding='utf-8')
+service = (java / 'ForegroundService.java').read_text(encoding='utf-8')
+assert 'Build.VERSION.SDK_INT < 33' in permission
+assert permission.index('requested.containsKey(activity)') < permission.index('requested.put(activity, true)') < permission.index('activity.requestPermissions(')
+assert 'ActivityLifecycleCallbacks' not in permission
+assert 'private static final int NOTIFICATION = 1594;' in service
+assert 'Build.VERSION.SDK_INT < 33' in service
+assert 'checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED' in service
+assert service.index('notificationPostedWhileGranted = notificationPermissionGranted();') < service.index('startForeground(NOTIFICATION, notification);') < service.index('registerActivityLifecycleCallbacks(this);')
+resume = service.split('void onActivityResumed(Activity activity)', 1)[1].split('@Override', 1)[0]
+assert 'if (!notificationPostedWhileGranted && notificationPermissionGranted())' in resume
+assert resume.index('.notify(NOTIFICATION, notification);') < resume.index('notificationPostedWhileGranted = true;')
+assert service.index('unregisterActivityLifecycleCallbacks(this);') < service.index('stopForeground(')
+print('androidBackground: Java service-owned permission resume/repost source contracts: PASS')
+
 
 def body(marker):
     start = header.index(marker)

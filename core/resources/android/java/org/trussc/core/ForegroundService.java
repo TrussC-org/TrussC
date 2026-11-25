@@ -1,17 +1,30 @@
 package org.trussc.core;
 
+import android.app.Activity;
+import android.app.Application;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
 
 /** Opt-in media playback service. No permission UI and no wake lock. */
-public final class ForegroundService extends Service {
+public final class ForegroundService extends Service implements Application.ActivityLifecycleCallbacks {
     private static final String CHANNEL = "trussc_media_playback";
     private static final int NOTIFICATION = 1594;
+    // Service and Activity lifecycle callbacks run on the main thread.
+    private Notification notification;
+    private boolean notificationPostedWhileGranted;
+
+    private boolean notificationPermissionGranted() {
+        return Build.VERSION.SDK_INT < 33
+            || checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED;
+    }
 
     @Override public void onCreate() {
         super.onCreate();
@@ -31,7 +44,10 @@ public final class ForegroundService extends Service {
             builder.setContentIntent(PendingIntent.getActivity(this, 0, launch,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
-        startForeground(NOTIFICATION, builder.build());
+        notification = builder.build();
+        notificationPostedWhileGranted = notificationPermissionGranted();
+        startForeground(NOTIFICATION, notification);
+        getApplication().registerActivityLifecycleCallbacks(this);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -40,9 +56,24 @@ public final class ForegroundService extends Service {
     }
 
     @Override public void onDestroy() {
+        getApplication().unregisterActivityLifecycleCallbacks(this);
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
+
+    @Override public void onActivityResumed(Activity activity) {
+        if (!notificationPostedWhileGranted && notificationPermissionGranted()) {
+            getSystemService(NotificationManager.class).notify(NOTIFICATION, notification);
+            notificationPostedWhileGranted = true;
+        }
+    }
+
+    @Override public void onActivityCreated(Activity activity, Bundle state) {}
+    @Override public void onActivityStarted(Activity activity) {}
+    @Override public void onActivityPaused(Activity activity) {}
+    @Override public void onActivityStopped(Activity activity) {}
+    @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) {}
+    @Override public void onActivityDestroyed(Activity activity) {}
 
     @Override public IBinder onBind(Intent intent) { return null; }
 }
