@@ -27,147 +27,253 @@ static void spawnDiagnostic(const string& message) {
     } else cerr << message << "\n";
 }
 
-#ifdef _WIN32
-
-int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile, const bool* cancel) {
-    if (argv.empty()) return -1;
-    // Text printed so far must come before the child's output, also through a pipe.
-    cout.flush();
-    cerr.flush();
-    string commandLine;
-    for (const auto& a : argv) {
-        if (!commandLine.empty()) commandLine += ' ';
-        commandLine += quoteWindowsArgument(a);
+namespace projectOps {
+struct ProcessRunner {
+    static void state(CancelHandle* handle, ProcessState value) {
+        if (handle) handle->state_ = value;
     }
+};
 
-    SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    HANDLE readEnd = nullptr, writeEnd = nullptr;
-    if (!CreatePipe(&readEnd, &writeEnd, &security, 0)) return -1;
-    // The read end stays with us; the child inherits only the write end.
-    SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
-
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = writeEnd;   // By default stderr shares this pipe to preserve output order.
-    si.hStdError = stderrFile ? reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stderrFile))) : writeEnd;
-    if (stderrFile) SetHandleInformation(si.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-    PROCESS_INFORMATION pi = {};
-    // Without a console (GUI launch), keep the child hidden as before.
-    const DWORD flags = GetConsoleCP() != 0 ? 0 : CREATE_NO_WINDOW;
-    const BOOL started = CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
-                                        flags, nullptr, nullptr, &si, &pi);
-    CloseHandle(writeEnd);
-    if (!started) {
-        CloseHandle(readEnd);
-        spawnDiagnostic("Error: failed to spawn '" + argv[0] + "'");
-        return -1;
+#ifndef _WIN32
+namespace {
+volatile sig_atomic_t pendingSignal = 0;
+void recordSignal(int signalNumber) { pendingSignal = signalNumber; }
+// Installed only by a CLI operation, never by a GUI worker.
+class SignalForwarding {
+public:
+    explicit SignalForwarding(bool enabled) : enabled_(enabled) {
+        if (!enabled_) return;
+        pendingSignal = 0;
+        struct sigaction action = {};
+        action.sa_handler = recordSignal;
+        sigemptyset(&action.sa_mask);
+        sigaction(SIGINT, &action, &previousInt_);
+        sigaction(SIGTERM, &action, &previousTerm_);
     }
-
-    char buffer[4096];
-    bool exited = false;
-    while (true) {
-        DWORD available = 0;
-        // A broken pipe means every writer has closed.
-        if (!PeekNamedPipe(readEnd, nullptr, 0, nullptr, &available, nullptr)) break;
-        if (available) {
-            DWORD count = 0;
-            const DWORD wanted = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
-            if (!ReadFile(readEnd, buffer, wanted, &count, nullptr) || count == 0) break;
-            onData(buffer, count);
-            if (cancel && *cancel) {
-                TerminateProcess(pi.hProcess, 1);
-                break;
-            }
-            continue;
-        }
-        if (exited) break;   // the child is gone and the pipe is drained
-        // Re-check the pipe once after seeing the exit: the last bytes were
-        // written before the child ended.
-        if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) exited = true;
-        else Sleep(2);
+    ~SignalForwarding() {
+        if (!enabled_) return;
+        sigaction(SIGINT, &previousInt_, nullptr);
+        sigaction(SIGTERM, &previousTerm_, nullptr);
     }
-    CloseHandle(readEnd);
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 0;
-    const BOOL gotExitCode = GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return gotExitCode ? static_cast<int>(exitCode) : -1;
+private:
+    bool enabled_;
+    struct sigaction previousInt_ = {}, previousTerm_ = {};
+};
 }
-
 #else
+static BOOL WINAPI ignoreAttachedSignal(DWORD) { return TRUE; }
+static BOOL CALLBACK closeChildWindow(HWND window, LPARAM context) {
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if (processId == static_cast<DWORD>(context)) PostMessageW(window, WM_CLOSE, 0, 0);
+    return TRUE;
+}
+#endif
 
-int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData, FILE* stderrFile, const bool* cancel) {
-    if (argv.empty()) return -1;
-    // Text printed so far must come before the child's output, also through a pipe.
+ProcessResult runProcess(const vector<string>& argv,
+    const function<void(const char*, size_t)>& onData, const ProcessOptions& options) {
+    ProcessResult result;
+    auto* handle = options.cancel;
+    if (handle && handle->stopRequested()) { result.stopped = true; return result; }
+    if (argv.empty()) return result;
+    // Preserve the ordering of existing CLI output and inherited child output.
     cout.flush();
     cerr.flush();
+#ifndef _WIN32
+    SignalForwarding forwarding(options.forwardSignals);
     vector<char*> cargv;
-    for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
+    for (const auto& argument : argv) cargv.push_back(const_cast<char*>(argument.c_str()));
     cargv.push_back(nullptr);
-
-    int fds[2];
-    if (pipe(fds) != 0) return -1;
-    // Close-on-exec keeps both ends out of the child; dup2 below clears it
-    // on the copies that become the child's stdout and stderr.
-    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
-    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
-    fcntl(fds[0], F_SETFL, O_NONBLOCK);
-
+    int fds[2] = {-1, -1};
+    if (!options.inheritOutput) {
+        if (pipe(fds) != 0) return result;
+        fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+        fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+        fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    }
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    // By default stderr shares stdout's pipe to preserve output order.
-    int error = posix_spawn_file_actions_adddup2(&actions, fds[1], 1);
-    if (!error) error = posix_spawn_file_actions_adddup2(&actions, stderrFile ? fileno(stderrFile) : fds[1], 2);
-    pid_t pid = 0;
-    if (!error) error = posix_spawnp(&pid, cargv[0], &actions, nullptr, cargv.data(), environ);
-    posix_spawn_file_actions_destroy(&actions);
-    close(fds[1]);
-    if (error) {
-        close(fds[0]);
-        spawnDiagnostic("Error: failed to spawn '" + argv[0] + "': " + strerror(error));
-        return -1;
+    int error = 0;
+    if (!options.workingDirectory.empty())
+        error = posix_spawn_file_actions_addchdir_np(&actions, options.workingDirectory.c_str());
+    if (!options.inheritOutput) {
+        if (!error) error = posix_spawn_file_actions_adddup2(&actions, fds[1], 1);
+        if (!error) error = posix_spawn_file_actions_adddup2(&actions,
+            options.stderrFile ? fileno(options.stderrFile) : fds[1], 2);
     }
-
-    int status = 0;
-    bool exited = false;
-    char buffer[4096];
-    while (true) {
-        pollfd p = {fds[0], POLLIN, 0};
-        // Once the child is gone, only read what is already in the pipe.
-        const int ready = poll(&p, 1, exited ? 0 : 50);
-        if (ready < 0) {
-            if (errno == EINTR) continue;
-            break;
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    if (options.ownGroup) {
+        posix_spawnattr_setpgroup(&attributes, 0);
+        posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+    }
+    pid_t pid = 0;
+    if (!error) error = posix_spawnp(&pid, cargv[0], &actions, &attributes, cargv.data(), environ);
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    if (fds[1] >= 0) close(fds[1]);
+    if (error) {
+        if (fds[0] >= 0) close(fds[0]);
+        spawnDiagnostic("Error: failed to spawn '" + argv[0] + "': " + strerror(error));
+        return result;
+    }
+    auto sendSignal = [&](int signalNumber) { kill(options.ownGroup ? -pid : pid, signalNumber); };
+#else
+    string commandLine = options.windowsCommandLine;
+    if (commandLine.empty()) {
+        for (const auto& argument : argv) {
+            if (!commandLine.empty()) commandLine += ' ';
+            commandLine += quoteWindowsArgument(argument);
         }
+    }
+    SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE readEnd = nullptr, writeEnd = nullptr;
+    if (!options.inheritOutput) {
+        if (!CreatePipe(&readEnd, &writeEnd, &security, 0)) return result;
+        SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+    }
+    HANDLE job = options.ownGroup ? CreateJobObjectW(nullptr, nullptr) : nullptr;
+    STARTUPINFOA startup = {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    if (options.ownGroup && options.hideConsole && GetConsoleCP() == 0) {
+        startup.dwFlags |= STARTF_USESHOWWINDOW;
+        startup.wShowWindow = SW_HIDE;
+    }
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = options.inheritOutput ? GetStdHandle(STD_OUTPUT_HANDLE) : writeEnd;
+    startup.hStdError = options.inheritOutput ? GetStdHandle(STD_ERROR_HANDLE) : writeEnd;
+    if (options.stderrFile) {
+        startup.hStdError = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(options.stderrFile)));
+        SetHandleInformation(startup.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+    // A no-console caller needs a child console for CTRL_BREAK. Known console
+    // tools request a hidden one; GUI apps retain their normal show state.
+    DWORD flags = CREATE_SUSPENDED;
+    // CLI children retain the console group so Ctrl-C reaches their own
+    // handlers exactly as before; GUI/layer children get an isolated group.
+    if (options.ownGroup && !options.forwardSignals) flags |= CREATE_NEW_PROCESS_GROUP;
+    if (GetConsoleCP() == 0) flags |= options.ownGroup ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW;
+    PROCESS_INFORMATION process = {};
+    const BOOL started = (!options.ownGroup || job) && CreateProcessA(nullptr,
+        commandLine.data(), nullptr, nullptr, TRUE, flags, nullptr,
+        options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str(), &startup, &process);
+    if (writeEnd) CloseHandle(writeEnd);
+    if (!started || (job && !AssignProcessToJobObject(job, process.hProcess))) {
+        if (started) { TerminateProcess(process.hProcess, 1); CloseHandle(process.hProcess); CloseHandle(process.hThread); }
+        if (readEnd) CloseHandle(readEnd);
+        if (job) CloseHandle(job);
+        if (!options.inheritOutput) spawnDiagnostic("Error: failed to spawn '" + argv[0] + "'");
+        return result;
+    }
+    ResumeThread(process.hThread);
+    CloseHandle(process.hThread);
+#endif
+    ProcessRunner::state(handle, ProcessState::Running);
+    bool stopSent = false, forceSent = false;
+    chrono::steady_clock::time_point requestedAt;
+    auto checkStop = [&]() {
+#ifndef _WIN32
+        if (options.forwardSignals && pendingSignal) {
+            const int signalNumber = pendingSignal;
+            pendingSignal = 0;
+            sendSignal(signalNumber);
+            result.stopped = true;
+            result.forwardedSignal = signalNumber;
+        }
+#endif
+        if (handle && handle->stopRequested() && !stopSent) {
+            stopSent = true;
+            result.stopped = true;
+            requestedAt = chrono::steady_clock::now();
+            ProcessRunner::state(handle, ProcessState::StopRequested);
+#ifndef _WIN32
+            sendSignal(SIGTERM);
+#else
+            // Console children get CTRL_BREAK; the child's GUI windows get
+            // WM_CLOSE. Neither request terminates an unresponsive child.
+            const bool attached = GetConsoleCP() == 0 && AttachConsole(process.dwProcessId);
+            if (attached) SetConsoleCtrlHandler(ignoreAttachedSignal, TRUE);
+            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, attached ? 0 : process.dwProcessId);
+            if (attached) FreeConsole();
+            if (job) EnumWindows(closeChildWindow, static_cast<LPARAM>(process.dwProcessId));
+#endif
+        }
+        const bool outputLimit = options.outputLimitExceeded && *options.outputLimitExceeded;
+        if (((handle && handle->forceRequested()) || outputLimit) && !forceSent) {
+            forceSent = true;
+            result.stopped = true;
+#ifndef _WIN32
+            sendSignal(SIGKILL);
+#else
+            if (job) TerminateJobObject(job, 1);
+            else TerminateProcess(process.hProcess, 1);
+#endif
+        }
+        if (stopSent && chrono::steady_clock::now() - requestedAt >= stopGracePeriod)
+            ProcessRunner::state(handle, ProcessState::StillRunning);
+    };
+    char buffer[4096];
+    bool exited = false, pipeClosed = options.inheritOutput;
+#ifndef _WIN32
+    int status = 0;
+    while (true) {
+        if (!exited) checkStop();
+        pollfd descriptor = {pipeClosed ? -1 : fds[0], POLLIN, 0};
+        const int ready = poll(&descriptor, 1, exited ? 0 : 50);
+        if (ready < 0 && errno == EINTR) continue;
         if (ready > 0) {
             const ssize_t count = read(fds[0], buffer, sizeof(buffer));
             if (count > 0) {
-                onData(buffer, static_cast<size_t>(count));
-                if (cancel && *cancel) {
-                    kill(pid, SIGKILL);
-                    break;
-                }
-                continue;
-            }
-            if (count == 0) break;                       // every writer closed
-            if (errno == EINTR || errno == EAGAIN) continue;
-            break;
+                if (onData) onData(buffer, static_cast<size_t>(count));
+            } else if (count == 0) pipeClosed = true;
         }
-        if (exited) break;
-        pid_t waited;
-        do { waited = waitpid(pid, &status, WNOHANG); } while (waited < 0 && errno == EINTR);
-        if (waited != 0) exited = true;   // one more pass reads the last bytes
+        if (exited && (ready <= 0 || pipeClosed)) break;
+        if (!exited) {
+            const pid_t waited = waitpid(pid, &status, WNOHANG);
+            if (waited == pid) exited = true;
+            else if (waited < 0 && errno != EINTR) break;
+        }
     }
-    close(fds[0]);
-    if (!exited) {
-        pid_t waited;
-        do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
-        if (waited < 0) return -1;
+    if (fds[0] >= 0) close(fds[0]);
+    result.exitCode = exited && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#else
+    while (true) {
+        if (!exited) checkStop();
+        DWORD available = 0;
+        if (!pipeClosed && !PeekNamedPipe(readEnd, nullptr, 0, nullptr, &available, nullptr)) pipeClosed = true;
+        if (available) {
+            DWORD count = 0;
+            const DWORD wanted = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
+            if (ReadFile(readEnd, buffer, wanted, &count, nullptr) && count && onData) onData(buffer, count);
+        }
+        if (exited && (!available || pipeClosed)) break;
+        if (!exited) exited = WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0;
+        if (!available && !exited) Sleep(2);
     }
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    if (readEnd) CloseHandle(readEnd);
+    DWORD exitCode = 0;
+    if (GetExitCodeProcess(process.hProcess, &exitCode)) result.exitCode = static_cast<int>(exitCode);
+    CloseHandle(process.hProcess);
+    if (job) CloseHandle(job);
+#endif
+    ProcessRunner::state(handle, ProcessState::Exited);
+    return result;
+}
+} // namespace projectOps
+
+int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData,
+                FILE* stderrFile, const bool* cancel) {
+    projectOps::ProcessOptions options;
+    options.ownGroup = false; // Existing helper callers retain foreground behavior.
+    options.stderrFile = stderrFile;
+    options.outputLimitExceeded = cancel;
+    return projectOps::runProcess(argv, onData, options).exitCode;
 }
 
-#endif
+int runInherited(const vector<string>& argv) {
+    projectOps::ProcessOptions options;
+    options.ownGroup = false;
+    options.inheritOutput = true;
+    return projectOps::runProcess(argv, {}, options).exitCode;
+}

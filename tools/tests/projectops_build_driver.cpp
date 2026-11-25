@@ -1,0 +1,63 @@
+#include "ProjectOps.h"
+#include "GeneratedFile.h"
+#include "TrussC.h"
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <iostream>
+#include <thread>
+
+void writeGeneratedFile(const fs::path& path, const std::string& text) {
+    std::ofstream(path, std::ios::binary) << text;
+}
+void removeBuildDirectory(const fs::path& path) { fs::remove_all(path); }
+
+int main(int argc, char** argv) {
+    if (argc < 3) return 2;
+    const std::string mode = argv[1];
+    projectOps::CancelHandle cancel;
+    std::atomic<bool> ready{false};
+    std::string output;
+    tc::Json events = tc::Json::array();
+    const auto originalDirectory = fs::current_path();
+    auto execute = [&]() {
+        projectOps::BuildInput input;
+        input.update.projectPath = argv[2];
+        input.cancel = &cancel;
+        input.jobs = 1;
+        input.verbose = true;
+        if (argc > 3) input.buildType = argv[3];
+        return projectOps::build(input, [&](const std::string& text, projectOps::MessageKind kind) {
+            output += text;
+            events.push_back({{"message", text}, {"kind", static_cast<int>(kind)}});
+            if (output.find("READY") != std::string::npos) ready = true;
+        });
+    };
+    auto operation = std::async(std::launch::async, execute);
+    bool stillRunning = false, cwdUnchangedDuringProcess = true;
+    if (mode != "build") {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        const char* readyMarker = std::getenv("CHILD_READY");
+        auto childReady = [&]() { return ready || (readyMarker && fs::exists(readyMarker)); };
+        while (!childReady() && operation.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready &&
+               std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        cwdUnchangedDuringProcess = fs::current_path() == originalDirectory;
+        cancel.requestStop();
+        if (mode == "force") {
+            while (cancel.state() != projectOps::ProcessState::StillRunning &&
+                   operation.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready &&
+                   std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            stillRunning = cancel.state() == projectOps::ProcessState::StillRunning &&
+                operation.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready;
+            cancel.forceStop();
+        }
+    }
+    const auto result = operation.get();
+    std::cout << tc::Json{{"success", result.success}, {"stopped", result.stopped},
+        {"exitCode", result.exitCode}, {"error", result.failureReason}, {"logs", result.logLines},
+        {"events", events}, {"output", output}, {"stillRunning", stillRunning},
+        {"cwdUnchangedDuringProcess", cwdUnchangedDuringProcess},
+        {"cwdRestored", fs::current_path() == originalDirectory}};
+}

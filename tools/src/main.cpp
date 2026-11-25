@@ -53,6 +53,8 @@ using trusscliBuild::parallelBuildArg;
 namespace fs = std::filesystem;
 
 static void printProjectMessage(const string& message, projectOps::MessageKind kind) {
+    if (kind == projectOps::MessageKind::Output) { cout << message << flush; return; }
+    if (kind == projectOps::MessageKind::ErrorOutput) { cerr << message << flush; return; }
     if (kind == projectOps::MessageKind::Warning) cerr << "Warning: " << message << "\n";
     else if (kind == projectOps::MessageKind::Diagnostic) cerr << message << "\n";
     else cout << message << endl;
@@ -183,71 +185,6 @@ static bool parseAddonValue(const string& value,
     }
     if (!current.empty()) out.push_back(current);
     return true;
-}
-
-// =============================================================================
-// Subprocess: run an external command with inherited stdout/stderr
-// =============================================================================
-
-// Run a command with argv passed as an array (no shell involvement). Output
-// streams through to this process's stdout/stderr (builds that need filtered
-// output use runCaptured() instead).
-// Returns the child's exit code, or -1 on spawn failure.
-static int runInherited(const vector<string>& argv) {
-    if (argv.empty()) return -1;
-    // Text printed so far must come before the child's output, also through a pipe.
-    cout.flush();
-    cerr.flush();
-#ifdef _WIN32
-    if (GetConsoleCP() != 0) {
-        // CLI builds inherit the same console used by configure.
-        // _spawnvp joins argv into one command line without quoting, so an
-        // argument with a space ("C:\Program Files\...") would be split.
-        vector<string> quoted;
-        for (const auto& a : argv) quoted.push_back(quoteWindowsArgument(a));
-        vector<const char*> cargv;
-        for (const auto& a : quoted) cargv.push_back(a.c_str());
-        cargv.push_back(nullptr);
-        return (int)_spawnvp(_P_WAIT, argv[0].c_str(), cargv.data());
-    }
-    // Without a console, keep children hidden just as configure does.
-    string commandLine;
-    for (const auto& a : argv) {
-        if (!commandLine.empty()) commandLine += ' ';
-        commandLine += quoteWindowsArgument(a);
-    }
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    PROCESS_INFORMATION pi = {};
-    if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return -1;
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 0;
-    const BOOL gotExitCode = GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return gotExitCode ? static_cast<int>(exitCode) : -1;
-#else
-    // POSIX: posix_spawnp + waitpid
-    vector<char*> cargv;
-    for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
-    cargv.push_back(nullptr);
-
-    extern char** environ;
-    pid_t pid = 0;
-    int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr, cargv.data(), environ);
-    if (err != 0) {
-        cerr << "Error: failed to spawn '" << argv[0] << "': " << strerror(err) << "\n";
-        return -1;
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-#endif
 }
 
 // =============================================================================
@@ -3347,19 +3284,7 @@ static constexpr const char* kNativePreset = nullptr;
 
 // Find the cmake binary. On macOS, PATH may not contain cmake when launched
 // from Finder, so check common Homebrew paths as well.
-static string findCMake() {
-#ifdef __APPLE__
-    const char* paths[] = {
-        "/opt/homebrew/bin/cmake",
-        "/usr/local/bin/cmake",
-        "/Applications/CMake.app/Contents/bin/cmake",
-    };
-    for (const char* p : paths) {
-        if (fs::exists(p)) return p;
-    }
-#endif
-    return "cmake";
-}
+static string findCMake() { return projectOps::findCMake(); }
 
 // Ensure a `cmake` executable is resolvable on this process's PATH.
 //
@@ -3570,82 +3495,6 @@ static int parseJobsFlag(const vector<string>& args, size_t& i, int& jobs) {
     return 1;
 }
 
-// Re-pin the Visual Studio toolchain in CMakePresets.json after Visual Studio
-// changed (#357): detect VS again and replace only the "windows" preset's
-// CMAKE_MAKE_PROGRAM and INCLUDE / LIB / PATH. The targets, web backend, IDE
-// (#350), TRUSSC_DIR, the other presets and hand edits stay. build-windows is
-// removed so the next configure starts clean. Nothing is changed when no
-// usable Visual Studio is found, or when its paths are missing too, so the
-// next build tries again. Always prints what it did.
-static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck& toolchain) {
-    const fs::path presetsPath = fs::path(projectPath) / "CMakePresets.json";
-    string presetsText;
-    {
-        ifstream file(presetsPath, ios::binary);
-        stringstream ss;
-        ss << file.rdbuf();
-        presetsText = ss.str();
-    }
-    const string missing = toolchain.missing.empty() ? string() : toolchain.missing[0];
-    const string changed = "Visual Studio changed since this project was generated (" +
-                           missing + " is missing)";
-
-    // The newest install, as `trusscli new` / `update` pick it. Without a VS
-    // the detector returns a fallback entry with no MSVC / SDK version.
-    vector<VsVersionInfo> installed = VsDetector::detectInstalledVersions();
-    if (installed.empty() || !canPinToolchain(installed[0])) {
-        cerr << "Error: " << changed << ", and no Visual Studio with the C++ tools "
-                "was found.\n"
-             << "Install Visual Studio (Desktop development with C++) and run "
-                "'trusscli build' again. CMakePresets.json and "
-             << ProjectGenerator::buildDirForPreset(kNativePreset) << " were left as they are.\n";
-        return 1;
-    }
-    const VsVersionInfo& vs = installed[0];
-
-    string repinned = repinWindowsToolchain(presetsText, windowsToolchainPins(vs));
-    if (repinned.empty()) {
-        cerr << "Error: " << changed << ", and CMakePresets.json has no readable "
-                "\"windows\" preset. Run 'trusscli update' to rewrite it.\n";
-        return 1;
-    }
-    // The detected install's paths must exist, or every build would repeat this
-    ToolchainCheck fresh = checkPresetToolchain(repinned, [](const string& path) {
-        error_code e;
-        return fs::exists(fs::path(path), e);
-    });
-    if (fresh.stale()) {
-        cerr << "Error: " << changed << ", and the paths of the detected "
-             << vs.displayName << " are missing too: " << fresh.missing[0] << "\n"
-             << "That Windows SDK / MSVC folder is incomplete: remove the leftover folder or "
-                "repair the SDK / Visual Studio install (or drop the \"environment\" block "
-                "from the \"windows\" preset). CMakePresets.json was left as it is.\n";
-        return 1;
-    }
-
-    // Remove the old build folder first: if that fails, the presets stay
-    // stale and the next build tries again.
-    const string buildDir = ProjectGenerator::buildDirForPreset(kNativePreset);
-    error_code ec;
-    try {
-        removeBuildDirectory(fs::path(projectPath) / buildDir);
-    } catch (const fs::filesystem_error& e) {
-        ec = e.code();
-    }
-    if (ec) {
-        cerr << "Error: " << changed << ", and " << buildDir << " could not be removed ("
-             << ec.message() << ").\n"
-             << "Close programs that use files in it and run 'trusscli build' again.\n";
-        return 1;
-    }
-    writeGeneratedFile(presetsPath, repinned);
-
-    cout << "[build] " << changed << ": pinned " << vs.displayName
-         << " in CMakePresets.json and removed " << buildDir << "\n";
-    cout.flush();
-    return 0;
-}
-
 static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     string explicitPath;
     string explicitTcRoot;
@@ -3702,313 +3551,27 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
         }
     }
 
-    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
-    if (projectPath.empty()) {
-        cerr << "Error: not inside a TrussC project.\n"
-             << "Use 'trusscli build -p <path>' or run from inside a project.\n";
-        return 1;
-    }
-
-    if (!explicitTcRoot.empty()) {
-        if (dryRun) { cerr << "Error: save --tc-root with use-local before --dry-run\n"; return 1; }
-        if (int rc = cmdUpdate({"-p", projectPath, "--tc-root", explicitTcRoot}, false)) return rc;
-    }
-    // Validate before the automatic update: build must never fetch a missing version.
-    string selectedRoot = trusscVersion::resolve(projectPath, false);
-    if (!selectedRoot.empty()) {
-        selectedRoot = fs::absolute(selectedRoot).generic_string();
-        cout << "TrussC: " << selectedRoot;
-        if (fs::exists(fs::path(selectedRoot) / ".git") ||
-            fs::exists(fs::path(selectedRoot) / ".git_archival.txt")) cout << " (" << trusscVersion::commitAt(selectedRoot) << ")";
-        cout << "\n";
-    }
-
-
-    if (targetPreset.empty()) {
-        if (!kNativePreset) {
-            cerr << "Error: cannot detect native platform. Use --web, --android, or --ios.\n";
-            return 1;
-        }
-        targetPreset = kNativePreset;
-    }
-
-    // Auto-run update if build files are missing (first-time setup after a
-    // minimal git clone that only ships src/). Flags are forwarded so that
-    // e.g. `trusscli build --web` implies `trusscli update --web`.
-    string cmakeListsPath = projectPath + "/CMakeLists.txt";
-    string presetsFile = projectPath + "/CMakePresets.json";
-    if ((!fs::exists(cmakeListsPath) || !fs::exists(presetsFile)) && dryRun) {
-        cerr << "Error: --dry-run needs the project's build files; run 'trusscli update' first.\n";
-        return 1;
-    }
-    if (!fs::exists(cmakeListsPath) || !fs::exists(presetsFile)) {
-        cout << "[update] Build files not found, running 'trusscli update' first...\n";
-        vector<string> updateArgs;
-        if (targetPreset == string("web"))     updateArgs.push_back("--web");
-        if (targetPreset == string("android")) updateArgs.push_back("--android");
-        if (targetPreset == string("ios"))     updateArgs.push_back("--ios");
-        if (verbose) updateArgs.push_back("--verbose");
-        updateArgs.push_back("-p");
-        updateArgs.push_back(projectPath);
-        if (int urc = cmdUpdate(updateArgs, false)) return urc;
-        cout << "\n";
-    }
-
-    // Safety check (should be generated by update above, but keep this as a
-    // belt-and-suspenders guard for edge cases).
-    if (!fs::exists(presetsFile)) {
-        cerr << "Error: no CMakePresets.json in " << projectPath << "\n"
-             << "Run 'trusscli update' first to generate build files.\n";
-        return 1;
-    }
-
-    addonVersions::Paths resolvedAddonPaths;
-    // Bound (project presets): cap addon-selection metadata at 16 MiB.
-    const auto presetData = Json::parse(trusscVersion::readBounded(presetsFile, 16 * 1024 * 1024), nullptr, false);
-    string addonRoot = selectedRoot;
-    if (addonRoot.empty() && presetData.is_object() && presetData.contains("configurePresets")) {
-        for (const auto& preset : presetData["configurePresets"]) {
-            if (preset.value("name", "") != targetPreset || !preset.contains("cacheVariables")) continue;
-            auto core = preset["cacheVariables"].value("TRUSSC_DIR", Json());
-            if (core.is_object()) core = core.value("value", Json());
-            if (!core.is_string()) continue;
-            string path = core.get<string>();
-            const string macro = "${sourceDir}";
-            if (path.compare(0, macro.size(), macro) == 0) path.replace(0, macro.size(), fs::absolute(projectPath).generic_string());
-            if (path.find('$') != string::npos) continue;
-            fs::path corePath(path);
-            if (corePath.is_relative()) corePath = fs::path(projectPath) / corePath;
-            addonRoot = fs::absolute(corePath).lexically_normal().parent_path().string();
-        }
-    }
-    // Legacy projects leave lookup to CMake, including its preset's core.
-    bool resolveAddons = !selectedRoot.empty();
-    Json addonVendor = Json::object();
-    if (presetData.is_object() && presetData.contains("vendor")) {
-        const auto& vendors = presetData["vendor"];
-        if (vendors.is_object() && vendors.contains("trussc") && vendors["trussc"].is_object()) addonVendor = vendors["trussc"];
-    }
-    string effectiveType = buildType.empty() ? "RelWithDebInfo" : buildType;
-    const bool nativeBuild = kNativePreset && targetPreset == kNativePreset;
-    bool remembered = false;
-    if (nativeBuild) {
-        if (rememberType && buildType.empty()) {
-            effectiveType = trusscliBuild::rememberedNativeBuildType(addonVendor);
-            remembered = addonVendor.value("buildType", Json()) == effectiveType;
-        }
-        cout << "Build type: " << effectiveType << (remembered ? " (remembered)" : "") << "\n";
-        if (rememberType && !buildType.empty() && !dryRun && presetData.is_object()) {
-            auto updated = presetData;
-            if (!updated["vendor"].is_object()) updated["vendor"] = Json::object();
-            if (!updated["vendor"]["trussc"].is_object()) updated["vendor"]["trussc"] = Json::object();
-            updated["vendor"]["trussc"]["buildType"] = buildType;
-            writeGeneratedFile(presetsFile, updated.dump(2));
-        }
-    } else if (targetPreset == "web") {
-        effectiveType = "MinSizeRel";
-    } else if (targetPreset == "android") {
-        effectiveType = "Release";
-    }
-    const auto localAddons = addonVendor.value("addonLocalPaths", Json::object());
-    const auto savedAddons = addonVendor.value("addonPaths", Json::object());
-    for (const auto& line : readProjectAddons(projectPath)) {
-        auto spec = addonVersions::parse(line);
-        resolveAddons |= !spec.owner.empty() || !spec.ref.empty() || localAddons.contains(spec.name);
-        // An unqualified external addon acquired by add/update still uses HEAD.
-        resolveAddons |= savedAddons.contains(spec.name) &&
-            !fs::is_directory(fs::path(addonRoot) / "addons" / spec.name);
-    }
-    if (resolveAddons) {
-        if (addonRoot.empty()) throw runtime_error("addon resolution needs a concrete preset TRUSSC_DIR");
-        resolvedAddonPaths = resolveAddonVersions(projectPath, addonRoot, false);
-    }
-
-    trusscVersion::markCachedUsed(addonRoot);
-    for (const auto& addon : resolvedAddonPaths) trusscVersion::markCachedUsed(addon.second);
-
-    // Windows: the presets pin the Visual Studio toolchain found when they were
-    // written. If Visual Studio changed since, rewrite them (same targets and
-    // IDE) and drop the native build folder; the configure below then runs on
-    // the fresh presets. Same check as `trusscli doctor`.
-    if (kNativePreset && targetPreset == kNativePreset) {
-        ToolchainCheck toolchain;
-        checkWindowsPresetToolchain(projectPath, &toolchain);
-        if (shouldRefreshPresets(kNativePreset, targetPreset, toolchain)) {
-            if (dryRun) {
-                cout << "[dry-run] would re-pin the Visual Studio paths in CMakePresets.json "
-                        "and remove the native build folder\n";
-            } else if (int rrc = refreshWindowsPresets(projectPath, toolchain)) {
-                return rrc;
-            }
-        }
-    }
-
-    string cmake = findCMake();
-
-    string parallelArg = parallelBuildArg(jobs);
-
-    // cmake --build --preset <target> --parallel[=N] --config <type> [--clean-first]
-    vector<string> cmd = {cmake, "--build", "--preset", targetPreset, parallelArg};
-    // --config only affects multi-config generators (Xcode, Visual Studio). The
-    // native presets are single-config (Unix Makefiles / Ninja), where --config
-    // is silently ignored; there the build type is fixed at configure time by
-    // CMAKE_BUILD_TYPE, which we pin below. Kept here so the build type also
-    // applies on any future multi-config native preset.
-    cmd.push_back("--config"); cmd.push_back(effectiveType);
-    if (clean) cmd.push_back("--clean-first");
-
-    // Name shown in the progress line ("Building <project> ...")
-    error_code nameEc;
-    fs::path projectDir = fs::weakly_canonical(projectPath, nameEc);
-    string projectName = projectDir.filename().string();
-    if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
-    projectName = sanitizeProjectName(projectName);
-
-    // Run from the project directory
-    string savedCwd = fs::current_path().string();
-    fs::current_path(projectPath);
-
-    // `cmake --build` cannot pass -D and does not configure a build folder
-    // that has no cache (or only the cache of a failed configure), so those
-    // cases need a configure pass
-    // (`cmake --preset`) first. MCP flag changes also require configure;
-    // every configure explicitly sets the requested MCP dev option.
-    // (the cwd is the project now; projectPath may be relative)
-    ConfigureInputs cfgIn = inspectBuildFolder(".", targetPreset,
-                                               kNativePreset ? kNativePreset : "");
-    cfgIn.requestedBuildType = nativeBuild ? effectiveType : buildType;
-    cfgIn.mcp = mcp;
-    cfgIn.warnings = warnings;
-    ConfigurePlan plan = planConfigure(cfgIn);
-    // Reuse CMake's configured scan (including explicit SOURCES and the
-    // platform gate) rather than maintaining a second marker parser here.
-    // A changed state makes the check fail and requests reconfiguration;
-    // plain cmake --build keeps that same fast-fail behavior. Dry-run must
-    // not execute the check, which can touch CMakeLists.txt on a toggle.
-    const fs::path hotReloadCheck = fs::path(cfgIn.buildDir) / "_tc_check_hot_reload.cmake";
-    bool hotReloadChanged = false;
-    if (!dryRun && !plan.configure && cfgIn.isNative &&
-        fs::exists(hotReloadCheck)) {
-        const fs::path projectCwd = fs::current_path();
-        fs::current_path(cfgIn.buildDir); // same working directory as the build target
-        // findCMake() returns fixed executable names/paths, and the script
-        // name is fixed; no project path is interpolated into this shell command.
-#ifdef _WIN32
-        const string checkExe = cmake;
-#else
-        const string checkExe = "'" + cmake + "'";
+    projectOps::BuildInput input;
+    input.update.projectPath = explicitPath;
+    input.update.tcRoot = explicitTcRoot;
+    input.update.executablePath = getExecutablePath();
+    input.update.addonLookup = registryAddonLookup();
+    if (!verbose) input.update.configureOutput = projectConfigureOutput();
+    input.targetPreset = targetPreset;
+    input.buildType = buildType;
+    input.clean = clean;
+    input.mcp = mcp;
+    input.warnings = warnings;
+    input.dryRun = dryRun;
+    input.verbose = verbose;
+    input.rememberType = rememberType;
+    input.jobs = jobs;
+    input.forwardSignals = true;
+    auto result = projectOps::build(input, printProjectMessage);
+#ifndef _WIN32
+    if (result.forwardedSignal) raise(result.forwardedSignal);
 #endif
-        // The check's expected fast-fail is replaced by the configure below.
-        hotReloadChanged = captureCommand(checkExe + " -P _tc_check_hot_reload.cmake 2>&1").exitCode != 0;
-        fs::current_path(projectCwd);
-    }
-    if (hotReloadChanged) {
-        cout << "[HotReload] Reconfiguring before build...\n";
-        plan.defines.push_back(mcp ? "-DTRUSSC_MCP_DEV=ON" : "-DTRUSSC_MCP_DEV=OFF");
-        plan.configure = true;
-    }
-    for (const string& line : plan.messages) cout << line << "\n";
-    cout.flush();   // print before cmake's own output, also through a pipe
-    vector<string> cfg = {cmake, "--preset", targetPreset};
-    cfg.insert(cfg.end(), plan.defines.begin(), plan.defines.end());
-    bool needConfigure = plan.configure;
-    const string addonPathsJson = Json(resolvedAddonPaths).dump();
-    const string cachedAddonPaths = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_PATHS");
-    bool presetAddonPaths = false;
-    if (presetData.is_object() && presetData.contains("configurePresets")) {
-        for (const auto& preset : presetData["configurePresets"]) {
-            if (preset.contains("cacheVariables") && preset["cacheVariables"].contains("TRUSSC_ADDON_PATHS")) presetAddonPaths = true;
-        }
-    }
-    if ((resolveAddons && !resolvedAddonPaths.empty()) || !cachedAddonPaths.empty() || presetAddonPaths) {
-        cfg.push_back("-DTRUSSC_ADDON_PATHS=" + addonPathsJson);
-        cfg.push_back("-DTRUSSC_ADDON_ORDER=" + resolvedAddonPaths.order);
-        const string cachedOrder = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_ORDER");
-        needConfigure = needConfigure || cachedOrder != resolvedAddonPaths.order;
-        needConfigure = needConfigure || cachedAddonPaths != addonPathsJson;
-    }
-    if (!selectedRoot.empty()) {
-        string coreDir = selectedRoot + "/core";
-        cfg.push_back("-DTRUSSC_DIR=" + coreDir);
-        ifstream cache(fs::path(cfgIn.buildDir) / "CMakeCache.txt");
-        string line;
-        bool sameRoot = false;
-        while (getline(cache, line)) {
-            if (line.rfind("TRUSSC_DIR:", 0) == 0) {
-                auto equals = line.find('=');
-                if (equals != string::npos) sameRoot = fs::path(line.substr(equals + 1)) == fs::path(coreDir);
-            }
-        }
-        needConfigure = needConfigure || !sameRoot;
-    }
-
-    if (dryRun) {
-        // Print the commands instead of running them (one line each).
-        auto printCommand = [](const vector<string>& argv) {
-            cout << "[dry-run]";
-            for (const string& a : argv) {
-                if (a.find_first_of(" \t\"") == string::npos && !a.empty()) cout << ' ' << a;
-                else cout << " \"" << a << '"';
-            }
-            cout << "\n";
-        };
-        if (needConfigure) printCommand(cfg);
-        printCommand(cmd);
-        fs::current_path(savedCwd);
-        return 0;
-    }
-
-    // The full output of configure and build always goes to <build folder>/build.log
-    // (overwritten on each build). The screen gets the short form unless --verbose.
-    // Both streams of the child arrive as one ordered stream (runCaptured).
-    error_code logEc;
-    fs::create_directories(cfgIn.buildDir, logEc);
-    const string logDisplay = cfgIn.buildDir + "/build.log";
-    ofstream logFile(logDisplay, ios::binary | ios::trunc);
-    const bool haveLog = logFile.is_open();
-    if (!haveLog) cerr << "Warning: cannot write " << logDisplay << " (the full output is not saved).\n";
-    const auto startedAt = chrono::steady_clock::now();
-    auto elapsedSeconds = [&]() {
-        return chrono::duration<double>(chrono::steady_clock::now() - startedAt).count();
-    };
-    BuildOutputFilter::Options filterOptions;
-    filterOptions.verbose = verbose;
-    filterOptions.project = projectName;
-    filterOptions.logDisplayPath = haveLog ? logDisplay : "";
-    auto runFiltered = [&](const vector<string>& argv, BuildOutputFilter::Phase phase) {
-        filterOptions.phase = phase;
-        if (phase == BuildOutputFilter::Phase::Build) {
-            // Written by the configure above (or an earlier one)
-            filterOptions.totalFiles = countCompileCommands(cfgIn.buildDir + "/compile_commands.json");
-        }
-        BuildOutputFilter filter(cout, haveLog ? &logFile : nullptr, filterOptions);
-        filter.begin();
-        const int code = runCaptured(argv, [&](const char* data, size_t size) { filter.write(data, size); });
-        filter.end(code, elapsedSeconds());
-        return code;
-    };
-
-    int rc = 0;
-    if (needConfigure) rc = runFiltered(cfg, BuildOutputFilter::Phase::Configure);
-    if (rc == 0) rc = runFiltered(cmd, BuildOutputFilter::Phase::Build);
-#ifdef _WIN32
-    // CMake owns this decision and may update it during an automatic reconfigure.
-    string hotReloadState;
-    ifstream(fs::path(cfgIn.buildDir) / ".tc_hot_reload_state") >> hotReloadState;
-#endif
-    fs::current_path(savedCwd);
-
-    if (rc != 0) {
-        // The short summary already says Failed; --verbose keeps the old line.
-        if (verbose) cerr << "Build failed (exit code " << rc << ").\n";
-#ifdef _WIN32
-        if (hotReloadState == "ON") {
-            cerr << "Warning: the guest can use only TrussC and code linked into the guest; "
-                 << "main.cpp functions and host-only libraries are not visible.\n";
-        }
-#endif
-    }
-    return rc;
+    return result.exitCode;
 }
 
 // =============================================================================
