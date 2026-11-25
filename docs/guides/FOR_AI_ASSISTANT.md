@@ -1616,7 +1616,7 @@ void tcApp::keyPressed(int key) {
 
 The bitmap-string atlas texture is created on the first bitmap-string draw, PBR shaders and fallback textures on first PBR use, and shared IBL baking resources on the first environment bake. These initial steps in memory are expected.
 
-Distinct glyphs and font sizes/settings increase atlas storage; reuse a small set of sizes. Glyph spacing adds a quarter of the raster line height (at least 2 texels), with 16-texel packing alignment. This is not a fixed 1.5× page-memory multiplier: pages grow discretely, so measure with the font counters. `size_t Font::getMemoryUsage() const` counts CPU atlas pixel bytes for one font; `static size_t Font::getTotalCacheMemoryUsage()` sums those bytes across shared cached atlases, not GPU textures or font-file data. With a `Font font` member:
+Distinct glyphs and font sizes/settings increase atlas storage; reuse a small set of sizes. Glyph spacing adds a quarter of the raster line height (at least 2 texels), with 16-texel packing alignment. Pages grow in steps, so measure with the font counters. `size_t Font::getMemoryUsage() const` counts CPU atlas pixel bytes for one font; `static size_t Font::getTotalCacheMemoryUsage()` sums those bytes across shared cached atlases, not GPU textures or font-file data. With a `Font font` member:
 ```cpp
 void tcApp::keyPressed(int key) {
     logNotice("Font") << font.getMemoryUsage() << " atlas bytes; cache: " << Font::getTotalCacheMemoryUsage();
