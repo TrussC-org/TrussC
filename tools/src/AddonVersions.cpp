@@ -172,8 +172,10 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
     }
     auto data = presets(project);
     Json local = Json::object();
+    Json savedPaths = Json::object();
     if (data.contains("vendor") && data["vendor"].is_object() && data["vendor"].contains("trussc") && data["vendor"]["trussc"].is_object()) {
         local = data["vendor"]["trussc"].value("addonLocalPaths", Json::object());
+        savedPaths = data["vendor"]["trussc"].value("addonPaths", Json::object());
     }
     Paths result;
     bool external = false;
@@ -239,7 +241,23 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
             auto owner = spec.owner.empty() ? source.owner : spec.owner;
             if (owner.empty()) throw std::runtime_error("unknown owner for addon " + spec.name + "; qualify owner/name or run `trusscli update`");
             auto versionSpec = trusscVersion::parse(owner + "/" + spec.name + "@" + (spec.ref.empty() ? "HEAD" : spec.ref));
+            // Dependency manifests retain their author's short ref. Builds use
+            // the full ID saved by update, without resolving that prefix again.
+            if (!fetch && versionSpec.shortCommit && savedPaths.contains(spec.name) && savedPaths[spec.name].is_string()) {
+                auto ref = fs::path(savedPaths[spec.name].get<std::string>()).filename().string();
+                auto prefix = spec.ref;
+                std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
+                    return c >= 'A' && c <= 'F' ? c + ('a' - 'A') : c;
+                });
+                if (ref.size() == 40 && ref.rfind(prefix, 0) == 0 && trusscVersion::parse(ref).commit) {
+                    versionSpec = trusscVersion::parse(owner + "/" + spec.name + "@" + ref);
+                }
+            }
             path = trusscVersion::acquire(versionSpec, fetch, true, source.url);
+            const auto ref = path.filename().string();
+            if (fetch && versionSpec.shortCommit && ref.size() == 40 && trusscVersion::parse(ref).commit) {
+                result.resolvedPins[spec.name] = ref;
+            }
         }
         path = fs::absolute(path).lexically_normal();
         external |= !spec.owner.empty() || !spec.ref.empty() || path != fs::absolute(installed).lexically_normal();

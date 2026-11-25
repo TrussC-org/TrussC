@@ -11,6 +11,64 @@ from test_trusscli_versions import CLI
 
 
 class CacheTests(AddonVersionTests):
+    def test_cache_remove_exact_ref_wins(self):
+        for addon in (False, True):
+            parent = self.cache / ("addons/alice/tcxFixture" if addon else "versions/TrussC-org/TrussC")
+            for ref, other in (("main", "main-feature"),
+                               ("123abcd", "123abcd" + "1" * 33)):
+                with self.subTest(addon=addon, ref=ref):
+                    for name in (ref, other):
+                        root = parent / name
+                        root.mkdir(parents=True)
+                        (root / ".git_archival.txt").write_text("describe: fixture\n", encoding="utf-8")
+                    args = ("--addon", "alice/tcxFixture@" + ref) if addon else (ref,)
+                    self.cli("cache", "remove", *args)
+                    self.assertFalse((parent / ref).exists())
+                    self.assertTrue((parent / other).is_dir())
+
+    def test_cache_remove_rejects_non_commit_prefixes(self):
+        for addon in (False, True):
+            parent = self.cache / ("addons/alice/tcxFixture" if addon else "versions/TrussC-org/TrussC")
+            for ref, cached in (("v0.8", "v0.8.1"),
+                                ("123abcd", "123abcd-feature"),
+                                ("123abcd", "123abcd123"),
+                                ("abcdef", "abcdef" + "1" * 34)):
+                with self.subTest(addon=addon, ref=ref, cached=cached):
+                    root = parent / cached
+                    root.mkdir(parents=True)
+                    (root / ".git_archival.txt").write_text("describe: fixture\n", encoding="utf-8")
+                    args = ("--addon", "alice/tcxFixture@" + ref) if addon else (ref,)
+                    output = self.cli("cache", "remove", *args, success=False)
+                    self.assertIn("spec is not in the cache", output)
+                    self.assertTrue(root.is_dir())
+
+    def test_cache_remove_unique_prefix(self):
+        for addon, commit in ((False, self.initial), (True, self.addon_initial)):
+            spec = ("alice/tcxFixture@" if addon else "") + commit
+            self.cli(*(("addon", "add", spec) if addon else ("use", spec)))
+            root = self.cache / ("addons/alice/tcxFixture" if addon else "versions/TrussC-org/TrussC") / commit
+            args = ("--addon", "alice/tcxFixture@" + commit[:7]) if addon else (commit[:7],)
+            self.cli("cache", "remove", *args)
+            self.assertFalse(root.exists())
+            if not addon:
+                self.cli("use", "v1.0.0")
+
+    def test_cache_remove_shared_prefix_lists_candidates_and_keeps_trees(self):
+        for addon in (False, True):
+            parent = self.cache / ("addons/alice/tcxFixture" if addon else "versions/TrussC-org/TrussC")
+            refs = ["123abcd" + "1" * 33, "123abcd" + "2" * 33]
+            for ref in refs:
+                root = parent / ref
+                root.mkdir(parents=True)
+                (root / ".git_archival.txt").write_text("describe: fixture\n", encoding="utf-8")
+            prefix = "alice/tcxFixture@" if addon else ""
+            args = ("--addon", prefix + "123abcd") if addon else ("123abcd",)
+            output = self.cli("cache", "remove", *args, success=False)
+            for ref in refs:
+                self.assertIn(ref, output)
+                self.assertTrue((parent / ref).is_dir())
+            self.assertIn("longer prefix", output)
+
     def fixture_cache(self):
         self.cli("addon", "add", "tcxFixture@v1")
         self.worktree = self.cache / "versions/TrussC-org/TrussC/v1.0.0"
@@ -264,7 +322,7 @@ class CacheTests(AddonVersionTests):
         self.cli("addon", "add-local", "tcxFixture", self.addon)
         before = self.command("list")
         for args in (("missing",), ("--addon", "tcxFixture@missing"),
-                     ("v1.0.0/core",), ("--addon", "tcxFixture@feature"),
+                     ("v1.0.0/core",), ("--addon", "tcxFixture@absent-feature"),
                      (str(self.source),), ("--addon", str(self.addon))):
             output = self.cli("cache", "remove", *args, success=False)
             # Local absolute paths are rejected by the existing parsers.
@@ -301,7 +359,7 @@ class CacheTests(AddonVersionTests):
 
     def test_cache_unknown(self):
         self.assertIn("unknown cache command", self.cli("cache", "unknown", success=False))
-        self.assertIn("cache list", self.cli("cache", "remove", "v1", success=False))
+        self.assertIn("cache list", self.cli("cache", "remove", "absent-version", success=False))
 
     def test_cache_symlinked_root_with_and_without_trailing_slash(self):
         target = self.base / "cache-target"
