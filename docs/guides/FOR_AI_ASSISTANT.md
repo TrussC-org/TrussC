@@ -2837,6 +2837,7 @@ float angleDifferenceDeg(float deg1, float deg2)  // Returns the shortest signed
 void applyWindow(std::vector<float> & signal, WindowType type) [+1]  // Applies a window to a signal in place.
 float binToFrequency(int bin, int fftSize, int sampleRate)  // Converts an FFT bin index to a frequency.
 float ceil(float x) [std]  // Rounds a number toward positive infinity.
+std::optional<double> correlation(std::span<const float> x, std::span<const float> y)  // Returns the Pearson correlation of paired float values.
 float exp(float x) [std]  // Returns e raised to the given power.
 void fft(std::vector<std::complex<float>> & data)  // Transforms complex samples into a frequency spectrum in place.
 std::vector<float> fftMagnitude(const std::vector<std::complex<float>> & spectrum)  // Returns the magnitude of each spectrum bin.
@@ -2844,19 +2845,23 @@ std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>> & spect
 std::vector<float> fftPhase(const std::vector<std::complex<float>> & spectrum)  // Returns the phase angle of each spectrum bin.
 std::vector<float> fftPower(const std::vector<std::complex<float>> & spectrum)  // Returns the squared magnitude of each spectrum bin.
 std::vector<std::complex<float>> fftReal(const std::vector<float> & signal) [+1]  // Computes the frequency spectrum of a real-valued signal.
+std::optional<LineFit> fitLine(std::span<const float> x, std::span<const float> y)  // Fits y = slope * x + intercept by least squares.
 float floor(float x) [std]  // Rounds a number toward negative infinity.
 float fmod(float x, float y) [std]  // Returns the floating-point remainder of a division.
 float fract(float value)  // Returns the fractional part relative to the floor of a value.
 int frequencyToBin(float freq, int fftSize, int sampleRate)  // Converts a frequency to an FFT bin index.
+std::optional<std::vector<std::size_t>> histogram(std::span<const float> values, std::size_t bins, float low, float high)  // Counts values in equal-width bins over [low, high).
 void ifft(std::vector<std::complex<float>> & data)  // Transforms a complex spectrum back into samples in place.
 bool isPowerOfTwo(int n)  // Tests whether an integer is a positive power of two.
 float log(float x) [std]  // Returns the natural logarithm of a value.
 float max(float a, float b) [std]  // Returns the greater of two values.
 float mean(std::span<const float> values)  // Returns the arithmetic mean of the values.
+std::optional<float> median(std::span<const float> values)  // Returns the middle value, averaging the middle pair for an even count.
 float min(float a, float b) [std]  // Returns the lesser of two values.
 std::pair<float, float> minMax(std::span<const float> values)  // Returns the minimum and maximum as a pair of floats.
 float mse(std::span<const float> a, std::span<const float> b)  // Returns the mean squared difference between two inputs.
 int nextPowerOfTwo(int n)  // Returns the smallest positive power of two at least as large as a value.
+std::optional<float> percentile(std::span<const float> values, double p)  // Returns an interpolated percentile with a fraction p from 0 to 1.
 float pow(float x, float y) [std]  // Returns a base raised to an exponent.
 float rms(std::span<const float> values)  // Returns the root mean square of the values.
 float round(float x) [std]  // Rounds a number to the nearest integer value.
@@ -2907,7 +2912,7 @@ void setIndependentFps(float updateFps, float drawFps)  // Sets separate update 
 void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on and the screen saver stay inactive.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
-void setWindowDecorated(bool decorated)  // Controls the resolved Window's standard decorations.
+void setWindowDecorated(bool decorated)  // Shows or hides window decorations while keeping the client size on Windows, macOS and X11.
 void setWindowPosition(int x, int y) [macos,windows,linux]  // Moves the window to a screen position.
 void setWindowSize(int width, int height)  // Resizes the window in the current coordinate units.
 void setWindowSizeLogical(int width, int height)  // Resizes the current window using logical dimensions.
@@ -3291,8 +3296,10 @@ void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a d
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
-void setDrawWhileHidden(bool allow)  // Sets drawing while hidden for all existing windows and the default for new ones.
+void setAndroidForegroundService(bool enabled)  // Opts in to Android mediaPlayback foreground service for background playback; visible opt-in requests notification permission on Android 13+ without delaying the service. No wake lock is acquired.
+void setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
+void setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
 Top  // Provides the shorthand constant for Direction::Top.
@@ -4092,6 +4099,11 @@ void Light::setSpecular(const Color & c) [+1]  // Sets the specular light color.
 void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Configures the light as a spot light.
 ```
 
+### LineFit — Least-squares line coefficients returned by fitLine, stored as doubles.
+
+```cpp
+```
+
 ### LoadResult — Represents the result of loading a resource.
 
 ```cpp
@@ -4845,10 +4857,10 @@ bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.
 void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
 int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
-int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
+int Serial::readBytes(void * buffer, int length) [+2] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
 bool Serial::setup(const std::string & portName, int baudRate) [+2] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
 bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
-int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
+int Serial::writeBytes(const void * buffer, int length) [+2] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
 ```
 
 ### SerialDeviceInfo — Holds information about one enumerated serial device.
@@ -4992,9 +5004,9 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
-bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
+bool StorageBuffer::read(void * destination, size_t bytes) [+2] [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
 void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on supported backends, including WebGPU, with a callback in a later main-thread update (C++ only).
-bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
+bool StorageBuffer::update(const void * data, size_t size) [+2]  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
 ### StrokeMesh — Builds triangle geometry for variable-width polyline strokes.
@@ -5299,9 +5311,9 @@ bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Returns wh
 bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Joins an IPv4 multicast group for reception.
 bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leaves an IPv4 multicast group.
 void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes pending UDP datagrams.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
-bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+3] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
+bool UdpSocket::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
 void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.
@@ -5600,7 +5612,7 @@ bool Window::isOpen() const  // Returns whether this window is open.
 bool Window::isVisible() const  // Returns this open window's requested visibility.
 void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
-void Window::setDrawWhileHidden(bool allow)  // Keeps this window drawing while hidden when enabled.
+void Window::setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
@@ -5608,6 +5620,7 @@ void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this windo
 void Window::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
+void Window::setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
 void Window::setVisible(bool visible)  // Hides or shows this window without closing it.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ```
@@ -5689,7 +5702,9 @@ ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Sets the access level
 
 ```cpp
 enum AudioBackend { Default, Null, WASAPI, DirectSound, WinMM, CoreAudio, PulseAudio, ALSA, JACK, AAudio, OpenSLES, WebAudio }  // Selects the audio engine backend.
+enum AudioContentType { Default, Music }  // Selects the AAudio output content type for background music.
 enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifies the stage at which audio initialization failed.
+enum AudioPerformanceProfile { LowLatency, Conservative }  // Selects the output performance profile for instruments or BGM.
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
 enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Selects a built-in synthesized notification sound.
