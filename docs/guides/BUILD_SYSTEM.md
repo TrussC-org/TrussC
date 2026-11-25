@@ -524,14 +524,14 @@ The pinned sokol-shdc generates SPIR-V for both platforms.
 Configure an existing Linux CMake project:
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=vulkan
 cmake --build --preset linux
 ```
 
 Configure an existing Windows CMake project in Developer PowerShell:
 
 ```powershell
-cmake --preset windows -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset windows -DTC_GFX_BACKEND=vulkan
 cmake --build --preset windows --config Debug
 ```
 
@@ -554,12 +554,12 @@ D3D11 on Windows). There is no runtime backend switch; clear the Vulkan CMake
 override in the existing project:
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
 ```
 
 ```powershell
-cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset windows -DTC_GFX_BACKEND=
 cmake --build --preset windows --config Debug
 ```
 
