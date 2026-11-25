@@ -2,9 +2,14 @@
 #include "ProjectName.h"
 #include "GeneratedFile.h"
 #include "BuildSetup.h"
+#include "AddonVersions.h"
+#include "BuildPreferences.h"
+#include "TrussCVersion.h"
 #include "TrussC.h"
+#include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <set>
 #include <filesystem>
 #include <stdexcept>
 #include <cstdio>
@@ -311,12 +316,51 @@ string ProjectGenerator::getTrusscDirValue(const string& projectPath) {
 // User-specific CMake config should go in local.cmake (auto-loaded by trussc_app()).
 // CMakePresets.json holds paths and build presets (also regenerated).
 
-void ProjectGenerator::writeAddonsMake(const string& destPath) {
+static string addonNameFromLine(const string& line) {
+    auto start = line.find_first_not_of(" \t\r\n");
+    if (start == string::npos || line[start] == '#') return {};
+    auto end = line.find_last_not_of(" \t\r\n");
+    return line.substr(start, end - start + 1);
+}
+
+static string readGuiUpdateFile(const fs::path& path) {
+    constexpr size_t limit = 16 * 1024 * 1024;
+    if (fs::file_size(path) > limit) {
+        throw runtime_error(path.filename().string() + " exceeds the " + to_string(limit) + "-byte limit");
+    }
+    return trusscVersion::readBounded(path, limit);
+}
+
+void ProjectGenerator::writeAddonsMake(const string& destPath, bool preserveExisting) {
     string addonsMakePath = destPath + "/addons.make";
     ostringstream addonsFile;
-    addonsFile << "# TrussC addons - one addon per line\n";
+    vector<bool> present(settings_.addons.size(), false);
+    istringstream existing;
+    const bool hasExisting = preserveExisting && fs::exists(addonsMakePath);
+    if (hasExisting) {
+        // Bound (preserved addon lines): cap addons.make at the CLI's 16 MiB before merging.
+        existing.str(readGuiUpdateFile(addonsMakePath));
+    }
+    if (hasExisting) {
+        string line;
+        while (getline(existing, line)) {
+            const string name = addonNameFromLine(line);
+            auto found = find(settings_.addons.begin(), settings_.addons.end(), name);
+            if (found == settings_.addons.end()) {
+                // The GUI does not own unknown lines; keep their positions.
+                addonsFile << line << "\n";
+            } else {
+                size_t index = found - settings_.addons.begin();
+                present[index] = true;
+                if (settings_.addonSelected[index]) addonsFile << line << "\n";
+            }
+        }
+        if (existing.bad()) throw runtime_error("Failed to read " + addonsMakePath);
+    } else {
+        addonsFile << "# TrussC addons - one addon per line\n";
+    }
     for (size_t i = 0; i < settings_.addons.size(); i++) {
-        if (settings_.addonSelected[i]) {
+        if (settings_.addonSelected[i] && !present[i]) {
             addonsFile << settings_.addons[i] << "\n";
         }
     }
@@ -371,6 +415,27 @@ static WindowsToolchainPins selectedWindowsToolchainPins(const ProjectSettings& 
 }
 #endif
 
+std::string nativeToolchainPreset(const ProjectSettings& settings) {
+    Json preset;
+#ifdef _WIN32
+    preset["generator"] = "Ninja";
+    const auto pins = selectedWindowsToolchainPins(settings);
+    if (!pins.makeProgram.empty()) preset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
+    if (!pins.include.empty()) {
+        preset["environment"]["INCLUDE"] = pins.include;
+        preset["environment"]["LIB"] = pins.lib;
+        preset["environment"]["PATH"] = pins.path;
+    }
+#else
+    (void)settings;
+    preset["generator"] = "Unix Makefiles";
+#ifdef __APPLE__
+    preset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
+#endif
+#endif
+    return preset.dump();
+}
+
 static void checkWebNinja(const ProjectSettings& settings) {
 #ifdef _WIN32
     // Kept targets retain their existing configure-failure warning behavior.
@@ -393,18 +458,17 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
     Json presets;
     presets["version"] = 6;
+    const int jobs = trusscliBuild::parallelBuildJobs();
     presets["configurePresets"] = Json::array();
     presets["buildPresets"] = Json::array();
 
 #ifdef __APPLE__
     // macOS preset
-    Json macosPreset;
+    Json macosPreset = Json::parse(nativeToolchainPreset(settings_));
     macosPreset["name"] = "macos";
     macosPreset["displayName"] = "macOS";
     macosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("macos");
-    macosPreset["generator"] = "Unix Makefiles";
     macosPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
-    macosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
         macosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
@@ -414,7 +478,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json macosBuildPreset;
     macosBuildPreset["name"] = "macos";
     macosBuildPreset["configurePreset"] = "macos";
-    macosBuildPreset["jobs"] = 4;
+    macosBuildPreset["jobs"] = jobs;
     presets["buildPresets"].push_back(macosBuildPreset);
 
     // NOTE: Xcode project is generated via direct `cmake -G Xcode` invocation
@@ -426,41 +490,30 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
 
 #elif defined(_WIN32)
     // Windows preset with ninja path and environment
-    Json windowsPreset;
+    Json windowsPreset = Json::parse(nativeToolchainPreset(settings_));
     windowsPreset["name"] = "windows";
     windowsPreset["displayName"] = "Windows";
     windowsPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("windows");
-    windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
         windowsPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
     }
 
-    // `trusscli build` re-pins the same values after a VS change.
-    const WindowsToolchainPins pins = selectedWindowsToolchainPins(settings_);
-    if (!pins.makeProgram.empty()) {
-        windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
-    }
-    if (!pins.include.empty()) {
-        windowsPreset["environment"]["INCLUDE"] = pins.include;
-        windowsPreset["environment"]["LIB"] = pins.lib;
-        windowsPreset["environment"]["PATH"] = pins.path;
-    }
     presets["configurePresets"].push_back(windowsPreset);
 
     Json windowsBuildPreset;
     windowsBuildPreset["name"] = "windows";
     windowsBuildPreset["configurePreset"] = "windows";
+    windowsBuildPreset["jobs"] = jobs;
     presets["buildPresets"].push_back(windowsBuildPreset);
 
 #else
     // Linux preset
-    Json linuxPreset;
+    Json linuxPreset = Json::parse(nativeToolchainPreset(settings_));
     linuxPreset["name"] = "linux";
     linuxPreset["displayName"] = "Linux";
     linuxPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("linux");
-    linuxPreset["generator"] = "Unix Makefiles";
     linuxPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
@@ -471,7 +524,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json linuxBuildPreset;
     linuxBuildPreset["name"] = "linux";
     linuxBuildPreset["configurePreset"] = "linux";
-    linuxBuildPreset["jobs"] = 4;
+    linuxBuildPreset["jobs"] = jobs;
     presets["buildPresets"].push_back(linuxBuildPreset);
 #endif
 
@@ -510,7 +563,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json androidBuildPreset;
         androidBuildPreset["name"] = "android";
         androidBuildPreset["configurePreset"] = "android";
-        androidBuildPreset["jobs"] = 4;
+        androidBuildPreset["jobs"] = jobs;
         presets["buildPresets"].push_back(androidBuildPreset);
     }
 
@@ -532,6 +585,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json iosBuildPreset;
         iosBuildPreset["name"] = "ios";
         iosBuildPreset["configurePreset"] = "ios";
+        iosBuildPreset["jobs"] = jobs;
         presets["buildPresets"].push_back(iosBuildPreset);
     }
 #endif
@@ -547,6 +601,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["generator"] = "Ninja";
         // Ninja needs no VS compiler environment; emcc comes from toolchainFile.
         // With no VS Ninja pin, leave CMake to find Ninja on PATH.
+        const WindowsToolchainPins pins = selectedWindowsToolchainPins(settings_);
         if (!pins.makeProgram.empty()) {
             webPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
         }
@@ -574,13 +629,46 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json webBuildPreset;
         webBuildPreset["name"] = "web";
         webBuildPreset["configurePreset"] = "web";
-        webBuildPreset["jobs"] = 4;
+        webBuildPreset["jobs"] = jobs;
         presets["buildPresets"].push_back(webBuildPreset);
     }
 
     // Remember the IDE (CMake and CMake Tools ignore vendor data). Targets and
     // the web backend need no entry: they are the presets above.
+    // Keep local selection and other vendor data across update's regeneration.
+    ifstream existingPresets(destPath + "/CMakePresets.json");
+    if (existingPresets) {
+        Json existing = Json::parse(existingPresets, nullptr, false);
+        if (existing.is_object() && existing.contains("vendor") && existing["vendor"].is_object()) {
+            presets["vendor"] = existing["vendor"];
+        }
+    }
+    existingPresets.close();
+    if (!presets["vendor"]["trussc"].is_object()) {
+        presets["vendor"]["trussc"] = Json::object();
+    }
     presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
+    const auto& vendor = presets["vendor"]["trussc"];
+    if (vendor.contains("addonPaths") && !vendor["addonPaths"].empty()) {
+        for (auto& preset : presets["configurePresets"]) {
+            preset["cacheVariables"]["TRUSSC_ADDON_PATHS"] = vendor["addonPaths"].dump();
+            preset["cacheVariables"]["TRUSSC_ADDON_ORDER"] = vendor.value("addonOrder", "");
+        }
+    }
+
+    // A regenerated native preset must configure with the same type as build/run.
+#if defined(_WIN32)
+    const string native = "windows";
+#elif defined(__APPLE__)
+    const string native = "macos";
+#else
+    const string native = "linux";
+#endif
+    for (auto& preset : presets["configurePresets"]) {
+        if (preset["name"] == native) {
+            preset["cacheVariables"]["CMAKE_BUILD_TYPE"] = trusscliBuild::rememberedNativeBuildType(vendor);
+        }
+    }
 
     writeGeneratedFile(destPath + "/CMakePresets.json", presets.dump(2));
 }
@@ -748,35 +836,118 @@ string ProjectGenerator::generate() {
     }
 }
 
-string ProjectGenerator::update(const string& projectPath_) {
+string ProjectGenerator::validateProject(const string& projectPath) {
+    // Safety check: if an existing CMakeLists.txt is present, verify it's
+    // actually a TrussC project before overwriting. This guards against
+    // accidentally clobbering an unrelated project whose directory just
+    // happened to contain a src/ folder.
+    string cmakeListsPath = projectPath + "/CMakeLists.txt";
+    if (fs::exists(cmakeListsPath)) {
+        ifstream in(cmakeListsPath);
+        stringstream ss;
+        ss << in.rdbuf();
+        string content = ss.str();
+        if (content.find("trussc_app(") == string::npos &&
+            content.find("TRUSSC_DIR") == string::npos) {
+            return "'" + cmakeListsPath + "' exists but does not look like "
+                   "a TrussC project (no trussc_app() or TRUSSC_DIR). "
+                   "Refusing to overwrite.";
+        }
+    }
+
+    return "";
+}
+
+string ProjectGenerator::updateFromGui(const string& projectPath) {
+    const string cliRequired =
+        "This project uses a pinned TrussC version or external addons. Use "
+        "`trusscli update -p <path>` (GUI support is planned for v0.9.1).";
+    try {
+        if (fs::exists(fs::path(projectPath) / ".trussc-version")) return cliRequired;
+        // use-local is currently saved in CMakePresets.json; also honor the
+        // user preset location so either override stays untouched.
+        for (const char* file : {"CMakePresets.json", "CMakeUserPresets.json"}) {
+            auto path = fs::path(projectPath) / file;
+            if (!fs::exists(path)) continue;
+            // Bound (GUI preset preflight): cap each preset JSON at the CLI's 16 MiB before parsing.
+            auto data = Json::parse(readGuiUpdateFile(path), nullptr, false);
+            if (!data.is_object() || !data.contains("vendor")) continue;
+            const auto& vendor = data["vendor"];
+            if (!vendor.is_object() || !vendor.contains("trussc")) continue;
+            const auto& trussc = vendor["trussc"];
+            if (trussc.contains("localPath") ||
+                (trussc.contains("addonLocalPaths") && !trussc["addonLocalPaths"].empty())) {
+                return cliRequired;
+            }
+        }
+        auto addonsPath = fs::path(projectPath) / "addons.make";
+        istringstream input;
+        if (fs::exists(addonsPath)) {
+            // Bound (GUI addon preflight): cap addons.make at the CLI's 16 MiB before scanning.
+            input.str(readGuiUpdateFile(addonsPath));
+        }
+        string line;
+        while (getline(input, line)) {
+            const string name = addonNameFromLine(line);
+            if (name.empty()) continue;
+            // Unknown lines survive the merge and still require CLI resolution.
+            if (find(settings_.addons.begin(), settings_.addons.end(), name) == settings_.addons.end()) return cliRequired;
+        }
+        if (input.bad()) throw runtime_error("Failed to read " + addonsPath.string());
+        vector<string> pending;
+        for (size_t i = 0; i < settings_.addons.size(); ++i) {
+            if (settings_.addonSelected[i]) pending.push_back(settings_.addons[i]);
+        }
+        set<string> visited;
+        for (size_t i = 0; i < pending.size(); ++i) {
+            const string name = pending[i];
+            auto spec = addonVersions::parse(name);
+            auto installed = fs::path(settings_.tcRoot) / "addons" / spec.name;
+            if (!spec.owner.empty() || !spec.ref.empty() || !fs::is_directory(installed)) return cliRequired;
+            if (!visited.insert(name).second) continue;
+            auto manifest = installed / "addon.json";
+            if (!fs::exists(manifest)) continue;
+            // Bound (installed addon dependencies): cap each manifest at the CLI's 16 MiB before parsing.
+            auto meta = Json::parse(readGuiUpdateFile(manifest));
+            if (!meta.contains("dependencies")) continue;
+            if (!meta["dependencies"].is_array()) throw runtime_error("addon dependencies must be an array: " + name);
+            for (const auto& dependency : meta["dependencies"]) {
+                // Bound (untrusted dependency graph): cap queued nodes and edges at the CLI's 4096.
+                if (pending.size() >= 4096) throw runtime_error("addon dependency graph exceeds the 4096 node/edge limit");
+                if (dependency.is_string()) pending.push_back(dependency.get<string>());
+                else {
+                    if (dependency.contains("commit") || dependency.contains("tag") ||
+                        dependency.contains("branch") || dependency.contains("url")) return cliRequired;
+                    pending.push_back(dependency.at("name").get<string>());
+                }
+            }
+        }
+        return update(projectPath, true);
+    } catch (const exception& e) {
+        return e.what();
+    }
+}
+
+string ProjectGenerator::update(const string& projectPath_, bool resolveInstalledAddons) {
     warnings_.clear();
     // Resolve project paths against the CLI working directory.
     string projectPath = fs::absolute(projectPath_).string();
     try {
         checkWebNinja(settings_);
-        // Safety check: if an existing CMakeLists.txt is present, verify it's
-        // actually a TrussC project before overwriting. This guards against
-        // accidentally clobbering an unrelated project whose directory just
-        // happened to contain a src/ folder.
-        string cmakeListsPath = projectPath + "/CMakeLists.txt";
-        if (fs::exists(cmakeListsPath)) {
-            ifstream in(cmakeListsPath);
-            stringstream ss;
-            ss << in.rdbuf();
-            string content = ss.str();
-            if (content.find("trussc_app(") == string::npos &&
-                content.find("TRUSSC_DIR") == string::npos) {
-                return "'" + cmakeListsPath + "' exists but does not look like "
-                       "a TrussC project (no trussc_app() or TRUSSC_DIR). "
-                       "Refusing to overwrite.";
-            }
-        }
+        if (auto error = validateProject(projectPath); !error.empty()) return error;
 
         log("Updating project...");
 
         // Update addons.make
         log("Updating addons.make...");
-        writeAddonsMake(projectPath);
+        writeAddonsMake(projectPath, true);
+
+        if (resolveInstalledAddons) {
+            // GUI preflight guarantees plain installed names, so no registry lookup is needed.
+            auto paths = addonVersions::resolve(projectPath, settings_.tcRoot, /*fetch=*/false,
+                [](const addonVersions::Spec&, bool) { return addonVersions::Source{}; });
+            addonVersions::saveResolved(projectPath, paths);
+        }
 
         // User-specific CMake config goes in local.cmake.
         log("Writing CMakeLists.txt...");
@@ -1208,16 +1379,13 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
 
     // Use vcvarsall.bat to set up VS environment, then run cmake
     // CMAKE_MAKE_PROGRAM is set in CMakeUserPresets.json
-    // Set the initial default before project() chooses MSVC's Debug default.
-    // Existing caches retain the build type selected by the user.
-    string buildType = fs::exists(fs::path(path) / buildDirForPreset(preset) / "CMakeCache.txt")
-        ? "" : " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+    // CMakePresets.json supplies the remembered native build type.
     // vcvarsall.bat looks for vswhere.exe on PATH and cmd.exe prints a
     // "not recognized" error when it is missing; the Installer folder fixes that.
     const string vswhereDir = VsDetector::findVswhereDir();
     const string pathPrefix = vswhereDir.empty() ? ""
         : "set \"PATH=" + vswhereDir + ";%PATH%\" && ";
-    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
+    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
 
     auto [result, output] = executeCommand(cmd);
     logConfigureOutput(buildDirForPreset(preset), output, result);

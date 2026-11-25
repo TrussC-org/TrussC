@@ -3,6 +3,8 @@
 TrussC is a lightweight creative coding framework inspired by openFrameworks.
 Built on C++20 + sokol, it's simple to write and runs cross-platform.
 
+Pin a project’s TrussC version with `.trussc-version` or `trusscli use`; see [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](guides/BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version).
+
 ---
 
 ## AI Assistant
@@ -148,6 +150,8 @@ Build the project creation tool (first time only).
 **Windows:** Double-click `tools/build_win.bat`
 
 **Linux:** Run `./tools/build_linux.sh` (dependencies are installed automatically)
+
+For unattended builds with dependencies already installed, run `./tools/build_linux.sh --no-deps --jobs 2 --non-interactive --no-launch` (macOS: use `./tools/build_mac.command`; `--no-deps` is a no-op).
 
 ---
 

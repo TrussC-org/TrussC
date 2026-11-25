@@ -37,6 +37,8 @@ class HelpTests(unittest.TestCase):
         commands = [(name,) for name in self.listed_commands(self.cli("--help"))]
         commands += [("addon", name) for name in
                      self.listed_commands(self.cli("addon", "--help"))]
+        commands += [("cache", name) for name in
+                     self.listed_commands(self.cli("cache", "--help"))]
         # Completion is dispatched but not advertised in the top-level list.
         commands.append(("completion",))
         for command in commands:
@@ -55,6 +57,24 @@ class HelpTests(unittest.TestCase):
                 self.assertIn("-h, --help", output)
                 self.assertNotIn("(built ", output)
                 self.assertNotIn(str(ROOT), output)
+
+    def test_cache_remove_syntax_is_listed(self):
+        for args in (("--help",), ("cache", "--help")):
+            output = self.cli(*args)
+            self.assertIn("remove <spec>", output)
+            self.assertIn("remove --addon <spec>", output)
+
+    def test_command_description_columns_align(self):
+        for args in (("--help",), ("cache", "--help")):
+            output = self.cli(*args)
+            block = output.split("Commands:\n", 1)[1].split("\n\n", 1)[0]
+            columns = []
+            for line in block.splitlines():
+                match = re.match(r"^  \S.*?\s{2,}(\S.*)$", line)
+                self.assertIsNotNone(match, line)
+                columns.append(match.start(1))
+            self.assertEqual(len(set(columns)), 1, block)
+        self.assertIn("Manage cached versions: list, remove, autoremove, clear", self.cli("--help"))
 
     def test_plain_version_matches_existing_aliases(self):
         output = self.cli("version")

@@ -19,6 +19,8 @@ PATCHED_HASHES = {
         "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b",
     "include/libremidi/backends/coremidi.hpp":
         "35725620d09241ebf2e8097bf2ad79d88ee4277bcba96b45f6c9e42bdf7264bd",
+    "include/libremidi/system_error2.hpp":
+        "0938b6c88b6013497042992a3070ab20ff81874c049ce55191d8fbb80b92abae",
 }
 INPUT_FILES = (
     "include/libremidi/detail/midi_stream_decoder.hpp",
@@ -215,7 +217,7 @@ def main():
         output.write("\n// Unknown local edit.\n")
     configure("modified_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
     cache = work / "reused_cache"
-    cached_source = cache / "libremidi-v5.4.3-r5-src"
+    cached_source = cache / "libremidi-v5.4.3-r6-src"
     shutil.copytree(pristine, cached_source)
     configure("unpatched_reused_cache", f"-DFETCHCONTENT_BASE_DIR={cache}",
               "-DFETCHCONTENT_FULLY_DISCONNECTED=ON", succeeds=False)

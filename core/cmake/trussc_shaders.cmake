@@ -156,6 +156,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
                     "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
+                VERBATIM
             )
         else()
             add_custom_command(
@@ -165,6 +166,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 DEPENDS ${_shader_src} ${_TC_SHADER_INCLUDES} "${_TC_SOKOL_SHDC}"
                     "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
+                VERBATIM
             )
         endif()
     endforeach()

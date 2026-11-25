@@ -47,9 +47,9 @@ endif()
 # its emscripten backend currently fails to compile, unrelated to our PR.)
 FetchContent_Declare(
     libremidi
-    # A new source location forces fresh extraction on upgrade: R5 cannot undo R1-R4
-    # (r4 caches have the ALSA patch but not the CoreMIDI observer patch).
-    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/libremidi-v5.4.3-r5-src"
+    # A new source location forces fresh extraction on upgrade: R6 adds the MSVC
+    # error callback patch missing from R5; older patches cannot undo R1-R3.
+    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/libremidi-v5.4.3-r6-src"
     URL      https://github.com/celtera/libremidi/archive/refs/tags/v5.4.3.tar.gz
     URL_HASH SHA256=a1c369c6aab01c80f1506345d1c099a167b330d1d59159aa7583f7b0b9f966b9
     PATCH_COMMAND ${CMAKE_COMMAND} -DLIBREMIDI_SOURCE_DIR=<SOURCE_DIR>
@@ -62,7 +62,7 @@ if(MSVC)
     target_compile_options(libremidi PRIVATE /w)
 endif()
 # PATCH_COMMAND is skipped for source overrides and may be skipped in reused
-# caches. Require upstream input files and the checked ALSA output patch.
+# caches. Require upstream input files and every checked patch.
 execute_process(COMMAND ${CMAKE_COMMAND}
     -DLIBREMIDI_SOURCE_DIR=${libremidi_SOURCE_DIR} -DVERIFY_ONLY=ON
     -P ${CMAKE_CURRENT_LIST_DIR}/cmake/PatchLibremidi.cmake

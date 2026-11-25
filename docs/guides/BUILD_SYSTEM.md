@@ -101,16 +101,148 @@ reported with a warning and replaced by the default. `TC_WEB_BACKEND` is read
 the way CMake builds it: `"WGPU"` (or unset) is WebGPU, any other value is
 GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
-### Keeping `trusscli` in sync
+### Build with a project's pinned TrussC version
 
-`trusscli` is a compiled binary. When you update TrussC by pulling the latest
-source (`git pull`), the binary you already have is **not** rebuilt automatically,
-so it can fall out of step with the framework.
+The installed trusscli builds the sources selected by a project's `.trussc-version`.
+Share this file with the project so collaborators select the same sources.
+Features newer than the pinned TrussC version may not apply; features that would
+change the result stop with a message instead. Select a newer core to use them:
 
 ```bash
-# Pull + rebuild trusscli in one step (recommended)
+trusscli use v0.8.1
+trusscli build --release
+```
+
+For example, an addon pinned with `@ref` needs a core that can load external
+addon paths. An older core stops with `cannot load external addon paths
+(TRUSSC_ADDON_PATHS is unavailable); select a newer TrussC version`.
+Select a core with that support, such as `main`:
+
+```bash
+trusscli use main
+```
+
+`use` saves the selection and prepares its sources; `update` refreshes them and
+regenerates project files. Tags, branches, full commit IDs, unique short commit
+IDs (7–39 hexadecimal characters), and forks (`owner/repo@ref`) are supported.
+Tags take priority over branches, and branches over short commit IDs. A short
+commit ID is printed as `Resolved <short> to <full>` and saved as the full
+40-character ID in `.trussc-version` and the cache folder name. Short commit IDs
+in external addon `@ref` selections also save the full ID in `addons.make`.
+For example:
+
+```bash
+trusscli use 006a086b
+```
+
+With Git, an ambiguous commit ID lists candidates and stops. Use a longer ID from that
+list; IDs shorter than 7 characters are treated as ref names:
+
+```bash
+trusscli use <longer-commit-id>
+```
+
+Without Git, short commit IDs are resolved once through the GitHub commits API,
+then the archive is fetched using the full ID. This works for external addons
+without archive commit metadata. If the API rate limit is reached (60 requests
+per hour without authentication), use a full ID or install Git:
+
+```bash
+trusscli use <40-character-commit-id>
+```
+
+`build` uses the prepared sources; if the cache
+is missing, prepare it explicitly:
+
+```bash
+trusscli update
+trusscli build --release
+```
+
+TrussC versions with the old `trussc/` layout (v0.1.0–v0.4.4) stop with
+“TrussC v0.4.4 predates the core/ layout; trusscli supports v0.5.0 and later.
+Run `trusscli use v0.5.0` (or newer).” The layout check also applies to forks
+and commits. A rejected `use` leaves the project's previous pin and local
+selection unchanged and does not publish the unsupported cache entry.
+Choose a supported version:
+
+```bash
+trusscli use v0.5.0
+```
+
+`use-local` saves a machine-local checkout override in project metadata and
+selects sources for the installed trusscli. This override takes precedence over the
+shared version file:
+
+```bash
+trusscli use-local /path/to/TrussC
+trusscli build --release
+```
+
+Return to the shared pin with `use-local --clear`. Remove both selections with
+`use --clear` to return to the current installation:
+
+```bash
+trusscli use-local --clear
+trusscli use --clear
+```
+
+Cached versions are shared across projects. Inspect them with `cache list` and
+remove an unused version with `cache remove <spec>`. An exact ref match wins;
+otherwise, a unique short commit ID (7–39 hex characters) can match a cached
+full 40-hex commit ID.
+Branch and tag names must match exactly:
+
+```bash
+trusscli cache remove main
+trusscli cache remove 006a086b
+```
+
+If several cached full commit IDs match the short ID, the command lists them and
+removes nothing. Choose a longer commit ID or a full spec from `cache list`:
+
+```bash
+trusscli cache list
+trusscli cache remove <owner/repo@full-ref>
+```
+
+Removing a selected cached
+version requires preparing it again before the next build:
+
+```bash
+trusscli cache list
+trusscli cache remove v0.8.1
+trusscli update
+```
+
+`cache autoremove` offers to remove versions unused for at least 90 days;
+`cache clear` offers to remove the whole cache. Both ask for confirmation:
+
+```bash
+trusscli cache autoremove
+trusscli cache clear
+```
+
+### Keeping `trusscli` in sync
+
+`trusscli` prints a reminder on every command when its binary inputs at HEAD
+have changed since it was configured: `tools/src`, `tools/CMakeLists.txt`,
+`tools/addons.make`, and `tools/icon`. Rebuild it with:
+
+```bash
 trusscli upgrade
 ```
+
+The comparison uses the installed checkout selected by `TRUSSC_DIR` or the
+executable location, independently of a project's pinned TrussC version.
+Commits affecting only core, addons, tests, or other tools files, and uncommitted
+edits anywhere, do not trigger the reminder. Without Git or known build metadata,
+the reminder stays silent. There is no tcApp API for this CLI check.
+
+`trusscli version` and `trusscli doctor` still show full Git describe strings;
+doctor's Version sync result compares the same binary inputs.
+
+For unattended trusscli builds with dependencies installed, run `./tools/build_linux.sh --no-deps --jobs 2 --non-interactive --no-launch` (macOS: `./tools/build_mac.command`, where `--no-deps` is a no-op).
 
 On Windows, `upgrade` runs `tools/build_win.bat`, which sets up Visual Studio
 and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
@@ -118,17 +250,6 @@ and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
 `trusscli.exe.old` before building; the next start removes it. If the build
 fails, the previous executable is restored and manual rebuild instructions
 are printed.
-
-If you pull manually instead, run `trusscli upgrade` to rebuild afterwards. `trusscli`
-detects this drift and prints a reminder on startup when the source has changed
-since the binary was built:
-
-```
-Note: TrussC has changed since trusscli was built (trusscli v0.6.1 vs TrussC v0.7.0).
-      Run 'trusscli upgrade' to rebuild trusscli in sync.
-```
-
-`trusscli doctor` reports the same version-sync status in detail.
 
 ---
 
@@ -257,7 +378,7 @@ cmake --build --preset web --parallel
 Requires:
 - Android SDK (`ANDROID_HOME` environment variable)
 - Android NDK (`ANDROID_NDK_HOME` environment variable)
-- Java (`JAVA_HOME` environment variable) — for APK signing
+- JDK (`JAVA_HOME` environment variable) — javac/jar for core and app Java, d8 from SDK build-tools, and APK signing. CMake looks for javac and jar in `$JAVA_HOME/bin` as well as its normal program paths.
 
 ```bash
 # Using trusscli (adds android preset to CMakePresets.json)
@@ -297,6 +418,86 @@ If neither file exists, the bundled "everything" manifest at
 
 Suggested workflow: copy the bundled manifest into `android/` and strip
 out the `<uses-permission>` lines you don't actually need.
+
+## Android background media playback
+
+Android background media playback can opt in to TrussC's mediaPlayback foreground service. The core Java service is compiled into every Android APK through javac/d8, so `hasCode` is always true. Nothing starts until the app opts in. Android 12+ forbids background service starts; start in setup() or another visible callback:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+To advance tracks from update() without a visible surface, enable hidden updates too. Without the foreground service Android may freeze or kill the background process:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or trigger GPU flushes. Check visibility before GPU work:
+
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+Android hidden ticks also deliver queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks follow the same GPU restriction and visibility check. Image/Font/Video completions, other resource callbacks and GPU readback polling wait for a visible host turn. TrussC has no API for background GPU work.
+
+Android 13+ requires runtime POST_NOTIFICATIONS permission for the notification drawer. Visible `setAndroidForegroundService(true)` requests it if needed, at most once per Activity instance. The service starts without waiting for the result; denial or dismissal leaves it running with its notification hidden from the drawer. Android < 13, false, and hidden calls request nothing. Opt in from a visible callback:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+A custom manifest must declare POST_NOTIFICATIONS; otherwise the system request has no effect. Add this inside `<manifest>`:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+With permission, a low-importance notification channel and ongoing notification appear. No wake lock is acquired: active audio normally keeps the CPU awake, while CPU-only ticks with the screen off need device verification. TrussC has no background wake-lock API.
+
+Stop the service when playback ends:
+
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+For targetSdk 34+, Google Play requires justification for every declared foreground service type in Play Console. For a store build that does not use background playback, copy `core/resources/android/AndroidManifest.xml.in` into the project's `android/AndroidManifest.xml.in`, then remove these entries (keep hasCode true, since core Java is still packaged):
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<!-- Remove this entire service element from application: -->
+<service android:name="org.trussc.core.ForegroundService"
+    android:foregroundServiceType="mediaPlayback" android:exported="false"/>
+```
+
+The app should leave the service stopped in that build:
+
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(false);
+}
+```
+
+iOS hidden updates are not implemented. Keep `setUpdateWhileHidden(false)` and use Sound/AudioEngine's audio thread for playback; audio background mode must be configured in the app's Info.plist. TrussC has no iOS background update API:
+
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
 
 **iOS Build (beta):**
 
@@ -684,9 +885,25 @@ TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's displa
 
 The Project Generator automatically sets `CMAKE_OSX_DEPLOYMENT_TARGET=14.0` in both the `macos` and `xcode` presets.
 
-### Build Type
+### TrussC build types
 
 TrussC defaults to **RelWithDebInfo** (Release with Debug Info). This provides optimized performance (`-O2`) while keeping debug symbols for stack traces and breakpoint debugging. We believe this is the best default for creative coding — you get near-Release speed without losing the ability to debug.
+
+`trusscli build` and `trusscli run` remember the last explicit `--debug`,
+`--release`, or `--relwithdebinfo` flag for each native project. Without a flag,
+they reuse that type, or use RelWithDebInfo when none is saved. Each build
+prints its type, with `(remembered)` when reusing the saved selection.
+
+```bash
+trusscli build --release
+trusscli run
+```
+
+The machine-local choice lives in `CMakePresets.json` under
+`vendor.trussc.buildType`, alongside the `use-local` marker, and survives
+`trusscli update` and `trusscli clean`. Web uses MinSizeRel and Android uses
+Release independently of this choice. `dist` selects its own build type and
+leaves the saved choice unchanged. There is no tcApp API for this CLI setting.
 
 | Build Type | Optimization | Debug Symbols | assert() | Use Case |
 |---|---|---|---|---|

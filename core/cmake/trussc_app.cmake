@@ -690,9 +690,8 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
     # host so audio threads, the OSC service, GPU resource pools etc. survive
     # reloads as singletons. Only addons (and the user's own code) reset.
     if(TARGET guest)
-        set(_TC_ADDONS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/addons.make")
-        if(EXISTS "${_TC_ADDONS_FILE}")
-            file(STRINGS "${_TC_ADDONS_FILE}" _TC_ADDON_LINES)
+        _tc_project_addons(_TC_ADDON_LINES)
+        if(_TC_ADDON_LINES)
             foreach(_TC_LINE ${_TC_ADDON_LINES})
                 string(STRIP "${_TC_LINE}" _TC_LINE)
                 if(_TC_LINE AND NOT _TC_LINE MATCHES "^#")
@@ -840,10 +839,8 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
         else()
             set(_TC_MANIFEST_TEMPLATE "${TRUSSC_DIR}/resources/android/AndroidManifest.xml.in")
         endif()
-        # Opt-in Java/.dex packaging. Set hasCode based on whether the
-        # project ships any Java sources (DeviceAdminReceiver and similar
-        # things that need real Java classes in the APK). NativeActivity-
-        # only projects keep hasCode="false" and the existing build path.
+        # Core Java (the opt-in foreground service) is compiled into every APK.
+        # Project/addon Java uses the same javac/d8 packaging path.
         set(_TC_JAVA_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android/java")
         set(_TC_RES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android/res")
 
@@ -859,7 +856,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
         # fragments. At configure time those are gathered into a single
         # advisory file and surfaced via a message — the user pastes (and
         # trims) them into their own manifest by hand.
-        set(_TC_ANDROID_JAVA_DIRS "")
+        set(_TC_ANDROID_JAVA_DIRS "${TRUSSC_DIR}/resources/android/java")
         set(_TC_ANDROID_RES_DIRS "")
         set(_TC_ANDROID_MANIFEST_HINTS "")  # "<addon>|<fragment-path>" pairs
         if(EXISTS "${_TC_JAVA_SRC_DIR}")
@@ -869,7 +866,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
             list(APPEND _TC_ANDROID_RES_DIRS "${_TC_RES_DIR}")
         endif()
         foreach(_TC_A ${_TC_LOADED_ADDONS})
-            get_filename_component(_TC_AP "${TRUSSC_DIR}/../addons/${_TC_A}" ABSOLUTE)
+            _tc_addon_path("${_TC_A}" _TC_AP)
             if(EXISTS "${_TC_AP}/android/java")
                 list(APPEND _TC_ANDROID_JAVA_DIRS "${_TC_AP}/android/java")
                 message(STATUS "[${PROJECT_NAME}] Addon Java: ${_TC_A}/android/java")
@@ -973,12 +970,11 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
             set(_TC_ALIGNED "${CMAKE_CURRENT_BINARY_DIR}/aligned.apk")
             set(_TC_APK_OUT "${_TC_APK_DIR}/${PROJECT_NAME}.apk")
 
-            # Optional Java + res integration (DeviceAdminReceiver etc.)
-            # Kicks in when the project OR any loaded addon ships android/java/.
+            # Compile core, project and addon Java together; package optional resources.
             set(_TC_PRE_CMDS)
             set(_TC_AAPT_EXTRA_ARGS)
             if(_TC_ANDROID_JAVA_DIRS)
-                find_program(_TC_JAVAC javac)
+                find_program(_TC_JAVAC javac HINTS "$ENV{JAVA_HOME}/bin")
                 find_program(_TC_D8 d8 HINTS "${ANDROID_BUILD_TOOLS_DIR}")
                 if(NOT _TC_JAVAC OR "${_TC_JAVAC}" MATCHES "NOTFOUND$")
                     message(FATAL_ERROR "[${PROJECT_NAME}] javac not found but android/java/ exists")
@@ -987,7 +983,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                     message(FATAL_ERROR "[${PROJECT_NAME}] d8 not found in ${ANDROID_BUILD_TOOLS_DIR} but android/java/ exists")
                 endif()
 
-                find_program(_TC_JAR jar)
+                find_program(_TC_JAR jar HINTS "$ENV{JAVA_HOME}/bin")
                 if(NOT _TC_JAR OR "${_TC_JAR}" MATCHES "NOTFOUND$")
                     message(FATAL_ERROR "[${PROJECT_NAME}] jar (from JDK) not found")
                 endif()
@@ -1039,6 +1035,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                     --ks-pass pass:android --key-pass pass:android
                     --out "${_TC_APK_OUT}" "${_TC_ALIGNED}"
                 COMMENT "[${PROJECT_NAME}] Packaging APK → ${_TC_APK_OUT}"
+                VERBATIM
             )
             message(STATUS "[${PROJECT_NAME}] APK auto-packaging enabled")
         else()

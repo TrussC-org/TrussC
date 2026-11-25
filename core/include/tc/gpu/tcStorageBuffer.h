@@ -5,6 +5,9 @@
 #include "../utils/tcOnceGate.h"
 #include "../app/internal/tcAppConstruction.h"
 #include "internal/tcBufferReadback.h"
+#include <span>
+#include <ranges>
+#include <type_traits>
 #include <utility>
 #include <climits>
 #include <new>
@@ -87,6 +90,12 @@ public:
         return true;
     }
 
+    template<class T>
+    TC_LUA_SKIP bool update(std::span<const T> data) { return update(data.data(), data.size_bytes()); }
+
+    template<std::ranges::contiguous_range R> requires std::ranges::sized_range<R>
+    TC_LUA_SKIP bool update(R&& data) { return update(std::span<const std::ranges::range_value_t<R>>(data)); }
+
 #if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
     // Reads a prefix synchronously. Zero bytes succeeds without a GPU or destination.
     // Failure leaves destination untouched and warns (rate-limited: often called per frame).
@@ -107,6 +116,12 @@ public:
         warn("Failed to read storage buffer");
         return false;
     }
+
+    template<class T> requires (!std::is_const_v<T>)
+    TC_LUA_SKIP TC_PLATFORMS("macos,windows,linux,ios,android") bool read(std::span<T> destination) { return read(destination.data(), destination.size_bytes()); }
+
+    template<std::ranges::contiguous_range R> requires (std::ranges::sized_range<R> && !std::is_const_v<std::remove_reference_t<std::ranges::range_reference_t<R>>>)
+    TC_LUA_SKIP TC_PLATFORMS("macos,windows,linux,ios,android") bool read(R&& destination) { return read(std::span<std::ranges::range_value_t<R>>(destination)); }
 #endif
 
     // Whole-buffer snapshot, delivered in request order in a later main update.

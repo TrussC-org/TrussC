@@ -30,6 +30,12 @@ int failures = 0;
 bool completed = false, alphaOnly = false;
 constexpr int cell = 32, width = cell * 9, height = cell * 2;
 const Color source(0.6f, 0.3f, 0.8f, 0.45f), destination(0.3f, 0.4f, 0.2f, 0.35f);
+// Glyph quads are grown into the atlas gap (internal::paddedGlyphQuad), so the
+// quads of touching glyphs overlap. Under Disabled the later quad's empty margin
+// (or the next case's glyph, across the cell edge) in the mask pass and stop
+// matching the blended passes, so the glyphs are drawn apart and inset from the
+// cell edge. The equations under test are unchanged.
+constexpr float firstGlyphX = 2, secondGlyphX = 18;
 const BlendMode modes[] = {BlendMode::Alpha, BlendMode::Add, BlendMode::Subtract,
     BlendMode::Multiply, BlendMode::Screen, BlendMode::Disabled,
     BlendMode::Custom, BlendMode::Custom, BlendMode::Custom};
@@ -101,7 +107,8 @@ class TextBlendApp : public App {
     Pixels mask_;
     void text(float x, float y) {
         setColor(source);
-        font_.drawString("Ag", x, y);
+        font_.drawString("A", x + firstGlyphX, y);
+        font_.drawString("g", x + secondGlyphX, y);
         glyphs_.draw(Mat4::translate(x, y+cell, 0));
     }
     void cases() {
@@ -145,7 +152,8 @@ class TextBlendApp : public App {
         setupScreenOrtho();
         setBlendMode(BlendMode::Disabled);
         setColor(1);
-        font_.drawString("Ag", 0, 0);
+        font_.drawString("A", firstGlyphX, 0);
+        font_.drawString("g", secondGlyphX, 0);
         maskGlyphs_.draw(Mat4::translate(0, cell, 0));
         mask.end();
         mask_.allocate(cell, height, 4);
@@ -217,9 +225,15 @@ public:
 #endif
         check("font fixture loads", font_.load(fixture, 20).ok());
         glyphs_.setFont(font_);
-        glyphs_.add("Ag", source);
         maskGlyphs_.setFont(font_);
-        maskGlyphs_.add("Ag", Color(1));
+        for (auto* batch : {&glyphs_, &maskGlyphs_}) {
+            const Color color = batch == &glyphs_ ? source : Color(1);
+            batch->setTransform(Mat4::translate(firstGlyphX, 0, 0));
+            batch->add("A", color);
+            batch->setTransform(Mat4::translate(secondGlyphX, 0, 0));
+            batch->add("g", color);
+            batch->resetTransform();
+        }
     }
     void draw() override {
         disableDepthTest();

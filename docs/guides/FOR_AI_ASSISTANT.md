@@ -838,6 +838,28 @@ popShader();
 
 Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3), texcoord(vec2), color(vec4).
 
+### Shader coordinates on the main window
+
+On the main window (swapchain), `gl_FragCoord.y` increases upward from the
+bottom on GL and downward from the top on Metal, D3D11, and WebGPU. For the same
+effect on every backend, pass a pixel position from the vertex shader instead of
+reading `gl_FragCoord`. Shapes drawn under `pushShader()` (drawRect, drawCircle,
+drawTriangle, drawLine) have texture coordinates of (0, 0); texture coordinates
+are only usable with meshes and images that carry them, and with
+FullscreenShader. With the vertex shader's `screenSize` uniform:
+
+```glsl
+// vertex shader
+out vec2 pixelPosition;
+pixelPosition = vec2(position.x, screenSize.y - position.y);
+```
+
+```glsl
+// fragment shader
+in vec2 pixelPosition;
+float hue = fract((pixelPosition.x + pixelPosition.y) * 0.003);
+```
+
 ### Running an Fbo through your own shader
 
 Use two float Fbos for repeated passes: sample one and render into the other
@@ -865,7 +887,13 @@ clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2
 with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native
 GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture
 coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same
-everywhere.
+everywhere. With `uv` passed from the vertex shader's texture coordinates,
+build a gradient in the fragment shader:
+
+```glsl
+float hue = fract(uv.x + uv.y);
+```
+
 Independently opened sokol passes are outside TrussC's public-Fbo hook.
 
 Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
@@ -1368,6 +1396,8 @@ In Xcode: pick a device/simulator → **set a Development Team under Signing & C
 
 Two layers. The core is built once as `libTrussC.a` and shared across all projects; apps only recompile their own delta (fast). `trusscli` (the project generator) handles create / update / IDE-file generation / per-platform enabling. `CMakeLists.txt` and `CMakePresets.json` are auto-generated, so **don't hand-edit them** — put addons in `addons.make` and project-specific CMake in `local.cmake`. Build with `trusscli build` (auto-selects native), or `cmake --preset <os>` + `cmake --build --preset <os>` (os = macos / windows / linux / web / android / ios).
 
+For a project pinned with `.trussc-version`, the installed `trusscli build` builds that version’s sources; prepare them with `trusscli update` (see [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version)).
+
 For a plain configure outside the repository, pass `-DTRUSSC_DIR=<TrussC-root>/core`. The generated CMakeLists retains the `../../../core` fallback and checks for `cmake/trussc_app.cmake` before including it. If missing, it stops with instructions to run `trusscli update`, configure with the host preset (`macos`, `linux`, or `windows`), or set `TRUSSC_DIR`.
 
 ### App icon
@@ -1576,6 +1606,57 @@ void tcApp::update() {
 - GPU-compressed textures (`Texture::allocateCompressed`, HAP video) stay compressed in GPU memory.
 - `RuntimeSettings::reserveUniformBuffer` costs twice its size on Metal, WebGPU and Vulkan (one copy per frame in flight).
 - On Windows, each extra back buffer from `setMaxFrameLatency` uses about 8 MB at 1080p.
+
+### Watch and reduce memory usage (process, caches, uploads)
+
+Watch process memory alongside resource caches to distinguish first-use allocation from steady growth. Reuse font sizes, upload only changed pixels, and close videos when a scene ends to keep retained memory down.
+
+`size_t getMemoryUsage()` reports process resident bytes (0 on unsupported platforms); `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Memory") << getMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+}
+```
+
+The bitmap-string atlas texture is created on the first bitmap-string draw, PBR shaders and fallback textures on first PBR use, and shared IBL baking resources on the first environment bake. These initial steps in memory are expected.
+
+Distinct glyphs and font sizes/settings increase atlas storage; reuse a small set of sizes. Glyph spacing adds a quarter of the raster line height (at least 2 texels), with 16-texel packing alignment. Pages grow in steps, so measure with the font counters. `size_t Font::getMemoryUsage() const` counts CPU atlas pixel bytes for one font; `static size_t Font::getTotalCacheMemoryUsage()` sums those bytes across shared cached atlases, not GPU textures or font-file data. With a `Font font` member:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Font") << font.getMemoryUsage() << " atlas bytes; cache: " << Font::getTotalCacheMemoryUsage();
+}
+```
+
+Clear old glyphs at a scene transition; this also affects fonts sharing the atlas. With a `GlyphBatch label` member already set to this font, rebuild its text after clearing:
+```cpp
+void tcApp::keyPressed(int key) {
+    font.clearAtlas();
+    label.clear();
+    label.add("Next scene", 20, 40);
+}
+```
+
+Texture-upload staging retains four upload slots across three device-frame sets, each sized for its largest recent upload (rounded to 4 bytes), with up to two native backings per slot: up to roughly largest upload × 2 × 4 × 3, excluding row-padding scratch storage. Slots retire automatically after 120 unused device frames; the WebGPU row-padding vector retains its capacity. There is no public staging-release API. Keep uploads small and send them only when pixels change; with `Texture texture`, `Pixels pixels`, and `bool pixelsChanged` members:
+```cpp
+void tcApp::update() {
+    if (pixelsChanged) texture.loadData(pixels);
+    pixelsChanged = false;
+}
+```
+
+Each loaded video retains decoder and frame resources. Release an unused `VideoPlayer video` member rather than just pausing it:
+```cpp
+void tcApp::keyPressed(int key) {
+    video.close();
+}
+```
+
+Poll the MCP tool `tc_get_health` over time and graph `rssBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample process memory periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
+```cpp
+void tcApp::update() {
+    if (memorySample.isFirstTime()) logNotice("Memory") << getElapsedTime() << " " << getMemoryUsage();
+}
+```
 
 ### Which video formats play fast on each OS? (hardware decoding, HAP)
 
