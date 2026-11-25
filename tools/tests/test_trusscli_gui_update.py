@@ -238,10 +238,15 @@ int main(int argc, char** argv) {
         self.assertTrue(data["configurePresets"])
         for preset in data["configurePresets"]:
             cache = preset["cacheVariables"]
-            self.assertEqual(json.loads(cache["TRUSSC_ADDON_PATHS"]), vendor["addonPaths"])
-            self.assertEqual(cache["TRUSSC_ADDON_ORDER"], expected)
-            for key in ("TRUSSC_ADDON_PATHS", "TRUSSC_ADDON_ORDER"):
-                lines.append(f'set({key} [==[{cache[key]}]==])')
+            if names:
+                self.assertEqual(json.loads(cache["TRUSSC_ADDON_PATHS"]), vendor["addonPaths"])
+                self.assertEqual(cache["TRUSSC_ADDON_ORDER"], expected)
+                for key in ("TRUSSC_ADDON_PATHS", "TRUSSC_ADDON_ORDER"):
+                    lines.append(f'set({key} [==[{cache[key]}]==])')
+            else:
+                # An empty map is not passed to CMake; addons.make alone decides.
+                self.assertNotIn("TRUSSC_ADDON_PATHS", cache)
+                self.assertNotIn("TRUSSC_ADDON_ORDER", cache)
             lines.extend(['_tc_project_addons(actual)',
                           f'if(NOT "${{actual}}" STREQUAL "{expected}")',
                           'message(FATAL_ERROR "Effective addons: ${actual}")', 'endif()'])
