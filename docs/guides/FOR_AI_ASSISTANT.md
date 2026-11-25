@@ -1603,6 +1603,57 @@ void tcApp::update() {
 - `RuntimeSettings::reserveUniformBuffer` costs twice its size on Metal, WebGPU and Vulkan (one copy per frame in flight).
 - On Windows, each extra back buffer from `setMaxFrameLatency` uses about 8 MB at 1080p.
 
+### Watch and reduce memory usage (process, caches, uploads)
+
+Watch process memory alongside resource caches to distinguish first-use allocation from steady growth. Reuse font sizes, upload only changed pixels, and close videos when a scene ends to keep retained memory down.
+
+`size_t getMemoryUsage()` reports process resident bytes (0 on unsupported platforms); `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Memory") << getMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+}
+```
+
+The bitmap-string atlas texture is created on the first bitmap-string draw, PBR shaders and fallback textures on first PBR use, and shared IBL baking resources on the first environment bake. These initial steps in memory are expected.
+
+Distinct glyphs and font sizes/settings increase atlas storage; reuse a small set of sizes. Glyph spacing adds a quarter of the raster line height (at least 2 texels), with 16-texel packing alignment. This is not a fixed 1.5× page-memory multiplier: pages grow discretely, so measure with the font counters. `size_t Font::getMemoryUsage() const` counts CPU atlas pixel bytes for one font; `static size_t Font::getTotalCacheMemoryUsage()` sums those bytes across shared cached atlases, not GPU textures or font-file data. With a `Font font` member:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Font") << font.getMemoryUsage() << " atlas bytes; cache: " << Font::getTotalCacheMemoryUsage();
+}
+```
+
+Clear old glyphs at a scene transition; this also affects fonts sharing the atlas. With a `GlyphBatch label` member already set to this font, rebuild its text after clearing:
+```cpp
+void tcApp::keyPressed(int key) {
+    font.clearAtlas();
+    label.clear();
+    label.add("Next scene", 20, 40);
+}
+```
+
+Texture-upload staging retains four upload slots across three device-frame sets, each sized for its largest recent upload (rounded to 4 bytes), with up to two native backings per slot: up to roughly largest upload × 2 × 4 × 3, excluding row-padding scratch storage. Slots retire automatically after 120 unused device frames; the WebGPU row-padding vector retains its capacity. There is no public staging-release API. Keep uploads small and send them only when pixels change; with `Texture texture`, `Pixels pixels`, and `bool pixelsChanged` members:
+```cpp
+void tcApp::update() {
+    if (pixelsChanged) texture.loadData(pixels);
+    pixelsChanged = false;
+}
+```
+
+Each loaded video retains decoder and frame resources. Release an unused `VideoPlayer video` member rather than just pausing it:
+```cpp
+void tcApp::keyPressed(int key) {
+    video.close();
+}
+```
+
+Poll the MCP tool `tc_get_health` over time and graph `rssBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample process memory periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
+```cpp
+void tcApp::update() {
+    if (memorySample.isFirstTime()) logNotice("Memory") << getElapsedTime() << " " << getMemoryUsage();
+}
+```
+
 ### Which video formats play fast on each OS? (hardware decoding, HAP)
 
 `VideoPlayer` uses each OS's own video system, so decoding speed depends on the OS and the codec more than on TrussC.
