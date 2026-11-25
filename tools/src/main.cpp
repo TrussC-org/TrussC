@@ -122,6 +122,14 @@ static bool isTrussCProject(const fs::path& path) {
     return fs::exists(path / "CMakeLists.txt") && fs::exists(path / "addons.make");
 }
 
+// Names the project files that isTrussCProject() found missing.
+static string missingProjectFiles(const fs::path& path) {
+    const bool cmake = fs::exists(path / "CMakeLists.txt");
+    const bool addons = fs::exists(path / "addons.make");
+    if (!cmake && !addons) return "CMakeLists.txt and addons.make";
+    return cmake ? "addons.make" : "CMakeLists.txt";
+}
+
 // Check `startPath` (or CWD if empty) and up to five parents above it,
 // looking for a TrussC project marker (src/ directory).
 // CMakeLists.txt / CMakePresets.json / addons.make
@@ -1073,7 +1081,7 @@ static int cmdCp(const vector<string>& args) {
     }
     if (!isTrussCProject(srcPath)) {
         cerr << "Error: source '" << srcArg << "' is not a TrussC project "
-             << "(missing CMakeLists.txt or addons.make)\n";
+             << "(missing " << missingProjectFiles(srcPath) << ")\n";
         return 1;
     }
 
@@ -3474,7 +3482,7 @@ static int cmdClean(const vector<string>& args) {
     projectPath = fs::absolute(projectPath).string();
     if (!isTrussCProject(projectPath)) {
         cerr << "Error: '" << projectPath << "' is not a TrussC project "
-             << "(missing CMakeLists.txt or addons.make). Nothing was removed.\n";
+             << "(missing " << missingProjectFiles(projectPath) << "). Nothing was removed.\n";
         return 1;
     }
 
