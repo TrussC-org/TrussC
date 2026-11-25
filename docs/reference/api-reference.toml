@@ -9801,16 +9801,37 @@ details.en = '''
 - `copyTo(Image& image)` replaces the destination with an Fbo-sized, four-channel U8 image, reads RGBA8 pixels into it, then calls `setDirty()` and `update()` on success. This performs GPU readback followed by a GPU upload.
 - Returns the readback result. An unallocated Fbo returns `false` without changing the destination; otherwise, the destination is allocated before readback and may be replaced even when readback fails.
 - See `Fbo::readPixels` for timing, conversion, orientation, and platform restrictions, and `Image` for CPU pixels and GPU texture updates.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - `copyTo(Image& image)` はコピー先を Fbo と同じサイズの 4 チャンネル U8 画像に置き換え、RGBA8 ピクセルを読み出し、成功時に `setDirty()` と `update()` を呼びます。GPU からの読み出しに続いて GPU へのアップロードを行います。
 - 読み出しの成否を返します。未確保の Fbo はコピー先を変更せずに `false` を返します。それ以外は読み出し前にコピー先を確保するため、読み出しに失敗してもコピー先が置き換わる場合があります。
 - 呼び出すタイミング、変換、上下の向き、プラットフォーム制限は `Fbo::readPixels` を、CPU ピクセルと GPU テクスチャの更新は `Image` を参照してください。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - `copyTo(Image& image)`는 대상을 Fbo와 같은 크기의 4채널 U8 이미지로 교체하고 RGBA8 픽셀을 읽은 뒤 성공하면 `setDirty()`와 `update()`를 호출합니다. GPU에서 읽은 다음 GPU로 업로드합니다.
 - 읽기 성공 여부를 반환합니다. 할당되지 않은 Fbo는 대상을 변경하지 않고 `false`를 반환합니다. 그 외에는 읽기 전에 대상을 할당하므로 읽기에 실패해도 대상이 교체될 수 있습니다.
 - 호출 시점, 변환, 상하 방향, 플랫폼 제한은 `Fbo::readPixels`를, CPU 픽셀과 GPU 텍스처 갱신은 `Image`를 참조하세요.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 snippet = '''
 // tcApp.h: Fbo fbo; Image image;
@@ -9931,6 +9952,13 @@ void tcApp::draw() {
 ```
 
 - Call after end() on all active Fbos. Success replaces pixels with top-left U8 bytes; failure returns false and leaves pixels unchanged. Unsupported sources warn. Readback synchronizes GPU work. pixels.save stores PNG bytes without gamma remapping. WebGPU synchronous readback is unsupported.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - end 後のシングルサンプル Fbo の stencil 値をデバッグ用の 1 チャンネル U8 Pixels に読み出します。 確保済みで end 後の所有するシングルサンプル Fbo が必要です。メイン描画先・MSAA は非対応です。元の色と stencil を保持します。
@@ -9944,6 +9972,13 @@ void tcApp::draw() {
 ```
 
 - すべてのアクティブな Fbo の end() 後に呼びます。成功時は左上原点の U8 バイトに置き換え、失敗時は false を返し pixels を保持します。非対応の描画元には警告します。GPU と同期します。pixels.save はガンマ変換なしで PNG を保存します。WebGPU の同期読み出しは非対応です。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 종료된 단일 샘플 Fbo의 스텐실 바이트를 디버깅용 1채널 U8 Pixels로 읽습니다. 할당되어 종료된 소유 단일 샘플 Fbo가 필요합니다. 메인 타깃과 MSAA는 지원하지 않습니다. 원본 색상과 스텐실을 보존합니다.
@@ -9957,6 +9992,13 @@ void tcApp::draw() {
 ```
 
 - 활성 Fbo 모두의 end() 후 호출합니다. 성공하면 왼쪽 위 원점의 U8 바이트로 바꾸며 실패하면 false를 반환하고 pixels를 보존합니다. 지원하지 않는 소스는 경고합니다. GPU 작업과 동기화합니다. pixels.save는 감마 변환 없이 PNG를 저장합니다. WebGPU 동기 읽기는 지원하지 않습니다.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["StencilDesc", "clearStencil", "Fbo::drawStencil"]
 
@@ -10215,6 +10257,13 @@ void tcApp::draw() {
 ```
 
 - WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - バッファ容量を計算せず CPU の RGBA8 ピクセルを取得するには Pixels 版を使います。bool を返し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
@@ -10252,6 +10301,13 @@ void tcApp::draw() {
 ```
 
 - WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 버퍼 용량을 계산하지 않고 CPU RGBA8 픽셀을 얻으려면 Pixels 오버로드를 사용합니다. bool을 반환하며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
@@ -10289,6 +10345,13 @@ void tcApp::draw() {
 ```
 
 - WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
@@ -10331,6 +10394,13 @@ void tcApp::draw() {
 ```
 
 - WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - バッファ容量を計算せず精度を保って CPU に読み出すには Pixels 版を使います。元のチャンネル数（RGBA 添付画像では RGBA）の F32 Pixels を生成し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
@@ -10365,6 +10435,13 @@ void tcApp::draw() {
 ```
 
 - WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 버퍼 용량을 계산하지 않고 정밀도를 유지한 CPU 읽기에는 Pixels 오버로드를 사용합니다. 원본 채널 수(RGBA 어태치먼트는 RGBA)의 F32 Pixels를 만들며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
@@ -10399,6 +10476,13 @@ void tcApp::draw() {
 ```
 
 - WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["Fbo::readPixels", "Pixels"]
 
@@ -28094,6 +28178,13 @@ details.en = '''
 - The recorder cannot be copied. Each take owns its recording state, and pending callbacks retain that state and its writer until completion.
 
 Window recording, including MCP `tc_start_recording`, reads window alpha with the precision described in `grabScreen`; use an Fbo source for exact alpha before encoding.
+
+- Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["VideoWriter", "startRecording", "Fbo", "Fbo::readPixels", "grabScreen"]
 platform_note.en = '''
@@ -28118,6 +28209,13 @@ details.ja = '''
 - レコーダーはコピーできません。各録画は専用の状態を持ち、処理中のコールバックは完了までその状態とライターを保持します。
 
 MCP の `tc_start_recording` を含むウィンドウの録画では、`grabScreen` に記載した精度でアルファ値を読み戻します。エンコード前の正確なアルファ値には Fbo を入力に使います。
+
+- v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 녹화를 시작할 때 현재 윈도우였던 윈도우의 각 프레임이 끝난 후, 내부 `VideoWriter`를 사용하여 자동으로 캡처합니다.
@@ -28129,6 +28227,13 @@ details.ko = '''
 - 레코더는 복사할 수 없습니다. 각 녹화는 자체 상태를 소유하며, 처리 중인 콜백은 완료될 때까지 해당 상태와 작성기를 유지합니다.
 
 MCP의 `tc_start_recording`을 포함한 윈도우 녹화는 `grabScreen`에 설명된 정밀도로 알파 값을 읽으며, 인코딩 전의 정확한 알파 값에는 Fbo 입력을 사용합니다.
+
+- v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 
 ["ScreenRecorder::getFrameCount"]
@@ -28226,6 +28331,13 @@ details.en = '''
 - On macOS the window is read back in the background, one frame at a time. If the previous frame is still being processed, that frame is skipped, and the video keeps real-time timing.
 
 For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
+
+- Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - `start(path)` でウィンドウを、`start(fbo, path)` で Fbo の内容を録画します（Fbo の場合、画面上の UI は映りません）。開始すると、`stop()` を呼ぶまで毎フレームの終わりに自動で録画されます。`ScreenRecorder` は tcApp のメンバーとして持っておいてください。同時に 1 本だけ録画できればよい場合は、共有のレコーダーを使う `startRecording()` でも同じことができます。
@@ -28237,6 +28349,13 @@ details.ja = '''
 - macOS では、ウィンドウの読み戻しを 1 フレームずつバックグラウンドで行います。前のフレームがまだ処理中の場合はそのフレームをスキップし、動画の時間は実時間のまま保たれます。
 
 ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
+
+- v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - `start(path)`는 윈도우를, `start(fbo, path)`는 Fbo의 내용을 녹화합니다(Fbo의 경우 화면의 UI는 찍히지 않습니다). 시작하면 `stop()`을 호출할 때까지 매 프레임이 끝날 때 자동으로 녹화됩니다. `ScreenRecorder`는 tcApp의 멤버로 가지고 있으세요. 한 번에 하나만 녹화하면 되는 경우에는 공유 레코더를 쓰는 `startRecording()`으로도 같은 일을 할 수 있습니다.
@@ -28248,6 +28367,13 @@ details.ko = '''
 - macOS에서는 윈도우 읽기를 한 프레임씩 백그라운드에서 처리합니다. 이전 프레임이 아직 처리 중이면 그 프레임은 건너뛰며, 비디오의 시간은 실제 시간 그대로 유지됩니다.
 
 윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
+
+- v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -43539,6 +43665,13 @@ details.en = '''
 - Backend failures are retained and logged once when first observed. `close()` reports a new finalization failure only when no earlier backend failure was retained; repeated closes retain the result.
 - The first caller mistake logs one Error per take; later mistakes still return their own failed `SaveResult` without another Error. `open()` resets this limit. Closing a take with caller mistakes and no accepted frames logs one Warning.
 - The writer cannot be copied or moved, and its public operations do not serialize concurrent access. Serialize access to a standalone writer; see `ScreenRecorder` for automatic capture.
+
+- Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. CPU-supplied Pixels do not require readback. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - `open(path, width, height, settings)` で開き、`addFrame()` または `addFrameAt()` でフレームを追加してから、`close()` でファイルを確定します。各操作は `SaveResult` を返します。破棄時にも `close()` を呼び出します。
@@ -43551,6 +43684,13 @@ details.ja = '''
 - バックエンドの失敗は保持し、最初に検出したときに一度だけ記録します。`close()` は、それ以前のバックエンド失敗がない場合だけ新たな終了処理の失敗を報告します。繰り返し閉じても結果を保持します。
 - 呼び出しの誤りは、各録画の最初の一度だけ Error を記録します。その後の誤りも個別の失敗した `SaveResult` を返しますが、Error は追加しません。`open()` でこの制限をリセットします。呼び出しの誤りがあり、受理済みフレームがない録画を閉じると Warning を一度記録します。
 - ライターはコピーもムーブもできず、公開操作は同時アクセスを直列化しません。単独のライターへのアクセスは直列化してください。自動キャプチャは `ScreenRecorder` を参照してください。
+
+- v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。CPU から渡す Pixels は読み戻しを必要としません。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - `open(path, width, height, settings)`으로 열고 `addFrame()` 또는 `addFrameAt()`으로 프레임을 추가한 다음, `close()`로 파일을 마무리합니다. 각 작업은 `SaveResult`를 반환합니다. 소멸 시에도 `close()`를 호출합니다.
@@ -43563,6 +43703,13 @@ details.ko = '''
 - 백엔드 실패는 유지하며 처음 감지했을 때 한 번만 기록합니다. `close()`는 이전 백엔드 실패가 없을 때만 새로운 종료 처리 실패를 보고합니다. 반복해서 닫아도 결과를 유지합니다.
 - 잘못된 호출은 녹화당 처음 한 번만 Error를 기록합니다. 이후 잘못된 호출도 각각 실패한 `SaveResult`를 반환하지만 Error를 추가하지 않습니다. `open()`은 이 제한을 초기화합니다. 잘못된 호출이 있었고 수락된 프레임이 없는 녹화를 닫으면 Warning을 한 번 기록합니다.
 - 작성기는 복사하거나 이동할 수 없으며 공개 작업은 동시 접근을 직렬화하지 않습니다. 독립된 작성기에 대한 접근은 직렬화해야 합니다. 자동 캡처는 `ScreenRecorder`를 참조하세요.
+
+- v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. CPU에서 제공하는 Pixels는 읽기가 필요하지 않습니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 snippet = '''
 void tcApp::setup() {
@@ -43614,14 +43761,35 @@ description.ko = "고정 프레임 레이트의 시각으로 프레임을 추가
 details.en = '''
 - Accepts an `Fbo` or `Pixels` and calls `addFrameAt` with `getFrameCount() / getFps()` seconds. The first frame uses time zero, and failed submissions do not advance this clock.
 - Source dimensions must match the writer. See `VideoWriter::addFrameAt` for supported formats, Fbo readback requirements, and submission results.
+
+- Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. CPU-supplied Pixels do not require readback. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - `Fbo` または `Pixels` を受け取り、`getFrameCount() / getFps()` 秒を指定して `addFrameAt` を呼びます。最初のフレームは 0 秒になり、追加に失敗してもこの時刻は進みません。
 - 入力の寸法はライターと一致する必要があります。対応形式、Fbo の読み戻し条件、追加結果は `VideoWriter::addFrameAt` を参照してください。
+
+- v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。CPU から渡す Pixels は読み戻しを必要としません。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - `Fbo` 또는 `Pixels`를 받아 `getFrameCount() / getFps()`초를 지정하여 `addFrameAt`을 호출합니다. 첫 프레임은 0초이며 제출에 실패해도 이 시각은 진행되지 않습니다.
 - 입력 크기는 라이터와 일치해야 합니다. 지원 형식, Fbo 읽기 조건, 제출 결과는 `VideoWriter::addFrameAt`을 참조하세요.
+
+- v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. CPU에서 제공하는 Pixels는 읽기가 필요하지 않습니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["Fbo", "Pixels", "VideoWriter::addFrameAt"]
 snippet = '''
@@ -43648,6 +43816,13 @@ details.en = '''
 - The raw-pointer overload expects tightly packed RGBA8 rows from top to bottom. The caller must provide at least `width * height * 4` readable bytes; buffer capacity is not checked.
 - A successful `SaveResult` means the backend accepted the submission and `getFrameCount()` increased. Linux checks `gst_app_src_push_buffer` and polls recording bus errors, Apple backends check the append result and AVAssetWriter status/error, and Windows checks the `WriteSample` HRESULT.
 - Submission success does not mean the file is finalized. Check `VideoWriter::close`; see `VideoWriter` for shared failure handling and `VideoWriter::open` for threading and input lifetime.
+
+- Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. CPU-supplied Pixels do not require readback. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - `Fbo`、`Pixels`、または `addFrameAt(rgba, width, height, timeSec)` を使えます。寸法はライターと一致する必要があり、`timeSec` は秒単位の表示時刻です。
@@ -43656,6 +43831,13 @@ details.ja = '''
 - 生ポインタの形式は、上から下へ隙間なく並べた RGBA8 の行を受け取ります。呼び出し側で少なくとも `width * height * 4` バイトの読み取り可能な領域を用意してください。バッファ容量は確認しません。
 - 成功の `SaveResult` はバックエンドが追加を受理し、`getFrameCount()` が増えたことを示します。Linux は `gst_app_src_push_buffer` と録画中の bus エラー、Apple のバックエンドは追加結果と AVAssetWriter の status/error、Windows は `WriteSample` の HRESULT を確認します。
 - 追加の成功はファイルの確定を意味しません。確定結果は `VideoWriter::close`、共通の失敗処理は `VideoWriter`、スレッドと入力の寿命は `VideoWriter::open` を参照してください。
+
+- v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。CPU から渡す Pixels は読み戻しを必要としません。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - `Fbo`, `Pixels` 또는 `addFrameAt(rgba, width, height, timeSec)`를 사용할 수 있습니다. 크기는 라이터와 일치해야 하며 `timeSec`는 초 단위의 표시 시각입니다.
@@ -43664,6 +43846,13 @@ details.ko = '''
 - 원시 포인터 오버로드는 위에서 아래 순서로 빈틈없이 저장된 RGBA8 행을 받습니다. 호출자는 최소 `width * height * 4`바이트의 읽을 수 있는 메모리를 제공해야 하며 버퍼 용량은 확인하지 않습니다.
 - 성공 `SaveResult`는 백엔드가 제출을 수락하고 `getFrameCount()`가 증가했음을 의미합니다. Linux는 `gst_app_src_push_buffer`와 녹화 중 bus 오류를 확인하고, Apple 백엔드는 추가 결과와 AVAssetWriter status/error를 확인하며, Windows는 `WriteSample`의 HRESULT를 확인합니다.
 - 제출 성공은 파일 마무리를 의미하지 않습니다. 마무리 결과는 `VideoWriter::close`, 공통 실패 처리는 `VideoWriter`, 스레드와 입력 수명은 `VideoWriter::open`을 참조하세요.
+
+- v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. CPU에서 제공하는 Pixels는 읽기가 필요하지 않습니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["Fbo", "Pixels"]
 snippet = '''
@@ -52365,6 +52554,13 @@ public:
 One call costs about 3–7 ms on desktop GPUs and about 15 ms on a Raspberry Pi at 720p, mostly waiting for the GPU, so reading less doesn't make it much cheaper; prefer calling on demand rather than every frame.
 
 On macOS, iOS and Windows, the main window uses RGB10A2, so its stored alpha has four levels (0, 85, 170, 255) and readback returns those values. On-screen appearance is unaffected: the view is opaque and rendering does not use destination alpha for color. For exact alpha, draw into an Fbo and use `Fbo::readPixels()` or `Fbo::save()`. Linux GLCORE windows and secondary desktop windows store 8-bit alpha; Linux EGL may omit the alpha channel.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - `update()`、`setup()`、フレーム内でも `events().afterFrame` リスナー内でもない他のフェーズ: `false` を返す。ウィンドウごとに Warning をちょうど1回出し、`events().afterFrame` または `saveScreenshot()` を案内する。
@@ -52396,6 +52592,13 @@ public:
 1回の呼び出しはデスクトップ GPU で約3〜7 ms、Raspberry Pi の720pで約15 msかかる。大半は GPU の待機時間なので、読み出し量を減らしてもあまり安くならない。毎フレームではなく、必要なときだけ呼ぶ。
 
 macOS・iOS・Windows のメインウィンドウは RGB10A2 を使うため、保存されるアルファ値は4段階（0, 85, 170, 255）で、読み戻しもこの値になります。ビューは不透明で、描画先のアルファ値を色の計算に使わないため、画面の見た目には影響しません。正確なアルファ値が必要な場合は Fbo に描画し、`Fbo::readPixels()` または `Fbo::save()` を使います。Linux GLCORE のウィンドウとデスクトップの副ウィンドウは8-bit アルファを保存しますが、Linux EGL ではアルファチャンネルがない場合があります。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - `update()`, `setup()`, 프레임 안이나 `events().afterFrame` 리스너 안이 아닌 다른 단계: `false`를 반환한다. 윈도우마다 Warning을 정확히 한 번 출력하며 `events().afterFrame` 또는 `saveScreenshot()`을 안내한다.
@@ -52427,6 +52630,13 @@ public:
 호출 한 번은 데스크톱 GPU에서 약 3–7 ms, Raspberry Pi의 720p에서 약 15 ms가 든다. 대부분 GPU를 기다리는 시간이므로 읽는 양을 줄여도 비용이 크게 줄지 않는다. 매 프레임보다 필요할 때만 호출하는 편이 좋다.
 
 macOS, iOS, Windows의 메인 윈도우는 RGB10A2를 사용하므로 저장되는 알파 값은 4단계(0, 85, 170, 255)이며 읽어올 때도 이 값을 반환합니다. 뷰가 불투명하고 색 계산에 대상 알파를 사용하지 않으므로 화면의 모습에는 영향이 없습니다. 정확한 알파 값이 필요하면 Fbo에 그린 뒤 `Fbo::readPixels()` 또는 `Fbo::save()`를 사용합니다. Linux GLCORE 윈도우와 데스크톱의 보조 윈도우는 8-bit 알파를 저장하지만 Linux EGL에서는 알파 채널이 없을 수 있습니다.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 platform_note.en = "Not implemented on web (no synchronous canvas readback): always returns false and logs a one-time warning. Use saveScreenshot() for a deferred canvas download or the browser's screenshot tools."
 platform_note.ja = "Web では未実装（同期 canvas 読み出しはない）: 常に false を返し、警告を1回だけ出す。遅延 canvas ダウンロードには saveScreenshot()、またはブラウザのスクリーンショット機能を使う。"
@@ -55598,6 +55808,13 @@ details.en = '''
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 
 For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - 解決した Window に capture を予約し、EVENT_DRIVEN でもフレームを要求します。afterFrame の全通知後に capture します。
@@ -55609,6 +55826,13 @@ details.ja = '''
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 
 ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 해석한 Window에 capture를 예약하고 EVENT_DRIVEN에서도 프레임을 요청합니다. afterFrame 알림이 모두 끝난 후 capture합니다.
@@ -55620,6 +55844,13 @@ details.ko = '''
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 
 윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["grabScreen", "startRecording", "captureWindow", "Fbo::readPixels"]
 platform_note.en = '''
@@ -67718,6 +67949,13 @@ details.en = '''
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 
 For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
+
+- Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - 解決した Window に非同期 capture を予約してフレームを要求します。各 Window は自分の capture queue だけを処理します。
@@ -67732,6 +67970,13 @@ details.ja = '''
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 
 ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
+
+- v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 해석한 Window에 비동기 capture를 예약하고 프레임을 요청합니다. 각 Window는 자신의 capture queue만 처리합니다.
@@ -67746,6 +67991,13 @@ details.ko = '''
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 
 윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
+
+- v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot", "Fbo::readPixels", "grabScreen"]
 snippet = '''
@@ -69618,16 +69870,37 @@ details.en = '''
 - read(destination, bytes) immediately submits preceding recorded draws and dispatches in order and blocks until completion. The frame stalls while it waits; calling it every frame can lower fps. No frame commit occurs, and later drawing continues normally. Available on Metal, D3D11, GL 4.3 and GLES 3.1, including Raspberry Pi 5. It is not available on Web: calling it there is a compile error.
 - Copies bytes from offset zero without conversion. Partial reads, including byte counts not divisible by four, are allowed. A zero-byte read succeeds without allocated storage or a destination and submits no work. A nonzero read requires allocated storage, a non-null destination with room for bytes, and bytes <= getSize(). Invalid input or native readback failure returns false with a warning (at most once every 5 seconds per buffer), and leaves the destination untouched. A successful result is a CPU snapshot that later GPU writes cannot change.
 - Every StorageBuffer allocation includes copy-source usage automatically. Call on the main thread with an initialized windowed GPU; this API does not enable headless compute.
+
+- Vulkan beta in v0.9 rejects nonzero reads with a warning; zero-byte reads still succeed. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - read(destination, bytes) は先行する記録済みの描画と dispatch を順番どおり直ちに送信し、完了までブロックします。待機中はフレームが停止し、毎フレーム呼ぶと fps が低下する場合があります。フレームの commit は行わず、その後も描画を続けられます。Metal、D3D11、GL 4.3、GLES 3.1（Raspberry Pi 5 を含みます）に対応します。Web では利用できず、呼ぶとコンパイルエラーになります。
 - オフセット 0 から bytes バイトを変換せずコピーします。4 の倍数でないバイト数を含め、部分読み取りができます。0 バイトなら確保済み領域や出力先は不要で、GPU へ送信せず true を返します。0 より大きい場合は、確保済み領域、bytes バイト以上の null でない出力先、bytes <= getSize() が必要です。不正な入力やネイティブ読み取り失敗では、警告を出して false を返し、出力先を変更しません。警告はバッファごとに 5 秒に 1 回までです。成功時の CPU スナップショットは、その後の GPU 書き込みでは変わりません。
 - すべての StorageBuffer は自動的にコピー元として確保します。ウィンドウの GPU が初期化された状態で、メインスレッドから呼びます。ヘッドレス compute を有効にする API ではありません。
+
+- v0.9 の Vulkan ベータ版は 0 より大きいバイト数の読み取りを警告付きで拒否します。0 バイトの読み取りは成功します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - read(destination, bytes)는 앞서 기록된 그리기와 dispatch를 순서대로 즉시 제출하고 완료까지 차단합니다. 기다리는 동안 프레임이 멈추며 매 프레임 호출하면 fps가 낮아질 수 있습니다. 프레임 commit은 수행하지 않으며 이후 그리기를 계속합니다. Metal, D3D11, GL 4.3, GLES 3.1(Raspberry Pi 5 포함)을 지원합니다. Web에서는 사용할 수 없으며 호출하면 컴파일 오류가 발생합니다.
 - 오프셋 0부터 bytes바이트를 변환 없이 복사합니다. 4의 배수가 아닌 바이트 수를 포함하여 부분 읽기를 허용합니다. 0바이트 읽기는 할당된 저장소나 출력 대상 없이 성공하며 GPU 작업을 제출하지 않습니다. 0보다 큰 읽기는 할당된 저장소, bytes바이트 이상을 담는 null이 아닌 출력 대상, bytes <= getSize()를 요구합니다. 잘못된 입력이나 네이티브 읽기 실패 시 경고하고 false를 반환하며 출력 대상을 변경하지 않습니다. 경고는 버퍼마다 5초에 한 번까지 출력합니다. 성공한 CPU 스냅샷은 이후 GPU 쓰기로 변경되지 않습니다.
 - 모든 StorageBuffer는 자동으로 복사 원본 용도를 포함하여 할당합니다. 창의 GPU를 초기화한 상태에서 메인 스레드에서 호출합니다. 이 API는 헤드리스 compute를 활성화하지 않습니다.
+
+- v0.9의 Vulkan 베타는 0보다 큰 바이트 수의 읽기를 경고와 함께 거부합니다. 0바이트 읽기는 성공합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 snippet = '''
 compute.dispatch(groups);
@@ -69637,23 +69910,44 @@ if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << va
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
 ["StorageBuffer::readAsync"]
-description.en = "Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only)."
-description.ja = "WebGPU を含む全プラットフォームでバッファ全体を読み取り、後続のメインスレッド更新のコールバックで受け取ります（C++ 専用です）。"
-description.ko = "WebGPU를 포함한 모든 플랫폼에서 전체 버퍼를 읽고 이후 메인 스레드 업데이트의 콜백으로 받습니다(C++ 전용입니다)."
+description.en = "Reads the whole buffer on supported backends, including WebGPU, with a callback in a later main-thread update (C++ only)."
+description.ja = "WebGPU を含む対応バックエンドでバッファ全体を読み取り、後続のメインスレッド更新のコールバックで受け取ります（C++ 専用です）。"
+description.ko = "WebGPU를 포함한 지원 백엔드에서 전체 버퍼를 읽고 이후 메인 스레드 업데이트의 콜백으로 받습니다(C++ 전용입니다)."
 details.en = '''
 - Call readAsync(callback) on the main thread. The callback receives ReadbackResult by value in request order, in an update later than the request. The result owns its bytes; clearing or destroying the StorageBuffer after requesting does not cancel delivery or change the snapshot. Keep the result to retain its bytes after the callback returns.
 - The callback runs in the requesting App's context and is dropped if that App ends first. Requests made outside any App have no App ownership and run in the polling update's current scope. Requests still pending when app shutdown begins are dropped without calling their callbacks. Native staging resources retire safely. Warnings use the same per-buffer 5-second gate as read().
 - All native backends (Metal, D3D11, GL 4.3 and GLES 3.1) and WebGPU are supported. GL/GLES submits a staging copy and fence immediately; D3D11 submits a staging copy and event query immediately, mapping only after the query completes. WebGPU records a staging copy in the current frame and maps it asynchronously after frame submission. Metal records a blit into shared staging on the current command buffer; the ordinary frame commit submits it. Later updates check completion without waiting before copying the snapshot into owned bytes. WebGL does not support storage buffers and delivers deferred !ok(). Empty storage and readback failure also deliver !ok(), with size() == 0. This does not enable headless compute.
+
+- Vulkan beta in v0.9 does not support allocated-buffer readback; readAsync delivers deferred failure with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ja = '''
 - メインスレッドから readAsync(callback) を呼びます。要求より後の更新で、要求順に ReadbackResult を値で受け取ります。結果はバイト列を所有するため、要求後に StorageBuffer を消去・破棄しても配送を取り消さず、スナップショットも変わりません。結果を保持するとコールバック終了後もバイト列を使えます。
 - コールバックは要求元 App のコンテキストで実行し、その App が先に終了した場合は破棄します。App の外での要求は App に所有されず、キューを処理する更新の現在のスコープで実行します。アプリの shutdown 開始時に保留中の要求は、コールバックを呼ばず破棄します。ネイティブのステージング資源も安全に解放します。警告は read() と同じ、バッファごとに 5 秒に 1 回の制限を共有します。
 - すべてのネイティブバックエンド（Metal、D3D11、GL 4.3、GLES 3.1）と WebGPU に対応します。GL/GLES はステージングへのコピーと fence を即座に送信します。D3D11 はステージングへのコピーとイベントクエリを即座に送信し、クエリの完了後にだけマップします。WebGPU は現在のフレームにステージングへのコピーを記録し、フレーム送信後に非同期でマップします。Metal は現在のコマンドバッファに共有ステージングへの blit を記録し、通常のフレーム commit で送信します。後続の更新で完了を待機せず確認し、スナップショットを所有バイト列にコピーします。WebGL は storage buffer に対応せず、後続の更新で !ok() を返します。空の領域や読み取り失敗も !ok()、size() == 0 を返します。ヘッドレス compute は有効にしません。
+
+- v0.9 の Vulkan ベータ版は確保済みバッファの読み戻しに対応しておらず、readAsync は警告付きの失敗を後から通知します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 details.ko = '''
 - 메인 스레드에서 readAsync(callback)을 호출합니다. 요청 이후 업데이트에서 요청 순서대로 ReadbackResult를 값으로 받습니다. 결과가 바이트를 소유하므로 요청 후 StorageBuffer를 지우거나 소멸해도 전달을 취소하지 않으며 스냅샷도 바뀌지 않습니다. 결과를 보관하면 콜백 반환 후에도 바이트를 사용할 수 있습니다.
 - 콜백은 요청한 App의 컨텍스트에서 실행되며 해당 App이 먼저 종료되면 폐기합니다. App 밖의 요청은 App에 소유되지 않으며 큐를 처리하는 업데이트의 현재 스코프에서 실행됩니다. 앱 종료가 시작될 때 보류 중인 요청은 콜백을 호출하지 않고 폐기합니다. 네이티브 스테이징 리소스도 안전하게 해제합니다. 경고는 read()와 버퍼별 5초 제한을 공유합니다.
 - 모든 네이티브 백엔드(Metal, D3D11, GL 4.3, GLES 3.1)와 WebGPU를 지원합니다. GL/GLES는 스테이징 복사와 fence를 즉시 제출합니다. D3D11은 스테이징 복사와 이벤트 쿼리를 즉시 제출하고 쿼리가 완료된 후에만 매핑합니다. WebGPU는 현재 프레임에 스테이징 복사를 기록하고 프레임 제출 후 비동기로 매핑합니다. Metal은 현재 커맨드 버퍼에 공유 스테이징으로의 blit을 기록하고 일반 프레임 commit으로 제출합니다. 이후 업데이트에서 기다리지 않고 완료를 확인한 뒤 스냅샷을 소유 바이트로 복사합니다. WebGL은 storage buffer를 지원하지 않으며 이후 업데이트에서 !ok()를 전달합니다. 빈 저장소와 읽기 실패도 !ok(), size() == 0을 전달합니다. 헤드리스 compute를 활성화하지 않습니다.
+
+- v0.9의 Vulkan 베타는 할당된 버퍼 읽기를 지원하지 않으며 readAsync는 경고와 함께 실패를 나중에 전달합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset linux
+```
 '''
 snippet = '''
 buffer.readAsync([](ReadbackResult result) {

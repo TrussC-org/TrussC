@@ -4912,7 +4912,7 @@ size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
 bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
-void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
+void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on supported backends, including WebGPU, with a callback in a later main-thread update (C++ only).
 bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
