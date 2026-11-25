@@ -50,7 +50,7 @@ After the scope ends, read into a `Pixels pixels` member and check success befor
 if (fbo.readPixels(pixels)) logNotice() << pixels.getWidth();
 ```
 
-For Linux capture backend selection, see [MIGRATION_0.9.md › Vulkan backend (beta)](#vulkan-backend-beta).
+Fbo readback does not work on the Vulkan beta; see [MIGRATION_0.9.md › Vulkan backend (beta)](#vulkan-backend-beta).
 
 ## Window::getFps() and getTargetFps()
 
@@ -194,7 +194,7 @@ After the scope ends, read into a `Pixels pixels` member and check success:
 if (fbo.readPixels(pixels)) logNotice() << pixels.getWidth();
 ```
 
-For Linux capture backend selection, see [MIGRATION_0.9.md › Vulkan backend (beta)](#vulkan-backend-beta). Details: [tcxHap README › Read Hap frames as pixels](../../addons/tcxHap/README.md#read-hap-frames-as-pixels).
+Fbo readback does not work on the Vulkan beta; see [MIGRATION_0.9.md › Vulkan backend (beta)](#vulkan-backend-beta). Details: [tcxHap README › Read Hap frames as pixels](../../addons/tcxHap/README.md#read-hap-frames-as-pixels).
 
 ## EasyCam mouse button setters
 
@@ -237,7 +237,7 @@ void tcApp::setup() {
 }
 ```
 
-Vulkan readback is not supported in v0.9: window screenshots, `Fbo::readPixels()` / `readPixelsFloat()` / `toImage()` / `readStencil()`, `StorageBuffer::read()` / `readAsync()`, MCP image tools and recorders fail with a warning. There is no Vulkan API to enable readback. Asynchronous buffer reads deliver deferred failure; recorders stop at the first readback failure. To capture, select the default OpenGL backend in the Linux project's CMake configuration and rebuild:
+Vulkan readback is not supported in v0.9: window capture (`grabScreen`, `saveScreenshot`, `saveScreenshotAsync`), Fbo readback (`readPixels`, `readPixelsFloat`, `copyTo` to an Image, `readStencil`), `StorageBuffer::read` and `readAsync`, MCP screenshot and window/Fbo image analysis, and `ScreenRecorder` / `VideoWriter` fed from a window or an Fbo fail with a warning. The full list is in [BUILD_SYSTEM.md › Experimental Vulkan build (Linux)](BUILD_SYSTEM.md#experimental-vulkan-build-linux). There is no Vulkan API to enable readback. Asynchronous buffer reads deliver deferred failure; recorders stop at the first readback failure. To capture, select the default OpenGL backend in the Linux project's CMake configuration and rebuild:
 
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
