@@ -11,6 +11,37 @@ from test_trusscli_versions import CLI
 
 
 class CacheTests(AddonVersionTests):
+    def test_cache_remove_exact_ref_wins(self):
+        for addon in (False, True):
+            parent = self.cache / ("addons/alice/tcxFixture" if addon else "versions/TrussC-org/TrussC")
+            for ref, other in (("main", "main-feature"),
+                               ("123abcd", "123abcd" + "1" * 33)):
+                with self.subTest(addon=addon, ref=ref):
+                    for name in (ref, other):
+                        root = parent / name
+                        root.mkdir(parents=True)
+                        (root / ".git_archival.txt").write_text("describe: fixture\n", encoding="utf-8")
+                    args = ("--addon", "alice/tcxFixture@" + ref) if addon else (ref,)
+                    self.cli("cache", "remove", *args)
+                    self.assertFalse((parent / ref).exists())
+                    self.assertTrue((parent / other).is_dir())
+
+    def test_cache_remove_rejects_non_commit_prefixes(self):
+        for addon in (False, True):
+            parent = self.cache / ("addons/alice/tcxFixture" if addon else "versions/TrussC-org/TrussC")
+            for ref, cached in (("v0.8", "v0.8.1"),
+                                ("123abcd", "123abcd-feature"),
+                                ("123abcd", "123abcd123"),
+                                ("abcdef", "abcdef" + "1" * 34)):
+                with self.subTest(addon=addon, ref=ref, cached=cached):
+                    root = parent / cached
+                    root.mkdir(parents=True)
+                    (root / ".git_archival.txt").write_text("describe: fixture\n", encoding="utf-8")
+                    args = ("--addon", "alice/tcxFixture@" + ref) if addon else (ref,)
+                    output = self.cli("cache", "remove", *args, success=False)
+                    self.assertIn("spec is not in the cache", output)
+                    self.assertTrue(root.is_dir())
+
     def test_cache_remove_unique_prefix(self):
         for addon, commit in ((False, self.initial), (True, self.addon_initial)):
             spec = ("alice/tcxFixture@" if addon else "") + commit

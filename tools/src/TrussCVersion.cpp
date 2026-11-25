@@ -786,7 +786,7 @@ int cacheCommand(const std::vector<std::string>& args) {
             "  autoremove             List and remove versions last used 90 or more days ago (one y/N prompt)\n\n"
             "Addon rows are marked 'addon'; other rows are marked 'TrussC'.\n"
             "remove uses specs as for use or addon add; qualify the owner if an addon is ambiguous.\n"
-            "A unique cached ref prefix is also accepted by remove.\n"
+            "A unique short commit ID (7-39 hex characters) is also accepted by remove.\n"
             "Versions without .last-used are never auto-removed.\n"
             "clear and autoremove require terminal input; the default answer is No.\n"
             "  -h, --help  Show this help\n";
@@ -809,10 +809,17 @@ int cacheCommand(const std::vector<std::string>& args) {
         }
         auto entries = cacheEntries();
         std::vector<CacheEntry> matches;
+        std::vector<CacheEntry> prefixMatches;
+        const bool shortCommit = parse(spec.ref).shortCommit;
         for (const auto& entry : entries) {
-            if (entry.addon == addon && entry.spec.repo == spec.repo && entry.spec.ref.rfind(spec.ref, 0) == 0 &&
-                (spec.owner.empty() || entry.spec.owner == spec.owner)) matches.push_back(entry);
+            if (entry.addon != addon || entry.spec.repo != spec.repo ||
+                (!spec.owner.empty() && entry.spec.owner != spec.owner)) continue;
+            if (entry.spec.ref == spec.ref) matches.push_back(entry);
+            else if (shortCommit && entry.spec.commit && entry.spec.ref.rfind(spec.ref, 0) == 0) {
+                prefixMatches.push_back(entry);
+            }
         }
+        if (matches.empty()) matches = std::move(prefixMatches);
         if (matches.empty()) throw std::runtime_error("spec is not in the cache: " + text + "; run `trusscli cache list`");
         if (matches.size() > 1) {
             std::string message = "ambiguous cached spec: " + text + "; candidates:";

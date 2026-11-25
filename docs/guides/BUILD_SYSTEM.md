@@ -190,16 +190,18 @@ trusscli use --clear
 ```
 
 Cached versions are shared across projects. Inspect them with `cache list` and
-remove an unused version with `cache remove <spec>`. A unique cached ref prefix
-is accepted, including a short prefix of a full commit ID:
+remove an unused version with `cache remove <spec>`. An exact ref match wins;
+otherwise, a unique short commit ID (7–39 hex characters) can match a cached
+full 40-hex commit ID.
+Branch and tag names must match exactly (there is no tcApp API for cache removal):
 
 ```bash
+trusscli cache remove main
 trusscli cache remove 006a086b
 ```
 
-If several cached refs match, the command lists them and removes nothing.
-Choose a longer prefix or a full spec from `cache list` (there is no tcApp API
-for cache removal):
+If several cached full commit IDs match the short ID, the command lists them and
+removes nothing. Choose a longer commit ID or a full spec from `cache list`:
 
 ```bash
 trusscli cache list
