@@ -251,7 +251,8 @@ bool captureWindow(Pixels& outPixels) {
 
 #else
 bool captureWindow(Pixels&) {
-    logWarning("Screenshot") << "captureWindow is not supported on the Vulkan backend yet";
+    if (internal::currentWindowContext().captureWarning.isFirstTime())
+        logWarning("Screenshot") << "captureWindow is not supported on the Vulkan backend yet";
     return false;
 }
 #endif

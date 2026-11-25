@@ -34,6 +34,37 @@ void check(const char* label, bool okay) {
     if (!okay) ++failures;
 }
 struct GuardApp : App {
+    void checkReadbackWarnings() {
+        int byteWarnings = 0, floatWarnings = 0, captureWarnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level != LogLevel::Warning) return;
+            if (event.message.find("readPixels is not supported") != std::string::npos) ++byteWarnings;
+            if (event.message.find("readPixelsFloat is not supported") != std::string::npos) ++floatWarnings;
+            if (event.message.find("[Screenshot]") != std::string::npos &&
+                event.message.find("Vulkan") != std::string::npos) ++captureWarnings;
+        });
+        // Each object logs its first failure, then suppresses consecutive calls.
+        Fbo fbos[2];
+        for (int i = 0; i < 2; ++i) {
+            auto& fbo = fbos[i];
+            fbo.allocate(4, 4);
+            unsigned char bytes[4 * 4 * 4]{};
+            float floats[4 * 4 * 4]{};
+            check("Vulkan byte readback fails", !fbo.readPixels(bytes));
+            check("first byte readback warns per Fbo", byteWarnings == i + 1);
+            check("repeated byte readback fails", !fbo.readPixels(bytes));
+            check("consecutive byte reads warn once", byteWarnings == i + 1);
+            check("Vulkan float readback fails", !fbo.readPixelsFloat(floats));
+            check("first float readback warns per Fbo", floatWarnings == i + 1);
+            check("repeated float readback fails", !fbo.readPixelsFloat(floats));
+            check("consecutive float reads warn once", floatWarnings == i + 1);
+        }
+        Pixels pixels;
+        check("Vulkan window capture fails", !grabScreen(pixels));
+        check("first window capture warns", captureWarnings == 1);
+        check("repeated window capture fails", !grabScreen(pixels));
+        check("consecutive window captures warn once", captureWarnings == 1);
+    }
     void setup() override {
         getWindow()->setTitle("TrussC Vulkan validation");
         sg_enable_stats();
@@ -117,15 +148,22 @@ struct GuardApp : App {
             std::puts("vulkanSingleWindow: acquisition skipped during recreation");
             return;
         }
+        if (draws == 0) checkReadbackWarnings();
         if (stencil) {
-            // Command-level check on the window attachment; Vulkan pixel readback
-            // is deferred. Linux's probe records native reference values;
-            // Windows logs the draws and relies on validation diagnostics.
+            // Check pipeline acceptance; pixels remain unverified without Vulkan readback.
+            if (draws == 0)
+                std::puts("vulkanSingleWindow: stencil pixel result not verified on Vulkan: readback is unsupported in v0.9");
             for (uint8_t ref : {uint8_t(1), uint8_t(73), uint8_t(255)}) {
-                setStencilDesc(StencilDesc::shape(ref));
-                drawRect(0, 0, 32, 32);
-                setStencilDesc(StencilDesc::inside(ref));
-                drawRect(0, 0, 32, 32);
+                for (const auto& desc : {StencilDesc::shape(ref), StencilDesc::inside(ref)}) {
+                    setStencilDesc(desc);
+                    drawRect(0, 0, 32, 32);
+                    if (draws == 0) {
+                        auto& target = internal::currentTarget();
+                        check("stencil raster state accepted", target.stencilDescKey == internal::stencilDescKey(desc));
+                        check("stencil pipeline created", target.immediatePipeline(target.selectedPipeline).id != 0);
+                        check("stencil commands accepted", !sgl_error().any);
+                    }
+                }
 #if defined(_WIN32)
                 if (draws == 0) std::printf("vulkanSingleWindow: stencil draw ref=%u\n", unsigned(ref));
 #endif

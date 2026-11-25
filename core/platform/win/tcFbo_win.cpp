@@ -231,11 +231,13 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 #else
 namespace trussc {
 bool Fbo::readPixelsPlatform(unsigned char*, bool) const {
-    logWarning("Fbo") << "readPixels is not supported on the Vulkan backend yet";
+    if (readPixelsWarning_.isFirstTime())
+        logWarning("Fbo") << "readPixels is not supported on the Vulkan backend yet";
     return false;
 }
 bool Fbo::readPixelsFloatPlatform(float*) const {
-    logWarning("Fbo") << "readPixelsFloat is not supported on the Vulkan backend yet";
+    if (readPixelsFloatWarning_.isFirstTime())
+        logWarning("Fbo") << "readPixelsFloat is not supported on the Vulkan backend yet";
     return false;
 }
 } // namespace trussc

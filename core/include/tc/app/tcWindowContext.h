@@ -200,6 +200,9 @@ struct WindowContext {
     // recording reads back ITS surface instead of the main swapchain. On macOS
     // capture reads lastSwapchainDrawable directly and ignores this.
     sg_swapchain lastSwapchain{};
+#if defined(SOKOL_VULKAN)
+    OnceGate captureWarning{5.0};
+#endif
     void clearFrameDrawable() {
         lastSwapchainDrawable = nullptr;
         lastSwapchain.metal.current_drawable = nullptr;

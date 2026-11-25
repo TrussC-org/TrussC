@@ -329,7 +329,8 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 bool captureWindow(Pixels& outPixels) {
 #if defined(SOKOL_VULKAN)
     (void)outPixels;
-    logWarning() << "[Screenshot] Vulkan window readback is not supported yet";
+    if (internal::currentWindowContext().captureWarning.isFirstTime())
+        logWarning() << "[Screenshot] Vulkan window readback is not supported yet";
     return false;
 #else
     if (!sg_isvalid()) return false;
