@@ -23579,11 +23579,13 @@ _SOKOL_PRIVATE void _sg_vk_init_caps(void) {
     _sg.limits.max_image_size_3d = (int)l->maxImageDimension3D;
     _sg.limits.max_image_size_array = _sg.limits.max_image_size_2d;
     _sg.limits.max_image_array_layers = (int)l->maxImageArrayLayers;
-    _sg.limits.max_vertex_attrs = _sg_min((int)l->maxVertexInputAttributes, SG_MAX_VERTEX_ATTRIBUTES);
-    _sg.limits.max_color_attachments = _sg_min((int)l->maxFragmentOutputAttachments, SG_MAX_COLOR_ATTACHMENTS);
-    _sg.limits.max_texture_bindings_per_stage = _sg_min((int)l->maxPerStageDescriptorSampledImages, SG_MAX_VIEW_BINDSLOTS);
-    _sg.limits.max_storage_buffer_bindings_per_stage = _sg_min((int)l->maxPerStageDescriptorStorageBuffers, SG_MAX_VIEW_BINDSLOTS);
-    _sg.limits.max_storage_image_bindings_per_stage = _sg_min((int)l->maxPerStageDescriptorStorageImages, SG_MAX_VIEW_BINDSLOTS);
+    // [TrussC fork] Clamp in unsigned before casting: some drivers (AMD) report
+    // UINT32_MAX here, which an early (int) cast turns into -1.
+    _sg.limits.max_vertex_attrs = (int)_sg_min(l->maxVertexInputAttributes, (uint32_t)SG_MAX_VERTEX_ATTRIBUTES);
+    _sg.limits.max_color_attachments = (int)_sg_min(l->maxFragmentOutputAttachments, (uint32_t)SG_MAX_COLOR_ATTACHMENTS);
+    _sg.limits.max_texture_bindings_per_stage = (int)_sg_min(l->maxPerStageDescriptorSampledImages, (uint32_t)SG_MAX_VIEW_BINDSLOTS);
+    _sg.limits.max_storage_buffer_bindings_per_stage = (int)_sg_min(l->maxPerStageDescriptorStorageBuffers, (uint32_t)SG_MAX_VIEW_BINDSLOTS);
+    _sg.limits.max_storage_image_bindings_per_stage = (int)_sg_min(l->maxPerStageDescriptorStorageImages, (uint32_t)SG_MAX_VIEW_BINDSLOTS);
     _sg.limits.vk_min_uniform_buffer_offset_alignment = (int)l->minUniformBufferOffsetAlignment;
 
     _SG_STRUCT(VkPhysicalDeviceImageFormatInfo2, fmt_info);
