@@ -248,6 +248,71 @@ static void parseAddonsMake(const string& projectPath,
     }
 }
 
+// Selection precedes update validation, just as in the command-line flow.
+static Result selectVersion(UpdateInput input, string value, bool local, bool clear,
+                            const LogCallback& callback) {
+    Result result;
+    string spawnFailure;
+    auto log = [&](const string& message, MessageKind kind) {
+        if (kind == MessageKind::Warning) result.warnings.push_back(message);
+        else result.logLines.push_back(message);
+        if (kind == MessageKind::Diagnostic && message.find("Error: failed to spawn '") == 0) {
+            spawnFailure = message;
+        }
+        if (callback) callback(message, kind);
+    };
+    ScopedDiagnostics diagnostics(log);
+    try {
+        if (input.projectPath.empty()) input.projectPath = detectProjectRoot();
+        if (input.projectPath.empty() || !fs::is_directory(fs::path(input.projectPath) / "src")) {
+            result.failureReason = "not inside a TrussC project";
+            return result;
+        }
+        auto versionFile = fs::path(input.projectPath) / ".trussc-version";
+        const bool selectingVersion = !local && !clear;
+        // Acquire and check the new sources before changing either project selection.
+        if (selectingVersion) {
+            auto spec = trusscVersion::parse(value);
+            auto root = trusscVersion::acquire(spec, true);
+            if (spec.shortCommit) value.replace(value.size() - spec.ref.size(), spec.ref.size(), fs::path(root).filename().string());
+        }
+        if (local) trusscVersion::setLocalPath(input.projectPath, clear ? "" : value);
+        else {
+            if (clear) fs::remove(versionFile);
+            else writeGeneratedFile(versionFile.string(), value + "\n");
+            trusscVersion::setLocalPath(input.projectPath, "");
+        }
+        // The selected TrussC was already fetched; addons still refresh in update.
+        input.fetchVersion = true;
+        input.versionAcquired = selectingVersion;
+        auto configureOutput = input.configureOutput;
+        if (configureOutput) {
+            input.configureOutput = [&](const string& project, const string& buildDir, const string& output, int code) {
+                result.logLines.push_back(output);
+                configureOutput(project, buildDir, output, code);
+            };
+        }
+        auto regenerated = update(input, log);
+        result.success = regenerated.success;
+        result.failureReason = regenerated.failureReason;
+    } catch (const exception& error) {
+        result.failureReason = error.what();
+    }
+    if (!result.success && !spawnFailure.empty() && result.failureReason.find(spawnFailure) == string::npos) {
+        result.failureSummary = result.failureReason;
+        result.failureReason += "\nDetail: " + spawnFailure;
+    }
+    return result;
+}
+
+Result use(const UseInput& input, const LogCallback& callback) {
+    return selectVersion(input.update, input.spec, false, input.clear, callback);
+}
+
+Result useLocal(const UseLocalInput& input, const LogCallback& callback) {
+    return selectVersion(input.update, input.path, true, input.clear, callback);
+}
+
 Result update(const UpdateInput& input, const LogCallback& callback) {
     Result result;
     auto log = [&](const string& message, MessageKind kind = MessageKind::Log) {
