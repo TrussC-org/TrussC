@@ -78,11 +78,12 @@ public:
         const int padding = int(lround(glyph->getV0() * page->getHeight()));
         const int glyphWidth = int(lround((glyph->getU1() - glyph->getU0()) * page->getWidth()));
         const int glyphHeight = int(lround((glyph->getV1() - glyph->getV0()) * page->getHeight()));
-        const int gap = std::max(2, (std::max(glyphWidth, glyphHeight) + 7) / 8);
+        // One gap per font; the last row/column keeps half a gap to the edge.
+        const int gap = manager->getGlyphGap();
         const int cellWidth = (glyphWidth + gap + 15) / 16 * 16;
         const int cellHeight = (glyphHeight + gap + 15) / 16 * 16;
-        const int capacity = (1 + (page->getWidth() - padding - glyphWidth - gap) / cellWidth) *
-                             (1 + (page->getHeight() - padding - glyphHeight - gap) / cellHeight);
+        const int capacity = (1 + (page->getWidth() - padding - glyphWidth - gap / 2) / cellWidth) *
+                             (1 + (page->getHeight() - padding - glyphHeight - gap / 2) / cellHeight);
         const int unalignedCapacity = ((page->getWidth() - 2) / (glyphWidth + gap)) *
             (1 + (page->getHeight() - 2 - glyphHeight - gap) / (glyphHeight + gap));
         bool aligned = true;

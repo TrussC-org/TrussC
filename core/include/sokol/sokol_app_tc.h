@@ -2202,6 +2202,7 @@ typedef struct sapp_desc {
     // Zero preserves legacy sapp launch behavior (draw while hidden).
     int _tc_draw_while_hidden; // [TrussC]
     bool _tc_start_hidden;           // [TrussC] never show the launch window before requested (#1262)
+    bool _tc_borderless;             // [TrussC] create desktop windows without decorations (#1639)
     // Host binding runs after native metadata initialization, before callback readiness.
     bool (*_tc_bind_cb)(uint32_t id, void* user); // [TrussC]
     void* _tc_bind_user; // [TrussC]
@@ -4510,6 +4511,8 @@ static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
 
 static void _sapp_tc_mac_apply_decoration(_sapp_tc_window_t* w) {
     NSWindow* window = w->window;
+    // [TrussC] Changing the style keeps the frame; preserve the client size (#1639).
+    const NSSize content_size = window.contentView.frame.size;
     const bool decorated = !w->desc.borderless;
     const NSWindowStyleMask base = NSWindowStyleMaskTitled |
                                    NSWindowStyleMaskClosable |
@@ -4543,6 +4546,7 @@ static void _sapp_tc_mac_apply_decoration(_sapp_tc_window_t* w) {
         window.opaque = YES;
         window.hasShadow = NO;
     }
+    [window setContentSize:content_size];
 }
 
 static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed) {
@@ -5081,10 +5085,11 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     NSRect rect = NSMakeRect(px, py, width, height);
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                               NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
-    if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
     w->window = [[_sapp_tc_window alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->window == nil) return _sapp_tc_mac_fail(w, "NSWindow initWithContentRect returned nil (no NSError available)");
+    // [TrussC] Match runtime borderless chrome before showing either window kind (#1639).
+    if (w->desc.borderless) _sapp_tc_mac_apply_decoration(w);
     w->window.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
@@ -9839,6 +9844,8 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool fullscreen_on_map;     /* replay requested fullscreen once after explicit show (#1262) */
     double fullscreen_sent;     /* when the last fullscreen request was sent */
     bool decoration_pending;    /* decoration changed while fullscreen; write it again on exit */
+    int windowed_width, windowed_height; /* last observed windowed client pixels */
+    int decoration_width, decoration_height; /* windowed client pixels at the decoration request */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
     // [TrussC #1263] Follower pacing is divided without blocking the shared GL context.
@@ -11552,6 +11559,11 @@ static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t* w) {
     if ((attribs.width <= 0) || (attribs.height <= 0)) {
         return false;
     }
+    // [TrussC #1639] Fullscreen pixels must not replace the windowed size to keep.
+    if (!w->fullscreen && !w->fullscreen_requested && !w->decoration_pending) {
+        w->windowed_width = attribs.width;
+        w->windowed_height = attribs.height;
+    }
     /* X11 has no separate backing scale: framebuffer == window pixels */
     const bool changed = (attribs.width != w->fb_width) || (attribs.height != w->fb_height);
     if (changed && w->fb_width > 0 && w->fb_height > 0) w->surface_resize_pending = true;
@@ -11607,6 +11619,14 @@ static void _sapp_tc_x11_observe_fullscreen(_sapp_tc_window_t* w) {
     if (!full && w->decoration_pending && (changed || !w->fullscreen_requested)) {
         w->decoration_pending = false;
         _sapp_tc_x11_set_decorated(w, !w->desc.borderless);
+        // [TrussC #1639] The WM may still expose its old frame rectangle here.
+        // Use the windowed client size saved when decorations were requested
+        // (none yet for a window that started fullscreen: X rejects a 0 size).
+        if (w->decoration_width > 0 && w->decoration_height > 0) {
+            XResizeWindow(_sapp_tc.display, w->xwin,
+                (unsigned int)w->decoration_width, (unsigned int)w->decoration_height);
+        }
+        XFlush(_sapp_tc.display);
     }
 }
 
@@ -18407,23 +18427,46 @@ extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 extern "C" void sapp_tc_window_set_decorated(sapp_tc_window win, bool decorated) {
 #if defined(_WIN32)
     auto* w = _sapp_tc_lookup(win);
-    if (!w) return;
+    if (!w || w->desc.borderless == !decorated) return;
     const LONG_PTR chrome = WS_CAPTION | WS_THICKFRAME |
                             WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
-    LONG_PTR style = w->fullscreen ? w->stored_style : GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+    const LONG_PTR old_style = w->fullscreen ? w->stored_style : GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+    LONG_PTR style = old_style;
     if (decorated) style |= chrome;
     else style &= ~chrome;
     w->desc.borderless = !decorated;
+    // [TrussC] Recompute the outer size for the existing client, at its current DPI (#1639).
+    const DWORD ex_style = (DWORD)(w->fullscreen ? w->stored_ex_style : GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE));
+    const auto adjust_rect = [&](RECT* rect, LONG_PTR frame_style) {
+        if (_sapp_tc.GetDpiForWindow && _sapp_tc.AdjustWindowRectExForDpi) {
+            _sapp_tc.AdjustWindowRectExForDpi(rect, (DWORD)frame_style, FALSE, ex_style,
+                                           _sapp_tc.GetDpiForWindow(w->hwnd));
+        } else {
+            AdjustWindowRectEx(rect, (DWORD)frame_style, FALSE, ex_style);
+        }
+    };
+    RECT rect = {};
+    if (w->fullscreen) {
+        RECT frame = {};
+        adjust_rect(&frame, old_style);
+        rect.right = w->stored_window_rect.right - w->stored_window_rect.left - (frame.right - frame.left);
+        rect.bottom = w->stored_window_rect.bottom - w->stored_window_rect.top - (frame.bottom - frame.top);
+    } else {
+        if (!GetClientRect(w->hwnd, &rect)) return;
+    }
+    adjust_rect(&rect, style);
     if (w->fullscreen) {
         w->stored_style = style;
+        w->stored_window_rect.right = w->stored_window_rect.left + (rect.right - rect.left);
+        w->stored_window_rect.bottom = w->stored_window_rect.top + (rect.bottom - rect.top);
         return;
     }
     SetWindowLongPtrW(w->hwnd, GWL_STYLE, style);
-    SetWindowPos(w->hwnd, nullptr, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    SetWindowPos(w->hwnd, nullptr, 0, 0, (int)(rect.right - rect.left), (int)(rect.bottom - rect.top),
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
 #elif defined(__APPLE__) && TARGET_OS_OSX
     auto* w = _sapp_tc_lookup(win);
-    if (!w) return;
+    if (!w || w->desc.borderless == !decorated) return;
     w->desc.borderless = !decorated;
     if (w->fullscreen_state.blocksGeometry()) {
         w->decoration_pending = true;
@@ -18434,10 +18477,19 @@ extern "C" void sapp_tc_window_set_decorated(sapp_tc_window win, bool decorated)
     [w->window makeFirstResponder:w->window.contentView];
 #elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     auto* w = _sapp_tc_lookup(win);
-    if (!w || !_sapp_tc.display || !w->xwin) return;
+    if (!w || !_sapp_tc.display || !w->xwin || w->desc.borderless == !decorated) return;
+    XWindowAttributes client;
+    if (!XGetWindowAttributes(_sapp_tc.display, w->xwin, &client)) return;
     w->desc.borderless = !decorated;
     _sapp_tc_x11_set_decorated(w, decorated);
     w->decoration_pending = w->fullscreen || w->fullscreen_requested;
+    w->decoration_width = w->decoration_pending ? w->windowed_width : client.width;
+    w->decoration_height = w->decoration_pending ? w->windowed_height : client.height;
+    // [TrussC] Queue one client-size request after the Motif change (#1639).
+    // With a WM, XResizeWindow sends ConfigureRequest even when the size is unchanged.
+    if (!w->decoration_pending) {
+        XResizeWindow(_sapp_tc.display, w->xwin, (unsigned int)client.width, (unsigned int)client.height);
+    }
     XFlush(_sapp_tc.display);
 #else
     (void)win; (void)decorated;

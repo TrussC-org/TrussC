@@ -11,6 +11,11 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [ "$(uname)" != "Linux" ]; then
+    echo "ERROR: This script is for Linux. On macOS use tools/build_mac.command; on Windows use tools/build_win.bat."
+    exit 1
+fi
+
 echo "=========================================="
 echo "  trusscli Build Script"
 echo "=========================================="
@@ -37,7 +42,7 @@ cd "$SOURCE_DIR/build"
 
 # CMake configuration
 echo "Running CMake..."
-cmake ..
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: CMake configuration failed!"
@@ -60,7 +65,7 @@ fi
 # Build
 echo ""
 echo "Building (parallel jobs: $JOBS)..."
-cmake --build . --parallel "$JOBS"
+cmake --build . --config MinSizeRel --parallel "$JOBS"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: Build failed!"

@@ -690,9 +690,8 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
     # host so audio threads, the OSC service, GPU resource pools etc. survive
     # reloads as singletons. Only addons (and the user's own code) reset.
     if(TARGET guest)
-        set(_TC_ADDONS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/addons.make")
-        if(EXISTS "${_TC_ADDONS_FILE}")
-            file(STRINGS "${_TC_ADDONS_FILE}" _TC_ADDON_LINES)
+        _tc_project_addons(_TC_ADDON_LINES)
+        if(_TC_ADDON_LINES)
             foreach(_TC_LINE ${_TC_ADDON_LINES})
                 string(STRIP "${_TC_LINE}" _TC_LINE)
                 if(_TC_LINE AND NOT _TC_LINE MATCHES "^#")
@@ -869,7 +868,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
             list(APPEND _TC_ANDROID_RES_DIRS "${_TC_RES_DIR}")
         endif()
         foreach(_TC_A ${_TC_LOADED_ADDONS})
-            get_filename_component(_TC_AP "${TRUSSC_DIR}/../addons/${_TC_A}" ABSOLUTE)
+            _tc_addon_path("${_TC_A}" _TC_AP)
             if(EXISTS "${_TC_AP}/android/java")
                 list(APPEND _TC_ANDROID_JAVA_DIRS "${_TC_AP}/android/java")
                 message(STATUS "[${PROJECT_NAME}] Addon Java: ${_TC_A}/android/java")
@@ -1039,6 +1038,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                     --ks-pass pass:android --key-pass pass:android
                     --out "${_TC_APK_OUT}" "${_TC_ALIGNED}"
                 COMMENT "[${PROJECT_NAME}] Packaging APK → ${_TC_APK_OUT}"
+                VERBATIM
             )
             message(STATUS "[${PROJECT_NAME}] APK auto-packaging enabled")
         else()

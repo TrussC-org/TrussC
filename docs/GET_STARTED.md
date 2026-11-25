@@ -3,6 +3,8 @@
 TrussC is a lightweight creative coding framework inspired by openFrameworks.
 Built on C++20 + sokol, it's simple to write and runs cross-platform.
 
+Pin a project’s TrussC version with `.trussc-version` or `trusscli use`; see [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](guides/BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version).
+
 ---
 
 ## AI Assistant

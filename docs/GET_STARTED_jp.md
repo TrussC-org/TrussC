@@ -3,6 +3,8 @@
 TrussC は openFrameworks にインスパイアされた軽量なクリエイティブコーディングフレームワークです。
 C++20 + sokol で構築されており、シンプルに書けてクロスプラットフォームで動作します。
 
+`.trussc-version` または `trusscli use` で、プロジェクトの TrussC バージョンを固定できます。詳しくは [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](guides/BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version) をご覧ください。
+
 ---
 
 ## AI アシスタント

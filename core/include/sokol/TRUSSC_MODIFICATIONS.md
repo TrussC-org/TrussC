@@ -926,7 +926,7 @@ Mac display/Metal validation and post-implementation review remain required.
 
 Upstream fixes `sg_desc.uniform_buffer_size` at `sg_setup()` (4 MiB, ~8k draws);
 overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 growth makes
-`WindowSettings::reserveUniformBuffer` an optimization, not a correctness need.
+`RuntimeSettings::reserveUniformBuffer` an optimization, not a correctness need.
 
 - `_sg_mtl_grow_uniform_buffer()` doubles the current rotate slot, defers old
   storage release, resets `cur_ub_offset` and logs `METAL_UNIFORM_BUFFER_GROWN`
@@ -1445,6 +1445,18 @@ the SGL failure log preserves the single exhaustion Error.
 The framework retains equal sg/sgl pool capacities and the public default 1024;
 there is no eviction or upstream issue. Tests: `sglPoolLimits`, `sglVertexLayout`,
 and the unchanged display suite / renderRegression pixel comparison.
+
+## Borderless client size (#1639)
+
+[TrussC] `sapp_desc._tc_borderless` and `_sapp_tc_normalize_main_window`
+forward launch decorations to the shared desktop constructors before mapping.
+Runtime decoration changes preserve the current client size: X11 queues one
+`XResizeWindow` request after the Motif property change, Win32 adjusts the outer
+rectangle for the new style at the current DPI, and macOS restores the content
+size after changing the style mask. Existing fullscreen deferral is retained.
+X11 snapshots the windowed client size at the decoration request and uses it on fullscreen exit, without sampling the WM's intermediate restore geometry.
+Borderless macOS creation uses the runtime decoration helper before showing main and sub-windows, preserving native fullscreen resizing.
+Tests: `runtimeSettings` and `tools/tests/test_window_decoration.py`.
 
 ## Per-draw stencil references (#1512, part 2b)
 
