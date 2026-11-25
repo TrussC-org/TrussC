@@ -9808,6 +9808,11 @@ details.en = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - `copyTo(Image& image)` はコピー先を Fbo と同じサイズの 4 チャンネル U8 画像に置き換え、RGBA8 ピクセルを読み出し、成功時に `setDirty()` と `update()` を呼びます。GPU からの読み出しに続いて GPU へのアップロードを行います。
@@ -9820,6 +9825,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - `copyTo(Image& image)`는 대상을 Fbo와 같은 크기의 4채널 U8 이미지로 교체하고 RGBA8 픽셀을 읽은 뒤 성공하면 `setDirty()`와 `update()`를 호출합니다. GPU에서 읽은 다음 GPU로 업로드합니다.
@@ -9831,6 +9841,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -9959,6 +9974,11 @@ void tcApp::draw() {
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - end 後のシングルサンプル Fbo の stencil 値をデバッグ用の 1 チャンネル U8 Pixels に読み出します。 確保済みで end 後の所有するシングルサンプル Fbo が必要です。メイン描画先・MSAA は非対応です。元の色と stencil を保持します。
@@ -9979,6 +9999,11 @@ void tcApp::draw() {
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 종료된 단일 샘플 Fbo의 스텐실 바이트를 디버깅용 1채널 U8 Pixels로 읽습니다. 할당되어 종료된 소유 단일 샘플 Fbo가 필요합니다. 메인 타깃과 MSAA는 지원하지 않습니다. 원본 색상과 스텐실을 보존합니다.
@@ -9998,6 +10023,11 @@ void tcApp::draw() {
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["StencilDesc", "clearStencil", "Fbo::drawStencil"]
@@ -10264,6 +10294,11 @@ void tcApp::draw() {
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - バッファ容量を計算せず CPU の RGBA8 ピクセルを取得するには Pixels 版を使います。bool を返し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
@@ -10308,6 +10343,11 @@ void tcApp::draw() {
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 버퍼 용량을 계산하지 않고 CPU RGBA8 픽셀을 얻으려면 Pixels 오버로드를 사용합니다. bool을 반환하며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
@@ -10351,6 +10391,11 @@ void tcApp::draw() {
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
@@ -10401,6 +10446,11 @@ void tcApp::draw() {
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - バッファ容量を計算せず精度を保って CPU に読み出すには Pixels 版を使います。元のチャンネル数（RGBA 添付画像では RGBA）の F32 Pixels を生成し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
@@ -10442,6 +10492,11 @@ void tcApp::draw() {
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 버퍼 용량을 계산하지 않고 정밀도를 유지한 CPU 읽기에는 Pixels 오버로드를 사용합니다. 원본 채널 수(RGBA 어태치먼트는 RGBA)의 F32 Pixels를 만들며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
@@ -10482,6 +10537,11 @@ void tcApp::draw() {
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo::readPixels", "Pixels"]
@@ -28185,6 +28245,11 @@ Window recording, including MCP `tc_start_recording`, reads window alpha with th
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 related = ["VideoWriter", "startRecording", "Fbo", "Fbo::readPixels", "grabScreen"]
 platform_note.en = '''
@@ -28216,6 +28281,11 @@ MCP の `tc_start_recording` を含むウィンドウの録画では、`grabScre
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 녹화를 시작할 때 현재 윈도우였던 윈도우의 각 프레임이 끝난 후, 내부 `VideoWriter`를 사용하여 자동으로 캡처합니다.
@@ -28233,6 +28303,11 @@ MCP의 `tc_start_recording`을 포함한 윈도우 녹화는 `grabScreen`에 설
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 
@@ -28338,6 +28413,11 @@ For window readback alpha precision and the Fbo alternative for exact alpha, see
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - `start(path)` でウィンドウを、`start(fbo, path)` で Fbo の内容を録画します（Fbo の場合、画面上の UI は映りません）。開始すると、`stop()` を呼ぶまで毎フレームの終わりに自動で録画されます。`ScreenRecorder` は tcApp のメンバーとして持っておいてください。同時に 1 本だけ録画できればよい場合は、共有のレコーダーを使う `startRecording()` でも同じことができます。
@@ -28356,6 +28436,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - `start(path)`는 윈도우를, `start(fbo, path)`는 Fbo의 내용을 녹화합니다(Fbo의 경우 화면의 UI는 찍히지 않습니다). 시작하면 `stop()`을 호출할 때까지 매 프레임이 끝날 때 자동으로 녹화됩니다. `ScreenRecorder`는 tcApp의 멤버로 가지고 있으세요. 한 번에 하나만 녹화하면 되는 경우에는 공유 레코더를 쓰는 `startRecording()`으로도 같은 일을 할 수 있습니다.
@@ -28373,6 +28458,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -43672,6 +43762,11 @@ details.en = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - `open(path, width, height, settings)` で開き、`addFrame()` または `addFrameAt()` でフレームを追加してから、`close()` でファイルを確定します。各操作は `SaveResult` を返します。破棄時にも `close()` を呼び出します。
@@ -43691,6 +43786,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - `open(path, width, height, settings)`으로 열고 `addFrame()` 또는 `addFrameAt()`으로 프레임을 추가한 다음, `close()`로 파일을 마무리합니다. 각 작업은 `SaveResult`를 반환합니다. 소멸 시에도 `close()`를 호출합니다.
@@ -43709,6 +43809,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -43768,6 +43873,11 @@ details.en = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - `Fbo` または `Pixels` を受け取り、`getFrameCount() / getFps()` 秒を指定して `addFrameAt` を呼びます。最初のフレームは 0 秒になり、追加に失敗してもこの時刻は進みません。
@@ -43779,6 +43889,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - `Fbo` 또는 `Pixels`를 받아 `getFrameCount() / getFps()`초를 지정하여 `addFrameAt`을 호출합니다. 첫 프레임은 0초이며 제출에 실패해도 이 시각은 진행되지 않습니다.
@@ -43789,6 +43904,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo", "Pixels", "VideoWriter::addFrameAt"]
@@ -43823,6 +43943,11 @@ details.en = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - `Fbo`、`Pixels`、または `addFrameAt(rgba, width, height, timeSec)` を使えます。寸法はライターと一致する必要があり、`timeSec` は秒単位の表示時刻です。
@@ -43838,6 +43963,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - `Fbo`, `Pixels` 또는 `addFrameAt(rgba, width, height, timeSec)`를 사용할 수 있습니다. 크기는 라이터와 일치해야 하며 `timeSec`는 초 단위의 표시 시각입니다.
@@ -43852,6 +43982,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo", "Pixels"]
@@ -52561,6 +52696,11 @@ On macOS, iOS and Windows, the main window uses RGB10A2, so its stored alpha has
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - `update()`、`setup()`、フレーム内でも `events().afterFrame` リスナー内でもない他のフェーズ: `false` を返す。ウィンドウごとに Warning をちょうど1回出し、`events().afterFrame` または `saveScreenshot()` を案内する。
@@ -52599,6 +52739,11 @@ macOS・iOS・Windows のメインウィンドウは RGB10A2 を使うため、�
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - `update()`, `setup()`, 프레임 안이나 `events().afterFrame` 리스너 안이 아닌 다른 단계: `false`를 반환한다. 윈도우마다 Warning을 정확히 한 번 출력하며 `events().afterFrame` 또는 `saveScreenshot()`을 안내한다.
@@ -52636,6 +52781,11 @@ macOS, iOS, Windows의 메인 윈도우는 RGB10A2를 사용하므로 저장되�
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 platform_note.en = "Not implemented on web (no synchronous canvas readback): always returns false and logs a one-time warning. Use saveScreenshot() for a deferred canvas download or the browser's screenshot tools."
@@ -55815,6 +55965,11 @@ For window readback alpha precision and the Fbo alternative for exact alpha, see
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - 解決した Window に capture を予約し、EVENT_DRIVEN でもフレームを要求します。afterFrame の全通知後に capture します。
@@ -55833,6 +55988,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 해석한 Window에 capture를 예약하고 EVENT_DRIVEN에서도 프레임을 요청합니다. afterFrame 알림이 모두 끝난 후 capture합니다.
@@ -55850,6 +56010,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["grabScreen", "startRecording", "captureWindow", "Fbo::readPixels"]
@@ -67956,6 +68121,11 @@ For window readback alpha precision and the Fbo alternative for exact alpha, see
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - 解決した Window に非同期 capture を予約してフレームを要求します。各 Window は自分の capture queue だけを処理します。
@@ -67977,6 +68147,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 해석한 Window에 비동기 capture를 예약하고 프레임을 요청합니다. 각 Window는 자신의 capture queue만 처리합니다.
@@ -67997,6 +68172,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot", "Fbo::readPixels", "grabScreen"]
@@ -69877,6 +70057,11 @@ details.en = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - read(destination, bytes) は先行する記録済みの描画と dispatch を順番どおり直ちに送信し、完了までブロックします。待機中はフレームが停止し、毎フレーム呼ぶと fps が低下する場合があります。フレームの commit は行わず、その後も描画を続けられます。Metal、D3D11、GL 4.3、GLES 3.1（Raspberry Pi 5 を含みます）に対応します。Web では利用できず、呼ぶとコンパイルエラーになります。
@@ -69889,6 +70074,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - read(destination, bytes)는 앞서 기록된 그리기와 dispatch를 순서대로 즉시 제출하고 완료까지 차단합니다. 기다리는 동안 프레임이 멈추며 매 프레임 호출하면 fps가 낮아질 수 있습니다. 프레임 commit은 수행하지 않으며 이후 그리기를 계속합니다. Metal, D3D11, GL 4.3, GLES 3.1(Raspberry Pi 5 포함)을 지원합니다. Web에서는 사용할 수 없으며 호출하면 컴파일 오류가 발생합니다.
@@ -69900,6 +70090,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -69924,6 +70119,11 @@ details.en = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ja = '''
 - メインスレッドから readAsync(callback) を呼びます。要求より後の更新で、要求順に ReadbackResult を値で受け取ります。結果はバイト列を所有するため、要求後に StorageBuffer を消去・破棄しても配送を取り消さず、スナップショットも変わりません。結果を保持するとコールバック終了後もバイト列を使えます。
@@ -69936,6 +70136,11 @@ details.ja = '''
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
 ```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
+```
 '''
 details.ko = '''
 - 메인 스레드에서 readAsync(callback)을 호출합니다. 요청 이후 업데이트에서 요청 순서대로 ReadbackResult를 값으로 받습니다. 결과가 바이트를 소유하므로 요청 후 StorageBuffer를 지우거나 소멸해도 전달을 취소하지 않으며 스냅샷도 바뀌지 않습니다. 결과를 보관하면 콜백 반환 후에도 바이트를 사용할 수 있습니다.
@@ -69947,6 +70152,11 @@ details.ko = '''
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
