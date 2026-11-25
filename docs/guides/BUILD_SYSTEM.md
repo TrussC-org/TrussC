@@ -123,8 +123,37 @@ trusscli use main
 ```
 
 `use` saves the selection and prepares its sources; `update` refreshes them and
-regenerates project files. Tags, branches, commit hashes, and forks
-(`owner/repo@ref`) are supported. `build` uses the prepared sources; if the cache
+regenerates project files. Tags, branches, full commit IDs, unique short commit
+IDs (7–39 hexadecimal characters), and forks (`owner/repo@ref`) are supported.
+Tags take priority over branches, and branches over short commit IDs. A short
+commit ID is printed as `Resolved <short> to <full>` and saved as the full
+40-character ID in `.trussc-version` and the cache folder name. Short commit IDs
+in external addon `@ref` selections also save the full ID in `addons.make`.
+For example:
+
+```bash
+trusscli use 006a086b
+```
+
+With Git, an ambiguous commit ID lists candidates and stops. Use a longer ID from that
+list; IDs shorter than 7 characters are treated as ref names. Version selection
+is a CLI operation with no tcApp API:
+
+```bash
+trusscli use <longer-commit-id>
+```
+
+Without Git, short commit IDs are resolved once through the GitHub commits API,
+then the archive is fetched using the full ID. This works for external addons
+without archive commit metadata. If the API rate limit is reached (60 requests
+per hour without authentication), use a full ID or install Git. There is no
+tcApp API for archive resolution:
+
+```bash
+trusscli use <40-character-commit-id>
+```
+
+`build` uses the prepared sources; if the cache
 is missing, prepare it explicitly:
 
 ```bash
@@ -161,7 +190,23 @@ trusscli use --clear
 ```
 
 Cached versions are shared across projects. Inspect them with `cache list` and
-remove an unused version with `cache remove <spec>`. Removing a selected cached
+remove an unused version with `cache remove <spec>`. A unique cached ref prefix
+is accepted, including a short prefix of a full commit ID:
+
+```bash
+trusscli cache remove 006a086b
+```
+
+If several cached refs match, the command lists them and removes nothing.
+Choose a longer prefix or a full spec from `cache list` (there is no tcApp API
+for cache removal):
+
+```bash
+trusscli cache list
+trusscli cache remove <owner/repo@full-ref>
+```
+
+Removing a selected cached
 version requires preparing it again before the next build:
 
 ```bash

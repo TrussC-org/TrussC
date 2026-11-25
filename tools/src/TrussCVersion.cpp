@@ -79,9 +79,11 @@ Spec parse(const std::string& text) {
             throw std::runtime_error("invalid TrussC version: malformed ref");
         }
     }
-    spec.commit = spec.ref.size() == 40 && std::all_of(spec.ref.begin(), spec.ref.end(),
+    auto hex = std::all_of(spec.ref.begin(), spec.ref.end(),
         [](unsigned char c) { return (c >= '0' && c <= '9') ||
             (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); });
+    spec.commit = spec.ref.size() == 40 && hex;
+    spec.shortCommit = spec.ref.size() >= 7 && spec.ref.size() < 40 && hex;
     return spec;
 }
 
@@ -110,6 +112,9 @@ void setLocalPath(const fs::path& project, const std::string& path) {
             !data["vendor"].contains("trussc") || !data["vendor"]["trussc"].is_object()) return;
         data["vendor"]["trussc"].erase("localPath");
     } else {
+        if (!fs::exists(path)) {
+            throw std::runtime_error("local TrussC path does not exist: " + path);
+        }
         auto root = fs::canonical(path);
         if (!fs::exists(root / "core/cmake/trussc_app.cmake")) {
             throw std::runtime_error("local TrussC path has no core/cmake/trussc_app.cmake");
@@ -370,7 +375,7 @@ static void extractArchive(const fs::path& archive, const fs::path& tree) {
 }
 
 // All curl/tar execution stays in this transport seam. No shell is involved.
-static void fetchTarball(const Spec& spec, const fs::path& destination, const std::string& base, bool addon) {
+static fs::path fetchTarball(const Spec& spec, fs::path destination, const std::string& base, bool addon) {
     checkCachePath(destination);
     auto versionRoot = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo;
     // A slash ref must not replace a different ref's tree (or its parent).
@@ -408,7 +413,48 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
     // Explicit tag URL wins even when a branch has the same name. The short URL
     // is also used by file:// fixtures and resolves branches/commits on GitHub.
     auto downloaded = spec.commit ? download(spec.ref) : download("refs/tags/" + spec.ref);
-    if (!spec.commit && downloaded.first != 0) downloaded = download(spec.ref);
+    bool shortCommit = false;
+    if (!spec.commit && downloaded.first != 0) {
+        // A hex branch name still wins over a short commit ID.
+        if (spec.shortCommit) downloaded = download("refs/heads/" + spec.ref);
+        if (!spec.shortCommit || downloaded.first != 0) {
+            if (spec.shortCommit) {
+                const auto response = scratch / "commit.json";
+                // The base override keeps API and archive fixtures on the same transport seam.
+                const std::string api = std::getenv("TRUSSC_GITHUB_BASE_URL") ? base
+                    : "https://api.github.com/repos/" + spec.owner + "/" + spec.repo;
+                auto resolved = archiveCommand({"curl", "--location", "--fail", "--silent", "--show-error",
+                    "--max-filesize", "1048576", "--max-time", "300", "--output", response.string(),
+                    "--write-out", "\n%{http_code}", "--url", api + "/commits/" + encode(spec.ref)});
+                const auto statusStart = resolved.second.rfind('\n');
+                const auto status = statusStart == std::string::npos ? "" : resolved.second.substr(statusStart + 1);
+                if (status == "422") throw std::runtime_error("the short commit ID is ambiguous; use a longer one");
+                if (status == "404") throw std::runtime_error(missingRefMessage(spec));
+                if (status == "403" || status == "429") {
+                    throw std::runtime_error("GitHub API rate limit or access restriction; use a full commit ID or install git");
+                }
+                if (resolved.first != 0) throw std::runtime_error("GitHub commit lookup failed: " + resolved.second);
+                std::ifstream input(response);
+                const auto data = Json::parse(input, nullptr, false);
+                const auto sha = data.is_object() ? data.value("sha", Json()) : Json();
+                const auto commit = sha.is_string() ? sha.get<std::string>() : "";
+                if (commit.size() != 40 || !std::all_of(commit.begin(), commit.end(), [](unsigned char c) {
+                        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                    })) throw std::runtime_error("GitHub commit lookup returned an invalid full commit ID");
+                destination = destination.parent_path() / commit;
+                checkCachePath(destination);
+                if (fs::exists(destination) && (!fs::is_regular_file(destination / ".git_archival.txt") ||
+                                              fs::exists(destination / ".git"))) {
+                    throw std::runtime_error("TrussC ref conflicts with an existing cache directory: " + destination.string());
+                }
+                std::cout << "Resolved " << spec.ref << " to " << commit << '\n';
+                downloaded = download(commit);
+            } else {
+                downloaded = download(spec.ref);
+            }
+            shortCommit = spec.shortCommit;
+        }
+    }
     auto statusStart = downloaded.second.rfind('\n');
     auto httpStatus = statusStart == std::string::npos ? "" : downloaded.second.substr(statusStart + 1);
     if (statusStart != std::string::npos) downloaded.second.resize(statusStart);
@@ -424,7 +470,7 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
         }
         // GitHub addon archives need not carry TrussC's export-subst metadata.
         std::ofstream marker(tree / ".git_archival.txt");
-        marker << "describe: " << spec.ref << "\n";
+        marker << "describe: " << (shortCommit ? destination.filename().string() : spec.ref) << "\n";
     } else if (!fs::is_regular_file(tree / "core/cmake/trussc_app.cmake") ||
         !fs::is_regular_file(tree / ".git_archival.txt")) {
         throw std::runtime_error("TrussC archive is missing core/cmake/trussc_app.cmake or .git_archival.txt");
@@ -445,10 +491,11 @@ static void fetchTarball(const Spec& spec, const fs::path& destination, const st
         if (fs::exists(previous)) fs::rename(previous, destination);
         throw;
     }
+    return destination;
 }
 
 // All transport and worktree mutations enter here. The URL override supports file://.
-static void fetchVersion(const Spec& spec, const fs::path& destination, bool addon, const std::string& sourceUrl) {
+static fs::path fetchVersion(const Spec& spec, fs::path destination, bool addon, const std::string& sourceUrl) {
     auto bare = cacheRoot() / "repos" / spec.owner / (spec.repo + ".git");
     const char* baseOverride = std::getenv("TRUSSC_GITHUB_BASE_URL");
     std::string base = baseOverride ? baseOverride : "https://github.com";
@@ -462,8 +509,7 @@ static void fetchVersion(const Spec& spec, const fs::path& destination, bool add
                 archiveSource.resize(archiveSource.size() - 4);
             }
         }
-        fetchTarball(spec, destination, archiveSource, addon);
-        return;
+        return fetchTarball(spec, destination, archiveSource, addon);
     }
     auto url = !baseOverride && !sourceUrl.empty() ? sourceUrl : base + "/" + spec.owner + "/" + spec.repo + ".git";
     checkCachePath(destination);
@@ -474,6 +520,7 @@ static void fetchVersion(const Spec& spec, const fs::path& destination, bool add
     checkedGit({"--git-dir=" + bare.string(), "fetch", "--force", "--prune", url,
                 "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"});
     std::string revision = spec.ref;
+    bool shortCommit = false;
     if (addon && spec.ref == "HEAD") {
         checkedGit({"--git-dir=" + bare.string(), "fetch", url, "HEAD"});
         revision = "FETCH_HEAD";
@@ -481,6 +528,12 @@ static void fetchVersion(const Spec& spec, const fs::path& destination, bool add
         auto tag = git({"--git-dir=" + bare.string(), "rev-parse", "--verify",
                         "refs/tags/" + spec.ref + "^{commit}"});
         revision = tag.first == 0 ? "refs/tags/" + spec.ref : "refs/heads/" + spec.ref;
+        if (tag.first != 0 && spec.shortCommit &&
+            git({"--git-dir=" + bare.string(), "rev-parse", "--verify", "--quiet",
+                 revision + "^{commit}"}).first != 0) {
+            revision = spec.ref;
+            shortCommit = true;
+        }
     }
     // Servers may allow a reachable commit that is not a branch/tag tip.
     if (spec.commit && git({"--git-dir=" + bare.string(), "cat-file", "-e", revision + "^{commit}"}).first != 0) {
@@ -493,12 +546,33 @@ static void fetchVersion(const Spec& spec, const fs::path& destination, bool add
             throw std::runtime_error("TrussC version Git command failed: " + fetched.diagnostic + fetched.second);
         }
     }
+    if (shortCommit && git({"--git-dir=" + bare.string(), "rev-parse", "--verify", "--quiet",
+                           revision + "^{commit}"}).first != 0) {
+        auto candidates = checkedGit({"--git-dir=" + bare.string(), "rev-parse", "--disambiguate=" + revision});
+        std::istringstream lines(candidates);
+        std::string id, commits;
+        size_t count = 0;
+        while (std::getline(lines, id)) {
+            if (git({"--git-dir=" + bare.string(), "cat-file", "-t", id}).second == "commit\n") {
+                commits += "\n  " + id;
+                ++count;
+            }
+        }
+        if (count > 1) throw std::runtime_error("Ambiguous commit ID '" + spec.ref + "'. Candidates:" +
+                                               commits + "\nUse a longer commit ID.");
+        throw std::runtime_error(missingRefMessage(spec));
+    }
     auto commit = checkedGit({"--git-dir=" + bare.string(), "rev-parse", "--verify", "--quiet",
                               revision + "^{commit}"}, true, &spec);
     // Inspect the acquired Git tree before changing or publishing a worktree.
     if (!addon && git({"--git-dir=" + bare.string(), "cat-file", "-t", commit + ":core/cmake/trussc_app.cmake"}).second.rfind("blob", 0) != 0 &&
         git({"--git-dir=" + bare.string(), "cat-file", "-t", commit + ":trussc"}).second.rfind("tree", 0) == 0) {
         rejectOldLayout(spec);
+    }
+    if (shortCommit) {
+        destination = destination.parent_path() / commit;
+        checkCachePath(destination);
+        std::cout << "Resolved " << spec.ref << " to " << commit << '\n';
     }
     if (fs::exists(destination)) {
         checkExistingWorktree(spec, bare, destination, addon);
@@ -508,6 +582,7 @@ static void fetchVersion(const Spec& spec, const fs::path& destination, bool add
         checkedGit({"--git-dir=" + bare.string(), "worktree", "prune"});
         checkedGit({"--git-dir=" + bare.string(), "worktree", "add", "--detach", destination.string(), commit});
     }
+    return destination;
 }
 
 std::string readBounded(const fs::path& path, size_t limit) {
@@ -703,13 +778,14 @@ int cacheCommand(const std::vector<std::string>& args) {
             << (args.size() == 2 ? args[0] : "[list|clear|autoremove|remove]") << "\n\n"
             << "Manage shared TrussC and external addon downloads. Local folders are not cached.\n\n"
             "Commands:\n"
-            "  list        List specs, worktree/tarball, size and last-used date (- if unknown)\n"
+            "  list                   List specs, worktree/tarball, size and last-used date (- if unknown)\n"
             "  remove <spec>          Remove one TrussC version without confirmation\n"
             "  remove --addon <spec>  Remove one external addon version without confirmation\n"
-            "  clear       Show total size and remove the whole cache after one y/N prompt\n"
-            "  autoremove  List and remove versions last used 90 or more days ago (one y/N prompt)\n\n"
+            "  clear                  Show total size and remove the whole cache after one y/N prompt\n"
+            "  autoremove             List and remove versions last used 90 or more days ago (one y/N prompt)\n\n"
             "Addon rows are marked 'addon'; other rows are marked 'TrussC'.\n"
             "remove uses specs as for use or addon add; qualify the owner if an addon is ambiguous.\n"
+            "A unique cached ref prefix is also accepted by remove.\n"
             "Versions without .last-used are never auto-removed.\n"
             "clear and autoremove require terminal input; the default answer is No.\n"
             "  -h, --help  Show this help\n";
@@ -733,11 +809,17 @@ int cacheCommand(const std::vector<std::string>& args) {
         auto entries = cacheEntries();
         std::vector<CacheEntry> matches;
         for (const auto& entry : entries) {
-            if (entry.addon == addon && entry.spec.repo == spec.repo && entry.spec.ref == spec.ref &&
+            if (entry.addon == addon && entry.spec.repo == spec.repo && entry.spec.ref.rfind(spec.ref, 0) == 0 &&
                 (spec.owner.empty() || entry.spec.owner == spec.owner)) matches.push_back(entry);
         }
         if (matches.empty()) throw std::runtime_error("spec is not in the cache: " + text + "; run `trusscli cache list`");
-        if (matches.size() > 1) throw std::runtime_error("ambiguous cached addon: " + text + "; use owner/repo@ref from `trusscli cache list`");
+        if (matches.size() > 1) {
+            std::string message = "ambiguous cached spec: " + text + "; candidates:";
+            for (const auto& match : matches) {
+                message += "\n  " + match.spec.owner + "/" + match.spec.repo + "@" + match.spec.ref;
+            }
+            throw std::runtime_error(message + "\nUse a longer prefix or owner/repo@ref from `trusscli cache list`.");
+        }
         removeCachedVersion(matches[0].path, matches[0].spec);
         std::cout << "Removed " << (addon ? "addon " : "TrussC ") << text << '\n';
         return 0;
@@ -790,7 +872,7 @@ std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string&
     auto root = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo / spec.ref;
     checkCachePath(root);
     if (fetch) {
-        fetchVersion(spec, root, addon, sourceUrl);
+        root = fetchVersion(spec, root, addon, sourceUrl);
     }
     else if (fs::exists(root)) {
         if (fs::exists(root / ".git")) {
@@ -835,6 +917,13 @@ std::string resolve(const fs::path& project, bool fetch) {
     auto begin = text.find_first_not_of(" \t\r\n");
     auto end = text.find_last_not_of(" \t\r\n");
     auto spec = parse(begin == std::string::npos ? "" : text.substr(begin, end - begin + 1));
-    return acquire(spec, fetch, false, "");
+    auto root = acquire(spec, fetch, false, "");
+    auto ref = fs::path(root).filename().string();
+    if (fetch && spec.shortCommit && ref != spec.ref) {
+        auto pin = text.substr(begin, end - begin + 1);
+        pin.replace(pin.size() - spec.ref.size(), spec.ref.size(), ref);
+        writeGeneratedFile(versionFile.string(), pin + "\n");
+    }
+    return root;
 }
 }

@@ -4,6 +4,7 @@ Run through tcbuild.sh: one check configures and builds a tiny fixture app.
 All Git writes are confined to temporary fake repositories, never this checkout.
 """
 import io
+import hashlib
 import tarfile
 import json
 import os
@@ -209,6 +210,115 @@ class VersionTests(unittest.TestCase):
         self.assertEqual((self.project / ".trussc-version").read_bytes(), b"v1\n")
         self.assertEqual(self.root(), self.cache / "versions/TrussC-org/TrussC/v1")
 
+    def test_short_commit_uses_full_pin_and_cache_path(self):
+        for length in (7, 12, 39):
+            for owner in ("TrussC-org", "tettou771"):
+                with self.subTest(length=length, owner=owner):
+                    ref = self.initial[:length]
+                    if self.env.get("TRUSSC_FETCH") == "tarball":
+                        self.archive(ref, owner=owner, revision=self.initial)
+                        self.archive_path(ref, owner).unlink()  # Only the full-ID archive is available.
+                    prefix = "" if owner == "TrussC-org" else owner + "/TrussC@"
+                    output = self.cli("use", prefix + ref)
+                    self.assertEqual(output.count("Resolved " + ref + " to " + self.initial), 1)
+                    self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8"), prefix + self.initial + "\n")
+                    self.assertEqual(self.root(), self.cache / "versions" / owner / "TrussC" / self.initial)
+                    self.assertFalse((self.root().parent / ref).exists())
+                    self.cli("build", "--dry-run")
+
+    def test_update_expands_short_pin(self):
+        ref = self.initial[:7]
+        for prefix in ("", "TrussC-org/TrussC@", "tettou771/TrussC@"):
+            if self.env.get("TRUSSC_FETCH") == "tarball":
+                owner = "tettou771" if prefix.startswith("tettou771/") else "TrussC-org"
+                self.archive(ref, owner=owner, revision=self.initial)
+                self.archive_path(ref, owner).unlink()
+            (self.project / ".trussc-version").write_text(prefix + ref + "\n", encoding="utf-8")
+            self.assertIn("Resolved " + ref + " to " + self.initial, self.cli("update"))
+            self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8"), prefix + self.initial + "\n")
+            self.cli("build", "--dry-run")
+
+    def test_hex_tag_and_branch_names_win_over_short_commits(self):
+        self.advance()
+        branch_commit = self.git("-C", self.source, "rev-parse", "HEAD").strip()
+        for length in (6, 7, 12, 39):
+            ref = self.initial[:length]
+            self.git("-C", self.source, "tag", ref, self.moved)
+            self.git("-C", self.source, "branch", ref, branch_commit)
+            remote = self.base / "remotes/TrussC-org/TrussC.git"
+            self.git("-C", remote, "fetch", self.source, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
+            if self.env.get("TRUSSC_FETCH") == "tarball":
+                self.archive(ref, revision="refs/tags/" + ref, path="refs/tags/" + ref)
+                self.archive(ref, revision="refs/heads/" + ref, path="refs/heads/" + ref)
+                self.archive(ref, revision=branch_commit)
+            output = self.cli("use", ref)
+            self.assertNotIn("Resolved ", output)
+            self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8"), ref + "\n")
+            self.assertEqual(self.root().name, ref)
+            if self.env.get("TRUSSC_FETCH") != "tarball":
+                self.assertEqual(self.git("-C", self.root(), "rev-parse", "HEAD").strip(), self.moved)
+            else:
+                self.assertEqual((self.root() / "revision").read_bytes(), b"next\n")
+                self.archive_path("refs/tags/" + ref).unlink()
+            self.git("-C", self.source, "tag", "-d", ref)
+            self.git("-C", remote, "tag", "-d", ref)
+            self.assertNotIn("Resolved ", self.cli("use", ref))
+            if self.env.get("TRUSSC_FETCH") != "tarball":
+                self.assertEqual(self.git("-C", self.root(), "rev-parse", "HEAD").strip(), branch_commit)
+            elif length >= 7:
+                self.assertEqual((self.root() / "revision").read_bytes(), b"next\nnext\n")
+
+    def test_missing_short_commit_and_sub_seven_hex_ref(self):
+        self.cli("use", "v1")
+        before = (self.project / ".trussc-version").read_bytes()
+        for ref in ("fffffff", self.initial[:6]):
+            output = self.cli("use", ref, success=False)
+            self.assertIn("Ref '" + ref + "' was not found in TrussC-org/TrussC.\n"
+                          "Check the tag or branch name, or use an existing commit ID.", output)
+            self.assertEqual((self.project / ".trussc-version").read_bytes(), before)
+
+    def test_ambiguous_seven_character_commit_lists_candidates(self):
+        # Hash candidate commit contents in memory; write only the two colliding objects.
+        tree = self.git("-C", self.source, "rev-parse", "HEAD^{tree}").strip()
+        header = ("tree " + tree + "\nparent " + self.initial + "\n"
+                  "author Fixture <fixture@example.invalid> 1 +0000\n"
+                  "committer Fixture <fixture@example.invalid> 1 +0000\n\n")
+        seen = {}
+        for number in range(200000):
+            content = (header + str(number) + "\n").encode()
+            commit = hashlib.sha1(b"commit " + str(len(content)).encode() + b"\0" + content).hexdigest()
+            prefix = commit[:7]
+            if prefix in seen:
+                candidates = (seen[prefix], (commit, content))
+                break
+            seen[prefix] = (commit, content)
+        else:
+            self.fail("fixture did not find a seven-character collision")
+        remote = self.base / "remotes/TrussC-org/TrussC.git"
+        for index, (commit, content) in enumerate(candidates):
+            result = subprocess.run(["git", "-C", str(remote), "hash-object", "-w", "-t", "commit", "--stdin"],
+                                    input=content, capture_output=True, check=True)
+            self.assertEqual(result.stdout.decode().strip(), commit)
+            self.git("-C", remote, "update-ref", "refs/heads/candidate-" + str(index), commit)
+        self.cli("use", "v1")
+        before = {name: (self.project / name).read_bytes() for name in (".trussc-version", "CMakePresets.json")}
+        output = self.cli("use", prefix, success=False)
+        self.assertIn("Ambiguous commit ID '" + prefix + "'", output)
+        self.assertIn("Use a longer commit ID.", output)
+        for commit, _ in candidates:
+            self.assertIn(commit, output)
+        for name, data in before.items():
+            self.assertEqual((self.project / name).read_bytes(), data)
+        self.assertFalse((self.root().parent / prefix).exists())
+
+    def test_missing_local_path_is_one_line_and_preserves_selection(self):
+        self.cli("use", "v1")
+        before = (self.project / "CMakePresets.json").read_bytes()
+        path = self.base / "nonexistent/x"
+        self.cli("use-local", path, success=False)
+        self.assertEqual(self.last_result.stderr, "Error: local TrussC path does not exist: " + str(path) + "\n")
+        self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
+
     def test_installed_cli_builds_sources_without_version_tools(self):
         self.cli("use", "v1")
         self.assertIn(self.root().as_posix(), self.cli("build", "--dry-run"))
@@ -340,12 +450,32 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(marker.read_text(encoding="utf-8"), before)
 
     def test_native_build_type_survives_update_and_clean(self):
+        presets_file = self.project / "CMakePresets.json"
+        initial = json.loads(presets_file.read_text(encoding="utf-8"))
+        initial["vendor"]["trussc"]["ide"] = "vscode"
+        presets_file.write_text(json.dumps(initial), encoding="utf-8")
         self.cli("use-local", self.source)
         self.cli("build", "--release")
         presets_file = self.project / "CMakePresets.json"
-        self.assertEqual(json.loads(presets_file.read_text(encoding="utf-8"))["vendor"]["trussc"]["buildType"], "Release")
-        self.cli("update")
-        self.assertEqual(json.loads(presets_file.read_text(encoding="utf-8"))["vendor"]["trussc"]["buildType"], "Release")
+        cache = self.project / ("build-" + NATIVE) / "CMakeCache.txt"
+        for args in (("use", "v1"), ("update",), ("use-local", self.source)):
+            with self.subTest(args=args):
+                output = self.cli(*args)
+                self.assertNotIn("Manually-specified variables were not used", output)
+                data = json.loads(presets_file.read_text(encoding="utf-8"))
+                self.assertEqual(data["vendor"]["trussc"]["buildType"], "Release")
+                native = next(p for p in data["configurePresets"] if p["name"] == NATIVE)
+                self.assertEqual(native["cacheVariables"]["CMAKE_BUILD_TYPE"], "Release")
+                self.assertNotIn("TRUSSC_ADDON_PATHS", native["cacheVariables"])
+                self.assertNotIn("TRUSSC_ADDON_ORDER", native["cacheVariables"])
+                self.assertIn("CMAKE_BUILD_TYPE:STRING=Release", cache.read_text(encoding="utf-8"))
+                output = self.cli("build")
+                self.assertIn("Build type: Release (remembered)", output)
+                self.assertNotIn("Switching build type", output)
+                jobs = next(p for p in data["buildPresets"] if p["name"] == NATIVE)["jobs"]
+                self.assertIsInstance(jobs, int)
+                self.assertGreater(jobs, 0)
+                self.assertIn("--parallel=" + str(jobs), self.cli("build", "--dry-run"))
         self.cli("clean")
         self.assertEqual(json.loads(presets_file.read_text(encoding="utf-8"))["vendor"]["trussc"]["buildType"], "Release")
         self.assertIn("Build type: Release (remembered)", self.cli("build"))
@@ -503,6 +633,10 @@ class TarballTests(unittest.TestCase):
         self.archive("shared", revision="refs/heads/shared")
 
     test_use_replaces_oversized_previous_pin = VersionTests.test_use_replaces_oversized_previous_pin
+    test_short_commit_uses_full_pin_and_cache_path = VersionTests.test_short_commit_uses_full_pin_and_cache_path
+    test_update_expands_short_pin = VersionTests.test_update_expands_short_pin
+    test_hex_tag_and_branch_names_win_over_short_commits = VersionTests.test_hex_tag_and_branch_names_win_over_short_commits
+    test_missing_local_path_is_one_line_and_preserves_selection = VersionTests.test_missing_local_path_is_one_line_and_preserves_selection
     old_layout = VersionTests.old_layout
     test_old_layout_use_preserves_selection_and_leaves_no_cache_entry = VersionTests.test_old_layout_use_preserves_selection_and_leaves_no_cache_entry
     test_old_layout_update_preserves_existing_cached_tree = VersionTests.test_old_layout_update_preserves_existing_cached_tree
@@ -517,8 +651,14 @@ class TarballTests(unittest.TestCase):
         prefix = "TrussC-" + ref.replace("/", "-") + "/"
         self.git("-C", self.source, "archive", "--format=tar.gz", "--prefix=" + prefix,
                  "--output=" + str(target), revision or ref)
+        if 7 <= len(ref) < 40 and all(c in "0123456789abcdef" for c in ref):
+            commit = self.git("-C", self.source, "rev-parse", revision or ref).strip()
+            response = self.archives / owner / "TrussC/commits" / ref
+            response.parent.mkdir(parents=True, exist_ok=True)
+            response.write_text(json.dumps({"sha": commit}), encoding="utf-8")
+            self.archive(commit, owner=owner, revision=revision or ref)
         with tarfile.open(target) as archive:
-            return archive.extractfile(prefix + ".git_archival.txt").read().decode().strip()[10:]
+            return archive.extractfile(prefix + ".git_archival.txt").read().decode().splitlines()[0][10:]
 
     @unittest.skipIf(sys.platform == "win32", "fixture needs an executable curl script")
     def test_unavailable_ref_preserves_previous_selection(self):
@@ -596,6 +736,48 @@ class TarballTests(unittest.TestCase):
                 self.assertEqual(list(root.parent.iterdir()), [])
                 self.assertFalse((self.project / ".trussc-version").exists())
                 self.assertEqual((self.project / "CMakePresets.json").read_bytes(), before)
+
+    @unittest.skipIf(sys.platform == "win32", "fixture needs an executable curl script")
+    def test_commit_api_errors_preserve_selection(self):
+        self.cli("use", "v1")
+        before = {name: (self.project / name).read_bytes()
+                  for name in (".trussc-version", "CMakePresets.json")}
+        ref = self.moved[:7]
+        self.archive(self.moved)
+        tools = self.base / "api-tools"
+        tools.mkdir()
+        real_curl = shutil.which("curl")
+        self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
+        for status, body, message in (
+                (422, {}, "the short commit ID is ambiguous; use a longer one"),
+                (404, {}, "was not found"),
+                (403, {"message": "API rate limit exceeded"}, "use a full commit ID or install git"),
+                (429, {}, "use a full commit ID or install git"),
+                (200, {"sha": "f" * 39}, "invalid full commit ID"),
+                (200, {"sha": "g" * 40}, "invalid full commit ID"),
+                (200, {"sha": 123}, "invalid full commit ID"),
+                (200, {}, "invalid full commit ID"),
+                (200, {"sha": self.moved}, None)):
+            with self.subTest(status=status, body=body):
+                curl = tools / "curl"
+                curl.write_text(
+                    "#!" + sys.executable + "\nimport pathlib, subprocess, sys\n"
+                    "if '/commits/' not in sys.argv[-1]:\n"
+                    "    sys.exit(subprocess.call([" + repr(real_curl) + "] + sys.argv[1:]))\n"
+                    "pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text("
+                    + repr(json.dumps(body)) + ", encoding='utf-8')\n"
+                    + f"sys.stdout.write('\\n{status}')\nsys.exit({0 if status == 200 else 22})\n", encoding="utf-8")
+                curl.chmod(0o755)
+                output = self.cli("use", ref, success=message is None)
+                if message is None:
+                    self.assertEqual(output.count("Resolved " + ref + " to " + self.moved), 1)
+                    self.assertEqual(self.root().name, self.moved)
+                    self.assertEqual((self.project / ".trussc-version").read_text(encoding="utf-8"), self.moved + "\n")
+                else:
+                    self.assertIn(message, output)
+                    for name, content in before.items():
+                        self.assertEqual((self.project / name).read_bytes(), content)
+                self.assertEqual(list(self.cache.rglob(".trussc-download-*")), [])
 
     def test_unsafe_archive_entries_are_rejected_before_extraction(self):
         for entry, target in (("TrussC-fixture/../outside", None), ("/absolute", None),

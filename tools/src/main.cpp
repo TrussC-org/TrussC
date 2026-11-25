@@ -5,6 +5,7 @@
 #include "GeneratedFile.h"
 #include "ProjectState.h"
 #include "BuildSetup.h"
+#include "BuildPreferences.h"
 #include "VsDetector.h"
 #include "BuildOutputFilter.h"
 #include "ProcessCapture.h"
@@ -47,6 +48,7 @@
 
 using namespace std;
 using namespace tc;
+using trusscliBuild::parallelBuildArg;
 namespace fs = std::filesystem;
 
 static addonVersions::Paths resolveAddonVersions(const string& project, const string& root, bool fetch, const vector<string>* selection = nullptr);
@@ -818,6 +820,21 @@ static void writeAddonsMake(const string& projectPath,
     writeGeneratedFile(path, out.str());
 }
 
+// Acquisition keeps named refs, but expands short commit IDs in cache paths.
+static bool expandAddonPins(vector<string>& selected, const addonVersions::Paths& paths) {
+    bool changed = false;
+    for (auto& line : selected) {
+        auto spec = addonVersions::parse(line);
+        if (spec.ref.empty() || !paths.contains(spec.name)) continue;
+        if (!trusscVersion::parse("placeholder/" + spec.name + "@" + spec.ref).shortCommit) continue;
+        auto ref = fs::path(paths.at(spec.name)).filename().string();
+        if (ref.size() != 40 || !trusscVersion::parse(ref).commit) continue;
+        line.replace(line.size() - spec.ref.size(), spec.ref.size(), ref);
+        changed = true;
+    }
+    return changed;
+}
+
 // Forward declarations for functions defined later
 static string findCMake();
 static int parseJobsFlag(const vector<string>& args, size_t& i, int& jobs);
@@ -1453,6 +1470,10 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true, bool 
     tcRoot = resolvedTcRoot;
 
     auto addonPaths = resolveAddonVersions(projectPath, tcRoot, fetchVersion);
+    if (fetchVersion) {
+        auto selected = readProjectAddons(projectPath);
+        if (expandAddonPins(selected, addonPaths)) writeAddonsMake(projectPath, selected);
+    }
     addonVersions::saveResolved(projectPath, addonPaths);
     vector<string> availableAddons;
     scanAddons(tcRoot, availableAddons);
@@ -1491,7 +1512,11 @@ static int cmdUse(const vector<string>& args, bool local) {
     auto versionFile = fs::path(projectPath) / ".trussc-version";
     const bool selectingVersion = !local && value != "--clear";
     // Acquire and check the new sources before changing either project selection.
-    if (selectingVersion) trusscVersion::acquire(trusscVersion::parse(value), true);
+    if (selectingVersion) {
+        auto spec = trusscVersion::parse(value);
+        auto root = trusscVersion::acquire(spec, true);
+        if (spec.shortCommit) value.replace(value.size() - spec.ref.size(), spec.ref.size(), fs::path(root).filename().string());
+    }
     if (local) trusscVersion::setLocalPath(projectPath, value == "--clear" ? "" : value);
     else {
         if (value == "--clear") fs::remove(versionFile);
@@ -1520,56 +1545,6 @@ static void printUpgradeHelp() {
          << "      --tc-root <path>       Path to TrussC root directory\n"
          << "  -j, --jobs <N>             Run at most N compile jobs in the rebuild\n"
          << "  -h, --help                 Show this help\n";
-}
-
-// =============================================================================
-// Parallel build jobs
-// =============================================================================
-
-// The --parallel argument for cmake --build. -j wins. Without it, jobs are
-// limited by RAM (~1.5 GB per compile job) to prevent memory exhaustion on
-// small machines (SBCs, 8 GB Macs), capped at CPU count + 2. Linux uses
-// available RAM, macOS total RAM; elsewhere the build tool decides.
-static string parallelBuildArg(int jobs) {
-    if (jobs > 0) {
-        cout << "  * Parallel jobs: " << jobs << " (-j)\n";
-        return "--parallel=" + to_string(jobs);
-    }
-#if defined(__linux__) || defined(__APPLE__)
-    const double bytesPerJob = 1.5 * 1024 * 1024 * 1024;
-    double ramBytes = 0;
-#ifdef __linux__
-    ifstream meminfo("/proc/meminfo");
-    string line;
-    while (getline(meminfo, line)) {
-        long availKB = 0;
-        if (sscanf(line.c_str(), "MemAvailable: %ld", &availKB) == 1) {
-            ramBytes = availKB * 1024.0;
-            break;
-        }
-    }
-#else
-    int64_t memsize = 0;
-    size_t len = sizeof(memsize);
-    if (sysctlbyname("hw.memsize", &memsize, &len, nullptr, 0) == 0) {
-        ramBytes = (double)memsize;
-    }
-#endif
-    if (ramBytes > 0) {
-        int ramJobs = max(1, (int)(ramBytes / bytesPerJob));
-        long cpus = sysconf(_SC_NPROCESSORS_ONLN);
-        if (cpus > 0 && ramJobs >= (int)cpus + 2) {
-            ramJobs = (int)cpus + 2;
-        } else {
-            // RAM is the limiting factor
-            cout << "  * Parallel jobs limited to " << ramJobs
-                 << " (" << fixed << setprecision(1) << ramBytes / (1024.0 * 1024 * 1024)
-                 << " GB RAM, ~1.5 GB per job)\n";
-        }
-        return "--parallel=" + to_string(ramJobs);
-    }
-#endif
-    return "--parallel";
 }
 
 static int cmdUpgrade(const vector<string>& args) {
@@ -1816,6 +1791,7 @@ static int cmdAdd(const vector<string>& args) {
     }
     selected.insert(selected.end(), dependencies.begin(), dependencies.end());
     auto paths = resolveAddonVersions(projectPath, resolvedTcRoot, true, &selected);
+    expandAddonPins(selected, paths);
     addonVersions::saveResolved(projectPath, paths);
     writeAddonsMake(projectPath, selected);
     return cmdUpdate({"-p", projectPath}, false);
@@ -3906,13 +3882,9 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     const bool nativeBuild = kNativePreset && targetPreset == kNativePreset;
     bool remembered = false;
     if (nativeBuild) {
-        const auto savedType = addonVendor.value("buildType", Json());
-        if (rememberType && buildType.empty() && savedType.is_string()) {
-            const string value = savedType.get<string>();
-            if (value == "Debug" || value == "Release" || value == "RelWithDebInfo") {
-                effectiveType = value;
-                remembered = true;
-            }
+        if (rememberType && buildType.empty()) {
+            effectiveType = trusscliBuild::rememberedNativeBuildType(addonVendor);
+            remembered = addonVendor.value("buildType", Json()) == effectiveType;
         }
         cout << "Build type: " << effectiveType << (remembered ? " (remembered)" : "") << "\n";
         if (rememberType && !buildType.empty() && !dryRun && presetData.is_object()) {
@@ -4038,7 +4010,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
             if (preset.contains("cacheVariables") && preset["cacheVariables"].contains("TRUSSC_ADDON_PATHS")) presetAddonPaths = true;
         }
     }
-    if (resolveAddons || !cachedAddonPaths.empty() || presetAddonPaths) {
+    if ((resolveAddons && !resolvedAddonPaths.empty()) || !cachedAddonPaths.empty() || presetAddonPaths) {
         cfg.push_back("-DTRUSSC_ADDON_PATHS=" + addonPathsJson);
         cfg.push_back("-DTRUSSC_ADDON_ORDER=" + resolvedAddonPaths.order);
         const string cachedOrder = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_ORDER");
@@ -5538,7 +5510,7 @@ static void printTopHelp() {
          << "  update                         Regenerate build files for the project in CWD\n"
          << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
          << "  addon <command>                Manage addons: list, add, add-local, remove, clone, pull, search\n"
-         << "  cache <command>                Manage cached versions: list, clear, autoremove\n"
+         << "  cache <command>                Manage cached versions: list, remove, autoremove, clear\n"
          << "  cache remove <spec>            Remove one cached TrussC version\n"
          << "  cache remove --addon <spec>    Remove one cached external addon version\n"
          << "  info [section]                 Show project / framework info\n"
@@ -5547,7 +5519,7 @@ static void printTopHelp() {
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
          << "  dist                           Package the project to run on another machine\n"
-         << "  version                       Show version (trusscli + current TrussC)\n"
+         << "  version                        Show version (trusscli + current TrussC)\n"
          << "\n"
          << "Common options (per subcommand):\n"
          << "  -p, --path <path>              Operate on a specific project path\n"

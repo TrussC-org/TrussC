@@ -64,6 +64,18 @@ class HelpTests(unittest.TestCase):
             self.assertIn("remove <spec>", output)
             self.assertIn("remove --addon <spec>", output)
 
+    def test_command_description_columns_align(self):
+        for args in (("--help",), ("cache", "--help")):
+            output = self.cli(*args)
+            block = output.split("Commands:\n", 1)[1].split("\n\n", 1)[0]
+            columns = []
+            for line in block.splitlines():
+                match = re.match(r"^  \S.*?\s{2,}(\S.*)$", line)
+                self.assertIsNotNone(match, line)
+                columns.append(match.start(1))
+            self.assertEqual(len(set(columns)), 1, block)
+        self.assertIn("Manage cached versions: list, remove, autoremove, clear", self.cli("--help"))
+
     def test_plain_version_matches_existing_aliases(self):
         output = self.cli("version")
         self.assertRegex(output, r"^trusscli .+ \(built .+\)\nTrussC   ")

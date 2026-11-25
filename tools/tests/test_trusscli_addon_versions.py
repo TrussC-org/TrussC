@@ -61,6 +61,37 @@ class AddonVersionTests(VersionTests):
         self.assertEqual(next(line for line in self.last_result.stderr.splitlines() if line.startswith("Error:")),
                          "Error: Ref 'missing' was not found in alice/tcxFixture.")
 
+    def test_addon_short_commit_expands_pin_and_cache_path(self):
+        ref = self.addon_initial[:7]
+        output = self.cli("addon", "add", "alice/tcxFixture@" + ref)
+        self.assertIn("Resolved " + ref + " to " + self.addon_initial, output)
+        self.assertIn("alice/tcxFixture@" + self.addon_initial + "\n", (self.project / "addons.make").read_text(encoding="utf-8"))
+        expected = self.cache / "addons/alice/tcxFixture" / self.addon_initial
+        self.assertEqual(Path(self.paths()["tcxFixture"]), expected)
+        self.assertFalse((expected.parent / ref).exists())
+        self.cli("build", "--dry-run")
+        (self.project / "addons.make").write_text("alice/tcxFixture@" + ref + "\n", encoding="utf-8")
+        self.cli("update")
+        self.assertIn("alice/tcxFixture@" + self.addon_initial + "\n", (self.project / "addons.make").read_text(encoding="utf-8"))
+
+    def test_addon_tarball_short_commit_uses_api_full_id(self):
+        # Third-party archives do not need TrussC archive metadata.
+        commit = self.addon_initial
+        ref = commit[:7]
+        target = self.base / "remotes/alice/tcxFixture/archive" / (commit + ".tar.gz")
+        target.parent.mkdir(parents=True)
+        self.git("-C", self.addon, "archive", "--format=tar.gz", "--prefix=fixture/",
+                 "--output=" + str(target), commit)
+        response = target.parent.parent / "commits" / ref
+        response.parent.mkdir()
+        response.write_text(json.dumps({"sha": commit}), encoding="utf-8")
+        self.env["TRUSSC_FETCH"] = "tarball"
+        output = self.cli("addon", "add", "alice/tcxFixture@" + ref)
+        self.assertIn("Resolved " + ref + " to " + commit, output)
+        self.assertIn("alice/tcxFixture@" + commit + "\n", (self.project / "addons.make").read_text(encoding="utf-8"))
+        self.assertEqual(Path(self.paths()["tcxFixture"]).name, commit)
+        self.cli("build", "--dry-run")
+
     def paths(self):
         data = json.loads((self.project / "CMakePresets.json").read_text(encoding="utf-8"))
         return data["vendor"]["trussc"]["addonPaths"]
@@ -298,6 +329,14 @@ class AddonVersionTests(VersionTests):
         self.assertTrue(Path(self.paths()["tcxFixture"]).as_posix().endswith('/v1'))
         self.assertNotIn("tcxFixture", (self.project / "addons.make").read_text(encoding="utf-8"))
         self.cli("build")
+
+    def test_addon_transitive_short_commit_builds_from_saved_full_id(self):
+        self.local_addons({"tcxParent": ["alice/tcxFixture@" + self.addon_initial[:7]]})
+        (self.project / "addons.make").write_text("tcxParent\n", encoding="utf-8")
+        self.cli("update")
+        self.assertEqual(Path(self.paths()["tcxFixture"]).name, self.addon_initial)
+        self.assertNotIn("tcxFixture", (self.project / "addons.make").read_text(encoding="utf-8"))
+        self.cli("build", "--dry-run")
 
     def test_addon_version_ranges(self):
         (self.project / "addons.make").write_text("tcxFixture\n", encoding="utf-8")
