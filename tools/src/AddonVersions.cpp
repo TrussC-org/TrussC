@@ -1,3 +1,4 @@
+#include "OperationLog.h"
 #include "AddonVersions.h"
 #include "TrussCVersion.h"
 #include "GeneratedFile.h"
@@ -141,8 +142,8 @@ static void checkRange(const std::string& name, std::string selected, const std:
         }
         accepted |= matches;
     }
-    if (!understood) std::cerr << "Warning: " << name << " has an unsupported trussc_version range '" << range << "'\n";
-    else if (!accepted) std::cerr << "Warning: " << name << " requires TrussC " << range << "; project selects " << selected << "\n";
+    if (!understood) projectOps::diagnostic(name + " has an unsupported trussc_version range '" + range + "'", projectOps::MessageKind::Warning);
+    else if (!accepted) projectOps::diagnostic(name + " requires TrussC " + range + "; project selects " + selected, projectOps::MessageKind::Warning);
 }
 
 Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const Lookup& lookup, const std::vector<std::string>* selection) {
@@ -195,9 +196,9 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
         if (projectSpec != explicitSpecs.end()) {
             auto defaultRef = [](const std::string& ref) { return ref.empty() ? "HEAD" : ref; };
             if (defaultRef(projectSpec->second.ref) != defaultRef(spec.ref)) {
-                std::cerr << "Warning: dependency " << spec.name << "@" << (spec.ref.empty() ? "HEAD" : spec.ref)
-                          << " conflicts with project " << projectSpec->second.name << "@"
-                          << (projectSpec->second.ref.empty() ? "HEAD" : projectSpec->second.ref) << "; project wins\n";
+                projectOps::diagnostic("dependency " + spec.name + "@" + (spec.ref.empty() ? "HEAD" : spec.ref)
+                    + " conflicts with project " + projectSpec->second.name + "@"
+                    + (projectSpec->second.ref.empty() ? "HEAD" : projectSpec->second.ref) + "; project wins", projectOps::MessageKind::Warning);
             }
             spec = projectSpec->second;
         }

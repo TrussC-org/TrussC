@@ -1,3 +1,4 @@
+#include "ProjectOps.h"
 #include "GeneratedFile.h"
 #include <mutex>
 // =============================================================================
@@ -988,18 +989,19 @@ void tcApp::doUpdateProject() {
 
     auto settings = buildProjectSettings();
 
-    ProjectGenerator generator(settings);
-
-    // Set log callback for progress messages
-    generator.setLogCallback([this](const string& msg) {
+    projectOps::UpdateInput input;
+    input.projectPath = importedProjectPath;
+    input.settings = settings;
+    input.requirePlainProject = true;
+    auto result = projectOps::update(input, [this](const string& msg, projectOps::MessageKind kind) {
+        // Keep the GUI's existing progress display; warnings remain in the result.
+        if (kind != projectOps::MessageKind::Log) return;
         lock_guard<mutex> lock(logMutex);
         generatingLog += msg + "\n";
         redraw();
     });
-
-    // Update project
-    string error = generator.updateFromGui(importedProjectPath);
-    if (!error.empty()) {
+    if (!result.success) {
+        const string& error = result.failureReason;
         setStatus(error, true);
         redraw();
         return;
