@@ -229,7 +229,7 @@ Additional breaks found in the merged v0.9 PRs are included in the migration exa
 
 ## Vulkan backend (beta)
 
-The v0.9 Vulkan backend is experimental on Linux desktop and supports one native window; additional `createWindow()` calls return `nullptr` with a warning. Use the launch window:
+The v0.9 Vulkan backend is experimental on Linux (X11) and Windows (Win32) and supports one native window; additional `createWindow()` calls return `nullptr` with a warning. Use the launch window:
 
 ```cpp
 void tcApp::setup() {
@@ -237,11 +237,16 @@ void tcApp::setup() {
 }
 ```
 
-Vulkan readback is not supported in v0.9: window capture (`grabScreen`, `saveScreenshot`, `saveScreenshotAsync`), Fbo readback (`readPixels`, `readPixelsFloat`, `copyTo` to an Image, `readStencil`), `StorageBuffer::read` and `readAsync`, MCP screenshot and window/Fbo image analysis, and `ScreenRecorder` / `VideoWriter` fed from a window or an Fbo fail with a warning. The full list is in [BUILD_SYSTEM.md › Experimental Vulkan build (Linux)](BUILD_SYSTEM.md#experimental-vulkan-build-linux). There is no Vulkan API to enable readback. Asynchronous buffer reads deliver deferred failure; recorders stop at the first readback failure. To capture, select the default OpenGL backend in the Linux project's CMake configuration and rebuild:
+Vulkan readback is not supported in v0.9: window capture (`grabScreen`, `saveScreenshot`, `saveScreenshotAsync`), Fbo readback (`readPixels`, `readPixelsFloat`, `copyTo` to an Image, `readStencil`), `StorageBuffer::read` and `readAsync`, MCP screenshot and window/Fbo image analysis, and `ScreenRecorder` / `VideoWriter` fed from a window or an Fbo fail with a warning. The full list is in [BUILD_SYSTEM.md › Experimental Vulkan build (Linux and Windows)](BUILD_SYSTEM.md#experimental-vulkan-build-linux-and-windows). There is no Vulkan API to enable readback. Asynchronous buffer reads deliver deferred failure; recorders stop at the first readback failure. To capture, rebuild with the platform's default backend (GL on Linux, D3D11 on Windows) by clearing the Vulkan override:
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
 ```
 
-Backend selection is a build option, not a `tcApp` runtime setting. See [BUILD_SYSTEM.md › Experimental Vulkan build (Linux)](BUILD_SYSTEM.md#experimental-vulkan-build-linux).
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
+```
+
+Backend selection is a build option, not a `tcApp` runtime setting. See [BUILD_SYSTEM.md › Experimental Vulkan build (Linux and Windows)](BUILD_SYSTEM.md#experimental-vulkan-build-linux-and-windows).

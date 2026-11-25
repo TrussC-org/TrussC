@@ -9805,8 +9805,13 @@ details.en = '''
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -9817,8 +9822,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -9829,8 +9839,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -9956,8 +9971,13 @@ void tcApp::draw() {
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -9976,8 +9996,13 @@ void tcApp::draw() {
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -9996,8 +10021,13 @@ void tcApp::draw() {
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["StencilDesc", "clearStencil", "Fbo::drawStencil"]
@@ -10261,8 +10291,13 @@ void tcApp::draw() {
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -10305,8 +10340,13 @@ void tcApp::draw() {
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -10349,8 +10389,13 @@ void tcApp::draw() {
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
@@ -10398,8 +10443,13 @@ void tcApp::draw() {
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -10439,8 +10489,13 @@ void tcApp::draw() {
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -10480,8 +10535,13 @@ void tcApp::draw() {
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo::readPixels", "Pixels"]
@@ -28182,8 +28242,13 @@ Window recording, including MCP `tc_start_recording`, reads window alpha with th
 - Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["VideoWriter", "startRecording", "Fbo", "Fbo::readPixels", "grabScreen"]
@@ -28213,8 +28278,13 @@ MCP の `tc_start_recording` を含むウィンドウの録画では、`grabScre
 - v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -28231,8 +28301,13 @@ MCP의 `tc_start_recording`을 포함한 윈도우 녹화는 `grabScreen`에 설
 - v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 
@@ -28335,8 +28410,13 @@ For window readback alpha precision and the Fbo alternative for exact alpha, see
 - Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -28353,8 +28433,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -28371,8 +28456,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -43669,8 +43759,13 @@ details.en = '''
 - Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. CPU-supplied Pixels do not require readback. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -43688,8 +43783,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。CPU から渡す Pixels は読み戻しを必要としません。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -43707,8 +43807,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. CPU에서 제공하는 Pixels는 읽기가 필요하지 않습니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -43765,8 +43870,13 @@ details.en = '''
 - Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. CPU-supplied Pixels do not require readback. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -43776,8 +43886,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。CPU から渡す Pixels は読み戻しを必要としません。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -43787,8 +43902,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. CPU에서 제공하는 Pixels는 읽기가 필요하지 않습니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo", "Pixels", "VideoWriter::addFrameAt"]
@@ -43820,8 +43940,13 @@ details.en = '''
 - Vulkan beta in v0.9 does not support window or Fbo readback for recording; it intentionally fails with a warning. CPU-supplied Pixels do not require readback. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -43835,8 +43960,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版は録画用のウィンドウや Fbo の読み戻しに対応しておらず、警告を出して意図的に失敗します。CPU から渡す Pixels は読み戻しを必要としません。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -43850,8 +43980,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 녹화를 위한 윈도우 또는 Fbo 읽기를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. CPU에서 제공하는 Pixels는 읽기가 필요하지 않습니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["Fbo", "Pixels"]
@@ -52558,8 +52693,13 @@ On macOS, iOS and Windows, the main window uses RGB10A2, so its stored alpha has
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -52596,8 +52736,13 @@ macOS・iOS・Windows のメインウィンドウは RGB10A2 を使うため、�
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -52634,8 +52779,13 @@ macOS, iOS, Windows의 메인 윈도우는 RGB10A2를 사용하므로 저장되�
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 platform_note.en = "Not implemented on web (no synchronous canvas readback): always returns false and logs a one-time warning. Use saveScreenshot() for a deferred canvas download or the browser's screenshot tools."
@@ -55812,8 +55962,13 @@ For window readback alpha precision and the Fbo alternative for exact alpha, see
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -55830,8 +55985,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -55848,8 +56008,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["grabScreen", "startRecording", "captureWindow", "Fbo::readPixels"]
@@ -67953,8 +68118,13 @@ For window readback alpha precision and the Fbo alternative for exact alpha, see
 - Vulkan beta in v0.9 does not support this readback path; it intentionally fails with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -67974,8 +68144,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版はこの読み戻し経路に対応しておらず、警告を出して意図的に失敗します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -67995,8 +68170,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 이 읽기 경로를 지원하지 않으며 경고와 함께 의도적으로 실패합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot", "Fbo::readPixels", "grabScreen"]
@@ -69874,8 +70054,13 @@ details.en = '''
 - Vulkan beta in v0.9 rejects nonzero reads with a warning; zero-byte reads still succeed. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -69886,8 +70071,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版は 0 より大きいバイト数の読み取りを警告付きで拒否します。0 バイトの読み取りは成功します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -69898,8 +70088,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 0보다 큰 바이트 수의 읽기를 경고와 함께 거부합니다. 0바이트 읽기는 성공합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
@@ -69921,8 +70116,13 @@ details.en = '''
 - Vulkan beta in v0.9 does not support allocated-buffer readback; readAsync delivers deferred failure with a warning. For capture work, clear the Vulkan override and rebuild with the platform's default backend (there is no runtime backend switch):
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ja = '''
@@ -69933,8 +70133,13 @@ details.ja = '''
 - v0.9 の Vulkan ベータ版は確保済みバッファの読み戻しに対応しておらず、readAsync は警告付きの失敗を後から通知します。キャプチャには Vulkan の指定を外し、プラットフォーム標準のバックエンドで再ビルドしてください（実行時にバックエンドを切り替える API はありません）。
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 details.ko = '''
@@ -69945,8 +70150,13 @@ details.ko = '''
 - v0.9의 Vulkan 베타는 할당된 버퍼 읽기를 지원하지 않으며 readAsync는 경고와 함께 실패를 나중에 전달합니다. 캡처 작업에는 Vulkan 지정을 해제하고 플랫폼 기본 백엔드로 다시 빌드합니다(실행 중 백엔드를 전환하는 API는 없습니다).
 
 ```bash
-cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+cmake --preset linux -DTC_GFX_BACKEND=
 cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
 ```
 '''
 snippet = '''
