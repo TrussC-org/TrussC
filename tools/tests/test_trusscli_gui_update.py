@@ -44,13 +44,17 @@ void writeGeneratedFile(const fs::path& path, const std::string& text) {
 void removeBuildDirectory(const fs::path& path) { fs::remove_all(path); }
 
 int main(int argc, char** argv) {
-    if (argc != 4) return 2;
+    if (argc != 4 && argc != 5) return 2;
     ProjectSettings settings;
     settings.tcRoot = argv[1];
     settings.projectName = "sample";
     settings.ideType = IdeType::CMakeOnly;
     settings.addons = {"tcxKeep", "tcxRemove", "tcxNew", "tcxClone"};
     settings.addonSelected = {1, 0, 1, 0};
+    if (argc == 5) {
+        if (std::string(argv[4]) == "clone") settings.addonSelected[3] = 1;
+        else settings.addonSelected = {0, 0, 0, 0};
+    }
     ProjectGenerator generator(settings);
     std::string error = std::string(argv[3]) == "gui"
         ? generator.updateFromGui(argv[2]) : generator.update(argv[2]);
@@ -65,6 +69,9 @@ int main(int argc, char** argv) {
             str(ROOT / "tools/src/ProjectGenerator.cpp"),
             str(ROOT / "tools/src/IdeHelper.cpp"),
             str(ROOT / "tools/src/VsDetector.cpp"), "-o", str(cls.driver),
+            str(ROOT / "tools/src/AddonVersions.cpp"),
+            str(ROOT / "tools/src/TrussCVersion.cpp"),
+            str(ROOT / "tools/src/ProcessCapture.cpp"),
         ], check=True)
 
     def setUp(self):
@@ -81,17 +88,20 @@ int main(int argc, char** argv) {
         (self.project / "build-linux").mkdir()
         (self.project / "build-linux/canary").write_text("keep", encoding="utf-8")
 
-    def update(self, mode="gui"):
-        return subprocess.run([str(self.driver), str(self.framework), str(self.project), mode],
+    def update(self, mode="gui", selection=None):
+        command = [str(self.driver), str(self.framework), str(self.project), mode]
+        if selection:
+            command.append(selection)
+        return subprocess.run(command,
                               text=True, capture_output=True, encoding="utf-8")
 
     def snapshot(self):
         return {p.relative_to(self.project).as_posix(): p.read_bytes()
                 for p in self.project.rglob("*") if p.is_file()}
 
-    def assert_refused(self):
+    def assert_refused(self, selection=None):
         before = self.snapshot()
-        result = self.update()
+        result = self.update(selection=selection)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, REFUSAL)
         self.assertEqual(self.snapshot(), before, "refusal must precede every write/cleanup")
@@ -151,10 +161,98 @@ int main(int argc, char** argv) {
         # CLI update also uses the installed folder for a plain name, so the GUI keeps handling it.
         (self.framework / "addons/tcxClone/.git").mkdir()
         (self.project / "addons.make").write_text("tcxClone\n", encoding="utf-8")
-        result = self.update()
+        result = self.update(selection="clone")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.project / "addons.make").read_text(encoding="utf-8"),
-                         "tcxKeep\ntcxNew\n")
+                         "tcxClone\ntcxKeep\ntcxNew\n")
+
+    def manifest(self, name, dependencies):
+        path = self.framework / "addons" / name
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "addon.json").write_text(json.dumps({"dependencies": dependencies}),
+                                        encoding="utf-8")
+
+    def test_selected_clone_and_bundled_addons_refuse_external_dependencies(self):
+        (self.framework / "addons/tcxClone/.git").mkdir()
+        for name in ("tcxClone", "tcxKeep", "tcxNew"):
+            with self.subTest(name=name):
+                # tcxKeep stays from addons.make; tcxClone/tcxNew are newly checked.
+                self.manifest(name, ["alice/tcxExternal@v1"])
+                self.assert_refused(selection="clone")
+                (self.framework / "addons" / name / "addon.json").unlink()
+
+    def test_transitive_external_dependencies_refuse_including_object_specs(self):
+        self.manifest("tcxNew", ["tcxBridge"])
+        for dependency in ("alice/tcxExternal@v1", "alice/tcxKeep", "tcxKeep@v1",
+                           "tcxMissing", {"name": "tcxKeep", "tag": "v1"},
+                           {"name": "tcxKeep", "commit": "abc123"},
+                           {"name": "tcxKeep", "branch": "main"},
+                           {"name": "tcxKeep", "url": "https://github.com/alice/tcxKeep.git"}):
+            with self.subTest(dependency=dependency):
+                self.manifest("tcxBridge", [dependency])
+                self.assert_refused()
+
+    def test_plain_installed_dependencies_update_including_cycles(self):
+        (self.framework / "addons/tcxClone/.git").mkdir()
+        self.manifest("tcxClone", ["tcxNew"])
+        self.manifest("tcxNew", [{"name": "tcxKeep"}, "tcxBridge"])
+        self.manifest("tcxBridge", ["tcxNew"])
+        result = self.update(selection="clone")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.project / "addons.make").read_text(encoding="utf-8"),
+                         "tcxKeep\ntcxNew\ntcxClone\n")
+
+    def test_unchecked_addon_dependencies_do_not_block_removal(self):
+        self.manifest("tcxRemove", ["alice/tcxExternal@v1"])
+        result = self.update()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_cli_resolver_map_cannot_keep_unchecked_addons_enabled(self):
+        for selection, expected in ((None, "tcxKeep;tcxNew"), ("empty", "")):
+            with self.subTest(selection=selection):
+                vendor = {"addonPaths": {name: str(self.framework / "addons" / name)
+                                         for name in ("tcxKeep", "tcxRemove")},
+                          "addonOrder": "tcxKeep;tcxRemove", "custom": "preserve"}
+                presets = self.project / "CMakePresets.json"
+                presets.write_text(json.dumps({"vendor": {"trussc": vendor}}), encoding="utf-8")
+                result = self.update(selection=selection)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                data = json.loads(presets.read_text(encoding="utf-8"))
+                self.assertNotIn("addonPaths", data["vendor"]["trussc"])
+                self.assertNotIn("addonOrder", data["vendor"]["trussc"])
+                self.assertEqual(data["vendor"]["trussc"]["custom"], "preserve")
+                script = self.base / "effective-addons.cmake"
+                lines = [f'set(CMAKE_CURRENT_SOURCE_DIR "{self.project.as_posix()}")',
+                         f'include("{(ROOT / "core/cmake/use_addon.cmake").as_posix()}")']
+                for preset in data["configurePresets"]:
+                    cache = preset.get("cacheVariables", {})
+                    for key in ("TRUSSC_ADDON_PATHS", "TRUSSC_ADDON_ORDER"):
+                        self.assertNotIn(key, cache)
+                        lines.append(f'set({key} [==[{cache.get(key, "")}]==])')
+                    lines.extend(['_tc_project_addons(actual)',
+                                  f'if(NOT "${{actual}}" STREQUAL "{expected}")',
+                                  'message(FATAL_ERROR "Effective addons: ${actual}")', 'endif()'])
+                script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                subprocess.run(["cmake", "-P", str(script)], check=True, capture_output=True)
+
+    def test_oversized_project_and_addon_files_fail_before_writes(self):
+        for relative, mode in (("addons.make", "gui"), ("addons.make", "generator"),
+                               ("CMakePresets.json", "gui"), ("CMakeUserPresets.json", "gui"),
+                               ("../framework/addons/tcxNew/addon.json", "gui")):
+            with self.subTest(relative=relative, mode=mode):
+                path = self.project / relative
+                original = path.read_bytes() if path.exists() else None
+                with path.open("wb") as output:
+                    output.truncate(16 * 1024 * 1024 + 1)
+                before = self.snapshot()
+                result = self.update(mode)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, path.name + " exceeds the 16777216-byte limit")
+                self.assertEqual(self.snapshot(), before)
+                if original is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(original)
 
 
 if __name__ == "__main__":

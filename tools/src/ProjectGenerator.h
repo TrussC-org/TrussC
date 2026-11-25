@@ -91,7 +91,7 @@ public:
     static std::string validateProject(const std::string& projectPath);
 
     // Update existing project
-    std::string update(const std::string& projectPath);
+    std::string update(const std::string& projectPath, bool clearAddonResolution = false);
 
     // GUI selections cover only local addons. Refuse projects that need the
     // CLI's version/addon resolution before any files or builds are changed.
@@ -162,7 +162,7 @@ private:
     // Valid names keep the template CMakeLists.txt; changed names are explicit.
     // The IDE is stored there too, as "vendor": {"trussc": {"ide": "<id>"}},
     // so update / addon add / addon remove can keep it (see ProjectState.h).
-    void writeCMakePresets(const std::string& destPath);
+    void writeCMakePresets(const std::string& destPath, bool clearAddonResolution = false);
 
     // Run cmake --preset for enabled cross-compile targets (iOS, Android, Web).
     // Returns false if any preset failed to configure, so callers can fail

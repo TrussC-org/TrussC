@@ -2,10 +2,13 @@
 #include "ProjectName.h"
 #include "GeneratedFile.h"
 #include "BuildSetup.h"
+#include "AddonVersions.h"
+#include "TrussCVersion.h"
 #include "TrussC.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <set>
 #include <filesystem>
 #include <stdexcept>
 #include <cstdio>
@@ -319,16 +322,25 @@ static string addonNameFromLine(const string& line) {
     return line.substr(start, end - start + 1);
 }
 
+static string readGuiUpdateFile(const fs::path& path) {
+    constexpr size_t limit = 16 * 1024 * 1024;
+    if (fs::file_size(path) > limit) {
+        throw runtime_error(path.filename().string() + " exceeds the " + to_string(limit) + "-byte limit");
+    }
+    return trusscVersion::readBounded(path, limit);
+}
+
 void ProjectGenerator::writeAddonsMake(const string& destPath, bool preserveExisting) {
     string addonsMakePath = destPath + "/addons.make";
     ostringstream addonsFile;
     vector<bool> present(settings_.addons.size(), false);
-    ifstream existing;
-    if (preserveExisting) existing.open(addonsMakePath);
-    if (preserveExisting && !existing && fs::exists(addonsMakePath)) {
-        throw runtime_error("Failed to read " + addonsMakePath);
+    istringstream existing;
+    const bool hasExisting = preserveExisting && fs::exists(addonsMakePath);
+    if (hasExisting) {
+        // Bound (preserved addon lines): cap addons.make at the CLI's 16 MiB before merging.
+        existing.str(readGuiUpdateFile(addonsMakePath));
     }
-    if (existing.is_open()) {
+    if (hasExisting) {
         string line;
         while (getline(existing, line)) {
             const string name = addonNameFromLine(line);
@@ -343,7 +355,6 @@ void ProjectGenerator::writeAddonsMake(const string& destPath, bool preserveExis
             }
         }
         if (existing.bad()) throw runtime_error("Failed to read " + addonsMakePath);
-        existing.close();  // Release the Windows file handle before atomic replacement.
     } else {
         addonsFile << "# TrussC addons - one addon per line\n";
     }
@@ -438,7 +449,7 @@ static void checkWebNinja(const ProjectSettings& settings) {
 #endif
 }
 
-void ProjectGenerator::writeCMakePresets(const string& destPath) {
+void ProjectGenerator::writeCMakePresets(const string& destPath, bool clearAddonResolution) {
     log("Writing CMakePresets.json...");
 
     // Get TRUSSC_DIR value for this project
@@ -633,6 +644,11 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         presets["vendor"]["trussc"] = Json::object();
     }
     presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
+    if (clearAddonResolution) {
+        // GUI preflight established that all selected addons use installed paths.
+        presets["vendor"]["trussc"].erase("addonPaths");
+        presets["vendor"]["trussc"].erase("addonOrder");
+    }
     const auto& vendor = presets["vendor"]["trussc"];
     if (vendor.contains("addonPaths")) {
         for (auto& preset : presets["configurePresets"]) {
@@ -839,9 +855,10 @@ string ProjectGenerator::updateFromGui(const string& projectPath) {
         // use-local is currently saved in CMakePresets.json; also honor the
         // user preset location so either override stays untouched.
         for (const char* file : {"CMakePresets.json", "CMakeUserPresets.json"}) {
-            ifstream input(fs::path(projectPath) / file);
-            if (!input) continue;
-            auto data = Json::parse(input, nullptr, false);
+            auto path = fs::path(projectPath) / file;
+            if (!fs::exists(path)) continue;
+            // Bound (GUI preset preflight): cap each preset JSON at the CLI's 16 MiB before parsing.
+            auto data = Json::parse(readGuiUpdateFile(path), nullptr, false);
             if (!data.is_object() || !data.contains("vendor")) continue;
             const auto& vendor = data["vendor"];
             if (!vendor.is_object() || !vendor.contains("trussc")) continue;
@@ -852,28 +869,54 @@ string ProjectGenerator::updateFromGui(const string& projectPath) {
             }
         }
         auto addonsPath = fs::path(projectPath) / "addons.make";
-        ifstream input(addonsPath);
-        if (!input && fs::exists(addonsPath)) throw runtime_error("Failed to read " + addonsPath.string());
+        istringstream input;
+        if (fs::exists(addonsPath)) {
+            // Bound (GUI addon preflight): cap addons.make at the CLI's 16 MiB before scanning.
+            input.str(readGuiUpdateFile(addonsPath));
+        }
         string line;
         while (getline(input, line)) {
             const string name = addonNameFromLine(line);
             if (name.empty()) continue;
-            auto installed = fs::path(settings_.tcRoot) / "addons" / name;
-            if (name.compare(0, 3, "tcx") != 0 || name.find_first_of("/@\\") != string::npos ||
-                find(settings_.addons.begin(), settings_.addons.end(), name) == settings_.addons.end() ||
-                !fs::is_directory(installed)) {
-                return cliRequired;
-            }
+            // Unknown lines survive the merge and still require CLI resolution.
+            if (find(settings_.addons.begin(), settings_.addons.end(), name) == settings_.addons.end()) return cliRequired;
         }
         if (input.bad()) throw runtime_error("Failed to read " + addonsPath.string());
-        input.close();
-        return update(projectPath);
+        vector<string> pending;
+        for (size_t i = 0; i < settings_.addons.size(); ++i) {
+            if (settings_.addonSelected[i]) pending.push_back(settings_.addons[i]);
+        }
+        set<string> visited;
+        for (size_t i = 0; i < pending.size(); ++i) {
+            const string name = pending[i];
+            auto spec = addonVersions::parse(name);
+            auto installed = fs::path(settings_.tcRoot) / "addons" / spec.name;
+            if (!spec.owner.empty() || !spec.ref.empty() || !fs::is_directory(installed)) return cliRequired;
+            if (!visited.insert(name).second) continue;
+            auto manifest = installed / "addon.json";
+            if (!fs::exists(manifest)) continue;
+            // Bound (installed addon dependencies): cap each manifest at the CLI's 16 MiB before parsing.
+            auto meta = Json::parse(readGuiUpdateFile(manifest));
+            if (!meta.contains("dependencies")) continue;
+            if (!meta["dependencies"].is_array()) throw runtime_error("addon dependencies must be an array: " + name);
+            for (const auto& dependency : meta["dependencies"]) {
+                // Bound (untrusted dependency graph): cap queued nodes and edges at the CLI's 4096.
+                if (pending.size() >= 4096) throw runtime_error("addon dependency graph exceeds the 4096 node/edge limit");
+                if (dependency.is_string()) pending.push_back(dependency.get<string>());
+                else {
+                    if (dependency.contains("commit") || dependency.contains("tag") ||
+                        dependency.contains("branch") || dependency.contains("url")) return cliRequired;
+                    pending.push_back(dependency.at("name").get<string>());
+                }
+            }
+        }
+        return update(projectPath, true);
     } catch (const exception& e) {
         return e.what();
     }
 }
 
-string ProjectGenerator::update(const string& projectPath_) {
+string ProjectGenerator::update(const string& projectPath_, bool clearAddonResolution) {
     warnings_.clear();
     // Resolve project paths against the CLI working directory.
     string projectPath = fs::absolute(projectPath_).string();
@@ -892,7 +935,7 @@ string ProjectGenerator::update(const string& projectPath_) {
         writeCMakeLists(projectPath);
 
         // Write CMakePresets.json (OS-specific with TRUSSC_DIR)
-        writeCMakePresets(projectPath);
+        writeCMakePresets(projectPath, clearAddonResolution);
 
         // Clean build directories for this platform before regenerating
         cleanBuildDirectories(projectPath);
