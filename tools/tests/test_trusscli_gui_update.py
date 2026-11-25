@@ -1,4 +1,4 @@
-"""ProjectGenerator GUI updates, using only local project/addon fixtures.
+"""Shared project-operation GUI updates, using only local project/addon fixtures.
 
 Run through tcbuild.sh. The production generator and IDE helper are compiled
 with a Json-only TrussC header and a file I/O shim; no display is needed.
@@ -27,14 +27,21 @@ class GuiUpdateTests(unittest.TestCase):
         scratch = Path(cls.build.name)
         (scratch / "TrussC.h").write_text(
             '#pragma once\n#include <nlohmann/json.hpp>\n'
+            # GCC 13+ misdiagnoses ProjectState's reference to a static vector.
+            '#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 13\n'
+            '#pragma GCC diagnostic ignored "-Wdangling-reference"\n'
+            '#endif\n'
             'namespace tc { using Json = nlohmann::json; }\n', encoding="utf-8")
         source = scratch / "main.cpp"
         source.write_text(r'''
 #include "ProjectGenerator.h"
+#include "ProjectOps.h"
 #include "GeneratedFile.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
+#include "TrussC.h"
 
 // Replace framework file I/O only. All update decisions and file contents
 // come from the production ProjectGenerator.
@@ -56,18 +63,65 @@ int main(int argc, char** argv) {
         else if (std::string(argv[4]) == "keep") settings.addonSelected = {1, 0, 0, 0};
         else settings.addonSelected = {0, 0, 0, 0};
     }
+    const std::string mode = argv[3];
+    if (mode == "operation" || mode == "use" || mode == "use-local") {
+        projectOps::UpdateInput input;
+        input.projectPath = argv[2];
+        input.tcRoot = argv[1];
+        input.flags.ide = IdeType::CMakeOnly;
+        input.fetchVersion = false;
+        input.addonLookup = [](const addonVersions::Spec&, bool) {
+            projectOps::diagnostic("registry callback fixture", projectOps::MessageKind::Diagnostic);
+            return addonVersions::Source{};
+        };
+        if (argc == 5 && mode == "operation") input.requirePlainProject = true;
+        tc::Json events = tc::Json::array();
+        std::ostringstream printed;
+        auto* previousOut = std::cout.rdbuf(printed.rdbuf());
+        auto* previousErr = std::cerr.rdbuf(printed.rdbuf());
+        auto log = [&](const std::string& text, projectOps::MessageKind kind) {
+            events.push_back({{"message", text}, {"warning", kind == projectOps::MessageKind::Warning}});
+        };
+        projectOps::Result result;
+        if (mode == "operation") result = projectOps::update(input, log);
+        else {
+            // Selection operations resolve their own source, rather than saving
+            // the driver's framework as an update override.
+            input.tcRoot.clear();
+            const std::string selection = argc == 5 ? argv[4] : "";
+            if (mode == "use") result = projectOps::use({input, selection, selection == "--clear"}, log);
+            else result = projectOps::useLocal({input, selection, selection == "--clear"}, log);
+        }
+        std::cout.rdbuf(previousOut);
+        std::cerr.rdbuf(previousErr);
+        if (!printed.str().empty()) return 4;
+        std::cout << tc::Json{{"success", result.success}, {"error", result.failureReason},
+            {"warnings", result.warnings}, {"logs", result.logLines}, {"events", events}};
+        return result.success ? 0 : 1;
+    }
     ProjectGenerator generator(settings);
-    std::string error = std::string(argv[3]) == "gui"
-        ? generator.updateFromGui(argv[2]) : generator.update(argv[2]);
+    std::string error;
+    if (std::string(argv[3]) == "gui") {
+        projectOps::UpdateInput input;
+        input.projectPath = argv[2];
+        input.settings = settings;
+        input.requirePlainProject = true;
+        auto result = projectOps::update(input);
+        error = result.failureReason;
+        if (result.success != error.empty()) return 3;
+    } else error = generator.update(argv[2]);
     if (!error.empty()) { std::cout << error; return 1; }
 }
 ''', encoding="utf-8")
         cls.driver = scratch / "driver"
         subprocess.run([
             os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror",
+            "-include", str(scratch / "TrussC.h"),
             "-I", str(scratch), "-I", str(ROOT / "tools/src"),
             "-I", str(ROOT / "core/include"), str(source),
             str(ROOT / "tools/src/ProjectGenerator.cpp"),
+            str(ROOT / "tools/src/ProjectOps.cpp"),
+            str(ROOT / "tools/src/ProjectState.cpp"),
             str(ROOT / "tools/src/IdeHelper.cpp"),
             str(ROOT / "tools/src/VsDetector.cpp"), "-o", str(cls.driver),
             str(ROOT / "tools/src/AddonVersions.cpp"),
@@ -82,6 +136,9 @@ int main(int argc, char** argv) {
         self.framework = self.base / "framework"
         for addon in ("tcxKeep", "tcxRemove", "tcxNew", "tcxClone"):
             (self.framework / "addons" / addon).mkdir(parents=True)
+        cmake = self.framework / "core/cmake"
+        cmake.mkdir(parents=True)
+        (cmake / "trussc_app.cmake").touch()
         self.project = self.base / "sample"
         (self.project / "src").mkdir(parents=True)
         (self.project / "CMakeLists.txt").write_text("# TRUSSC_DIR\n", encoding="utf-8")
@@ -128,6 +185,72 @@ int main(int argc, char** argv) {
                          "tcxKeep\ntcxNew\n")
         self.assertTrue((self.project / "CMakePresets.json").is_file())
         self.assertIn("trussc_app(", (self.project / "CMakeLists.txt").read_text(encoding="utf-8"))
+
+    def test_direct_operation_restores_addons_and_presets(self):
+        addons = self.project / "addons.make"
+        original = "# keep comments\ntcxKeep\ntcxRemove\n"
+        addons.write_text(original, encoding="utf-8")
+        self.manifest("tcxKeep", ["tcxNew"])
+        presets = self.project / "CMakePresets.json"
+        presets.write_text(json.dumps({"vendor": {"trussc": {"custom": "keep"}}}),
+                           encoding="utf-8")
+        result = self.update("operation")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["success"])
+        self.assertEqual(report["error"], "")
+        self.assertEqual(addons.read_text(encoding="utf-8"), original)
+        self.assert_effective_addons("tcxKeep;tcxRemove;tcxNew")
+        vendor = json.loads(presets.read_text(encoding="utf-8"))["vendor"]["trussc"]
+        self.assertEqual(vendor["custom"], "keep")
+        self.assertEqual(vendor["ide"], "cmake")
+        self.assertEqual(report["logs"], [event["message"] for event in report["events"]
+                                          if not event["warning"]])
+        self.assertEqual(report["warnings"], [event["message"] for event in report["events"]
+                                              if event["warning"]])
+        self.assertEqual(report["logs"][-1], "Project updated: " + str(self.project))
+
+    def test_direct_operation_plain_requirement_refuses_before_local_override(self):
+        (self.project / ".trussc-version").touch()
+        before = self.snapshot()
+        result = self.update("operation", "plain")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertFalse(report["success"])
+        self.assertEqual(report["error"], REFUSAL)
+        self.assertEqual(report["logs"], [])
+        self.assertEqual(self.snapshot(), before)
+
+    def test_direct_operation_returns_preset_warnings(self):
+        (self.project / "CMakePresets.json").write_text(
+            json.dumps({"configurePresets": 17}), encoding="utf-8")
+        result = self.update("operation")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["warnings"])
+        self.assertEqual(report["events"][0],
+                         {"message": report["warnings"][0], "warning": True})
+
+    def test_direct_operation_captures_resolver_warnings(self):
+        (self.project / ".trussc-version").write_text("v1.0.0\n", encoding="utf-8")
+        (self.framework / "addons/tcxKeep/addon.json").write_text(
+            json.dumps({"trussc_version": "unsupported"}), encoding="utf-8")
+        result = self.update("operation")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        report = json.loads(result.stdout)
+        expected = "tcxKeep has an unsupported trussc_version range 'unsupported'"
+        self.assertIn(expected, report["warnings"])
+        self.assertEqual(report["events"][0], {"message": expected, "warning": True})
+
+    def test_direct_operation_captures_registry_diagnostics(self):
+        (self.framework / "addons/tcxClone/.git").mkdir()
+        (self.project / "addons.make").write_text("tcxClone\n", encoding="utf-8")
+        result = self.update("operation")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["logs"][0], "registry callback fixture")
+        self.assertEqual(report["events"][0],
+                         {"message": "registry callback fixture", "warning": False})
 
     def test_version_file_refuses_even_when_empty(self):
         (self.project / ".trussc-version").touch()
@@ -254,6 +377,17 @@ int main(int argc, char** argv) {
         result = subprocess.run(["cmake", "-P", str(script)], text=True, capture_output=True,
                                 encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_plain_operation_without_settings_bounds_addons_make(self):
+        path = self.project / "addons.make"
+        with path.open("wb") as output:
+            output.truncate(16 * 1024 * 1024 + 1)
+        before = self.snapshot()
+        result = self.update("operation", "plain")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["error"],
+                         "addons.make exceeds the 16777216-byte limit")
+        self.assertEqual(self.snapshot(), before)
 
     def test_oversized_project_and_addon_files_fail_before_writes(self):
         for relative, mode in (("addons.make", "gui"), ("addons.make", "generator"),

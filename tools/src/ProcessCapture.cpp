@@ -1,4 +1,5 @@
 #include "ProcessCapture.h"
+#include "OperationLog.h"
 
 #include <cerrno>
 #include <cstring>
@@ -19,6 +20,12 @@ extern char** environ;
 #endif
 
 using namespace std;
+
+static void spawnDiagnostic(const string& message) {
+    if (projectOps::diagnosticCallback) {
+        projectOps::diagnostic(message, projectOps::MessageKind::Diagnostic);
+    } else cerr << message << "\n";
+}
 
 #ifdef _WIN32
 
@@ -54,7 +61,7 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
     CloseHandle(writeEnd);
     if (!started) {
         CloseHandle(readEnd);
-        cerr << "Error: failed to spawn '" << argv[0] << "'\n";
+        spawnDiagnostic("Error: failed to spawn '" + argv[0] + "'");
         return -1;
     }
 
@@ -120,7 +127,7 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
     close(fds[1]);
     if (error) {
         close(fds[0]);
-        cerr << "Error: failed to spawn '" << argv[0] << "': " << strerror(error) << "\n";
+        spawnDiagnostic("Error: failed to spawn '" + argv[0] + "': " + strerror(error));
         return -1;
     }
 

@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
-#include <set>
 #include <filesystem>
 #include <stdexcept>
 #include <cstdio>
@@ -858,75 +857,6 @@ string ProjectGenerator::validateProject(const string& projectPath) {
     return "";
 }
 
-string ProjectGenerator::updateFromGui(const string& projectPath) {
-    const string cliRequired =
-        "This project uses a pinned TrussC version or external addons. Use "
-        "`trusscli update -p <path>` (GUI support is planned for v0.9.1).";
-    try {
-        if (fs::exists(fs::path(projectPath) / ".trussc-version")) return cliRequired;
-        // use-local is currently saved in CMakePresets.json; also honor the
-        // user preset location so either override stays untouched.
-        for (const char* file : {"CMakePresets.json", "CMakeUserPresets.json"}) {
-            auto path = fs::path(projectPath) / file;
-            if (!fs::exists(path)) continue;
-            // Bound (GUI preset preflight): cap each preset JSON at the CLI's 16 MiB before parsing.
-            auto data = Json::parse(readGuiUpdateFile(path), nullptr, false);
-            if (!data.is_object() || !data.contains("vendor")) continue;
-            const auto& vendor = data["vendor"];
-            if (!vendor.is_object() || !vendor.contains("trussc")) continue;
-            const auto& trussc = vendor["trussc"];
-            if (trussc.contains("localPath") ||
-                (trussc.contains("addonLocalPaths") && !trussc["addonLocalPaths"].empty())) {
-                return cliRequired;
-            }
-        }
-        auto addonsPath = fs::path(projectPath) / "addons.make";
-        istringstream input;
-        if (fs::exists(addonsPath)) {
-            // Bound (GUI addon preflight): cap addons.make at the CLI's 16 MiB before scanning.
-            input.str(readGuiUpdateFile(addonsPath));
-        }
-        string line;
-        while (getline(input, line)) {
-            const string name = addonNameFromLine(line);
-            if (name.empty()) continue;
-            // Unknown lines survive the merge and still require CLI resolution.
-            if (find(settings_.addons.begin(), settings_.addons.end(), name) == settings_.addons.end()) return cliRequired;
-        }
-        if (input.bad()) throw runtime_error("Failed to read " + addonsPath.string());
-        vector<string> pending;
-        for (size_t i = 0; i < settings_.addons.size(); ++i) {
-            if (settings_.addonSelected[i]) pending.push_back(settings_.addons[i]);
-        }
-        set<string> visited;
-        for (size_t i = 0; i < pending.size(); ++i) {
-            const string name = pending[i];
-            auto spec = addonVersions::parse(name);
-            auto installed = fs::path(settings_.tcRoot) / "addons" / spec.name;
-            if (!spec.owner.empty() || !spec.ref.empty() || !fs::is_directory(installed)) return cliRequired;
-            if (!visited.insert(name).second) continue;
-            auto manifest = installed / "addon.json";
-            if (!fs::exists(manifest)) continue;
-            // Bound (installed addon dependencies): cap each manifest at the CLI's 16 MiB before parsing.
-            auto meta = Json::parse(readGuiUpdateFile(manifest));
-            if (!meta.contains("dependencies")) continue;
-            if (!meta["dependencies"].is_array()) throw runtime_error("addon dependencies must be an array: " + name);
-            for (const auto& dependency : meta["dependencies"]) {
-                // Bound (untrusted dependency graph): cap queued nodes and edges at the CLI's 4096.
-                if (pending.size() >= 4096) throw runtime_error("addon dependency graph exceeds the 4096 node/edge limit");
-                if (dependency.is_string()) pending.push_back(dependency.get<string>());
-                else {
-                    if (dependency.contains("commit") || dependency.contains("tag") ||
-                        dependency.contains("branch") || dependency.contains("url")) return cliRequired;
-                    pending.push_back(dependency.at("name").get<string>());
-                }
-            }
-        }
-        return update(projectPath, true);
-    } catch (const exception& e) {
-        return e.what();
-    }
-}
 
 string ProjectGenerator::update(const string& projectPath_, bool resolveInstalledAddons) {
     warnings_.clear();

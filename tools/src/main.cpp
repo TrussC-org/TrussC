@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "ProjectOps.h"
 #include "ProjectName.h"
 #include "GeneratedFile.h"
 #include "ProjectState.h"
@@ -50,6 +51,14 @@ using namespace std;
 using namespace tc;
 using trusscliBuild::parallelBuildArg;
 namespace fs = std::filesystem;
+
+static void printProjectMessage(const string& message, projectOps::MessageKind kind) {
+    if (kind == projectOps::MessageKind::Warning) cerr << "Warning: " << message << "\n";
+    else if (kind == projectOps::MessageKind::Diagnostic) cerr << message << "\n";
+    else cout << message << endl;
+}
+
+static addonVersions::Lookup registryAddonLookup();
 
 static addonVersions::Paths resolveAddonVersions(const string& project, const string& root, bool fetch, const vector<string>* selection = nullptr);
 
@@ -106,34 +115,19 @@ static void parseAddonsMake(const string& projectPath,
 }
 
 static string autoDetectTcRoot() {
-    const char* envRoot = std::getenv("TRUSSC_DIR");
-    if (envRoot && fs::exists(string(envRoot) + "/core/cmake/trussc_app.cmake")) {
-        return string(envRoot);
-    }
-
-    // Walk up from the executable looking for core/cmake/trussc_app.cmake.
-    // Typically trusscli lives in TRUSSC_ROOT/tools/bin/trusscli.app/Contents/MacOS/
-    // (Linux/Windows: TRUSSC_ROOT/tools/bin/trusscli[.exe])
-    // Use canonical() to resolve symlinks — when invoked via /usr/local/bin/trusscli,
-    // the raw path would be the symlink location, not the actual binary.
-    fs::path searchPath = fs::canonical(getExecutablePath()).parent_path();
-    #ifdef __APPLE__
-    // Climb out of MacOS -> Contents -> .app -> parent dir
-    for (int i = 0; i < 3 && searchPath.has_parent_path(); ++i) {
-        searchPath = searchPath.parent_path();
-    }
-    #endif
-    for (int i = 0; i < 5 && searchPath.has_parent_path(); ++i) {
-        if (fs::exists(searchPath / "core" / "cmake" / "trussc_app.cmake")) {
-            return searchPath.string();
-        }
-        searchPath = searchPath.parent_path();
-    }
-    return "";
+    return projectOps::detectTcRoot(getExecutablePath());
 }
 
 static bool isTrussCProject(const fs::path& path) {
     return fs::exists(path / "CMakeLists.txt") && fs::exists(path / "addons.make");
+}
+
+// Names the project files that isTrussCProject() found missing.
+static string missingProjectFiles(const fs::path& path) {
+    const bool cmake = fs::exists(path / "CMakeLists.txt");
+    const bool addons = fs::exists(path / "addons.make");
+    if (!cmake && !addons) return "CMakeLists.txt and addons.make";
+    return cmake ? "addons.make" : "CMakeLists.txt";
 }
 
 // Check `startPath` (or CWD if empty) and up to five parents above it,
@@ -142,17 +136,7 @@ static bool isTrussCProject(const fs::path& path) {
 // are generated or optional, so we only rely on src/ here. Non-TrussC projects
 // that happen to have src/ are guarded later by signature check in update().
 static string autoDetectProjectRoot(const string& startPath) {
-    fs::path searchPath = fs::absolute(
-        startPath.empty() ? fs::current_path() : fs::path(startPath));
-    for (int i = 0; i <= 5; ++i) {
-        if (fs::is_directory(searchPath / "src")) {
-            return searchPath.string();
-        }
-        if (!searchPath.has_parent_path() ||
-            searchPath == searchPath.parent_path()) break;
-        searchPath = searchPath.parent_path();
-    }
-    return "";
+    return projectOps::detectProjectRoot(startPath);
 }
 
 // Read-only commands share the project selection without acquiring versions.
@@ -748,65 +732,6 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
     return 0;
 }
 
-// Rebuild a project from a populated ProjectSettings. Used by update / add /
-// remove to regenerate CMakeLists.txt / CMakePresets.json after any change.
-static int runProjectUpdate(ProjectSettings& settings, const string& projectPath,
-                            bool shortConfigureOutput = false) {
-    ProjectGenerator gen(settings);
-    gen.setLogCallback([](const string& msg) { cout << msg << endl; });
-    if (shortConfigureOutput) {
-        // CMake configure output: the "-- ..." lines are hidden on screen, the
-        // whole output goes to <build folder>/build.log (#1240).
-        gen.setConfigureOutputCallback([projectPath](const string& buildDir, const string& output,
-                                                     int result) {
-            const string logDisplay = buildDir + "/build.log";
-            const fs::path logPath = fs::path(projectPath) / logDisplay;
-            // CMake creates the build folder; when it did not (or printed
-            // nothing), there is nothing to save.
-            ofstream logFile;
-            if (!output.empty() && fs::is_directory(logPath.parent_path())) {
-                logFile.open(logPath, ios::binary | ios::trunc);
-            }
-            BuildOutputFilter::Options options;
-            options.phase = BuildOutputFilter::Phase::Configure;
-            options.logDisplayPath = logFile.is_open() ? logDisplay : "";
-            BuildOutputFilter filter(cout, logFile.is_open() ? &logFile : nullptr, options);
-            filter.write(output.data(), output.size());
-            filter.end(result != 0 ? 1 : 0, -1);
-        });
-    }
-    string err = gen.update(projectPath);
-    // Kept targets whose configure failed: reported, the update stands
-    for (const string& w : gen.getWarnings()) {
-        cerr << "Warning: " << w << "\n";
-    }
-    if (!err.empty()) {
-        cerr << "Error: " << err << "\n";
-        return 1;
-    }
-    return 0;
-}
-
-// Regenerate an existing project (update / addon add / addon remove) with
-// the given addon selection. The settings come from prepareRegeneration():
-// the project's own CMakePresets.json first (IDE, targets, web backend),
-// then the explicit flags, which win.
-static int regenerateProject(const string& projectPath, const string& tcRoot,
-                             const vector<string>& availableAddons,
-                             const vector<int>& addonSelected,
-                             const GenerationFlags& flags,
-                             bool shortConfigureOutput = false) {
-    RegenerationSetup setup = prepareRegeneration(projectPath, tcRoot, availableAddons,
-                                                  addonSelected, flags);
-    for (const string& w : setup.warnings) cerr << "Warning: " << w << "\n";
-    if (!setup.summary.empty()) cout << setup.summary << "\n";
-    if (!setup.leftoverNotice.empty()) cout << setup.leftoverNotice << "\n";
-
-    if (int rc = runProjectUpdate(setup.settings, projectPath, shortConfigureOutput)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
-}
-
 // Write an addons.make file containing the selected addon names. Called from
 // add / remove after modifying the selection set.
 static void writeAddonsMake(const string& projectPath,
@@ -1156,7 +1081,7 @@ static int cmdCp(const vector<string>& args) {
     }
     if (!isTrussCProject(srcPath)) {
         cerr << "Error: source '" << srcArg << "' is not a TrussC project "
-             << "(missing CMakeLists.txt or addons.make)\n";
+             << "(missing " << missingProjectFiles(srcPath) << ")\n";
         return 1;
     }
 
@@ -1404,6 +1329,27 @@ static void printUpdateHelp() {
          << "hidden; errors still show) and saved to <build folder>/build.log.\n";
 }
 
+// Keep configure filtering and build.log presentation in the CLI.
+static projectOps::ConfigureOutputCallback projectConfigureOutput() {
+    return [](const string& projectPath, const string& buildDir, const string& output,
+              int result) {
+        const string logDisplay = buildDir + "/build.log";
+        const fs::path logPath = fs::path(projectPath) / logDisplay;
+        // CMake creates the build folder; when it did not (or printed
+        // nothing), there is nothing to save.
+        ofstream logFile;
+        if (!output.empty() && fs::is_directory(logPath.parent_path())) {
+            logFile.open(logPath, ios::binary | ios::trunc);
+        }
+        BuildOutputFilter::Options options;
+        options.phase = BuildOutputFilter::Phase::Configure;
+        options.logDisplayPath = logFile.is_open() ? logDisplay : "";
+        BuildOutputFilter filter(cout, logFile.is_open() ? &logFile : nullptr, options);
+        filter.write(output.data(), output.size());
+        filter.end(result != 0 ? 1 : 0, -1);
+    };
+}
+
 static int cmdUpdate(const vector<string>& args, bool fetchVersion = true, bool versionAcquired = false) {
     string projectPath;
     GenerationFlags flags;
@@ -1453,37 +1399,18 @@ static int cmdUpdate(const vector<string>& args, bool fetchVersion = true, bool 
         }
     }
 
-    const string checkedProject = projectPath.empty() ? autoDetectProjectRoot("") : projectPath;
-    if (!checkedProject.empty()) {
-        if (auto error = ProjectGenerator::validateProject(checkedProject); !error.empty()) {
-            cerr << "Error: " << error << "\n";
-            return 1;
-        }
-    }
-    string resolvedProjectPath;
-    string resolvedTcRoot;
-    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot, fetchVersion && !versionAcquired)) {
-        return rc;
-    }
-    projectPath = resolvedProjectPath;
-    tcRoot = resolvedTcRoot;
-
-    auto addonPaths = resolveAddonVersions(projectPath, tcRoot, fetchVersion);
-    if (fetchVersion) {
-        auto selected = readProjectAddons(projectPath);
-        if (expandAddonPins(selected, addonPaths)) writeAddonsMake(projectPath, selected);
-    }
-    addonVersions::saveResolved(projectPath, addonPaths);
-    vector<string> availableAddons;
-    scanAddons(tcRoot, availableAddons);
-    for (const auto& spec : readProjectAddons(projectPath)) {
-        if (find(availableAddons.begin(), availableAddons.end(), spec) == availableAddons.end()) availableAddons.push_back(spec);
-    }
-
-    vector<int> addonSelected;
-    parseAddonsMake(projectPath, availableAddons, addonSelected);
-    return regenerateProject(projectPath, tcRoot, availableAddons, addonSelected, flags,
-                             /*shortConfigureOutput=*/!verbose);
+    projectOps::UpdateInput input;
+    input.projectPath = projectPath;
+    input.tcRoot = tcRoot;
+    input.executablePath = getExecutablePath();
+    input.flags = flags;
+    input.fetchVersion = fetchVersion;
+    input.versionAcquired = versionAcquired;
+    input.addonLookup = registryAddonLookup();
+    if (!verbose) input.configureOutput = projectConfigureOutput();
+    auto result = projectOps::update(input, printProjectMessage);
+    if (!result.success) cerr << "Error: " << result.failureReason << "\n";
+    return result.success ? 0 : 1;
 }
 
 // =============================================================================
@@ -1504,26 +1431,18 @@ static int cmdUse(const vector<string>& args, bool local) {
         else { cerr << "Error: expected one selection or --clear\n"; return 1; }
     }
     if (value.empty()) { cerr << "Error: a selection or --clear is required\n"; return 1; }
-    if (projectPath.empty()) projectPath = autoDetectProjectRoot("");
-    if (projectPath.empty() || !fs::is_directory(fs::path(projectPath) / "src")) {
-        cerr << "Error: not inside a TrussC project\n"; return 1;
+    projectOps::UpdateInput update;
+    update.projectPath = projectPath;
+    update.executablePath = getExecutablePath();
+    update.addonLookup = registryAddonLookup();
+    update.configureOutput = projectConfigureOutput();
+    projectOps::Result result;
+    if (local) result = projectOps::useLocal({update, value, value == "--clear"}, printProjectMessage);
+    else result = projectOps::use({update, value, value == "--clear"}, printProjectMessage);
+    if (!result.success) {
+        cerr << "Error: " << (result.failureSummary.empty() ? result.failureReason : result.failureSummary) << "\n";
     }
-    auto versionFile = fs::path(projectPath) / ".trussc-version";
-    const bool selectingVersion = !local && value != "--clear";
-    // Acquire and check the new sources before changing either project selection.
-    if (selectingVersion) {
-        auto spec = trusscVersion::parse(value);
-        auto root = trusscVersion::acquire(spec, true);
-        if (spec.shortCommit) value.replace(value.size() - spec.ref.size(), spec.ref.size(), fs::path(root).filename().string());
-    }
-    if (local) trusscVersion::setLocalPath(projectPath, value == "--clear" ? "" : value);
-    else {
-        if (value == "--clear") fs::remove(versionFile);
-        else writeGeneratedFile(versionFile.string(), value + "\n");
-        trusscVersion::setLocalPath(projectPath, "");
-    }
-    // The selected TrussC was already fetched; addons still refresh in update.
-    return cmdUpdate({"-p", projectPath}, true, selectingVersion);
+    return result.success ? 0 : 1;
 }
 
 // =============================================================================
@@ -2087,7 +2006,7 @@ static vector<AddonInfo> parseRegistry(const string& out) {
         }
         return result;
     } catch (...) {
-        cerr << "Error: failed to parse registry JSON.\n";
+        projectOps::diagnostic("Error: failed to parse registry JSON.", projectOps::MessageKind::Diagnostic);
         return {};
     }
 }
@@ -2109,7 +2028,7 @@ static vector<AddonInfo> fetchRegistry(bool allowStaleCache = false) {
             if (code == 0 && !out.empty()) writeRegistryCache(out);
         }
     } else {
-        cerr << "Fetching addon registry ...\n";
+        projectOps::diagnostic("Fetching addon registry ...", projectOps::MessageKind::Diagnostic);
         auto [c, o] = captureCommand("curl -sfL \"" + string(kRegistryURL) + "\"");
         code = c;
         out  = o;
@@ -2118,9 +2037,8 @@ static vector<AddonInfo> fetchRegistry(bool allowStaleCache = false) {
 
     if (out.empty()) {
         if (!allowStaleCache) {
-            cerr << "Error: could not fetch addon registry.\n"
-                 << "URL: " << kRegistryURL << "\n"
-                 << "Check your network connection.\n";
+            projectOps::diagnostic("Error: could not fetch addon registry.\nURL: " + string(kRegistryURL)
+                + "\nCheck your network connection.", projectOps::MessageKind::Diagnostic);
         }
         return {};
     }
@@ -2308,30 +2226,10 @@ static vector<const AddonInfo*> findCandidates(
     return result;
 }
 
-static string addonOwnerFromURL(const string& url) {
-    const string prefix = "https://github.com/";
-    if (url.compare(0, prefix.size(), prefix) != 0) return "";
-    auto identity = url.substr(prefix.size());
-    if (identity.size() >= 4 && identity.substr(identity.size() - 4) == ".git") identity.resize(identity.size() - 4);
-    return addonVersions::parse(identity).owner;
-}
 
-static addonVersions::Paths resolveAddonVersions(const string& project, const string& root, bool fetch, const vector<string>* selection) {
-    vector<AddonInfo> registry;
-    bool loaded = false;
-    return addonVersions::resolve(project, root, fetch, [&](const addonVersions::Spec& spec, bool mayFetch) {
+static addonVersions::Lookup registryAddonLookup() {
+    return [registry = vector<AddonInfo>{}, loaded = false](const addonVersions::Spec& spec, bool mayFetch) mutable {
         addonVersions::Source source;
-        // An installed external addon's metadata can identify its source even
-        // when the registry is unavailable. Bundled addons never enter here.
-        auto installed = fs::path(root) / "addons" / spec.name / "addon.json";
-        if (spec.owner.empty() && fs::exists(installed)) {
-            // Bound (installed addon metadata): cap each manifest at 16 MiB.
-            auto meta = Json::parse(trusscVersion::readBounded(installed, 16 * 1024 * 1024));
-            source.owner = meta.value("owner", "");
-            source.url = meta.value("url", "");
-            if (source.owner.empty()) source.owner = addonOwnerFromURL(source.url);
-            if (!source.owner.empty()) return source;
-        }
         // Builds read the existing registry cache only. They never consult the network.
         if (!loaded) {
             auto cached = readRegistryCache();
@@ -2344,9 +2242,12 @@ static addonVersions::Paths resolveAddonVersions(const string& project, const st
             source.owner = candidates[0]->owner;
             source.url = candidates[0]->url;
         }
-        if (source.owner.empty()) source.owner = addonOwnerFromURL(source.url);
         return source;
-    }, selection);
+    };
+}
+
+static addonVersions::Paths resolveAddonVersions(const string& project, const string& root, bool fetch, const vector<string>* selection) {
+    return projectOps::resolveAddons(project, root, fetch, registryAddonLookup(), selection);
 }
 
 static int cmdAddonAddLocal(const vector<string>& args) {
@@ -3575,7 +3476,7 @@ static int cmdClean(const vector<string>& args) {
     projectPath = fs::absolute(projectPath).string();
     if (!isTrussCProject(projectPath)) {
         cerr << "Error: '" << projectPath << "' is not a TrussC project "
-             << "(missing CMakeLists.txt or addons.make). Nothing was removed.\n";
+             << "(missing " << missingProjectFiles(projectPath) << "). Nothing was removed.\n";
         return 1;
     }
 
@@ -5554,6 +5455,7 @@ static void printTopHelp() {
 // =============================================================================
 
 int main(int argc, char* argv[]) try {
+    projectOps::ScopedDiagnostics consoleDiagnostics(printProjectMessage);
 #ifdef _WIN32
     // Best effort: an earlier process may still have the old image locked.
     const fs::path exePath = runningExecutablePath();

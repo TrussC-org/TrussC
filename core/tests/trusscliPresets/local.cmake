@@ -4,6 +4,7 @@
 set(_TC_TRUSSCLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/src")
 target_sources(${PROJECT_NAME} PRIVATE
     "${_TC_TRUSSCLI_SRC}/ProjectGenerator.cpp"
+    "${_TC_TRUSSCLI_SRC}/ProjectOps.cpp"
     "${_TC_TRUSSCLI_SRC}/ProjectState.cpp"
     "${_TC_TRUSSCLI_SRC}/BuildSetup.cpp"
     "${_TC_TRUSSCLI_SRC}/IdeHelper.cpp"
