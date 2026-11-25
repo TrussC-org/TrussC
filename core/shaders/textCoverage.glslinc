@@ -23,14 +23,20 @@ float textCoverage(vec2 texcoord) {
     vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
     float texelsPerPixel = max(length(dx * size), length(dy * size));
     float spread = clamp((texelsPerPixel - 1.0) * 8.0, 0.0, 1.0);
-    if (spread <= 0.0) return textureGrad(sampler2D(tex, smp), texcoord, gx, gy).r;
-    vec2 ox = dx * spread;
-    vec2 oy = dy * spread;
-    float c = 0.0;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.375 + oy *  0.125, gx, gy).r;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.125 + oy * -0.375, gx, gy).r;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.375 + oy * -0.125, gx, gy).r;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.125 + oy *  0.375, gx, gy).r;
-    return c * 0.25;
+    // Keep one initialized result and return path for D3D11 (X4000).
+    float coverage = 0.0;
+    if (spread <= 0.0) {
+        coverage = textureGrad(sampler2D(tex, smp), texcoord, gx, gy).r;
+    } else {
+        vec2 ox = dx * spread;
+        vec2 oy = dy * spread;
+        float c = 0.0;
+        c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.375 + oy *  0.125, gx, gy).r;
+        c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.125 + oy * -0.375, gx, gy).r;
+        c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.375 + oy * -0.125, gx, gy).r;
+        c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.125 + oy *  0.375, gx, gy).r;
+        coverage = c * 0.25;
+    }
+    return coverage;
 }
 @end
