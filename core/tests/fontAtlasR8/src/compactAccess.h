@@ -15,7 +15,7 @@ struct FontAtlasCompactionTestAccess {
             page->pixels_.resize(256 * 256, 0);
             for (int j = 0; j < 2; ++j) {
                 const int shape = j == 0 ? i : 7 - i;
-                const int gap = mainLayout ? 2 : manager.glyphGap(side);
+                const int gap = mainLayout ? 2 : manager.getGlyphGap();
                 const int x = 16 + manager.alignGlyphOffset(side + gap) * j, y = 16;
                 GlyphInfo glyph{};
                 glyph.valid_ = true;

@@ -81,13 +81,13 @@ REM If configure fails anyway, retry once from a clean cache: whatever made a
 REM leftover cache unusable (the checks above can miss a case, #251), a fresh
 REM configure gets past it, and a real error simply fails twice.
 echo Running CMake...
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+cmake -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel ..
 if %ERRORLEVEL% neq 0 (
     echo.
     echo CMake configuration failed - retrying once with a clean cache...
     if exist "CMakeCache.txt" del /q "CMakeCache.txt"
     if exist "CMakeFiles" rmdir /s /q "CMakeFiles"
-    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel ..
 )
 if %ERRORLEVEL% neq 0 (
     echo.
@@ -101,7 +101,7 @@ if %ERRORLEVEL% neq 0 (
 REM Build
 echo.
 echo Building...
-cmake --build . --parallel
+cmake --build . --config MinSizeRel --parallel
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Build failed!

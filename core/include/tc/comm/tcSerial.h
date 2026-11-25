@@ -1,4 +1,5 @@
 #pragma once
+#include <span>
 #include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
@@ -1143,6 +1144,8 @@ public:
         return n;
     }
 
+    TC_LUA_SKIP int readBytes(std::span<unsigned char> buffer) { return readBytes(buffer.data(), static_cast<int>(buffer.size())); }
+
     // Read into std::string (convenience method)
     int readBytes(std::string& buffer, int length) {
         buffer.resize(length);
@@ -1265,6 +1268,8 @@ public:
         closeLost(loss);
         return n;
     }
+
+    TC_LUA_SKIP int writeBytes(std::span<const unsigned char> buffer) { return writeBytes(buffer.data(), static_cast<int>(buffer.size())); }
 
     // Write std::string
     int writeBytes(const std::string& buffer) {

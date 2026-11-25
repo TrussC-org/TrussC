@@ -63,40 +63,58 @@ See [BUILD_SYSTEM.md](BUILD_SYSTEM.md#6-project-local-cmake-config-localcmake) f
 
 ## Using Addons
 
-### 1. Create addons.make
+Create `addons.make` in the project folder and list addon names one per line.
+The following physics choices use the same header with different APIs.
 
-Create an `addons.make` file in your project folder, listing addon names one per line:
+### Select Box2D v3 for a new physics project
 
-```
-tcxOsc
-tcxBox2d
-```
+`tcxBox2d3` provides experimental Box2D v3.2 physics. Select it alone: v2 and
+v3 share `tcx::box2d` and `tcxBox2d.h`, and cannot be used together. There is
+no API for combining the two addons in one project.
 
-Comments are also supported:
-
-```
-# Physics engine
-tcxBox2d
-
-# Networking (add later)
-# tcxOsc
+```make
+# addons.make
+tcxBox2d3
 ```
 
-### 2. Use in Code
+Include the shared header and step the v3 World explicitly:
 
 ```cpp
+#include <TrussC.h>
 #include <tcxBox2d.h>
-
-using namespace tcx::box2d;
-
-World world;
-CircleBody circle;
-
-void setup() {
-    world.setup(tc::Vec2(0, 300));
-    circle.setup(world, 400, 100, 30);
-}
+using namespace tc;
+using namespace tcx;
+class tcApp : public App {
+    box2d::World world;
+    void setup() override { world.setup(); }
+    void update() override { world.update(); }
+};
 ```
+
+### Select Box2D v2 for an existing physics project
+
+`tcxBox2d` is frozen at Box2D v2.4. New projects should select `tcxBox2d3`;
+existing v2 projects keep their v2 selection and API:
+
+```make
+# addons.make
+tcxBox2d
+```
+
+The v2 World steps automatically:
+
+```cpp
+#include <TrussC.h>
+#include <tcxBox2d.h>
+using namespace tc;
+using namespace tcx;
+class tcApp : public App {
+    box2d::World world;
+    void setup() override { world.setup(Vec2(0, 300)); }
+};
+```
+
+Other addons can be listed one per line in `addons.make`; `#` starts a comment.
 
 ### CMakeLists.txt (Reference)
 
@@ -126,11 +144,13 @@ Addons included with TrussC:
 
 | Addon | Description |
 |-------|-------------|
-| tcxBox2d | 2D physics engine (Box2D) |
+| tcxBox2d | Box2D v2.4, frozen; existing projects |
+| tcxBox2d3 | Box2D v3.2, experimental; select without tcxBox2d |
 | tcxCurl | HTTPS client (libcurl) |
 | tcxGltf | glTF 2.0 / GLB model loader (cgltf) |
 | tcxHap | Hap video codec for fast GPU playback |
 | tcxImGui | Dear ImGui integration |
+| tcxInputReplay | Input recording and replay with a Node toolbar, ring capture and scene marks (experimental) |
 | tcxLut | 3D LUT color grading |
 | tcxObj | Wavefront OBJ model import/export |
 | tcxOsc | OSC (Open Sound Control) protocol |
@@ -146,7 +166,8 @@ Addons included with TrussC:
 ```
 tc_v0.0.1/
 └── addons/
-    ├── tcxBox2d/        # Official
+    ├── tcxBox2d/        # Box2D v2.4, frozen
+    ├── tcxBox2d3/       # Box2D v3.2, experimental (choose one version)
     ├── tcxOsc/          # Official
     └── tcxSomeAddon/    # Third-party
 ```
@@ -194,32 +215,30 @@ Addons meeting these conditions don't need CMakeLists.txt:
 
 ### When CMakeLists.txt Is Needed
 
-When fetching external libraries with FetchContent:
+Box2D addons each fetch their own upstream version. The frozen v2 addon
+`tcxBox2d/CMakeLists.txt` declares:
 
 ```cmake
-# tcxBox2d/CMakeLists.txt
-
-set(ADDON_NAME tcxBox2d)
-
-# Get Box2D via FetchContent
 include(FetchContent)
-FetchContent_Declare(
-    box2d
+FetchContent_Declare(box2d
     GIT_REPOSITORY https://github.com/erincatto/box2d.git
-    GIT_TAG v2.4.2
-)
-set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
-set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(box2d)
-
-# Source files (CONFIGURE_DEPENDS: new files are picked up without reconfiguring)
-file(GLOB ADDON_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-file(GLOB ADDON_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
-
-add_library(${ADDON_NAME} STATIC ${ADDON_SOURCES} ${ADDON_HEADERS})
-target_include_directories(${ADDON_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(${ADDON_NAME} PUBLIC box2d TrussC)
+    GIT_TAG v2.4.2)
 ```
+
+The experimental v3 addon `tcxBox2d3/CMakeLists.txt` instead declares:
+
+```cmake
+cmake_minimum_required(VERSION 3.22)
+include(FetchContent)
+FetchContent_Declare(box2d3
+    GIT_REPOSITORY https://github.com/erincatto/box2d.git
+    GIT_TAG v3.2.0)
+```
+
+Both upstream versions export a `box2d` target. Each addon disables upstream
+samples and tests, fetches its dependency, then links its own library to
+`box2d` and `TrussC`. v3 requires C17. See the addon CMakeLists.txt files for
+the complete configuration. There is no API for loading both versions together.
 
 ### Shipping a runtime file with the app (`tc_addon_bundle_file`)
 
@@ -386,7 +405,7 @@ An addon that keeps a `Node` beyond a single call (a target to follow, a selecti
 |------|------------|---------|
 | Folder name | `tcx` + PascalCase | `tcxBox2d`, `tcxGui` |
 | Library name | Same as folder name | `tcxBox2d` |
-| Main header | `AddonName.h` | `tcxBox2d.h` |
+| Main header | `AddonName.h` (Box2D v3 keeps the v2 header name) | `tcxBox2d.h` |
 
 ### Namespaces
 
@@ -398,7 +417,8 @@ namespace tcx::addonname {
 
 | Addon | Namespace |
 |-------|-----------|
-| tcxBox2d | `tcx::box2d` |
+| tcxBox2d (v2, frozen) | `tcx::box2d` |
+| tcxBox2d3 (v3.2, experimental; exclusive with v2) | `tcx::box2d` |
 | tcxGui | `tcx::gui` |
 | tcxOsc | `tcx::osc` |
 
@@ -654,53 +674,41 @@ To make your addon discoverable:
 
 ## Bundled Addon Details
 
-### tcxBox2d
+### tcxBox2d — frozen Box2D v2
 
-2D physics built on Box2D, with physics and rendering as separate Mods.
-`World` steps automatically each frame. Set up your own World or use
-`defaultWorld().setup()`; add nodes to the scene for automatic transform sync.
+`tcxBox2d` provides frozen Box2D v2.4 physics for existing projects; use
+`tcxBox2d3` for new projects. Its World steps automatically, with body nodes
+or RigidBody2D and ColliderRenderer2D Mods. Select only `tcxBox2d` in
+`addons.make` for v2; there is no API for mixing v2 and v3 in one project.
+
+Set up a v2 World inside `tcApp`:
 
 ```cpp
-#include <TrussC.h>
-#include <tcxBox2d.h>
-
-using namespace tc;
-using namespace tcx::box2d;
-
-class tcApp : public App {
-    World world;
-
-    void setup() override {
-        world.setup(Vec2(0, 300));
-        world.createBounds();
-        auto node = std::make_shared<Node>();
-        node->setPos(400, 100);
-        addChild(node);
-        node->addMod<RigidBody2D>(world, Shape2D::circle(30));
-        node->addMod<ColliderRenderer2D>();
-    }
-
-    void draw() override {
-        clear(0.12);
-    }
-};
+box2d::World world;
+void setup() override { world.setup(Vec2(0, 300)); }
 ```
 
-Mods expose `onCollisionEnter/Stay/Exit` for solid contacts and
-`onTriggerEnter/Stay/Exit` for sensors (`setTrigger()`). Begin/End are delivered
-after each managed sub-step; Stay runs once per update. Raw `b2World::Step()`
-events wait for the next fresh-frame `World::update()`. Listeners may release
-bodies or the World; recheck borrowed payload pointers after release.
-The classic alternative uses `CircleBody`, `RectBody` and `PolyShape` body nodes.
-See the [addon README](../../addons/tcxBox2d/README.md) for shapes and the
-[collision event contract](../../addons/tcxBox2d/README.md#collision-events).
+Include `<tcxBox2d.h>` and use namespaces `tc` and `tcx`.
+See the [v2 README](../../addons/tcxBox2d/README.md) for bodies and events.
 
-b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+### tcxBox2d3 — experimental Box2D v3.2
 
-Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+`tcxBox2d3` provides experimental Box2D v3.2 physics for new projects, using
+namespace `tcx::box2d` and header `<tcxBox2d.h>`. Select only `tcxBox2d3` in
+`addons.make`; there is no API for combining it with `tcxBox2d`.
 
-Use `World::setDestructionListener()` for a borrowed user destruction listener,
-preserving the World's internal observer.
+Step the v3 World explicitly inside `tcApp` (namespaces `tc` and `tcx`):
+
+```cpp
+box2d::World world;
+void setup() override { world.setup(); }
+void update() override { world.update(); }
+```
+
+RigidBody2D Mods own bodies and expose post-step contact, sensor and hit
+events. Shapes use v3 ids; World supplies mouse drag helpers. See the
+[v3 README](../../addons/tcxBox2d3/README.md) and
+[falling bodies example](../../addons/tcxBox2d3/example-basic/src/tcApp.cpp).
 
 ### tcxCurl
 
@@ -771,6 +779,19 @@ Dear ImGui integration.
 **Features:**
 - Full Dear ImGui API
 - Integrated with TrussC rendering pipeline
+
+### tcxInputReplay
+
+tcxInputReplay records one window's mouse, keyboard, touch and file-drop input to JSON Lines and replays it on its recorded schedule, for debugging interactive apps. Scene marks align playback when app timing changes. The addon is experimental, and the JSONL format may change in future versions.
+
+```cpp
+void tcApp::setup() {
+    // F9 shows and hides the record/play toolbar
+    addChild(make_shared<tcx::inputreplay::Toolbar>(KEY_F9));
+}
+```
+
+See [tcxInputReplay README](../../addons/tcxInputReplay/README.md) for the toolbar, file and ring recording, playback scaling and MCP controls.
 
 ### tcxLut
 

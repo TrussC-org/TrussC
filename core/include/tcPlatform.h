@@ -150,6 +150,8 @@ void setSingleWindowSizeFractionalX11(double width, double height);
 // buttons). false = borderless/chromeless, but the window stays key-focusable
 // (keyboard works) and closable (exitApp() works). Usually driven once at
 // startup by WindowSettings::setDecorated(), but can be toggled at runtime.
+// Windows, macOS and X11 keep the client (drawable) size, including when a
+// change requested in fullscreen takes effect after returning to windowed mode.
 // Desktop only; no-op on mobile/web.
 void setWindowDecorated(bool decorated);
 

@@ -23,6 +23,8 @@ Inspired by openFrameworks, implemented simply with modern C++.
 Build it once from `tools/` (run `tools/build_mac.command`, `tools/build_linux.sh`, or `tools/build_win.bat`) to create projects via GUI.
 Supports VSCode, Cursor, Xcode, and Visual Studio.
 
+For headless Linux builds with dependencies installed, run `./tools/build_linux.sh --no-deps --jobs 2 --non-interactive --no-launch`; macOS accepts the same options with `./tools/build_mac.command` (`--no-deps` is a no-op).
+
 Project and binary names replace each character outside ASCII letters, digits, `_ . + -` with one `_` (a non-ASCII character such as 日 counts as one); reserved names get `app_`, and the folder keeps its name.
 
 ### Command Line Build

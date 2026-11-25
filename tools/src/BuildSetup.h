@@ -27,10 +27,11 @@ struct ConfigureInputs {
     bool generated = false;           // a configure finished there: the build system
                                       // (Makefile, build.ninja, *.xcodeproj, ...) exists
     std::string cachedBuildType;      // CMAKE_BUILD_TYPE in that cache ("" if none)
-    std::string requestedBuildType;   // from --debug / --release / --relwithdebinfo ("" if none)
+    std::string requestedBuildType;   // effective native type selected by cmdBuild ("" uses the default)
     bool cachedMcp = false;           // TRUSSC_MCP_DEV in that cache (missing is OFF)
     bool mcp = false;                 // --mcp (never sticky)
     bool warnings = false;            // --warnings
+    bool multiConfig = false;         // CMAKE_CONFIGURATION_TYPES is set; use --config instead
 };
 
 struct ConfigurePlan {

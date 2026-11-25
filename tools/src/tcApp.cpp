@@ -133,11 +133,11 @@ void tcApp::update() {
 }
 
 // Redraw on mouse events
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs& e) {
     redraw();
 }
 
-void tcApp::mouseReleased(Vec2 pos, int button) {
+void tcApp::mouseReleased(const MouseEventArgs& e) {
     redraw();
 }
 
@@ -148,7 +148,7 @@ void tcApp::mouseMoved(Vec2 pos) {
     }
 }
 
-void tcApp::mouseDragged(Vec2 pos, int button) {
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
     redraw();
 }
 
@@ -998,7 +998,7 @@ void tcApp::doUpdateProject() {
     });
 
     // Update project
-    string error = generator.update(importedProjectPath);
+    string error = generator.updateFromGui(importedProjectPath);
     if (!error.empty()) {
         setStatus(error, true);
         redraw();

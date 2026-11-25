@@ -50,6 +50,9 @@ struct ProjectSettings {
     }
 };
 
+// Native generator, cache variables and environment shared by projects and A-1.
+std::string nativeToolchainPreset(const ProjectSettings& settings);
+
 // The toolchainFile to write into a web / android preset. `detected` is what
 // this shell finds (empty when nothing was found), `saved` the toolchainFile
 // of the existing preset, `envFallback` the $env{...} form CMake resolves at
@@ -84,8 +87,15 @@ public:
     // Returns empty string on success, error message on failure
     std::string generate();
 
+    // Check the existing project signature before any update writes.
+    static std::string validateProject(const std::string& projectPath);
+
     // Update existing project
-    std::string update(const std::string& projectPath);
+    std::string update(const std::string& projectPath, bool resolveInstalledAddons = false);
+
+    // GUI selections cover only local addons. Refuse projects that need the
+    // CLI's version/addon resolution before any files or builds are changed.
+    std::string updateFromGui(const std::string& projectPath);
 
     // Write only CMakePresets.json into an existing project, from the current
     // settings (no addons.make, CMakeLists.txt, IDE files or configure).
@@ -139,7 +149,7 @@ private:
     void runCMakeConfigure(const std::string& path);
 
     // Write addons.make
-    void writeAddonsMake(const std::string& destPath);
+    void writeAddonsMake(const std::string& destPath, bool preserveExisting = false);
 
     // Regenerate the standard CMake file, naming changed targets explicitly.
     void writeCMakeLists(const std::string& projectPath);

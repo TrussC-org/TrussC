@@ -1,4 +1,6 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
+#include <span>
 
 #include <string>
 #include <vector>
@@ -147,6 +149,8 @@ public:
         return add<std::vector<uint8_t>>('b', std::move(blob));
     }
 
+    TC_LUA_SKIP OscMessage& addBlob(std::span<const uint8_t> data) { return addBlob(data.data(), data.size()); }
+
     OscMessage& addBool(bool value) { return addTag(value ? 'T' : 'F'); }
 
     OscMessage& addInt64(int64_t value) { return add<int64_t>('h', value); }
@@ -281,10 +285,12 @@ public:
     // Incoming packets are preflighted before decoding: at most 65,536 bytes
     // (the UDP datagram size); an over-size packet is rejected whole.
     static OscMessage fromBytes(const uint8_t* data, size_t size, bool& ok);
+    TC_LUA_SKIP static OscMessage fromBytes(std::span<const uint8_t> data, bool& ok) { return fromBytes(data.data(), data.size(), ok); }
     // Same, and paddingMissing tells whether the data ends before the zero
     // padding that aligns its last item to 4 bytes. Such a message still
     // parses (ok is true); OscReceiver logs a warning for it.
     static OscMessage fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing);
+    TC_LUA_SKIP static OscMessage fromBytes(std::span<const uint8_t> data, bool& ok, bool& paddingMissing) { return fromBytes(data.data(), data.size(), ok, paddingMissing); }
 
     // -------------------------------------------------------------------------
     // Debug string

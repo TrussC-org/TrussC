@@ -201,14 +201,10 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
-            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
-            sed -i '' 's/open /#open /g' tools/build_mac.command
-            ./tools/build_mac.command
+            ./tools/build_mac.command --non-interactive --no-launch
           elif [ "$RUNNER_OS" == "Linux" ]; then
             chmod +x tools/build_linux.sh
-            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-            sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-            ./tools/build_linux.sh
+            ./tools/build_linux.sh --non-interactive --no-launch
           elif [ "$RUNNER_OS" == "Windows" ]; then
             TC_NO_LAUNCH=1 ./tools/build_win.bat
           fi
@@ -228,7 +224,7 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_examples_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
-          ./examples/build_all.py --verbose
+          ./examples/build_all.py --verbose --exclude-addons tcxBox2d
           TC_BUILD
 
       - name: Check build warnings (daily_examples_native)
@@ -245,7 +241,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_addon_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
-          ./examples/build_all.py --addon-tests-only --include-daily --verbose
+          ./examples/build_all.py --addon-tests-only --include-daily --verbose --exclude-addons tcxBox2d
           TC_BUILD
 
       - name: Check build warnings (daily_addon_tests)
@@ -398,9 +394,7 @@ jobs:
         run: |
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
-          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-          ./tools/build_linux.sh
+          ./tools/build_linux.sh --non-interactive --no-launch
           TC_BUILD
 
       - name: Check build warnings (daily_tools_web)
@@ -415,8 +409,8 @@ jobs:
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/web_examples.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           # emcc fetches emdawnwebgpu lazily; retry once after a transient download failure.
-          ./examples/build_all.py --web-only --verbose ||
-            ./examples/build_all.py --web-only --verbose
+          ./examples/build_all.py --web-only --verbose --exclude-addons tcxBox2d ||
+            ./examples/build_all.py --web-only --verbose --exclude-addons tcxBox2d
           TC_BUILD
 
       - name: Check build warnings (web_examples)

@@ -24,10 +24,10 @@ public:
     void cleanup() override;
 
     // Mouse events (for redraw)
-    void mousePressed(Vec2 pos, int button) override;
-    void mouseReleased(Vec2 pos, int button) override;
+    void mousePressed(const MouseEventArgs& e) override;
+    void mouseReleased(const MouseEventArgs& e) override;
     void mouseMoved(Vec2 pos) override;
-    void mouseDragged(Vec2 pos, int button) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
     void mouseScrolled(Vec2 delta) override;
 
     // Key events (for redraw)

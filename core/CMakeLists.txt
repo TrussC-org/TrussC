@@ -598,6 +598,7 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         # Bump the bundle's mtime so Finder and the Dock pick up a changed icon.
         COMMAND touch "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
+        VERBATIM
     )
 endfunction()
 
@@ -790,9 +791,11 @@ function(_trussc_apply_macos_icon_assets TARGET_NAME ASSETS_CAR ICON_NAME)
 
     # Add CFBundleIconName to Info.plist (post-build with PlistBuddy)
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-        COMMAND /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>/Contents/Info.plist" 2>/dev/null || true
+        COMMAND sh -c "/usr/libexec/PlistBuddy -c \"Delete :CFBundleIconName\" \"$1\" 2>/dev/null || true"
+            sh "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>/Contents/Info.plist"
         COMMAND /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string ${ICON_NAME}" "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>/Contents/Info.plist"
         COMMENT "Adding CFBundleIconName to Info.plist for Tahoe icon"
+        VERBATIM
     )
 endfunction()
 

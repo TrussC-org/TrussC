@@ -303,3 +303,25 @@ MIT (author: tettou771). No third-party dependencies — the OSC codec is implem
 here directly on top of the core `UdpSocket`.
 
 OOM guarantees for public parser results apply to Release builds, or iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). Preflight itself allocates no storage, but constructing or returning an empty `OscMessage` or `OscBundle` can allocate STL iterator proxies in MSVC Debug. Persistent failure tests for those result constructions SKIP with a reason when iterator debugging is enabled.
+
+### OSC byte spans
+
+`addBlob()` and both `OscMessage::fromBytes()` and `OscBundle::fromBytes()` accept `span<const uint8_t>`. A byte vector converts implicitly. These overloads forward to the pointer APIs and preserve parser bounds and the `ok` / `paddingMissing` results.
+
+```cpp
+void tcApp::setup() {
+    vector<uint8_t> bytes{1, 2, 3};
+    tcx::osc::OscMessage message("/blob");
+    message.addBlob(bytes);
+}
+```
+
+Parse a serialized message using its vector length:
+
+```cpp
+void tcApp::setup() {
+    bool ok = false;
+    auto bytes = tcx::osc::OscMessage("/blob").toBytes();
+    auto message = tcx::osc::OscMessage::fromBytes(bytes, ok);
+}
+```
