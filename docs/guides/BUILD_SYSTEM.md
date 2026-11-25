@@ -538,7 +538,7 @@ version. The following paths intentionally fail with a warning:
   `Pixels` do not require GPU readback. `ScreenRecorder` stops at the first
   readback failure; `VideoWriter` retains the Fbo readback failure.
 
-For capture work, rebuild with the default GL backend on Linux. There is no
+For capture work, rebuild with the platform's default backend. There is no
 runtime backend switch; clear the Vulkan CMake override in the existing project:
 
 ```bash
