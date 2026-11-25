@@ -197,6 +197,8 @@ the reminder stays silent. There is no tcApp API for this CLI check.
 `trusscli version` and `trusscli doctor` still show full Git describe strings;
 doctor's Version sync result compares the same binary inputs.
 
+For unattended trusscli builds with dependencies installed, run `./tools/build_linux.sh --no-deps --jobs 2 --non-interactive --no-launch` (macOS: `./tools/build_mac.command`, where `--no-deps` is a no-op).
+
 On Windows, `upgrade` runs `tools/build_win.bat`, which sets up Visual Studio
 and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
 `tools/trusscli.exe` link or copy. The running executable is renamed to

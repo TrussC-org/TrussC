@@ -338,14 +338,10 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_1.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
-            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
-            sed -i '' 's/open /#open /g' tools/build_mac.command
-            ./tools/build_mac.command
+            ./tools/build_mac.command --non-interactive --no-launch
           elif [ "$RUNNER_OS" == "Linux" ]; then
             chmod +x tools/build_linux.sh
-            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-            sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-            ./tools/build_linux.sh
+            ./tools/build_linux.sh --non-interactive --no-launch
           elif [ "$RUNNER_OS" == "Windows" ]; then
             TC_NO_LAUNCH=1 ./tools/build_win.bat
             echo "Searching for trusscli.exe..."
@@ -568,13 +564,9 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_4.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" = "macOS" ]; then
-            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
-            sed -i '' 's/open /#open /g' tools/build_mac.command
-            ./tools/build_mac.command
+            ./tools/build_mac.command --non-interactive --no-launch
           else
-            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-            sed -i 's|"$SCRIPT_DIR/trusscli"|#&|g' tools/build_linux.sh
-            ./tools/build_linux.sh
+            ./tools/build_linux.sh --non-interactive --no-launch
           fi
           TC_BUILD
 
@@ -736,9 +728,7 @@ jobs:
         run: |
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_6.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
-          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-          ./tools/build_linux.sh
+          ./tools/build_linux.sh --non-interactive --no-launch
           TC_BUILD
 
       - name: Check build warnings (6)
@@ -897,9 +887,7 @@ jobs:
         run: |
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_8.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
-          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
-          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
-          ./tools/build_linux.sh
+          ./tools/build_linux.sh --non-interactive --no-launch
           TC_BUILD
 
       - name: Check build warnings (8)
@@ -1252,6 +1240,10 @@ jobs:
       - name: build warning gate regression checks
         if: always()
         run: python3 tools/tests/test_build_warnings.py -v
+
+      - name: build script option regression checks
+        if: always()
+        run: python3 tools/tests/test_build_script_options.py -v
 
       - name: build workflow cache regression checks
         if: always()
