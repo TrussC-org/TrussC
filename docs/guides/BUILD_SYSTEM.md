@@ -136,8 +136,7 @@ trusscli use 006a086b
 ```
 
 With Git, an ambiguous commit ID lists candidates and stops. Use a longer ID from that
-list; IDs shorter than 7 characters are treated as ref names. Version selection
-is a CLI operation with no tcApp API:
+list; IDs shorter than 7 characters are treated as ref names:
 
 ```bash
 trusscli use <longer-commit-id>
@@ -146,8 +145,7 @@ trusscli use <longer-commit-id>
 Without Git, short commit IDs are resolved once through the GitHub commits API,
 then the archive is fetched using the full ID. This works for external addons
 without archive commit metadata. If the API rate limit is reached (60 requests
-per hour without authentication), use a full ID or install Git. There is no
-tcApp API for archive resolution:
+per hour without authentication), use a full ID or install Git:
 
 ```bash
 trusscli use <40-character-commit-id>
@@ -193,7 +191,7 @@ Cached versions are shared across projects. Inspect them with `cache list` and
 remove an unused version with `cache remove <spec>`. An exact ref match wins;
 otherwise, a unique short commit ID (7–39 hex characters) can match a cached
 full 40-hex commit ID.
-Branch and tag names must match exactly (there is no tcApp API for cache removal):
+Branch and tag names must match exactly:
 
 ```bash
 trusscli cache remove main
