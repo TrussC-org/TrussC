@@ -524,13 +524,22 @@ cmake --preset linux -DTC_GFX_BACKEND=vulkan -DFETCHCONTENT_FULLY_DISCONNECTED=O
 cmake --build --preset linux
 ```
 
-StorageBuffer readback, byte/float Fbo readback and screenshot/window capture
-are not supported on Vulkan yet (step 4). There is no API to enable them.
-StorageBuffer asynchronous reads deliver deferred failure; synchronous reads
-return failure. Fbo readback and window capture warn on every call and return
-false. MCP capture and image analysis report the failure; Fbo/window recording
-stops at its first readback failure. Use the default GL backend when these
-features are needed:
+Vulkan ships as beta in v0.9 and does not support GPU-to-CPU readback in this
+version. The following paths intentionally fail with a warning:
+
+- Window capture: `grabScreen`, `saveScreenshot`, and `saveScreenshotAsync`.
+- Fbo readback: `Fbo::readPixels`, `readPixelsFloat`, `copyTo` (Image output),
+  and `readStencil`. There is no `Fbo::toImage` API; use `copyTo` on a supported backend.
+- `StorageBuffer::read` with a nonzero byte count and `readAsync` on allocated
+  storage. Synchronous reads return `false`; asynchronous reads deliver deferred failure.
+- MCP screenshot tools and `tc_analyze_image` with window or Fbo sources.
+  Analysis of CPU-resident Images or files does not require GPU readback.
+- `ScreenRecorder` and `VideoWriter` fed from a window or an Fbo. CPU-supplied
+  `Pixels` do not require GPU readback. `ScreenRecorder` stops at the first
+  readback failure; `VideoWriter` retains the Fbo readback failure.
+
+For capture work, rebuild with the default GL backend on Linux. There is no
+runtime backend switch; clear the Vulkan CMake override in the existing project:
 
 ```bash
 cmake --preset linux -DTC_GFX_BACKEND= -DFETCHCONTENT_FULLY_DISCONNECTED=ON
