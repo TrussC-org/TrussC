@@ -1490,3 +1490,17 @@ and baked 61 through pipeline loads and pops.
 counts; the existing path matrix covers all ordinary non-zero stencil draws.
 That matrix includes LUT color grading, synthetic NV12 textures on Linux, and
 independent ImGui contexts, with distinct nonzero refs for each submission path.
+
+## Android update-only background ticks (#1594)
+
+`_sapp_tc_android_t::background_tick` and Android-only
+`sapp_tc_android_set_background_tick` store an optional app-thread callback.
+`_sapp_tc_android_should_background_update` admits it only after initialization,
+while visible frames are unavailable, before cleanup/quit.
+`_sapp_tc_android_background_update` delivers one callback without EGL/GL.
+`_sapp_tc_android_loop` uses a 16 ms timed looper poll in that state, including
+handoff from the legacy fallback poll; a monotonic deadline also ticks when
+sensor/input events prevent a timeout. Foreground Choreographer is unchanged.
+Android `sapp_tc_window_occluded` also reports a missing EGL surface as hidden.
+No pbuffer or GPU support is added to background updates. The TrussC callback
+skips GPU queues/readbacks; app updates must avoid all GPU work while hidden.

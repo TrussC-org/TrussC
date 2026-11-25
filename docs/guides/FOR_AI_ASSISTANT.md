@@ -1603,6 +1603,57 @@ void tcApp::update() {
 - `RuntimeSettings::reserveUniformBuffer` costs twice its size on Metal, WebGPU and Vulkan (one copy per frame in flight).
 - On Windows, each extra back buffer from `setMaxFrameLatency` uses about 8 MB at 1080p.
 
+### Watch and reduce memory usage (process, caches, uploads)
+
+Watch process memory alongside resource caches to distinguish first-use allocation from steady growth. Reuse font sizes, upload only changed pixels, and close videos when a scene ends to keep retained memory down.
+
+`size_t getMemoryUsage()` reports process resident bytes (0 on unsupported platforms); `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Memory") << getMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+}
+```
+
+The bitmap-string atlas texture is created on the first bitmap-string draw, PBR shaders and fallback textures on first PBR use, and shared IBL baking resources on the first environment bake. These initial steps in memory are expected.
+
+Distinct glyphs and font sizes/settings increase atlas storage; reuse a small set of sizes. Glyph spacing adds a quarter of the raster line height (at least 2 texels), with 16-texel packing alignment. Pages grow in steps, so measure with the font counters. `size_t Font::getMemoryUsage() const` counts CPU atlas pixel bytes for one font; `static size_t Font::getTotalCacheMemoryUsage()` sums those bytes across shared cached atlases, not GPU textures or font-file data. With a `Font font` member:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Font") << font.getMemoryUsage() << " atlas bytes; cache: " << Font::getTotalCacheMemoryUsage();
+}
+```
+
+Clear old glyphs at a scene transition; this also affects fonts sharing the atlas. With a `GlyphBatch label` member already set to this font, rebuild its text after clearing:
+```cpp
+void tcApp::keyPressed(int key) {
+    font.clearAtlas();
+    label.clear();
+    label.add("Next scene", 20, 40);
+}
+```
+
+Texture-upload staging retains four upload slots across three device-frame sets, each sized for its largest recent upload (rounded to 4 bytes), with up to two native backings per slot: up to roughly largest upload × 2 × 4 × 3, excluding row-padding scratch storage. Slots retire automatically after 120 unused device frames; the WebGPU row-padding vector retains its capacity. There is no public staging-release API. Keep uploads small and send them only when pixels change; with `Texture texture`, `Pixels pixels`, and `bool pixelsChanged` members:
+```cpp
+void tcApp::update() {
+    if (pixelsChanged) texture.loadData(pixels);
+    pixelsChanged = false;
+}
+```
+
+Each loaded video retains decoder and frame resources. Release an unused `VideoPlayer video` member rather than just pausing it:
+```cpp
+void tcApp::keyPressed(int key) {
+    video.close();
+}
+```
+
+Poll the MCP tool `tc_get_health` over time and graph `rssBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample process memory periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
+```cpp
+void tcApp::update() {
+    if (memorySample.isFirstTime()) logNotice("Memory") << getElapsedTime() << " " << getMemoryUsage();
+}
+```
+
 ### Which video formats play fast on each OS? (hardware decoding, HAP)
 
 `VideoPlayer` uses each OS's own video system, so decoding speed depends on the OS and the codec more than on TrussC.
@@ -3241,8 +3292,10 @@ void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a d
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
-void setDrawWhileHidden(bool allow)  // Sets drawing while hidden for all existing windows and the default for new ones.
+void setAndroidForegroundService(bool enabled)  // Opts in to Android mediaPlayback foreground service for background playback; visible opt-in requests notification permission on Android 13+ without delaying the service. No wake lock is acquired.
+void setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
+void setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
 Top  // Provides the shorthand constant for Direction::Top.
@@ -5545,7 +5598,7 @@ bool Window::isOpen() const  // Returns whether this window is open.
 bool Window::isVisible() const  // Returns this open window's requested visibility.
 void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
-void Window::setDrawWhileHidden(bool allow)  // Keeps this window drawing while hidden when enabled.
+void Window::setDrawWhileHidden(bool allow)  // Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
@@ -5553,6 +5606,7 @@ void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this windo
 void Window::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
+void Window::setUpdateWhileHidden(bool allow)  // Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet.
 void Window::setVisible(bool visible)  // Hides or shows this window without closing it.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ```

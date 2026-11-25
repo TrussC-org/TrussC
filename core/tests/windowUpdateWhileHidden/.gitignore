@@ -1,0 +1,5 @@
+/bin
+/build-*
+/CMakeLists.txt
+/CMakePresets.json
+/.trussc
