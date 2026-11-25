@@ -153,6 +153,8 @@ class CustomBlendApp : public App {
     Texture texture_;
     Fbo source_;
     Pixels textMask_;
+    // Separate sampled regions so padded glyph quads cannot mark a neighboring mask.
+    static constexpr int textMaskStride = 32;
     int frame_ = 0;
     std::vector<double> customTimes_, standardTimes_;
     static constexpr int draws = 4000, frames = 30;
@@ -186,7 +188,7 @@ class CustomBlendApp : public App {
             for(int text=0;text<3;++text) {
                 bool matches=true; int ink=0, transparent=0;
                 for(int y=0;y<24;++y) for(int x=0;x<24;++x) {
-                    const auto mask=textMask_.getColor(x,y+text*24);
+                    const auto mask=textMask_.getColor(x,y+text*textMaskStride);
                     auto source=sourceColor_; source.a*=mask.a;
                     const auto wanted=mask.r>0.5f ? expected(i,source,destination_) : destination_;
                     const auto c=pixels.getColor(int((i*48+x)*scale),int(((text==2 ? 152 : 80+text*24)+y)*scale));
@@ -210,14 +212,14 @@ class CustomBlendApp : public App {
         }
     }
     void gpuChecks() {
-        Fbo mask; mask.allocate(24,72);
+        Fbo mask; mask.allocate(24,3*textMaskStride);
         mask.begin(0,0,0,0); setupScreenOrtho();
         BlendDesc overwrite{{BlendFactor::One,BlendFactor::Zero},{BlendFactor::One,BlendFactor::Zero}};
         setCustomBlendDesc(overwrite); setBlendMode(BlendMode::Custom);
-        setColor(1); font_.drawString("A",0,0); drawBitmapString("A",0,24);
+        setColor(1); font_.drawString("A",0,0); drawBitmapString("A",0,textMaskStride);
         GlyphBatch maskGlyphs; maskGlyphs.setFont(font_); maskGlyphs.add("A",Color(1));
-        maskGlyphs.draw(Mat4::translate(0,48,0)); mask.end();
-        textMask_.allocate(24,72,4); check("text coverage reference",mask.readPixels(textMask_.getData()));
+        maskGlyphs.draw(Mat4::translate(0,2*textMaskStride,0)); mask.end();
+        textMask_.allocate(24,3*textMaskStride,4); check("text coverage reference",mask.readPixels(textMask_.getData()));
         // Alpha drawing stores premultiplied RGB; Custom uses those values once.
         source_.begin(0,0,0,0); setBlendMode(BlendMode::Alpha); setColor(sourceColor_);
         drawRect(0,0,24,24); source_.end();
