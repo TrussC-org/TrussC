@@ -5,6 +5,7 @@ Run through tcbuild.sh. Conditions have bounded waits; no elapsed-time verdicts.
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -74,7 +75,8 @@ class BuildOperationTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertTrue(report["cwdRestored"])
         self.assertTrue(report["cwdUnchangedDuringProcess"])
-        self.assertEqual(report["logs"], [event["message"] for event in report["events"]])
+        if mode != "noisy":
+            self.assertEqual(report["logs"], [event["message"] for event in report["events"]])
         return report
 
     def test_configure_build_type_and_compile_failure(self):
@@ -92,24 +94,34 @@ class BuildOperationTests(unittest.TestCase):
         self.assertNotEqual(report["exitCode"], 0)
         self.assertIn("error:", (self.project / "build-linux/build.log").read_text(encoding="utf-8"))
 
-    def child_fixture(self, ignore=False):
+    def child_fixture(self, ignore=False, parent_exits=False):
         fake = self.base / "fake-bin"
         fake.mkdir()
         script = fake / "cmake"
         script.write_text(f'''#!{sys.executable}
 import os, signal, sys, time
 ignore = {ignore!r}
+parent_exits = {parent_exits!r}
 child = 0
 def finish(number, frame):
     open(os.environ["STOP_MARKERS"] + str(os.getpid()), "w").close()
-    if child:
+    if child and not parent_exits:
         os.waitpid(child, 0)
     sys.exit(0)
 for number in (signal.SIGINT, signal.SIGTERM):
     signal.signal(number, signal.SIG_IGN if ignore else finish)
+read_end, write_end = os.pipe()
 child = os.fork()
 if child == 0:
+    os.close(read_end)
+    if parent_exits:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    os.write(write_end, b"ready")
+    os.close(write_end)
     while True: signal.pause()
+os.close(write_end)
+os.read(read_end, 5)
+os.close(read_end)
 open(os.environ["CHILD_PIDS"], "w").write(str(os.getpid()) + " " + str(child))
 print("READY", flush=True)
 open(os.environ["CHILD_READY"], "w").close()
@@ -172,7 +184,17 @@ while True: signal.pause()
         self.assertIn("Build files not found", report["output"])
         self.assert_children_exited()
 
-    def test_cli_forwards_sigint_and_sigterm_to_build_grandchild(self):
+    def test_stop_tracks_survivor_after_parent_exits_without_waiting(self):
+        self.child_fixture(parent_exits=True)
+        report = self.operate("force-orphan")
+        self.assertTrue(report["stillRunning"], report)
+        self.assertTrue(report["parentExitedAfterStop"], report)
+        self.assertTrue(report["survivorBeforeForce"], report)
+        self.assertTrue(report["stopped"])
+        self.assertFalse(report["success"])
+        self.assert_children_exited()
+
+    def test_cli_terminal_group_sigint_and_sigterm_reach_build_grandchild(self):
         self.child_fixture()
         for number in (signal.SIGINT, signal.SIGTERM):
             with self.subTest(signal=number):
@@ -183,7 +205,7 @@ while True: signal.pause()
                                       start_new_session=True, text=True, encoding="utf-8") as process:
                     try:
                         wait_for(self.ready.exists)
-                        process.send_signal(number)
+                        os.killpg(process.pid, number)
                         output, _ = process.communicate(timeout=20)
                         self.assertEqual(process.returncode, -number, output)
                         self.assertIn("READY", output)
@@ -192,6 +214,88 @@ while True: signal.pause()
                         if process.poll() is None:
                             os.killpg(process.pid, signal.SIGKILL)
                             process.wait()
+
+    def test_cli_build_and_regeneration_can_read_terminal(self):
+        import pty
+        self.child_fixture()
+        script = self.base / "fake-bin/cmake"
+        script.write_text(f'''#!{sys.executable}
+import os, sys
+from pathlib import Path
+marker = Path(os.environ["CHILD_READY"])
+if not marker.exists():
+    Path(str(marker) + ".prompt").touch()
+    print("READ_READY", flush=True)
+    assert sys.stdin.readline() == "terminal input\\n"
+    print("READ_DONE", flush=True)
+    marker.touch()
+''', encoding="utf-8")
+        for regenerate in (False, True):
+            with self.subTest(regeneration=regenerate):
+                self.ready.unlink(missing_ok=True)
+                prompt = Path(str(self.ready) + ".prompt")
+                prompt.unlink(missing_ok=True)
+                if regenerate:
+                    framework = self.base / "framework"
+                    (framework / "core/cmake").mkdir(parents=True)
+                    (framework / "core/cmake/trussc_app.cmake").touch()
+                    self.env["TRUSSC_DIR"] = str(framework)
+                    (self.project / "CMakeLists.txt").unlink()
+                    (self.project / "CMakePresets.json").unlink()
+                pid, terminal = pty.fork()
+                if pid == 0:
+                    os.execve(str(CLI), [str(CLI), "build", "-p", str(self.project), "--verbose", "-j1"], self.env)
+                output = b""
+                sent = False
+                status = None
+                ended = 0
+                try:
+                    deadline = time.monotonic() + 20
+                    while time.monotonic() < deadline:
+                        if select.select([terminal], [], [], 0.05)[0]:
+                            try:
+                                output += os.read(terminal, 4096)
+                            except OSError:
+                                pass  # Linux ptys report EIO after their last writer exits.
+                        if prompt.exists() and not sent:
+                            os.write(terminal, b"terminal input\n")
+                            sent = True
+                        ended, status = os.waitpid(pid, os.WNOHANG)
+                        if ended:
+                            break
+                    else:
+                        self.fail("terminal read did not complete: " + repr(output))
+                    self.assertEqual(os.waitstatus_to_exitcode(status), 0, output)
+                    self.assertIn(b"READ_DONE", output)
+                finally:
+                    os.close(terminal)
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    if status is None or not ended:
+                        os.waitpid(pid, 0)
+
+    def test_retained_log_is_bounded_while_callback_and_file_are_complete(self):
+        self.child_fixture()
+        script = self.base / "fake-bin/cmake"
+        for lines, width in ((20000, 256), (40000, 8)):
+            with self.subTest(lines=lines, width=width):
+                script.write_text(f'''#!{sys.executable}
+import sys
+sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_OUTPUT\\n")
+''', encoding="utf-8")
+                report = self.operate("noisy")
+                self.assertTrue(report["success"], report["error"])
+                self.assertLessEqual(sum(len(line) for line in report["logs"]), 2 * 1024 * 1024)
+                self.assertLessEqual(len(report["logs"]), 32768)
+                self.assertEqual(report["logs"][0], "[Earlier build output truncated]\n")
+                self.assertNotIn("FIRST_OUTPUT", "".join(report["logs"]))
+                self.assertIn("LAST_OUTPUT", "".join(report["logs"]))
+                full = "FIRST_OUTPUT\n" + ("x" * width + "\n") * lines + "LAST_OUTPUT\n"
+                self.assertIn(full, report["output"])
+                self.assertEqual(report["output"], "".join(event["message"] for event in report["events"]))
+                self.assertEqual((self.project / "build-linux/build.log").read_text(encoding="utf-8"), full)
 
     def test_run_retains_terminal_group_ctrl_c(self):
         self.child_fixture()

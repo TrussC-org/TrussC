@@ -3,7 +3,8 @@
 // Run a command and receive its stdout and stderr as ONE ordered byte stream
 // (#1240). Both streams of the child are the same pipe, so a compiler
 // diagnostic (stderr) arrives in the right place between the build tool's
-// progress lines (stdout). No shell is involved.
+// progress lines (stdout). Windows batch files run through cmd.exe; other
+// programs receive argv directly.
 
 #include <cstdio>
 #include <atomic>
@@ -33,11 +34,8 @@ private:
 };
 
 struct ProcessOptions {
-    CancelHandle* cancel = nullptr;
+    CancelHandle* cancel = nullptr; // Isolates the child group/job only when supplied.
     std::string workingDirectory;
-    bool ownGroup = true;
-    // CLI only: forward POSIX signals; retain the Windows console group.
-    bool forwardSignals = false;
     bool inheritOutput = false;
     bool hideConsole = false; // Known console tools only; apps keep their normal show state.
 #ifdef _WIN32
@@ -49,7 +47,6 @@ struct ProcessOptions {
 struct ProcessResult {
     int exitCode = -1;
     bool stopped = false;
-    int forwardedSignal = 0; // POSIX CLI restores the terminal's exit status.
 };
 ProcessResult runProcess(const std::vector<std::string>& argv,
     const std::function<void(const char*, size_t)>& onData = {},

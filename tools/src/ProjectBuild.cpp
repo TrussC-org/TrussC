@@ -6,6 +6,7 @@
 #include "GeneratedFile.h"
 #include "TrussCVersion.h"
 #include "TrussC.h"
+#include <deque>
 #include <fstream>
 #include <sstream>
 #include <streambuf>
@@ -138,7 +139,6 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
     ProcessOptions processOptions;
     processOptions.cancel = input.cancel;
     processOptions.hideConsole = true; // These children are CMake console tools.
-    processOptions.forwardSignals = input.forwardSignals;
     struct RestoreCommands {
         ProjectGenerator::CommandRunner previous;
         ~RestoreCommands() { ProjectGenerator::commandRunner = std::move(previous); }
@@ -158,7 +158,6 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
             output.append(data, size);
         }, options);
         result.stopped |= child.stopped;
-        if (child.forwardedSignal) result.forwardedSignal = child.forwardedSignal;
         int code = child.exitCode;
 #ifndef _WIN32
         // The generator's existing popen adapter returns a wait status.
@@ -372,7 +371,6 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         // The expected fast-fail is replaced by the configure below.
         const auto checked = runProcess({cmake, "-P", "_tc_check_hot_reload.cmake"}, {}, checkOptions);
         result.stopped |= checked.stopped;
-        result.forwardedSignal = checked.forwardedSignal;
         hotReloadChanged = checked.exitCode != 0;
         if (result.stopped) return checked.exitCode;
     }
@@ -458,7 +456,6 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         filter.begin();
         const auto child = runProcess(argv, [&](const char* data, size_t size) { filter.write(data, size); }, processOptions);
         result.stopped |= child.stopped;
-        result.forwardedSignal = child.forwardedSignal;
         const int code = child.exitCode;
         filter.end(code, elapsedSeconds());
         return code;
@@ -488,9 +485,25 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
 
 Result build(const BuildInput& input, const LogCallback& callback) {
     Result result;
+    // Bound (long build transcripts): retain at most 2 MiB and 32768 chunks, including the truncation notice.
+    constexpr size_t maxLogBytes = 2 * 1024 * 1024, maxLogEntries = 32768;
+    const string truncationNotice = "[Earlier build output truncated]\n";
+    deque<string> retained;
+    size_t retainedBytes = 0;
+    bool truncated = false;
     auto log = [&](const string& message, MessageKind kind) {
         if (kind == MessageKind::Warning) result.warnings.push_back(message);
-        else result.logLines.push_back(message);
+        else {
+            const size_t budget = maxLogBytes - truncationNotice.size();
+            truncated |= message.size() > budget;
+            retained.push_back(message.size() > budget ? message.substr(message.size() - budget) : message);
+            retainedBytes += retained.back().size();
+            while (retainedBytes > budget || retained.size() >= maxLogEntries) {
+                retainedBytes -= retained.front().size();
+                retained.pop_front();
+                truncated = true;
+            }
+        }
         if (kind == MessageKind::ErrorOutput) result.failureReason += message;
         if (callback) callback(message, kind);
     };
@@ -508,6 +521,8 @@ Result build(const BuildInput& input, const LogCallback& callback) {
     } catch (const exception& error) {
         err << "Error: " << error.what() << "\n";
     }
+    if (truncated) result.logLines.push_back(truncationNotice);
+    result.logLines.insert(result.logLines.end(), retained.begin(), retained.end());
     return result;
 }
 } // namespace projectOps

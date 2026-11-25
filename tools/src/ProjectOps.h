@@ -56,14 +56,12 @@ struct BuildInput {
     bool rememberType = true;
     int jobs = 0;
     CancelHandle* cancel = nullptr;
-    bool forwardSignals = false; // CLI only, never enabled by a GUI worker.
 };
 
 struct Result {
     bool success = false;
     bool stopped = false;
     int exitCode = 1;
-    int forwardedSignal = 0;
     std::string failureReason;
     // Original final error when a separately logged spawn diagnostic enriches
     // failureReason. The CLI keeps its existing two-message presentation.

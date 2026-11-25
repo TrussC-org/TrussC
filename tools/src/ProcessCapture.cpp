@@ -2,6 +2,7 @@
 #include "OperationLog.h"
 
 #include <cerrno>
+#include <cctype>
 #include <cstring>
 #include <iostream>
 
@@ -34,33 +35,28 @@ struct ProcessRunner {
     }
 };
 
-#ifndef _WIN32
-namespace {
-volatile sig_atomic_t pendingSignal = 0;
-void recordSignal(int signalNumber) { pendingSignal = signalNumber; }
-// Installed only by a CLI operation, never by a GUI worker.
-class SignalForwarding {
-public:
-    explicit SignalForwarding(bool enabled) : enabled_(enabled) {
-        if (!enabled_) return;
-        pendingSignal = 0;
-        struct sigaction action = {};
-        action.sa_handler = recordSignal;
-        sigemptyset(&action.sa_mask);
-        sigaction(SIGINT, &action, &previousInt_);
-        sigaction(SIGTERM, &action, &previousTerm_);
+#ifdef _WIN32
+static string resolveWindowsProgram(const string& program) {
+    if (program.find_first_of("/\\:") != string::npos) return program;
+    auto search = [&](const char* extension) -> string {
+        const DWORD size = SearchPathA(nullptr, program.c_str(), extension, 0, nullptr, nullptr);
+        if (!size) return {};
+        vector<char> path(size);
+        const DWORD length = SearchPathA(nullptr, program.c_str(), extension, size, path.data(), nullptr);
+        return length && length < size ? string(path.data(), length) : string();
+    };
+    if (program.find('.') != string::npos) {
+        const string path = search(nullptr);
+        return path.empty() ? program : path;
     }
-    ~SignalForwarding() {
-        if (!enabled_) return;
-        sigaction(SIGINT, &previousInt_, nullptr);
-        sigaction(SIGTERM, &previousTerm_, nullptr);
+    // Match the CRT spawn search used by inherited CLI commands such as emrun.
+    for (const char* extension : {".com", ".exe", ".bat", ".cmd"}) {
+        const string path = search(extension);
+        if (!path.empty()) return path;
     }
-private:
-    bool enabled_;
-    struct sigaction previousInt_ = {}, previousTerm_ = {};
-};
+    return program;
 }
-#else
+
 static BOOL WINAPI ignoreAttachedSignal(DWORD) { return TRUE; }
 static BOOL CALLBACK closeChildWindow(HWND window, LPARAM context) {
     DWORD processId = 0;
@@ -74,13 +70,13 @@ ProcessResult runProcess(const vector<string>& argv,
     const function<void(const char*, size_t)>& onData, const ProcessOptions& options) {
     ProcessResult result;
     auto* handle = options.cancel;
+    const bool ownGroup = handle != nullptr;
     if (handle && handle->stopRequested()) { result.stopped = true; return result; }
     if (argv.empty()) return result;
     // Preserve the ordering of existing CLI output and inherited child output.
     cout.flush();
     cerr.flush();
 #ifndef _WIN32
-    SignalForwarding forwarding(options.forwardSignals);
     vector<char*> cargv;
     for (const auto& argument : argv) cargv.push_back(const_cast<char*>(argument.c_str()));
     cargv.push_back(nullptr);
@@ -103,7 +99,7 @@ ProcessResult runProcess(const vector<string>& argv,
     }
     posix_spawnattr_t attributes;
     posix_spawnattr_init(&attributes);
-    if (options.ownGroup) {
+    if (ownGroup) {
         posix_spawnattr_setpgroup(&attributes, 0);
         posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
     }
@@ -117,13 +113,23 @@ ProcessResult runProcess(const vector<string>& argv,
         spawnDiagnostic("Error: failed to spawn '" + argv[0] + "': " + strerror(error));
         return result;
     }
-    auto sendSignal = [&](int signalNumber) { kill(options.ownGroup ? -pid : pid, signalNumber); };
+    auto sendSignal = [&](int signalNumber) { kill(ownGroup ? -pid : pid, signalNumber); };
 #else
     string commandLine = options.windowsCommandLine;
+    string application;
     if (commandLine.empty()) {
-        for (const auto& argument : argv) {
+        application = resolveWindowsProgram(argv[0]);
+        commandLine = quoteWindowsArgument(application);
+        for (size_t i = 1; i < argv.size(); ++i) {
             if (!commandLine.empty()) commandLine += ' ';
-            commandLine += quoteWindowsArgument(argument);
+            commandLine += quoteWindowsArgument(argv[i]);
+        }
+        string extension = application.substr(application.find_last_of('.') + 1);
+        for (char& c : extension) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        if (extension == "bat" || extension == "cmd") {
+            application = resolveWindowsProgram("cmd.exe");
+            // /s strips this outer pair, leaving the quoted script and argv.
+            commandLine = quoteWindowsArgument(application) + " /d /s /c \"" + commandLine + '"';
         }
     }
     SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
@@ -132,11 +138,11 @@ ProcessResult runProcess(const vector<string>& argv,
         if (!CreatePipe(&readEnd, &writeEnd, &security, 0)) return result;
         SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
     }
-    HANDLE job = options.ownGroup ? CreateJobObjectW(nullptr, nullptr) : nullptr;
+    HANDLE job = ownGroup ? CreateJobObjectW(nullptr, nullptr) : nullptr;
     STARTUPINFOA startup = {};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
-    if (options.ownGroup && options.hideConsole && GetConsoleCP() == 0) {
+    if (ownGroup && options.hideConsole && GetConsoleCP() == 0) {
         startup.dwFlags |= STARTF_USESHOWWINDOW;
         startup.wShowWindow = SW_HIDE;
     }
@@ -152,10 +158,10 @@ ProcessResult runProcess(const vector<string>& argv,
     DWORD flags = CREATE_SUSPENDED;
     // CLI children retain the console group so Ctrl-C reaches their own
     // handlers exactly as before; GUI/layer children get an isolated group.
-    if (options.ownGroup && !options.forwardSignals) flags |= CREATE_NEW_PROCESS_GROUP;
-    if (GetConsoleCP() == 0) flags |= options.ownGroup ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW;
+    if (ownGroup) flags |= CREATE_NEW_PROCESS_GROUP;
+    if (GetConsoleCP() == 0) flags |= ownGroup ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW;
     PROCESS_INFORMATION process = {};
-    const BOOL started = (!options.ownGroup || job) && CreateProcessA(nullptr,
+    const BOOL started = (!ownGroup || job) && CreateProcessA(application.empty() ? nullptr : application.c_str(),
         commandLine.data(), nullptr, nullptr, TRUE, flags, nullptr,
         options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str(), &startup, &process);
     if (writeEnd) CloseHandle(writeEnd);
@@ -173,15 +179,6 @@ ProcessResult runProcess(const vector<string>& argv,
     bool stopSent = false, forceSent = false;
     chrono::steady_clock::time_point requestedAt;
     auto checkStop = [&]() {
-#ifndef _WIN32
-        if (options.forwardSignals && pendingSignal) {
-            const int signalNumber = pendingSignal;
-            pendingSignal = 0;
-            sendSignal(signalNumber);
-            result.stopped = true;
-            result.forwardedSignal = signalNumber;
-        }
-#endif
         if (handle && handle->stopRequested() && !stopSent) {
             stopSent = true;
             result.stopped = true;
@@ -218,9 +215,10 @@ ProcessResult runProcess(const vector<string>& argv,
 #ifndef _WIN32
     int status = 0;
     while (true) {
-        if (!exited) checkStop();
+        checkStop();
         pollfd descriptor = {pipeClosed ? -1 : fds[0], POLLIN, 0};
-        const int ready = poll(&descriptor, 1, exited ? 0 : 50);
+        const bool treeRunning = stopSent && ownGroup && kill(-pid, 0) == 0;
+        const int ready = poll(&descriptor, 1, exited && !treeRunning ? 0 : 50);
         if (ready < 0 && errno == EINTR) continue;
         if (ready > 0) {
             const ssize_t count = read(fds[0], buffer, sizeof(buffer));
@@ -228,7 +226,7 @@ ProcessResult runProcess(const vector<string>& argv,
                 if (onData) onData(buffer, static_cast<size_t>(count));
             } else if (count == 0) pipeClosed = true;
         }
-        if (exited && (ready <= 0 || pipeClosed)) break;
+        if (exited && !treeRunning && (ready <= 0 || pipeClosed)) break;
         if (!exited) {
             const pid_t waited = waitpid(pid, &status, WNOHANG);
             if (waited == pid) exited = true;
@@ -239,7 +237,7 @@ ProcessResult runProcess(const vector<string>& argv,
     result.exitCode = exited && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 #else
     while (true) {
-        if (!exited) checkStop();
+        checkStop();
         DWORD available = 0;
         if (!pipeClosed && !PeekNamedPipe(readEnd, nullptr, 0, nullptr, &available, nullptr)) pipeClosed = true;
         if (available) {
@@ -247,9 +245,13 @@ ProcessResult runProcess(const vector<string>& argv,
             const DWORD wanted = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
             if (ReadFile(readEnd, buffer, wanted, &count, nullptr) && count && onData) onData(buffer, count);
         }
-        if (exited && (!available || pipeClosed)) break;
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting = {};
+        const bool treeRunning = stopSent && job &&
+            QueryInformationJobObject(job, JobObjectBasicAccountingInformation,
+                &accounting, sizeof(accounting), nullptr) && accounting.ActiveProcesses > 0;
+        if (exited && !treeRunning && (!available || pipeClosed)) break;
         if (!exited) exited = WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0;
-        if (!available && !exited) Sleep(2);
+        if (!available && (!exited || treeRunning)) Sleep(2);
     }
     if (readEnd) CloseHandle(readEnd);
     DWORD exitCode = 0;
@@ -265,7 +267,6 @@ ProcessResult runProcess(const vector<string>& argv,
 int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData,
                 FILE* stderrFile, const bool* cancel) {
     projectOps::ProcessOptions options;
-    options.ownGroup = false; // Existing helper callers retain foreground behavior.
     options.stderrFile = stderrFile;
     options.outputLimitExceeded = cancel;
     return projectOps::runProcess(argv, onData, options).exitCode;
@@ -273,7 +274,6 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
 
 int runInherited(const vector<string>& argv) {
     projectOps::ProcessOptions options;
-    options.ownGroup = false;
     options.inheritOutput = true;
     return projectOps::runProcess(argv, {}, options).exitCode;
 }

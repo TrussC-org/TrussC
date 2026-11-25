@@ -3556,7 +3556,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     input.update.tcRoot = explicitTcRoot;
     input.update.executablePath = getExecutablePath();
     input.update.addonLookup = registryAddonLookup();
-    if (!verbose) input.update.configureOutput = projectConfigureOutput();
+    if (!verbose || !explicitTcRoot.empty()) input.update.configureOutput = projectConfigureOutput();
     input.targetPreset = targetPreset;
     input.buildType = buildType;
     input.clean = clean;
@@ -3566,11 +3566,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     input.verbose = verbose;
     input.rememberType = rememberType;
     input.jobs = jobs;
-    input.forwardSignals = true;
     auto result = projectOps::build(input, printProjectMessage);
-#ifndef _WIN32
-    if (result.forwardedSignal) raise(result.forwardedSignal);
-#endif
     return result.exitCode;
 }
 
