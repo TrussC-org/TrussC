@@ -129,8 +129,17 @@ ProcessResult runProcess(const vector<string>& argv,
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     int error = 0;
-    if (!options.workingDirectory.empty())
+    if (!options.workingDirectory.empty()) {
+#ifdef __APPLE__
+        // Keep the call available to deployment targets older than macOS 26.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
         error = posix_spawn_file_actions_addchdir_np(&actions, options.workingDirectory.c_str());
+#ifdef __APPLE__
+#pragma clang diagnostic pop
+#endif
+    }
     if (!options.inheritOutput) {
         if (!error) error = posix_spawn_file_actions_adddup2(&actions, fds[1], 1);
         if (!error) error = posix_spawn_file_actions_adddup2(&actions,

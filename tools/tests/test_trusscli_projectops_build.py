@@ -90,6 +90,9 @@ class BuildOperationTests(unittest.TestCase):
         self.assertTrue(report["success"], report)
         self.assertIn("CMAKE_BUILD_TYPE:STRING=Debug", (self.build_dir / "CMakeCache.txt").read_text(encoding="utf-8"))
         (self.project / "src/main.cpp").write_text("compile_error\n", encoding="utf-8")
+        # Make 3.81 compares whole seconds; force this rewrite past the object.
+        modified = time.time() + 2
+        os.utime(self.project / "src/main.cpp", (modified, modified))
         report = self.operate()
         self.assertFalse(report["success"])
         self.assertFalse(report["stopped"])
