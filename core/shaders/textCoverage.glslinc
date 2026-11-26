@@ -1,7 +1,56 @@
 // Shared by immediate and retained glyph rendering.
 @block text_coverage
 // Experimental top level. Rebuild both consuming shaders after changing this.
+// Compile-time experiments; defaults retain the existing branch output.
+#ifndef TC_TEXT_PATTERN
+#define TC_TEXT_PATTERN 0 // 0: msaa, 1: nested, 2: nested five-point candidate
+#endif
+#ifndef TC_TEXT_OPENING
+#define TC_TEXT_OPENING 0 // 0: blend, 1: main RGSS spread (msaa only)
+#endif
+#ifndef TC_TEXT_TAPS
 #define TC_TEXT_TAPS 8
+#endif
+#if TC_TEXT_OPENING == 1 && TC_TEXT_PATTERN != 0
+#error Spread opening requires the main MSAA RGSS pattern.
+#endif
+
+#if TC_TEXT_PATTERN == 0
+#if TC_TEXT_OPENING == 1
+float textCoverageSpread(vec2 texcoord) {
+    // Half gradients keep base-only sampling through two atlas texels per target
+    // pixel, then increase LOD continuously (the "one level sharp" policy).
+    //
+    // Minified text (more than one atlas texel per pixel) also takes a 4-tap
+    // rotated-grid supersample (RGSS) over the pixel footprint: the same as
+    // rendering at 2x and box-averaging down, per text fragment only. Offsets
+    // are in target pixels; every tap has a distinct x and a distinct y
+    // (+-0.125, +-0.375), so with the neighboring pixels the taps sit evenly
+    // every 1/4 pixel along both axes and a moving stroke no longer pops in and
+    // out of the single sample. At 1:1 and magnified the spread is 0: the exact
+    // single sample is kept, so grid-fitted 1:1 text still lands texel on pixel.
+    // Once minified it opens fully within 1/8 texel per pixel (by 1.125): a
+    // partly open spread leaves gaps between the taps, and a slow fade made
+    // ~1.5x minification shimmer more than full supersampling does.
+    // Derivatives stay unconditional (outside the branch).
+    vec2 dx = dFdx(texcoord);
+    vec2 dy = dFdy(texcoord);
+    vec2 gx = dx * 0.5;
+    vec2 gy = dy * 0.5;
+    vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
+    float texelsPerPixel = max(length(dx * size), length(dy * size));
+    float spread = clamp((texelsPerPixel - 1.0) * 8.0, 0.0, 1.0);
+    if (spread <= 0.0) return textureGrad(sampler2D(tex, smp), texcoord, gx, gy).r;
+    vec2 ox = dx * spread;
+    vec2 oy = dy * spread;
+    float c = 0.0;
+    c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.375 + oy *  0.125, gx, gy).r;
+    c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.125 + oy * -0.375, gx, gy).r;
+    c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.375 + oy * -0.125, gx, gy).r;
+    c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.125 + oy *  0.375, gx, gy).r;
+    return c * 0.25;
+}
+#endif
 #if TC_TEXT_TAPS != 8 && TC_TEXT_TAPS != 16
 #error TC_TEXT_TAPS must be 8 or 16.
 #endif
@@ -67,6 +116,12 @@ float textCoverageLevel(int level, vec2 uv, vec2 dx, vec2 dy) {
 }
 
 float textCoverage(vec2 texcoord) {
+    #if TC_TEXT_OPENING == 1
+    vec2 openingDx = dFdx(texcoord);
+    vec2 openingDy = dFdy(texcoord);
+    vec2 openingSize = vec2(textureSize(sampler2D(tex, smp), 0));
+    if (max(length(openingDx * openingSize), length(openingDy * openingSize)) < 1.125) return textCoverageSpread(texcoord);
+    #endif
     // Derivatives stay unconditional. At 1:1 and magnified, keep the exact
     // single sample. Every transition blends fixed footprints over 12.5%
     // in linear texels/pixel (threshold through threshold * 1.125).
@@ -86,4 +141,54 @@ float textCoverage(vec2 texcoord) {
     }
     return textCoverageLevel(textTransitionCount, texcoord, dx, dy);
 }
+#else
+// The nested top comes from the arrays; TC_TEXT_TAPS selects the MSAA top.
+// Offsets below are supplied in target pixels with Y down; sampling flips Y.
+#if TC_TEXT_PATTERN == 2
+const vec2 textNestedOffsets[] = vec2[](
+    vec2(0,0), vec2(.2,.4), vec2(-.4,.2), vec2(-.2,-.4), vec2(.4,-.2));
+const int textLevelSizes[] = int[](1,5);
+const float textNestedThresholds[] = float[](1.0);
+#else
+const vec2 textNestedOffsets[] = vec2[](
+    vec2(0,0), vec2(.103,.397), vec2(.397,.103), vec2(-.500,-.500),
+    vec2(.052,-.300), vec2(-.300,.052), vec2(.448,-.200), vec2(-.200,.448),
+    vec2(.222,-.089), vec2(.169,.162), vec2(-.072,.237), vec2(.264,-.415),
+    vec2(-.338,-.335), vec2(.345,.329), vec2(-.162,-.164), vec2(-.428,.275));
+const int textLevelSizes[] = int[](1,4,8,16);
+const float textNestedThresholds[] = float[](1.0,32.0,64.0);
+#endif
+
+float textCoverage(vec2 uv) {
+    vec2 dx = dFdx(uv);
+    vec2 dy = dFdy(uv);
+    vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
+    float rho = max(length(dx * size), length(dy * size));
+    // Preserve the exact single sample at 1:1 and magnification.
+    if (rho <= textNestedThresholds[0])
+        return textureGrad(sampler2D(tex, smp), uv, dx * .5, dy * .5).r;
+    int count = 1;
+    int oldCount = 1;
+    float w = 1.0;
+    for (int level = 0; level < textNestedThresholds.length(); ++level) {
+        oldCount = textLevelSizes[level];
+        float threshold = textNestedThresholds[level];
+        if (rho <= threshold) {
+            count = oldCount;
+            w = 1.0;
+            break;
+        }
+        count = textLevelSizes[level + 1];
+        w = clamp((rho / threshold - 1.0) * 8.0, 0.0, 1.0);
+        if (rho < threshold * 1.125) break;
+    }
+    float sum = 0.0;
+    for (int i = 0; i < count; ++i) {
+        vec2 offset = textNestedOffsets[i];
+        float weight = i < oldCount ? 1.0 : w;
+        sum += weight * textureGrad(sampler2D(tex, smp), uv + dx * offset.x - dy * offset.y, dx * .5, dy * .5).r;
+    }
+    return sum / (float(oldCount) + float(count - oldCount) * w);
+}
+#endif
 @end
