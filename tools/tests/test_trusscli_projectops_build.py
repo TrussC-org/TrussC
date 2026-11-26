@@ -106,6 +106,13 @@ class BuildOperationTests(unittest.TestCase):
         script = fake / "build-tool"
         script.write_text(f'''#!{sys.executable}
 import os, signal, sys, time
+# The build call (-f Makefile) and execute_process (no arguments) act;
+# any other call is a CMake probe of the make program.
+with open(os.environ["CHILD_PIDS"] + ".calls", "a") as calls:
+    calls.write(repr(sys.argv[1:]) + "\\n")
+if sys.argv[1:] and "-f" not in sys.argv[1:]:
+    print("GNU Make 4.3")
+    sys.exit(0)
 ignore = {ignore!r}
 parent_exits = {parent_exits!r}
 child = 0
@@ -148,6 +155,10 @@ while True: signal.pause()
         self.ready = self.base / "ready"
         self.env.update(CHILD_PIDS=str(self.pids), CHILD_READY=str(self.ready),
                         STOP_MARKERS=str(self.base / "stopped-"))
+
+    def fixture_calls(self):
+        calls = Path(str(self.pids) + ".calls")
+        return "build-tool calls:\n" + (calls.read_text(encoding="utf-8") if calls.exists() else "(none)\n")
 
     def assert_children_exited(self):
         for pid in map(int, self.pids.read_text(encoding="utf-8").split()):
@@ -231,7 +242,10 @@ while True: signal.pause()
                                 self.assertTrue(data, output)
                                 output += data
                             return b"READY\n" in output
-                        wait_for(received_ready)
+                        try:
+                            wait_for(received_ready)
+                        except AssertionError:
+                            self.fail("READY was not forwarded: " + repr(output) + "\n" + self.fixture_calls())
                         os.killpg(process.pid, number)
                         remaining, _ = process.communicate(timeout=20)
                         output = output.decode("utf-8") + remaining
@@ -250,6 +264,13 @@ while True: signal.pause()
         script.write_text(f'''#!{sys.executable}
 import os, sys
 from pathlib import Path
+# The build call (-f Makefile) and execute_process (no arguments) act;
+# any other call is a CMake probe of the make program.
+with open(os.environ["CHILD_PIDS"] + ".calls", "a") as calls:
+    calls.write(repr(sys.argv[1:]) + "\\n")
+if sys.argv[1:] and "-f" not in sys.argv[1:]:
+    print("GNU Make 4.3")
+    sys.exit(0)
 marker = Path(os.environ["CHILD_READY"])
 if not marker.exists():
     Path(str(marker) + ".prompt").touch()
@@ -303,7 +324,7 @@ if not marker.exists():
                     else:
                         self.fail("terminal read did not complete: " + repr(output))
                     self.assertEqual(os.waitstatus_to_exitcode(status), 0, output)
-                    self.assertIn(b"READ_DONE", output)
+                    self.assertIn(b"READ_DONE", output, self.fixture_calls())
                 finally:
                     os.close(terminal)
                     try:
