@@ -1,4 +1,4 @@
-// Private/RSS API and MCP regression: headless Linux RssAnon, file mmap, and health-only HTTP.
+// Private/RSS API and MCP regression: privateBytes on every native platform, Linux RssAnon, POSIX file mmap, and health-only HTTP.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -8,7 +8,7 @@
 #include <future>
 #include "impl/httplib.h"
 #endif
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -34,6 +34,11 @@ struct HealthApp : App {
         check("health-only grant remains Public", mcp::getToolLevel() == mcp::ToolLevel::Public);
         const auto snapshot = health();
         check("headless health succeeds", snapshot.value("status", "") == "ok");
+#ifndef __EMSCRIPTEN__
+        check("native health includes nonzero privateBytes",
+              snapshot.contains("privateBytes") && snapshot.at("privateBytes").get<int64_t>() > 0);
+        check("native getter returns nonzero private memory", getMemoryUsage() > 0);
+#endif
 #if defined(__EMSCRIPTEN__)
         check("Web omits privateBytes", !snapshot.contains("privateBytes"));
         check("Web getter returns zero", getMemoryUsage() == 0);
@@ -62,7 +67,10 @@ struct HealthApp : App {
               std::abs(int64_t(getMemoryUsage()) - measured) <= slack);
         check("privateBytes agrees with independent RssAnon read",
               manualBytes >= 0 && std::abs(measured - manualBytes) <= slack);
-
+#endif
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+        // POSIX: a shared file mapping adds resident pages but no private memory.
+        if (!snapshot.contains("privateBytes")) { exitApp(); return; }
         constexpr size_t fileBytes = 64 * 1024 * 1024;
         FILE* file = std::tmpfile();
         check("create local mapped-file fixture", file != nullptr);
@@ -121,9 +129,7 @@ struct HealthApp : App {
             const auto body = json::parse(reply->body);
             const auto snapshot = json::parse(body.at("result").at("content").at(0).at("text").get<std::string>());
             check("health-only HTTP returns counters", snapshot.value("status", "") == "ok" && snapshot.contains("rssBytes"));
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
             check("health-only HTTP includes privateBytes", snapshot.contains("privateBytes"));
-#endif
         }
         exitApp();
 #endif

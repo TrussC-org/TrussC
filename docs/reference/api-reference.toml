@@ -52258,6 +52258,7 @@ void tcApp::keyPressed(int key) {
 }
 ```
 - Uses Windows Private Bytes (`PrivateUsage`, Task Manager "Commit size"), Linux/Android `RssAnon`, and macOS/iOS footprint (`phys_footprint`, Activity Monitor "Memory").
+- On macOS and iOS it also includes GPU memory the app owns, so it can be larger than `getResidentMemoryUsage()`. GPU leaks show up there too.
 - `tc_get_health` uses this function for `privateBytes` and omits the field when the result is 0.
 
 Web and failed queries return 0; skip unavailable samples. No private-memory measurement API is available on Web.
@@ -52283,6 +52284,7 @@ void tcApp::keyPressed(int key) {
 }
 ```
 - Windows では Private Bytes（`PrivateUsage`、タスクマネージャーの「コミット サイズ」）、Linux/Android では `RssAnon`、macOS/iOS では footprint（`phys_footprint`、アクティビティモニタの「メモリ」）を使います。
+- macOS と iOS ではアプリが持つ GPU メモリも含むため、`getResidentMemoryUsage()` より大きくなることがあります。GPU のリークもここに現れます。
 - `tc_get_health` はこの関数を `privateBytes` に使い、戻り値が 0 の場合はフィールドを省略します。
 
 Web や取得に失敗した場合は 0 を返すため、計測できないサンプルを除外します。Web ではプライベートメモリを計測する API はありません。
@@ -52308,6 +52310,7 @@ void tcApp::keyPressed(int key) {
 }
 ```
 - Windows에서는 Private Bytes(`PrivateUsage`, 작업 관리자의 "커밋 크기"), Linux/Android에서는 `RssAnon`, macOS/iOS에서는 footprint(`phys_footprint`, 활성 상태 보기의 "메모리")를 사용합니다.
+- macOS와 iOS에서는 앱이 소유한 GPU 메모리도 포함하므로 `getResidentMemoryUsage()`보다 클 수 있습니다. GPU 누수도 여기에 나타납니다.
 - `tc_get_health`는 이 함수를 `privateBytes`에 사용하며 반환값이 0이면 필드를 생략합니다.
 
 Web이나 조회 실패 시에는 0을 반환하므로 측정할 수 없는 샘플은 제외합니다. Web에서는 프라이빗 메모리를 측정하는 API가 없습니다.
