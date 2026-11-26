@@ -61,6 +61,7 @@ struct BuildInput {
 struct RunInput {
     BuildInput build; // Native desktop settings; run() supplies cancellation for both phases.
     std::string session; // Linux display session: empty, "x11", or "labwc".
+    // Session startup and teardown are not covered by CancelHandle Stop, and the GUI does not let users pick a session (the session path is only for starting a display server on devices like a Raspberry Pi).
     bool inheritOutput = false; // CLI apps keep their terminal streams.
 };
 

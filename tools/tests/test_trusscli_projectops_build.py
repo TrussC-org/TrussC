@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -55,12 +56,14 @@ class BuildOperationTests(unittest.TestCase):
         self.preset = "macos" if sys.platform == "darwin" else "linux"
         self.project = self.base / "sample"
         self.build_dir = self.project / ("build-" + self.preset)
+        self.app = self.project / ("bin/sample.app/Contents/MacOS/sample"
+                                   if sys.platform == "darwin" else "bin/sample")
         (self.project / "src").mkdir(parents=True)
         (self.project / "addons.make").touch()
         (self.project / "CMakeLists.txt").write_text(
             'cmake_minimum_required(VERSION 3.20)\nproject(sample LANGUAGES CXX)\n'
             'add_executable(sample src/main.cpp)\n'
-            'set_target_properties(sample PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")\n',
+            f'set_target_properties(sample PROPERTIES RUNTIME_OUTPUT_DIRECTORY "{self.app.parent}")\n',
             encoding="utf-8")
         (self.project / "src/main.cpp").write_text('int main() { return 0; }\n', encoding="utf-8")
         (self.project / "CMakePresets.json").write_text(json.dumps({
@@ -85,7 +88,7 @@ class BuildOperationTests(unittest.TestCase):
         report = self.operate("build", "Release")
         self.assertTrue(report["success"], report)
         self.assertIn("Built target sample", report["output"])
-        self.assertTrue((self.project / "bin/sample").is_file())
+        self.assertTrue(self.app.is_file())
         report = self.operate("build", "Debug")
         self.assertTrue(report["success"], report)
         self.assertIn("CMAKE_BUILD_TYPE:STRING=Debug", (self.build_dir / "CMakeCache.txt").read_text(encoding="utf-8"))
@@ -317,11 +320,11 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
 
     def run_fixture(self, ignore=False):
         self.child_fixture(ignore=ignore)
-        app = self.project / "bin/sample"
-        app.parent.mkdir()
-        app.write_bytes((self.base / "fake-bin/cmake").read_bytes())
+        app = self.app
+        app.parent.mkdir(parents=True)
+        app.write_bytes((self.base / "fake-bin/build-tool").read_bytes())
         app.chmod(0o755)
-        (self.base / "fake-bin/cmake").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (self.base / "fake-bin/build-tool").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
 
     def test_run_streams_app_output_and_returns_exit_status(self):
         for code in (0, 7):
@@ -331,19 +334,23 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
                     'puts("APP_STDOUT"); fflush(stdout);\n'
                     'fputs("APP_STDERR\\n", stderr);\n'
                     f'return {code}; }}\n', encoding="utf-8")
+                modified = time.time() + 2
+                os.utime(self.project / "src/main.cpp", (modified, modified))
                 report = self.operate("run")
                 self.assertEqual(report["success"], code == 0, report)
                 self.assertEqual(report["exitCode"], code)
                 self.assertFalse(report["stopped"])
                 self.assertIn("Launching sample ...\nAPP_STDOUT\nAPP_STDERR\n", report["output"])
         (self.project / "src/main.cpp").write_text("compile_error\n", encoding="utf-8")
+        modified = time.time() + 2
+        os.utime(self.project / "src/main.cpp", (modified, modified))
         report = self.operate("run")
         self.assertFalse(report["success"])
         self.assertNotIn("Launching sample", report["output"])
 
     def test_run_retained_output_is_bounded_but_callback_is_complete(self):
         self.run_fixture()
-        app = self.project / "bin/sample"
+        app = self.app
         app.write_text(f'#!{sys.executable}\n'
                        'print("FIRST_APP_OUTPUT")\n'
                        'print("x" * (3 * 1024 * 1024))\n'
@@ -360,21 +367,24 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
 
     def test_run_reports_missing_binary(self):
         self.child_fixture()
-        (self.base / "fake-bin/cmake").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (self.base / "fake-bin/build-tool").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         report = self.operate("run")
         self.assertFalse(report["success"])
         self.assertEqual(report["exitCode"], 1)
         self.assertIn("built binary not found", report["error"])
 
+    @unittest.skipUnless(sys.platform == "linux", "X11/labwc session launch is Linux-only")
     def test_run_display_session_launcher_and_spawn_failure(self):
         self.run_fixture()
-        app = self.project / "bin/sample"
+        app = self.app
         app.write_text("#!/bin/sh\nprintf 'SESSION_APP\\n'\n", encoding="utf-8")
         arguments = self.base / "session-arguments"
         self.env["SESSION_ARGS"] = str(arguments)
+        (self.base / "fake-bin/cmake").symlink_to(shutil.which("cmake"))
         labwc = self.base / "fake-bin/labwc"
         labwc.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$SESSION_ARGS"\nexec "$2"\n', encoding="utf-8")
         labwc.chmod(0o755)
+        self.env["PATH"] = str(self.base / "fake-bin") + os.pathsep + self.env["PATH"]
         report = self.operate("run", "", "labwc")
         self.assertTrue(report["success"], report)
         self.assertIn("Launching via labwc Wayland session ...\nSESSION_APP\n", report["output"])
@@ -415,8 +425,7 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
 
     def test_run_retains_terminal_group_ctrl_c(self):
         self.child_fixture()
-        app = self.project / ("bin/sample.app/Contents/MacOS/sample"
-                              if sys.platform == "darwin" else "bin/sample")
+        app = self.app
         app.parent.mkdir(parents=True)
         app.write_bytes((self.base / "fake-bin/build-tool").read_bytes())
         app.chmod(0o755)

@@ -125,7 +125,7 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
 
 Result run(const RunInput& input, const LogCallback& callback, CancelHandle* cancel) {
     Result result;
-    // Retain a bounded transcript while streaming every app byte to the caller.
+    // Bound (app-controlled output): retain at most 2 MiB and 32768 entries, including the truncation notice.
     constexpr size_t maxLogBytes = 2 * 1024 * 1024, maxLogEntries = 32768;
     const string truncationNotice = "[Earlier run output truncated]\n";
     deque<string> retained;
