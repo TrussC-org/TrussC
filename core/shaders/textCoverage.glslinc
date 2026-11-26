@@ -1,36 +1,63 @@
 // Shared by immediate and retained glyph rendering.
 @block text_coverage
-float textCoverage(vec2 texcoord) {
-    // Half gradients keep base-only sampling through two atlas texels per target
-    // pixel, then increase LOD continuously (the "one level sharp" policy).
-    //
-    // Minified text (more than one atlas texel per pixel) also takes a 4-tap
-    // rotated-grid supersample (RGSS) over the pixel footprint: the same as
-    // rendering at 2x and box-averaging down, per text fragment only. Offsets
-    // are in target pixels; every tap has a distinct x and a distinct y
-    // (+-0.125, +-0.375), so with the neighboring pixels the taps sit evenly
-    // every 1/4 pixel along both axes and a moving stroke no longer pops in and
-    // out of the single sample. At 1:1 and magnified the spread is 0: the exact
-    // single sample is kept, so grid-fitted 1:1 text still lands texel on pixel.
-    // Once minified it opens fully within 1/8 texel per pixel (by 1.125): a
-    // partly open spread leaves gaps between the taps, and a slow fade made
-    // ~1.5x minification shimmer more than full supersampling does.
-    // Derivatives stay unconditional (outside the branch).
-    vec2 dx = dFdx(texcoord);
-    vec2 dy = dFdy(texcoord);
+// Experimental top level. Rebuild both consuming shaders after changing this.
+// The supplied 16x layout is deferred pending its centroid check.
+#define TC_TEXT_TAPS 8
+#if TC_TEXT_TAPS != 8
+#error Only the validated 8x layout is enabled in this experiment.
+#endif
+const vec2 textOffsets1[1] = vec2[1](vec2(0.0));
+const vec2 textOffsets4[4] = vec2[4](
+    vec2(0.375, 0.125), vec2(0.125, -0.375),
+    vec2(-0.375, -0.125), vec2(-0.125, 0.375));
+// Standard 8x positions, center-relative and y flipped to match the RGSS above.
+const vec2 textOffsets8[8] = vec2[8](
+    vec2(1.0, 3.0) / 16.0, vec2(-1.0, -3.0) / 16.0,
+    vec2(5.0, -1.0) / 16.0, vec2(-3.0, 5.0) / 16.0,
+    vec2(-5.0, -5.0) / 16.0, vec2(-7.0, 1.0) / 16.0,
+    vec2(3.0, -7.0) / 16.0, vec2(7.0, 7.0) / 16.0);
+// Half gradients reach the font sampler's mip-4 cap at 32 texels/pixel.
+const float textThresholds[2] = float[2](1.0, 32.0);
+
+float textCoverageLevel(int level, vec2 uv, vec2 dx, vec2 dy) {
     vec2 gx = dx * 0.5;
     vec2 gy = dy * 0.5;
+    if (level == 0) {
+        return textureGrad(sampler2D(tex, smp), uv + textOffsets1[0], gx, gy).r;
+    }
+    float coverage = 0.0;
+    if (level == 1) {
+        for (int i = 0; i < 4; ++i) {
+            vec2 offset = textOffsets4[i];
+            coverage += textureGrad(sampler2D(tex, smp), uv + dx * offset.x + dy * offset.y, gx, gy).r;
+        }
+        return coverage * 0.25;
+    }
+    for (int i = 0; i < TC_TEXT_TAPS; ++i) {
+        vec2 offset = textOffsets8[i];
+        coverage += textureGrad(sampler2D(tex, smp), uv + dx * offset.x + dy * offset.y, gx, gy).r;
+    }
+    return coverage / float(TC_TEXT_TAPS);
+}
+
+float textCoverage(vec2 texcoord) {
+    // Derivatives stay unconditional. At 1:1 and magnified, keep the exact
+    // single sample. Every transition blends fixed footprints over 12.5%
+    // in linear texels/pixel (threshold through threshold * 1.125).
+    vec2 dx = dFdx(texcoord);
+    vec2 dy = dFdy(texcoord);
     vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
     float texelsPerPixel = max(length(dx * size), length(dy * size));
-    float spread = clamp((texelsPerPixel - 1.0) * 8.0, 0.0, 1.0);
-    if (spread <= 0.0) return textureGrad(sampler2D(tex, smp), texcoord, gx, gy).r;
-    vec2 ox = dx * spread;
-    vec2 oy = dy * spread;
-    float c = 0.0;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.375 + oy *  0.125, gx, gy).r;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox *  0.125 + oy * -0.375, gx, gy).r;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.375 + oy * -0.125, gx, gy).r;
-    c += textureGrad(sampler2D(tex, smp), texcoord + ox * -0.125 + oy *  0.375, gx, gy).r;
-    return c * 0.25;
+    for (int level = 0; level < 2; ++level) {
+        float threshold = textThresholds[level];
+        if (texelsPerPixel < threshold * 1.125) {
+            float low = textCoverageLevel(level, texcoord, dx, dy);
+            float t = clamp((texelsPerPixel / threshold - 1.0) * 8.0, 0.0, 1.0);
+            if (t <= 0.0) return low;
+            float high = textCoverageLevel(level + 1, texcoord, dx, dy);
+            return mix(low, high, t);
+        }
+    }
+    return textCoverageLevel(2, texcoord, dx, dy);
 }
 @end
