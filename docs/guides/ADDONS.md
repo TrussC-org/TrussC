@@ -150,6 +150,7 @@ Addons included with TrussC:
 | tcxGltf | glTF 2.0 / GLB model loader (cgltf) |
 | tcxHap | Hap video codec for fast GPU playback |
 | tcxImGui | Dear ImGui integration |
+| tcxInputReplay | Input recording and replay with a Node toolbar, ring capture and scene marks (experimental) |
 | tcxLut | 3D LUT color grading |
 | tcxObj | Wavefront OBJ model import/export |
 | tcxOsc | OSC (Open Sound Control) protocol |
@@ -765,6 +766,19 @@ Dear ImGui integration.
 **Features:**
 - Full Dear ImGui API
 - Integrated with TrussC rendering pipeline
+
+### tcxInputReplay
+
+tcxInputReplay records one window's mouse, keyboard, touch and file-drop input to JSON Lines and replays it on its recorded schedule, for debugging interactive apps. Scene marks align playback when app timing changes. The addon is experimental, and the JSONL format may change in future versions.
+
+```cpp
+void tcApp::setup() {
+    // F9 shows and hides the record/play toolbar
+    addChild(make_shared<tcx::inputreplay::Toolbar>(KEY_F9));
+}
+```
+
+See [tcxInputReplay README](../../addons/tcxInputReplay/README.md) for the toolbar, file and ring recording, playback scaling and MCP controls.
 
 ### tcxLut
 

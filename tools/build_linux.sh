@@ -11,18 +11,64 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Defaults preserve interactive builds.
+NO_DEPS=false
+NON_INTERACTIVE=false
+NO_LAUNCH=false
+JOBS=""
+usage() {
+    cat <<EOF
+Usage: $0 [options]
+  --no-deps          Skip dependency installation (no-op on macOS)
+  --jobs N           Use N parallel build jobs (positive integer)
+  --non-interactive  Decline installation prompts and skip close waits
+  --no-launch        Do not launch the GUI after building
+  -h, --help         Show this help
+EOF
+}
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --no-deps) NO_DEPS=true ;;
+        --non-interactive) NON_INTERACTIVE=true ;;
+        --no-launch) NO_LAUNCH=true ;;
+        --jobs)
+            if [[ ! "${2:-}" =~ ^[0-9]+$ || ! "${2:-}" =~ [1-9] ]]; then
+                echo "ERROR: --jobs requires a positive integer." >&2
+                usage
+                exit 1
+            fi
+            JOBS="$2"
+            shift
+            ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "ERROR: Unknown option: $1" >&2; usage; exit 1 ;;
+    esac
+    shift
+done
+
+if [ "$(uname)" != "Linux" ]; then
+    echo "ERROR: This script is for Linux. On macOS use tools/build_mac.command; on Windows use tools/build_win.bat."
+    exit 1
+fi
+
 echo "=========================================="
 echo "  trusscli Build Script"
 echo "=========================================="
 echo ""
 
 # Check and install dependencies
-"$SCRIPT_DIR/install_dependencies_linux.sh"
-if [ $? -ne 0 ]; then
-    echo "ERROR: Dependency check failed. Please install required packages."
-    exit 1
+if [ "$NO_DEPS" = false ]; then
+    if [ "$NON_INTERACTIVE" = true ]; then
+        "$SCRIPT_DIR/install_dependencies_linux.sh" <<< "n"
+    else
+        "$SCRIPT_DIR/install_dependencies_linux.sh"
+    fi
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Dependency check failed. Please install required packages."
+        exit 1
+    fi
+    echo ""
 fi
-echo ""
 
 # Source directory (flat layout — CMakeLists.txt lives at SCRIPT_DIR)
 SOURCE_DIR="$SCRIPT_DIR"
@@ -37,7 +83,7 @@ cd "$SOURCE_DIR/build"
 
 # CMake configuration
 echo "Running CMake..."
-cmake ..
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: CMake configuration failed!"
@@ -50,17 +96,19 @@ if [ $? -ne 0 ]; then
 fi
 
 # Calculate parallel jobs based on available RAM (~1.5GiB per compile job)
-AVAIL_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-JOBS=$(awk "BEGIN { n = int($AVAIL_KB / 1572864); if (n < 1) n = 1; print n }")
-MAX_JOBS=$(( $(nproc) + 2 ))
-if [ "$JOBS" -gt "$MAX_JOBS" ]; then
-    JOBS=$MAX_JOBS
+if [ -z "$JOBS" ]; then
+    AVAIL_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+    JOBS=$(awk "BEGIN { n = int($AVAIL_KB / 1572864); if (n < 1) n = 1; print n }")
+    MAX_JOBS=$(( $(nproc) + 2 ))
+    if [ "$JOBS" -gt "$MAX_JOBS" ]; then
+        JOBS=$MAX_JOBS
+    fi
 fi
 
 # Build
 echo ""
 echo "Building (parallel jobs: $JOBS)..."
-cmake --build . --parallel "$JOBS"
+cmake --build . --config MinSizeRel --parallel "$JOBS"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: Build failed!"
@@ -81,7 +129,11 @@ if [ -f "$HOME/.local/share/applications/trusscli.desktop" ]; then
     INSTALL_DESKTOP="skip"
 else
     echo ""
-    read -r -p "Install desktop entry to application menu? [y/N]: " INSTALL_DESKTOP
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -r -p "Install desktop entry to application menu? [y/N]: " INSTALL_DESKTOP
+    else
+        INSTALL_DESKTOP="n"
+    fi
 fi
 case "$INSTALL_DESKTOP" in
     [yY]|[yY][eE][sS])
@@ -141,7 +193,11 @@ if [ "$CURRENT_LINK" = "$BIN_TARGET" ]; then
     INSTALL_PATH_LINK="skip"
 else
     echo ""
-    read -r -p "Add trusscli to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -r -p "Add trusscli to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+    else
+        INSTALL_PATH_LINK="n"
+    fi
 fi
 case "$INSTALL_PATH_LINK" in
     [yY]|[yY][eE][sS])
@@ -182,7 +238,11 @@ if [ -n "$SHELL_RC" ]; then
         echo "Shell completion already configured."
     else
         echo ""
-        read -r -p "Enable tab completion for trusscli? [y/N]: " INSTALL_COMPLETION
+        if [ "$NON_INTERACTIVE" = false ]; then
+            read -r -p "Enable tab completion for trusscli? [y/N]: " INSTALL_COMPLETION
+        else
+            INSTALL_COMPLETION="n"
+        fi
         case "$INSTALL_COMPLETION" in
             [yY]|[yY][eE][sS])
                 echo "" >> "$SHELL_RC"
@@ -202,5 +262,7 @@ echo "=========================================="
 echo "  Build completed successfully!"
 echo "=========================================="
 echo ""
-echo "Launching TrussC Project Generator..."
-"$SCRIPT_DIR/trusscli"
+if [ "$NO_LAUNCH" = false ]; then
+    echo "Launching TrussC Project Generator..."
+    "$SCRIPT_DIR/trusscli"
+fi

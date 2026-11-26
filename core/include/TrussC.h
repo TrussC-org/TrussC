@@ -1563,8 +1563,17 @@ bool isWindowOccluded();
 
 // Keep drawing hidden windows for Spout / Syphon / NDI or recording.
 // Sets every existing window and the default for new windows (initially false).
-// Screen output while hidden is up to the OS.
+// Screen output while hidden is up to the OS; no effect on iOS/Android.
 void setDrawWhileHidden(bool allow);
+
+// Continue updates while hidden: desktop default true, iOS/Android default false.
+// Sets every existing window and the default for new windows, independently of draw.
+// Android background updates must avoid GPU work; iOS background ticks are not supported.
+void setUpdateWhileHidden(bool allow);
+
+// Opt in to Android's mediaPlayback foreground service while the app is visible.
+// Does not request notification permission or acquire a wake lock.
+void setAndroidForegroundService(bool enabled);
 
 // ---------------------------------------------------------------------------
 // Cursor
@@ -2460,10 +2469,6 @@ namespace internal {
     // App instance (held as void*)
     inline void* appInstance = nullptr;
 
-    // Window decoration requested via WindowSettings; applied in _setup_cb once
-    // the platform window exists (sokol has no decoration flag in sapp_desc).
-    inline bool windowDecorated = true;
-
     // Callback function pointers
     inline void (*appSetupFunc)() = nullptr;
     inline void (*appCleanupFunc)() = nullptr;
@@ -2521,12 +2526,6 @@ namespace internal {
         // Install the standard application menu on macOS so Cmd+Q etc. work
         // out of the box. No-op on other platforms.
         internal::installAppMenu();
-
-        // Apply borderless/chromeless decoration if requested (the window now
-        // exists). Kept key-focusable and closable so exitApp() still works.
-        if (!internal::windowDecorated) {
-            setWindowDecorated(false);
-        }
 
         // Bring window to front on startup
         if (!sapp_query_desc()._tc_start_hidden) bringWindowToFront();
@@ -2649,6 +2648,7 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     desc.high_dpi = !window.no_high_dpi;
     desc.sample_count = window.sample_count;
     desc.fullscreen = window.fullscreen;
+    desc._tc_borderless = window.borderless;
     if constexpr (Platform::isDesktop()) desc._tc_start_hidden = window.hidden;
     else if (window.hidden) logNotice("Window") << "WindowSettings::setVisible(): unsupported on this platform";
     desc.swap_interval = window.swap_interval;
@@ -2702,9 +2702,6 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings(),
 
     // Set pixel perfect mode
     internal::pixelPerfectMode() = settings.pixelPerfect;
-
-    // Remember the requested decoration; applied after the window is created.
-    internal::windowDecorated = settings.decorated;
 
     // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
     internal::gpuUniformBufferReserve = runtime.uniformBufferReserve;

@@ -409,6 +409,19 @@ ResourceLoadBatch takeResourceLoadBatch() {
     batch.warnings = MainThreadSlotBatch(owner.completions);
     return batch;
 }
+ResourceLoadBatch takeCpuResourceLoadBatch() {
+    auto& owner = host();
+    std::lock_guard<std::mutex> lock(owner.mutex);
+    ResourceLoadBatch batch;
+    auto& results = owner.mailbox.results;
+    // Preserve ordering in both batches; newly published work waits for a tick.
+    for (auto& state : results) {
+        if (!state->requiresGpu()) batch.results.push_back(std::move(state));
+    }
+    std::erase(results, nullptr);
+    batch.warnings = MainThreadSlotBatch(owner.completions);
+    return batch;
+}
 void deliverResourceLoadBatch(ResourceLoadBatch batch) {
     for (auto& slot : batch.callbacks) {
         auto fn = std::move(slot);

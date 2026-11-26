@@ -57,9 +57,11 @@ struct State {
         ANativeActivity* activity = nullptr;
         void* looper = nullptr;
         void* choreographer = nullptr;
+        void (*background_tick)(void) = nullptr;
         struct Resources { void* input = nullptr; void* window = nullptr; } current, pending;
         struct { int read_from_main_fd = 0, write_from_app_fd = 1, mutex = 0, cond = 0; } pt;
     } android;
+    struct { int timestamp = 0; } timing;
 } _sapp_tc;
 int failures = 0, cleanups = 0, finishes = 0, requests = 0, backEvents = 0, frames = 0, polls = 0;
 int backgroundPosts = 0, backgrounds = 0, pbuffers = 0, currentContext = 3;
@@ -170,6 +172,7 @@ int ALooper_pollOnce(int timeout, int*, int*, void*) {
     }
     return 0;
 }
+double _sapp_tc_timestamp_now(int*) { return 0.0; }
 #include "android_functions.h"
 
 void reset() {

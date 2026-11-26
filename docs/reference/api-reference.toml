@@ -1798,7 +1798,7 @@ description.ko = "오디오 출력 엔진을 초기화하거나 재초기화한�
 details.en = '''
 - `init(settings)` opens output using `AudioSettings`; without a device object, an empty device name selects the system default. The device object takes precedence over name and backend. An unmatched device name logs a warning and fails without opening another device.
 - Positive sample rate, channel count, buffer size, and polyphony values are used as supplied; nonpositive values select `48000` Hz, `2` channels, backend-selected buffer size (`0`), and no voice cap (`0`) respectively.
-- These four settings are stored even if initialization fails. `init()` without arguments reuses them, but always requests the system default device with `AudioBackend::Default`; device name and backend are not retained.
+- These four settings, `performanceProfile`, and `contentType` are stored even if initialization fails. `init()` without arguments reuses them, but always requests the system default device with `AudioBackend::Default`; device name and backend are not retained.
 - Returns `true` after opening and starting output, then notifying `audioDeviceChanged`; returns `false` on selection, backend creation, device opening, or device start failure. Missing selections and unavailable backends log a Warning; device open/start failures use `logError("AudioEngine")`, identifying the requested device when supplied.
 - Reinitialization closes the running device first, so it causes an output gap and a failed attempt leaves the engine stopped. Lowering a polyphony cap discards slots beyond the new cap.
 - During live reinitialization that changes the sample rate, active voices are migrated to the new rate while preserving playback time; streams of unknown length restart from the beginning, and streams whose decoder cannot reopen are stopped.
@@ -1811,7 +1811,7 @@ details.en = '''
 details.ja = '''
 - `init(settings)` は `AudioSettings` に従って出力を開きます。デバイスオブジェクトがなければ、空の名前でシステム既定を選びます。オブジェクトは名前とバックエンドの指定より優先します。名前に一致するデバイスがなければ警告を出し、別のデバイスを開かず失敗します。
 - サンプルレート、チャンネル数、バッファサイズ、同時再生数が正なら指定値を使います。0 以下なら、それぞれ `48000` Hz、`2` チャンネル、バックエンドが選ぶサイズ（`0`）、上限なし（`0`）を使います。
-- この 4 項目は初期化に失敗しても保存します。引数なしの `init()` はこれらを再利用しますが、常に `AudioBackend::Default` でシステム既定のデバイスを要求します。デバイス名とバックエンドは引き継ぎません。
+- この 4 項目と `performanceProfile`、`contentType` は初期化に失敗しても保存します。引数なしの `init()` はこれらを再利用しますが、常に `AudioBackend::Default` でシステム既定のデバイスを要求します。デバイス名とバックエンドは引き継ぎません。
 - 出力を開いて開始し、`audioDeviceChanged` を通知した後に `true` を返します。デバイスの選択、バックエンドの作成、デバイスのオープン、出力の開始に失敗すると `false` を返します。選択したデバイスが見つからない場合やバックエンドを利用できない場合は Warning、デバイスのオープンや開始の失敗は `logError("AudioEngine")` で記録します。デバイス名を指定していた場合は、その名前も示します。
 - 再初期化では先に動作中のデバイスを閉じるため、出力が一時的に途切れ、失敗するとエンジンは停止したままになります。同時再生数の上限を下げると、新しい上限を超えるスロットを破棄します。
 - 動作中の再初期化でサンプルレートが変わる場合は、再生位置の時間を保ってアクティブな再生を新しいレートへ移行します。この場合、長さが不明なストリームは先頭から再開し、デコーダーを開き直せないストリームは停止します。
@@ -1824,7 +1824,7 @@ details.ja = '''
 details.ko = '''
 - `init(settings)`는 `AudioSettings`에 따라 출력을 엽니다. 장치 객체가 없고 이름이 비어 있으면 시스템 기본 장치를 선택합니다. 객체는 이름과 백엔드 지정보다 우선합니다. 일치하는 이름이 없으면 경고를 기록하고 다른 장치를 열지 않고 실패합니다.
 - 샘플 레이트, 채널 수, 버퍼 크기, 동시 재생 수가 양수이면 지정값을 사용합니다. 0 이하이면 각각 `48000` Hz, `2`채널, 백엔드가 선택하는 크기(`0`), 상한 없음(`0`)을 사용합니다.
-- 이 네 설정은 초기화에 실패해도 저장합니다. 인수 없는 `init()`은 이를 재사용하지만 항상 `AudioBackend::Default`로 시스템 기본 장치를 요청합니다. 장치 이름과 백엔드는 유지하지 않습니다.
+- 이 네 설정과 `performanceProfile`, `contentType`은 초기화에 실패해도 저장합니다. 인수 없는 `init()`은 이를 재사용하지만 항상 `AudioBackend::Default`로 시스템 기본 장치를 요청합니다. 장치 이름과 백엔드는 유지하지 않습니다.
 - 출력을 열고 시작한 뒤 `audioDeviceChanged`를 알리고 `true`를 반환합니다. 장치 선택, 백엔드 생성, 장치 열기, 출력 시작에 실패하면 `false`를 반환합니다. 선택한 장치가 없거나 백엔드를 사용할 수 없으면 Warning을 기록하고, 장치 열기나 시작에 실패하면 `logError("AudioEngine")`로 기록하며, 장치 이름을 지정했다면 그 이름도 표시합니다.
 - 재초기화는 실행 중인 장치를 먼저 닫으므로 출력이 잠시 끊기며, 실패하면 엔진이 정지한 상태로 남습니다. 동시 재생 수 상한을 줄이면 새 상한을 넘는 슬롯을 버립니다.
 - 실행 중 재초기화로 샘플 레이트가 바뀌면 재생 시간을 유지하며 활성 재생을 새 레이트로 이전합니다. 이 경우 길이가 알려지지 않은 스트림은 처음부터 다시 시작하고, 디코더를 다시 열 수 없는 스트림은 정지합니다.
@@ -2643,21 +2643,21 @@ description.en = "Configures audio engine initialization."
 description.ja = "オーディオエンジンの初期化を設定する。"
 description.ko = "오디오 엔진 초기화를 설정한다."
 details.en = '''
-- Pass this type to `AudioEngine::init(settings)` to choose the sample rate, output channels, device buffer size, maximum simultaneous voices, and playback device.
+- Pass this type to `AudioEngine::init(settings)` to choose the sample rate, output channels, device buffer size, maximum simultaneous voices, playback device, performance profile, and AAudio content type.
 - Defaults are `sampleRate = 0` for 48000 Hz, `channels = 2` for stereo, `bufferSize = 0` for automatic device selection of the period size, and `maxPolyphony = 0` for no cap on simultaneous voices. The buffer size is requested in frames; nonpositive `sampleRate`, `channels` and `bufferSize` select the corresponding engine defaults.
 - An empty `deviceName` selects the system default playback device. A nonempty name is matched against `AudioEngine::listDevices()`; if no match is found, the engine logs a warning and fails without opening another device. `device`, when set, selects by ID and overrides both `deviceName` and `backend`.
 - `backend` defaults to `AudioBackend::Default`. Set it to `AudioBackend::Null` for a silent mixer that runs without a physical audio device.
 - Initialization failures and live reinitialization follow the rules of `AudioEngine::init`.
 '''
 details.ja = '''
-- `AudioEngine::init(settings)` に渡し、サンプルレート、出力チャンネル数、デバイスのバッファサイズ、最大同時再生数、再生デバイスを指定します。
+- `AudioEngine::init(settings)` に渡し、サンプルレート、出力チャンネル数、デバイスのバッファサイズ、最大同時再生数、再生デバイス、パフォーマンスプロファイル、AAudioのコンテンツ種別を指定します。
 - 既定値は、48000 Hz を選ぶ `sampleRate = 0`、ステレオの `channels = 2`、デバイスに周期の選択を任せる `bufferSize = 0`、同時再生数に上限を設けない `maxPolyphony = 0` です。バッファサイズの要求値はフレーム数で指定します。`sampleRate`、`channels`、`bufferSize` が 0 以下の場合は、それぞれのエンジン既定値を使います。
 - `deviceName` が空ならシステム既定の再生デバイスを選びます。空でない場合は `AudioEngine::listDevices()` の名前と照合し、見つからなければ警告を記録して別のデバイスを開かず失敗します。`device` を設定するとIDで選び、`deviceName` と `backend` より優先します。
 - `backend` の既定値は `AudioBackend::Default` です。物理オーディオデバイスを使わず無音でミキサーを動かす場合は、`AudioBackend::Null` を指定します。
 - 初期化の失敗と実行中の再初期化については、`AudioEngine::init` の規則に従います。
 '''
 details.ko = '''
-- `AudioEngine::init(settings)`에 전달하여 샘플레이트, 출력 채널 수, 장치 버퍼 크기, 최대 동시 재생 수, 재생 장치를 지정합니다.
+- `AudioEngine::init(settings)`에 전달하여 샘플레이트, 출력 채널 수, 장치 버퍼 크기, 최대 동시 재생 수, 재생 장치, 성능 프로파일, AAudio 콘텐츠 유형을 지정합니다.
 - 기본값은 48000 Hz를 선택하는 `sampleRate = 0`, 스테레오인 `channels = 2`, 장치가 주기 크기를 선택하도록 하는 `bufferSize = 0`, 동시 재생 수에 상한을 두지 않는 `maxPolyphony = 0`입니다. 버퍼 크기는 프레임 수로 요청합니다. `sampleRate`, `channels`, `bufferSize`가 0 이하이면 각각의 엔진 기본값을 사용합니다.
 - `deviceName`이 비어 있으면 시스템 기본 재생 장치를 선택합니다. 비어 있지 않으면 `AudioEngine::listDevices()`의 이름과 비교하며, 일치하는 장치가 없으면 경고를 기록하고 다른 장치를 열지 않고 실패합니다. `device`를 설정하면 ID로 선택하며 `deviceName`과 `backend`보다 우선합니다.
 - `backend`의 기본값은 `AudioBackend::Default`입니다. 물리적 오디오 장치 없이 믹서를 무음으로 실행하려면 `AudioBackend::Null`을 지정합니다.
@@ -43658,70 +43658,645 @@ void tcApp::setup() {
 related = ["Window::setPosition"]
 
 ["Window::setDrawWhileHidden"]
-keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
-description.en = "Keeps this window drawing while hidden when enabled."
-description.ja = "有効にすると、非表示中もこのウィンドウの描画を続けます。"
-description.ko = "활성화하면 숨겨진 동안에도 이 윈도우의 그리기를 계속합니다."
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder", "android"]
+description.en = "Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android."
+description.ja = "デスクトップの非表示中も Spout/Syphon/NDI への送信や録画用に描画します。iOS/Android では効果がありません。"
+description.ko = "데스크톱에서 숨겨진 동안 Spout/Syphon/NDI 전송이나 녹화를 위해 그립니다. iOS/Android에서는 효과가 없습니다."
 details.en = '''
-- With `true`, update and draw keep running while minimized or fully covered. Use this when `draw()` sends frames to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
-- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see `setDrawWhileHidden`).
-- The default is `false`: hidden windows keep updating and stop drawing. This window inherits the global default at creation; the last global or per-window call wins. A local call does not change the default for future windows.
-- Call on the main thread. The setting survives App replacement on this Window.
-- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+- Default: false on every OS. Desktop windows keep updating by default; iOS/Android stop receiving frames while hidden. This setting never changes the update policy.
+
+Enable hidden desktop draws in setup:
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- Targets this Window only, inherits the global default at creation, and survives App replacement. The last global or per-window call wins; a local call leaves the default unchanged. Call on the main thread.
+
+- iOS/Android have no drawable surface or frame source while hidden; there is no API for drawing there. For Android CPU-only updates use `setUpdateWhileHidden` and `setAndroidForegroundService` instead.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- Desktop hidden ticks run at about the display base rate (~60 Hz); faster pacing and swapInterval are not preserved. Choose a fixed rate explicitly:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ja = '''
-- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送る場合に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
-- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（`setDrawWhileHidden` を参照）。
-- 既定値は `false` で、非表示中も更新を続けますが描画は停止します。作成時にグローバルの既定値を引き継ぎ、その後はグローバルとウィンドウ単位の最後の呼び出しが優先されます。この呼び出しは今後作成するウィンドウの既定値を変更しません。
-- メインスレッドで呼び出してください。この Window の App を差し替えても設定を保持します。
-- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+- 既定値は全 OS で false です。デスクトップは既定で非表示中も更新し、iOS/Android は非表示中にフレームが届きません。更新設定は変更しません。
+
+setup でデスクトップの非表示描画を有効にします：
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- この Window のみを対象にし、作成時にグローバルの既定値を継承します。App 交換後も保持し、グローバルと窓単位の最後の呼び出しが優先されます。ローカル呼び出しは既定値を変えません。メインスレッドで呼びます。
+
+- iOS/Android は非表示中に描画サーフェスもフレーム源もなく、そこで描画する API はありません。Android の CPU のみの更新には setUpdateWhileHidden と setAndroidForegroundService を使います。
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- デスクトップの非表示 tick は画面の基本レート（約 60 Hz）です。それ以上のペースと swapInterval は保たれません。固定レートを明示します：
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ko = '''
-- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 보낼 때 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
-- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(`setDrawWhileHidden` 참조).
-- 기본값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다. 생성 시 전역 기본값을 상속하며 이후에는 전역 호출과 윈도우별 호출 중 마지막 호출이 우선합니다. 이 호출은 앞으로 생성할 윈도우의 기본값을 변경하지 않습니다.
-- 메인 스레드에서 호출합니다. 이 Window의 App을 교체해도 설정을 유지합니다.
-- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+- 기본값은 모든 OS에서 false입니다. 데스크톱은 기본적으로 숨겨져도 업데이트하며 iOS/Android는 숨겨진 동안 프레임을 받지 않습니다. 업데이트 설정은 바꾸지 않습니다.
+
+setup에서 데스크톱 숨김 그리기를 켭니다:
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- 이 Window만 대상으로 하며 생성 시 전역 기본값을 상속하고 App 교체 후에도 유지합니다. 전역/창별 호출 중 마지막 호출이 우선하며 창별 호출은 기본값을 바꾸지 않습니다. 메인 스레드에서 호출합니다.
+
+- iOS/Android는 숨겨진 동안 그릴 surface나 프레임 소스가 없으며 그 상태에서 그리는 API가 없습니다. Android CPU 전용 업데이트에는 setUpdateWhileHidden과 setAndroidForegroundService를 사용합니다.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- 데스크톱 숨김 tick은 디스플레이 기본 레이트(약 60 Hz)입니다. 더 빠른 속도와 swapInterval은 유지되지 않습니다. 고정 레이트를 지정합니다:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
-related = ["setDrawWhileHidden", "Window::isOccluded", "Window::setVisible", "Window::setFps"]
+related = ["setUpdateWhileHidden", "Window::setUpdateWhileHidden", "setAndroidForegroundService"]
 snippet = '''
-window->setDrawWhileHidden(true);
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
 '''
 
 ["setDrawWhileHidden"]
-keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
-description.en = "Sets drawing while hidden for all existing windows and the default for new ones."
-description.ja = "非表示中に描画するかを全ウィンドウに設定し、新規ウィンドウの既定値にします。"
-description.ko = "숨겨진 동안 그릴지 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다."
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder", "android"]
+description.en = "Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android."
+description.ja = "デスクトップの非表示中も Spout/Syphon/NDI への送信や録画用に描画します。iOS/Android では効果がありません。"
+description.ko = "데스크톱에서 숨겨진 동안 Spout/Syphon/NDI 전송이나 녹화를 위해 그립니다. iOS/Android에서는 효과가 없습니다."
 details.en = '''
-- Sets every existing window and becomes the default for new windows, even when called from one App's callbacks. The initial default is `false`: hidden windows keep updating and stop drawing.
-- With `true`, hidden windows keep updating and drawing, including while minimized or fully covered. This supports sending frames from `draw()` to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
-- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see the snippet).
-- `Window::setDrawWhileHidden()` changes one window only. The last global or per-window call wins. Call on the main thread; setup may set the policy before the first draw.
-- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+- Default: false on every OS. Desktop windows keep updating by default; iOS/Android stop receiving frames while hidden. This setting never changes the update policy.
+
+Enable hidden desktop draws in setup:
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- Sets all existing windows and the default for future windows, even from one App callback. The last global or per-window call wins. Call on the main thread.
+
+- iOS/Android have no drawable surface or frame source while hidden; there is no API for drawing there. For Android CPU-only updates use `setUpdateWhileHidden` and `setAndroidForegroundService` instead.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- Desktop hidden ticks run at about the display base rate (~60 Hz); faster pacing and swapInterval are not preserved. Choose a fixed rate explicitly:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ja = '''
-- ある App のコールバックから呼んだ場合も、既存のすべてのウィンドウに設定し、新規ウィンドウの既定値にします。初期値は `false` で、非表示中も更新を続けますが描画は停止します。
-- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送り続ける用途に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
-- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（スニペット参照）。
-- `Window::setDrawWhileHidden()` は 1 つのウィンドウだけを変更し、最後の呼び出しが優先されます。メインスレッドで呼び出してください。setup で初回描画の前に設定できます。
-- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+- 既定値は全 OS で false です。デスクトップは既定で非表示中も更新し、iOS/Android は非表示中にフレームが届きません。更新設定は変更しません。
+
+setup でデスクトップの非表示描画を有効にします：
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- ある App のコールバックから呼んでも、既存の全窓と今後の既定値に設定します。グローバルと窓単位の最後の呼び出しが優先されます。メインスレッドで呼びます。
+
+- iOS/Android は非表示中に描画サーフェスもフレーム源もなく、そこで描画する API はありません。Android の CPU のみの更新には setUpdateWhileHidden と setAndroidForegroundService を使います。
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- デスクトップの非表示 tick は画面の基本レート（約 60 Hz）です。それ以上のペースと swapInterval は保たれません。固定レートを明示します：
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ko = '''
-- 한 App의 콜백에서 호출해도 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다. 초기값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다.
-- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 계속 보내는 데 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
-- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(스니펫 참조).
-- `Window::setDrawWhileHidden()`는 하나의 윈도우만 변경하며 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다. setup에서 첫 그리기 전에 설정할 수 있습니다.
-- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+- 기본값은 모든 OS에서 false입니다. 데스크톱은 기본적으로 숨겨져도 업데이트하며 iOS/Android는 숨겨진 동안 프레임을 받지 않습니다. 업데이트 설정은 바꾸지 않습니다.
+
+setup에서 데스크톱 숨김 그리기를 켭니다:
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- 한 App 콜백에서 호출해도 모든 기존 창과 새 창의 기본값에 적용합니다. 전역/창별 호출 중 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다.
+
+- iOS/Android는 숨겨진 동안 그릴 surface나 프레임 소스가 없으며 그 상태에서 그리는 API가 없습니다. Android CPU 전용 업데이트에는 setUpdateWhileHidden과 setAndroidForegroundService를 사용합니다.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- 데스크톱 숨김 tick은 디스플레이 기본 레이트(약 60 Hz)입니다. 더 빠른 속도와 swapInterval은 유지되지 않습니다. 고정 레이트를 지정합니다:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
-related = ["Window::setDrawWhileHidden", "Window::isOccluded", "setFps"]
+related = ["setUpdateWhileHidden", "Window::setUpdateWhileHidden", "setAndroidForegroundService"]
 snippet = '''
-EventListener occListener;  // member
-setDrawWhileHidden(true);
-// Optional: a slower rate while hidden
-occListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
-    setFps(e.occluded ? 10 : VSYNC);
-});
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+'''
+
+["setUpdateWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "background", "android", "update", "pause"]
+description.en = "Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet."
+description.ja = "非表示中の更新を制御します。デスクトップの処理停止や Android の CPU バックグラウンド処理に使い、iOS の有効化は未対応です。"
+description.ko = "숨김 업데이트를 제어하여 데스크톱 작업을 멈추거나 Android CPU 백그라운드 작업을 켭니다. iOS 활성화는 아직 지원하지 않습니다."
+details.en = '''
+- Default: true on desktop/Web, false on iOS/Android. Drawing is independent: draw=true/update=false draws without updating. Resuming paused updates resets timing without a catch-up burst.
+
+Choose the update policy in setup:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- Sets all existing windows and the default for future windows, even from one App callback. The last global or per-window call wins. Call on the main thread.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
+
+- Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- setUpdateWhileHidden(true) has no effect on iOS yet. Keep the default and use the existing Sound/AudioEngine audio thread for playback; TrussC has no iOS background update API. Audio background mode still needs app Info.plist configuration:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ja = '''
+- 既定値はデスクトップ/Web で true、iOS/Android で false です。描画とは独立し、draw=true/update=false は更新なしで描画します。再開時は時間をリセットし、停止分をまとめて更新しません。
+
+setup で更新設定を選びます：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- ある App のコールバックから呼んでも、既存の全窓と今後の既定値に設定します。グローバルと窓単位の最後の呼び出しが優先されます。メインスレッドで呼びます。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
+
+- Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS では setUpdateWhileHidden(true) はまだ効果がありません。既定値を保ち、再生には既存の Sound/AudioEngine の音声スレッドを使います。iOS のバックグラウンド更新 API はありません。音声の background mode はアプリの Info.plist 設定が必要です：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ko = '''
+- 기본값은 데스크톱/Web에서 true, iOS/Android에서 false입니다. 그리기와 독립적이므로 draw=true/update=false이면 업데이트 없이 그립니다. 재개 시 시간을 초기화해 밀린 업데이트를 몰아서 실행하지 않습니다.
+
+setup에서 업데이트 정책을 선택합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- 한 App 콜백에서 호출해도 모든 기존 창과 새 창의 기본값에 적용합니다. 전역/창별 호출 중 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
+
+- Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS에서는 setUpdateWhileHidden(true)가 아직 효과가 없습니다. 기본값을 유지하고 재생에는 기존 Sound/AudioEngine 오디오 스레드를 사용합니다. iOS 백그라운드 업데이트 API는 없습니다. 오디오 background mode는 앱 Info.plist 설정이 필요합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+related = ["setDrawWhileHidden", "setAndroidForegroundService", "isWindowOccluded", "CoreEvents::occludedChanged"]
+snippet = '''
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+'''
+
+["Window::setUpdateWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "background", "android", "update", "pause"]
+description.en = "Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet."
+description.ja = "非表示中の更新を制御します。デスクトップの処理停止や Android の CPU バックグラウンド処理に使い、iOS の有効化は未対応です。"
+description.ko = "숨김 업데이트를 제어하여 데스크톱 작업을 멈추거나 Android CPU 백그라운드 작업을 켭니다. iOS 활성화는 아직 지원하지 않습니다."
+details.en = '''
+- Default: true on desktop/Web, false on iOS/Android. Drawing is independent: draw=true/update=false draws without updating. Resuming paused updates resets timing without a catch-up burst.
+
+Choose the update policy in setup:
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- Targets this Window only, inherits the global default at creation, and survives App replacement. The last global or per-window call wins; a local call leaves the default unchanged. Call on the main thread.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
+
+- Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- setUpdateWhileHidden(true) has no effect on iOS yet. Keep the default and use the existing Sound/AudioEngine audio thread for playback; TrussC has no iOS background update API. Audio background mode still needs app Info.plist configuration:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ja = '''
+- 既定値はデスクトップ/Web で true、iOS/Android で false です。描画とは独立し、draw=true/update=false は更新なしで描画します。再開時は時間をリセットし、停止分をまとめて更新しません。
+
+setup で更新設定を選びます：
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- この Window のみを対象にし、作成時にグローバルの既定値を継承します。App 交換後も保持し、グローバルと窓単位の最後の呼び出しが優先されます。ローカル呼び出しは既定値を変えません。メインスレッドで呼びます。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
+
+- Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS では setUpdateWhileHidden(true) はまだ効果がありません。既定値を保ち、再生には既存の Sound/AudioEngine の音声スレッドを使います。iOS のバックグラウンド更新 API はありません。音声の background mode はアプリの Info.plist 設定が必要です：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ko = '''
+- 기본값은 데스크톱/Web에서 true, iOS/Android에서 false입니다. 그리기와 독립적이므로 draw=true/update=false이면 업데이트 없이 그립니다. 재개 시 시간을 초기화해 밀린 업데이트를 몰아서 실행하지 않습니다.
+
+setup에서 업데이트 정책을 선택합니다:
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- 이 Window만 대상으로 하며 생성 시 전역 기본값을 상속하고 App 교체 후에도 유지합니다. 전역/창별 호출 중 마지막 호출이 우선하며 창별 호출은 기본값을 바꾸지 않습니다. 메인 스레드에서 호출합니다.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
+
+- Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS에서는 setUpdateWhileHidden(true)가 아직 효과가 없습니다. 기본값을 유지하고 재생에는 기존 Sound/AudioEngine 오디오 스레드를 사용합니다. iOS 백그라운드 업데이트 API는 없습니다. 오디오 background mode는 앱 Info.plist 설정이 필요합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+related = ["setDrawWhileHidden", "setAndroidForegroundService", "isWindowOccluded", "CoreEvents::occludedChanged"]
+snippet = '''
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+'''
+
+["setAndroidForegroundService"]
+keywords = ["android", "background", "foreground service", "mediaPlayback", "audio", "notification"]
+description.en = "Opts in to Android mediaPlayback foreground service for background playback; visible opt-in requests notification permission on Android 13+ without delaying the service. No wake lock is acquired."
+description.ja = "Android のバックグラウンド再生用 mediaPlayback foreground service を有効にします。Android 13 以降は表示中の有効化で通知権限を要求し、結果を待たずにサービスを開始します。wake lock は取得しません。"
+description.ko = "Android 백그라운드 재생용 mediaPlayback foreground service를 켭니다. Android 13 이상에서는 표시 중에 활성화하면 알림 권한을 요청하고 결과를 기다리지 않고 서비스를 시작합니다. wake lock은 획득하지 않습니다."
+details.en = '''
+- Default: stopped on Android; no service runs until true is passed. Other OSes do nothing and log one Notice per call.
+
+- Android 12+ rejects starting a foreground service from the background. Call true in setup() or another visible callback:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+Stop the service when background playback ends:
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- On Android 13+, visible true calls request POST_NOTIFICATIONS if it is not granted, at most once per Activity instance. The service starts without waiting: denial or dismissal leaves it running, with its notification hidden from the drawer. Android < 13, false, and hidden calls request nothing. With permission, the low-importance ongoing notification appears. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- A custom AndroidManifest.xml must declare POST_NOTIFICATIONS; without it the system request has no effect. Add this declaration inside <manifest>:
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+- No wake lock is acquired. Active audio normally keeps the CPU awake; this service alone does not guarantee CPU-only ticks with the screen off. TrussC has no background wake-lock API.
+- For targetSdk 34+, justify the mediaPlayback foreground service type in Play Console. Unused store builds should remove the service and the three related permissions from their project manifest; see BUILD_SYSTEM.md › Android background media playback.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+details.ja = '''
+- Android の既定は停止で、true を渡すまで動きません。他 OS は何もせず、呼び出しごとに Notice を 1 回出します。
+
+- Android 12 以降はバックグラウンドからの foreground service 開始を拒否します。setup() または表示中のコールバックで true を呼びます：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+バックグラウンド再生が終わったらサービスを停止します：
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13 以降は表示中に true を呼ぶと、未許可の POST_NOTIFICATIONS を Activity ごとに最大 1 回要求します。サービスは結果を待たずに開始します。拒否やダイアログを閉じた場合も動作を続けますが、通知一覧には表示されません。Android 13 未満、false、非表示中の呼び出しでは要求しません。許可されていれば重要度の低い継続通知を表示します。表示中に有効にします：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- 独自の AndroidManifest.xml には POST_NOTIFICATIONS の宣言が必要です。宣言がなければシステムへの要求は効果がありません。<manifest> 内に追加します：
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+- wake lock は取得しません。音声再生中は通常 CPU が動き続けますが、サービス単体では画面オフ中の CPU 更新を保証しません。TrussC にバックグラウンド wake-lock API はありません。
+- targetSdk 34 以降は Play Console で mediaPlayback 型の説明が必要です。使わないストア用アプリは自身の manifest から service と関連する 3 権限を削除します。BUILD_SYSTEM.md › Android background media playback を参照してください。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+details.ko = '''
+- Android 기본값은 중지이며 true를 전달할 때만 실행합니다. 다른 OS에서는 아무것도 하지 않고 호출마다 Notice를 한 번 기록합니다.
+
+- Android 12 이상은 백그라운드에서 foreground service 시작을 거부합니다. setup() 또는 표시 중인 콜백에서 true를 호출합니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+백그라운드 재생이 끝나면 서비스를 중지합니다:
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13 이상에서 표시 중에 true를 호출하면 허용되지 않은 POST_NOTIFICATIONS를 Activity 인스턴스마다 최대 한 번 요청합니다. 서비스는 결과를 기다리지 않고 시작합니다. 거부하거나 대화 상자를 닫아도 서비스는 계속 실행되지만 알림 목록에는 표시되지 않습니다. Android 13 미만, false, 숨김 상태의 호출에서는 요청하지 않습니다. 허용된 경우 중요도가 낮은 지속 알림을 표시합니다. 표시 중에 활성화합니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- 사용자 지정 AndroidManifest.xml에는 POST_NOTIFICATIONS 선언이 필요합니다. 선언이 없으면 시스템 요청은 효과가 없습니다. <manifest> 안에 추가합니다:
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+- wake lock을 획득하지 않습니다. 오디오 재생 중에는 보통 CPU가 깨어 있지만 서비스만으로 화면이 꺼진 동안의 CPU 업데이트를 보장하지 않습니다. TrussC에는 백그라운드 wake-lock API가 없습니다.
+- targetSdk 34 이상은 Play Console에서 mediaPlayback 유형의 용도를 설명해야 합니다. 사용하지 않는 스토어 빌드는 자체 manifest에서 service와 관련 권한 3개를 제거합니다. BUILD_SYSTEM.md › Android background media playback을 참고하세요.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+related = ["setUpdateWhileHidden", "isWindowOccluded"]
+snippet = '''
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
 '''
 
 ["Window::setFps"]
@@ -51555,17 +52130,17 @@ description.ko = "공유 오디오 출력 엔진을 초기화한다."
 details.en = '''
 - Calls `AudioEngine::getInstance().init()` only while the engine is uninitialized. It returns no value and leaves an already initialized engine unchanged.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, and both `loadFromBuffer()` overloads attempt initialization automatically while the engine is uninitialized; `play()` does not. Call this helper to start output before using synthesis through `audioOut`.
-- Initialization reuses the numeric configuration from the last `AudioEngine::init(AudioSettings)` call, or the initial defaults described in `AudioEngine`, and selects the system default device with the default backend selection. Use `AudioEngine::init(settings)` for custom configuration and its boolean result, or check `isInitialized()` after this helper; startup failures are logged.
+- Initialization reuses the numeric configuration, performance profile, and content type from the last `AudioEngine::init(AudioSettings)` call, or the initial defaults described in `AudioEngine`, and selects the system default device with the default backend selection. Use `AudioEngine::init(settings)` for custom configuration and its boolean result, or check `isInitialized()` after this helper; startup failures are logged.
 '''
 details.ja = '''
 - エンジンが未初期化のときだけ `AudioEngine::getInstance().init()` を呼びます。戻り値はなく、初期化済みの場合は変更しません。
 - `Sound::load()`、`loadStream()`、`loadTestTone()`、両方の `loadFromBuffer()` は、エンジンが未初期化なら自動的に初期化を試みます。`play()` は初期化しません。`audioOut` による音声合成などで先に出力を開始するには、この関数を呼んでください。
-- 最後の `AudioEngine::init(AudioSettings)` の数値設定を再利用し、まだ呼んでいない場合は `AudioEngine` に記載した初期の既定値を使います。デバイスはシステム既定、バックエンドは既定の選択方法になります。独自の設定と成否の戻り値が必要な場合は `AudioEngine::init(settings)` を使うか、この関数のあとで `isInitialized()` を確認してください。開始に失敗した場合はログに出力されます。
+- 最後の `AudioEngine::init(AudioSettings)` の数値設定、パフォーマンスプロファイル、コンテンツ種別を再利用し、まだ呼んでいない場合は `AudioEngine` に記載した初期の既定値を使います。デバイスはシステム既定、バックエンドは既定の選択方法になります。独自の設定と成否の戻り値が必要な場合は `AudioEngine::init(settings)` を使うか、この関数のあとで `isInitialized()` を確認してください。開始に失敗した場合はログに出力されます。
 '''
 details.ko = '''
 - 엔진이 초기화되지 않았을 때만 `AudioEngine::getInstance().init()`를 호출합니다. 반환값은 없으며 이미 초기화된 엔진은 변경하지 않습니다.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, 두 `loadFromBuffer()` 오버로드는 엔진이 초기화되지 않았으면 자동으로 초기화를 시도합니다. `play()`는 초기화하지 않습니다. `audioOut`을 통한 음성 합성 등에서 출력을 먼저 시작하려면 이 함수를 호출합니다.
-- 마지막 `AudioEngine::init(AudioSettings)`의 숫자 설정을 재사용하며 아직 호출하지 않았다면 `AudioEngine`에 설명된 초기 기본값을 사용합니다. 장치는 시스템 기본 장치를 선택하고 백엔드는 기본 선택 방식을 사용합니다. 사용자 설정과 성공 여부 반환값이 필요하면 `AudioEngine::init(settings)`를 사용하거나 이 함수 뒤에 `isInitialized()`를 확인합니다. 시작 실패는 로그에 기록합니다.
+- 마지막 `AudioEngine::init(AudioSettings)`의 숫자 설정, 성능 프로파일, 콘텐츠 유형을 재사용하며 아직 호출하지 않았다면 `AudioEngine`에 설명된 초기 기본값을 사용합니다. 장치는 시스템 기본 장치를 선택하고 백엔드는 기본 선택 방식을 사용합니다. 사용자 설정과 성공 여부 반환값이 필요하면 `AudioEngine::init(settings)`를 사용하거나 이 함수 뒤에 `isInitialized()`를 확인합니다. 시작 실패는 로그에 기록합니다.
 '''
 related = ["AudioEngine::getInstance", "shutdownAudio", "AudioEngine::init"]
 snippet = '''
@@ -56481,20 +57056,47 @@ void tcApp::setup() {
 ["setWindowDecorated"]
 category = "window_system"
 keywords = ["borderless", "titlebar", "chrome", "frame", "decoration"]
-description.en = "Controls the resolved Window's standard decorations."
-description.ja = "対象 Window の標準装飾を切り替える。"
-description.ko = "대상 Window의 표준 장식을 전환한다."
+description.en = "Shows or hides window decorations while keeping the client size on Windows, macOS and X11."
+description.ja = "Windows・macOS・X11 で内容領域のサイズを保ちながら、ウィンドウの標準装飾を切り替えます。"
+description.ko = "Windows, macOS, X11에서 클라이언트 영역 크기를 유지하면서 창의 표준 장식을 전환합니다."
 details.en = '''
+- On Windows, macOS and X11, changing decorations keeps the client (drawable) size, including after a change requested while fullscreen takes effect on return to windowed mode.
+
+Hide the decorations:
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - Changing decoration while fullscreen keeps the window fullscreen. The requested decoration takes effect after leaving fullscreen.
 - Pass `false` to hide the title bar, borders, and window buttons, or `true` to restore standard decorations; keyboard focus and programmatic closing remain available.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
+- Windows・macOS・X11 では、装飾を変更しても内容（描画）領域のサイズを保ちます。フルスクリーン中に要求した変更を解除後に反映するときも同じです。
+
+装飾を非表示にします。
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - フルスクリーン中に装飾を変更してもフルスクリーンを維持します。指定した装飾は解除後に反映します。
 - `false` でタイトルバー、枠、ウィンドウボタンを隠し、`true` で標準装飾に戻します。キーボードフォーカスとプログラムからの終了は引き続き使えます。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
+- Windows, macOS, X11에서는 장식을 변경해도 클라이언트(그리기) 영역 크기를 유지합니다. 전체화면 중 요청한 변경을 창 모드로 돌아온 뒤 적용할 때도 동일합니다.
+
+장식을 숨깁니다.
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - 전체화면 중에 장식을 변경해도 전체화면을 유지합니다. 요청한 장식은 전체화면을 종료한 뒤 적용합니다.
 - `false`이면 제목 표시줄, 테두리, 윈도우 버튼을 숨기고 `true`이면 표준 장식을 복원합니다. 키보드 포커스와 프로그램을 통한 종료는 계속 사용할 수 있습니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
@@ -71653,6 +72255,117 @@ struct tcApp : App {
 
 - 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
 - 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
+'''
+
+["AudioPerformanceProfile"]
+category = "sound"
+description.en = "Selects the output performance profile for instruments or BGM."
+description.ja = "楽器演奏やBGM向けの出力パフォーマンスプロファイルを選ぶ。"
+description.ko = "악기 연주 또는 BGM용 출력 성능 프로파일을 선택한다."
+details.en = "`LowLatency` (default) and `Conservative` map to miniaudio's low-latency and conservative profiles. Set `AudioSettings::performanceProfile` before opening output."
+details.ja = "`LowLatency`（既定値）と `Conservative` はminiaudioの低レイテンシーと保守的なプロファイルに対応します。出力を開く前に `AudioSettings::performanceProfile` に設定します。"
+details.ko = "`LowLatency`(기본값)와 `Conservative`는 miniaudio의 저지연 및 보수적 프로파일에 대응합니다. 출력을 열기 전에 `AudioSettings::performanceProfile`에 설정합니다."
+related = ["AudioSettings::performanceProfile"]
+
+["AudioContentType"]
+category = "sound"
+description.en = "Selects the AAudio output content type for background music."
+description.ja = "BGM向けのAAudio出力のコンテンツ種別を選ぶ。"
+description.ko = "BGM용 AAudio 출력의 콘텐츠 유형을 선택한다."
+details.en = "`Default` leaves miniaudio's content type unchanged; `Music` selects music. Set `AudioSettings::contentType` before opening output."
+details.ja = "`Default` はminiaudioのコンテンツ種別を変更せず、`Music` は音楽を指定します。出力を開く前に `AudioSettings::contentType` に設定します。"
+details.ko = "`Default`는 miniaudio의 콘텐츠 유형을 유지하며 `Music`은 음악을 선택합니다. 출력을 열기 전에 `AudioSettings::contentType`에 설정합니다."
+related = ["AudioSettings::contentType"]
+
+["AudioSettings::performanceProfile"]
+category = "sound"
+description.en = "Chooses low latency for instruments or a conservative profile for long BGM playback."
+description.ja = "楽器向けの低レイテンシーか、長時間のBGM再生向けの保守的なプロファイルを選びます。"
+description.ko = "악기용 저지연 또는 장시간 BGM 재생용 보수적 프로파일을 선택합니다."
+details.en = '''
+- `LowLatency` is the default for instruments; `Conservative` requests larger default periods for long BGM playback, including on desktop backends, when `bufferSize` is 0 (automatic), subject to backend negotiation. A positive `bufferSize` is used as-is.
+- Conservative can raise latency; use low latency for instruments:
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
+}
+```
+- On AAudio, conservative maps to `AAUDIO_PERFORMANCE_MODE_NONE`. `POWER_SAVING` has no TrussC API.
+- Settings apply when `AudioEngine::init(settings)` opens or reopens output. Editing the local settings object does not change a running device; pass it to `init(settings)` again to apply it. Zero-argument `init()` retains the last profile and content type, including after a failed initialization.
+- On Android, after an automatic reroute (headphones, Bluetooth), TrussC reopens output once more to restore Conservative, so there is a second short gap.
+'''
+details.ja = '''
+- 楽器向けの `LowLatency` が既定値で、`Conservative` は `bufferSize` が0（自動）のとき、デスクトップを含むバックエンドに長時間のBGM再生向けの大きい既定の処理周期を要求します。実際の周期はバックエンドとの交渉で決まり、正の `bufferSize` はそのまま使います。
+- Conservativeではレイテンシーが増えることがあるため、楽器演奏には低レイテンシーを使います。
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
+}
+```
+- AAudioではConservativeが `AAUDIO_PERFORMANCE_MODE_NONE` に対応します。`POWER_SAVING` を指定するTrussC APIはありません。
+- `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用します。ローカルの設定オブジェクトの編集だけでは動作中のデバイスは変わりません。適用するには再度 `init(settings)` に渡します。引数なしの `init()` は、初期化が失敗した場合も最後のプロファイルとコンテンツ種別を再利用します。
+- Androidでは自動的な出力先の切り替え（ヘッドホン、Bluetooth）の後、Conservativeを復元するためにTrussCが出力をもう一度開き直すので、短い中断がもう一度発生します。
+'''
+details.ko = '''
+- 악기용 `LowLatency`가 기본값이며 `Conservative`는 `bufferSize`가 0(자동)일 때 데스크톱을 포함한 백엔드에 장시간 BGM 재생용으로 더 큰 기본 처리 주기를 요청합니다. 실제 주기는 백엔드와의 협상에 따라 결정되며 양수 `bufferSize`는 그대로 사용합니다.
+- Conservative는 지연을 늘릴 수 있으므로 악기 연주에는 저지연을 사용합니다.
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
+}
+```
+- AAudio에서 Conservative는 `AAUDIO_PERFORMANCE_MODE_NONE`에 대응합니다. `POWER_SAVING`을 지정하는 TrussC API는 없습니다.
+- `AudioEngine::init(settings)`가 출력을 열거나 다시 열 때 적용합니다. 로컬 설정 객체를 편집하는 것만으로 실행 중인 장치는 바뀌지 않습니다. 적용하려면 다시 `init(settings)`에 전달합니다. 인자 없는 `init()`은 초기화 실패 후에도 마지막 프로파일과 콘텐츠 유형을 재사용합니다.
+- Android에서는 자동 출력 경로 변경(헤드폰, Bluetooth) 후 TrussC가 Conservative를 복원하기 위해 출력을 한 번 더 열므로 짧은 재생 중단이 한 번 더 발생합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    AudioSettings settings;
+    settings.performanceProfile = AudioPerformanceProfile::Conservative;
+    settings.contentType = AudioContentType::Music;
+    AudioEngine::getInstance().init(settings);
+}
+'''
+
+["AudioSettings::contentType"]
+category = "sound"
+description.en = "Labels AAudio output as music for BGM or background playback."
+description.ja = "BGMやバックグラウンド再生のAAudio出力を音楽として指定します。"
+description.ko = "BGM 또는 백그라운드 재생의 AAudio 출력을 음악으로 지정합니다."
+details.en = '''
+- `Default` skips the AAudio content-type setter (AAudio's effective default is MUSIC); `Music` explicitly requests `AAUDIO_CONTENT_TYPE_MUSIC` for BGM, independently of the platform default. Other backends ignore this field; there is no content-type API for those backends.
+- Applied when output opens or reopens through `AudioEngine::init(settings)`; zero-argument `init()` retains the last content type. To apply a changed settings object, reopen output:
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.contentType = AudioContentType::Music});
+}
+```
+'''
+details.ja = '''
+- `Default` はAAudioのコンテンツ種別の設定を省略し、AAudioの実効的な既定値はMUSICです。`Music` はプラットフォームの既定値に依存せず、BGM向けに `AAUDIO_CONTENT_TYPE_MUSIC` を明示的に要求します。他のバックエンドでは無視され、それらのコンテンツ種別を指定するAPIはありません。
+- `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用し、引数なしの `init()` は最後の種別を再利用します。変更した設定オブジェクトを適用するには出力を開き直します。
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.contentType = AudioContentType::Music});
+}
+```
+'''
+details.ko = '''
+- `Default`는 AAudio 콘텐츠 유형 설정을 생략하며 AAudio의 실제 기본값은 MUSIC입니다. `Music`은 플랫폼 기본값과 관계없이 BGM용 `AAUDIO_CONTENT_TYPE_MUSIC`을 명시적으로 요청합니다. 다른 백엔드는 이 필드를 무시하며 해당 백엔드의 콘텐츠 유형을 지정하는 API는 없습니다.
+- `AudioEngine::init(settings)`로 출력을 열거나 다시 열 때 적용하며 인자 없는 `init()`은 마지막 유형을 재사용합니다. 변경한 설정 객체를 적용하려면 출력을 다시 엽니다.
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.contentType = AudioContentType::Music});
+}
+```
+'''
+snippet = '''
+void tcApp::setup() {
+    AudioSettings settings;
+    settings.performanceProfile = AudioPerformanceProfile::Conservative;
+    settings.contentType = AudioContentType::Music;
+    AudioEngine::getInstance().init(settings);
+}
 '''
 
 ["median"]

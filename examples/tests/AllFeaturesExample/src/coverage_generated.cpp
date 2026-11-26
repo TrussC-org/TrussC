@@ -513,8 +513,10 @@ static void cover_other() {
     (void)operator*(af::val<float>(), af::val<const Vec4>());
     (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
+    (void)setAndroidForegroundService(af::val<bool>());
     (void)setDrawWhileHidden(af::val<bool>());
     (void)setResourceLoadConcurrency(af::val<int>());
+    (void)setUpdateWhileHidden(af::val<bool>());
 }
 
 static void cover_platform() {
@@ -1078,9 +1080,11 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
         (void)af::val<AudioSettings>().backend;
         (void)af::val<AudioSettings>().bufferSize;
         (void)af::val<AudioSettings>().channels;
+        (void)af::val<AudioSettings>().contentType;
         (void)af::val<AudioSettings>().device;
         (void)af::val<AudioSettings>().deviceName;
         (void)af::val<AudioSettings>().maxPolyphony;
+        (void)af::val<AudioSettings>().performanceProfile;
         (void)af::val<AudioSettings>().sampleRate;
     }
 };
@@ -5253,6 +5257,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().setQuitOnClose(af::val<bool>());
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setTitle(af::val<const std::string>());
+        (void)af::val<Window>().setUpdateWhileHidden(af::val<bool>());
         (void)af::val<Window>().setVisible(af::val<bool>());
         (void)af::val<Window>().toggleFullscreen();
     }
