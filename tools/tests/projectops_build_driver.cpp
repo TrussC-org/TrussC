@@ -1,6 +1,7 @@
 #include "ProjectOps.h"
 #include "GeneratedFile.h"
 #include "TrussC.h"
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -9,7 +10,9 @@
 #include <iostream>
 #include <thread>
 #include <signal.h>
+#if defined(__linux__)
 #include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
 
 void writeGeneratedFile(const fs::path& path, const std::string& text) {
@@ -20,7 +23,9 @@ void removeBuildDirectory(const fs::path& path) { fs::remove_all(path); }
 int main(int argc, char** argv) {
     if (argc < 3) return 2;
     const std::string mode = argv[1];
+#if defined(__linux__)
     if (mode == "force" || mode == "force-orphan") prctl(PR_SET_CHILD_SUBREAPER, 1);
+#endif
     projectOps::CancelHandle cancel;
     std::atomic<bool> ready{false};
     std::string output;
@@ -42,7 +47,7 @@ int main(int argc, char** argv) {
     auto operation = std::async(std::launch::async, execute);
     bool stillRunning = false, cwdUnchangedDuringProcess = true;
     bool parentExitedAfterStop = false, survivorBeforeForce = false;
-    pid_t orphan = 0;
+    pid_t parent = 0, orphan = 0;
     if (mode == "stop" || mode == "force" || mode == "force-orphan") {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         const char* readyMarker = std::getenv("CHILD_READY");
@@ -58,17 +63,23 @@ int main(int argc, char** argv) {
             stillRunning = cancel.state() == projectOps::ProcessState::StillRunning &&
                 operation.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready;
             {
-                pid_t parent = 0;
                 std::ifstream(std::getenv("CHILD_PIDS")) >> parent >> orphan;
-                parentExitedAfterStop = parent > 0 && kill(parent, 0) == -1;
-                survivorBeforeForce = orphan > 0 && waitpid(orphan, nullptr, WNOHANG) == 0 && kill(orphan, 0) == 0;
+#if defined(__linux__)
+                if (parent > 0) waitpid(parent, nullptr, WNOHANG);
+#endif
+                parentExitedAfterStop = parent > 0 && kill(parent, 0) == -1 && errno == ESRCH;
+                // On macOS the live orphan belongs to launchd, not this driver.
+                survivorBeforeForce = orphan > 0 && kill(orphan, 0) == 0;
             }
             cancel.forceStop();
-            // This test process reaps its adopted orphan, just as init normally does.
+            // Linux adopts fixture descendants; macOS launchd reaps them.
+#if defined(__linux__)
             while (orphan > 0 && operation.wait_for(std::chrono::milliseconds(5)) != std::future_status::ready &&
                    std::chrono::steady_clock::now() < deadline) {
+                if (parent > 0) waitpid(parent, nullptr, WNOHANG);
                 waitpid(orphan, nullptr, WNOHANG);
             }
+#endif
         }
     }
     const auto result = operation.get();

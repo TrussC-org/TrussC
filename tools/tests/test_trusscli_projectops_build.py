@@ -25,7 +25,7 @@ def wait_for(condition, timeout=20):
         time.sleep(0.01)
 
 
-@unittest.skipUnless(sys.platform == "linux", "POSIX process-group fixture")
+@unittest.skipUnless(os.name == "posix", "requires POSIX process groups, signals, and PTYs")
 class BuildOperationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -52,7 +52,9 @@ class BuildOperationTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory(prefix="projectops-build-")
         self.addCleanup(self.scratch.cleanup)
         self.base = Path(self.scratch.name)
+        self.preset = "macos" if sys.platform == "darwin" else "linux"
         self.project = self.base / "sample"
+        self.build_dir = self.project / ("build-" + self.preset)
         (self.project / "src").mkdir(parents=True)
         (self.project / "addons.make").touch()
         (self.project / "CMakeLists.txt").write_text(
@@ -62,9 +64,9 @@ class BuildOperationTests(unittest.TestCase):
             encoding="utf-8")
         (self.project / "src/main.cpp").write_text('int main() { return 0; }\n', encoding="utf-8")
         (self.project / "CMakePresets.json").write_text(json.dumps({
-            "version": 3, "configurePresets": [{"name": "linux", "generator": "Unix Makefiles",
-            "binaryDir": "${sourceDir}/build-linux", "cacheVariables": {"FETCHCONTENT_FULLY_DISCONNECTED": "ON"}}],
-            "buildPresets": [{"name": "linux", "configurePreset": "linux"}]}), encoding="utf-8")
+            "version": 3, "configurePresets": [{"name": self.preset, "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build-" + self.preset, "cacheVariables": {"FETCHCONTENT_FULLY_DISCONNECTED": "ON"}}],
+            "buildPresets": [{"name": self.preset, "configurePreset": self.preset}]}), encoding="utf-8")
         self.env = dict(os.environ)
 
     def operate(self, mode="build", *args):
@@ -86,18 +88,18 @@ class BuildOperationTests(unittest.TestCase):
         self.assertTrue((self.project / "bin/sample").is_file())
         report = self.operate("build", "Debug")
         self.assertTrue(report["success"], report)
-        self.assertIn("CMAKE_BUILD_TYPE:STRING=Debug", (self.project / "build-linux/CMakeCache.txt").read_text(encoding="utf-8"))
+        self.assertIn("CMAKE_BUILD_TYPE:STRING=Debug", (self.build_dir / "CMakeCache.txt").read_text(encoding="utf-8"))
         (self.project / "src/main.cpp").write_text("compile_error\n", encoding="utf-8")
         report = self.operate()
         self.assertFalse(report["success"])
         self.assertFalse(report["stopped"])
         self.assertNotEqual(report["exitCode"], 0)
-        self.assertIn("error:", (self.project / "build-linux/build.log").read_text(encoding="utf-8"))
+        self.assertIn("error:", (self.build_dir / "build.log").read_text(encoding="utf-8"))
 
     def child_fixture(self, ignore=False, parent_exits=False):
         fake = self.base / "fake-bin"
         fake.mkdir()
-        script = fake / "cmake"
+        script = fake / "build-tool"
         script.write_text(f'''#!{sys.executable}
 import os, signal, sys, time
 ignore = {ignore!r}
@@ -128,24 +130,30 @@ open(os.environ["CHILD_READY"], "w").close()
 while True: signal.pause()
 ''', encoding="utf-8")
         script.chmod(0o755)
-        build = self.project / "build-linux"
+        build = self.build_dir
         build.mkdir()
         (build / "Makefile").touch()
-        (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\n", encoding="utf-8")
+        # Let the real CMake launch the fixture, including when macOS selects
+        # CMake by absolute path instead of searching PATH.
+        (build / "CMakeCache.txt").write_text(
+            "CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\n"
+            "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n"
+            "CMAKE_PROJECT_NAME:STATIC=sample\n"
+            f"CMAKE_MAKE_PROGRAM:FILEPATH={script}\n", encoding="utf-8")
         self.pids = self.base / "pids"
         self.ready = self.base / "ready"
-        self.env.update(PATH=str(fake) + os.pathsep + self.env["PATH"],
-                        CHILD_PIDS=str(self.pids), CHILD_READY=str(self.ready),
+        self.env.update(CHILD_PIDS=str(self.pids), CHILD_READY=str(self.ready),
                         STOP_MARKERS=str(self.base / "stopped-"))
 
     def assert_children_exited(self):
         for pid in map(int, self.pids.read_text(encoding="utf-8").split()):
             def ended():
-                # The process may disappear between any two reads of /proc.
-                try:
-                    return Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[2] == "Z"
-                except (FileNotFoundError, ProcessLookupError):
-                    return True
+                # One snapshot: both a vanished PID and a zombie have exited.
+                result = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                                        capture_output=True, text=True, encoding="utf-8", timeout=5)
+                self.assertIn(result.returncode, (0, 1), result.stderr)
+                state = result.stdout.strip()
+                return not state or state.startswith("Z")
             wait_for(ended)
 
     def test_request_stop_returns_stopped_result(self):
@@ -153,7 +161,7 @@ while True: signal.pause()
         report = self.operate("stop")
         self.assertFalse(report["success"])
         self.assertTrue(report["stopped"])
-        self.assertEqual(report["exitCode"], 0)
+        self.assertEqual(report["exitCode"], -1)
         self.assert_children_exited()
         for pid in self.pids.read_text(encoding="utf-8").split():
             self.assertTrue((self.base / ("stopped-" + pid)).exists())
@@ -177,7 +185,9 @@ while True: signal.pause()
         self.child_fixture()
         framework = self.base / "framework"
         (framework / "core/cmake").mkdir(parents=True)
-        (framework / "core/cmake/trussc_app.cmake").touch()
+        (framework / "core/cmake/trussc_app.cmake").write_text(
+            'execute_process(COMMAND "' + str(self.base / "fake-bin/build-tool") + '")\n'
+            'function(trussc_app)\nendfunction()\n', encoding="utf-8")
         self.env["TRUSSC_DIR"] = str(framework)
         (self.project / "CMakeLists.txt").unlink()
         (self.project / "CMakePresets.json").unlink()
@@ -221,7 +231,7 @@ while True: signal.pause()
     def test_cli_build_and_regeneration_can_read_terminal(self):
         import pty
         self.child_fixture()
-        script = self.base / "fake-bin/cmake"
+        script = self.base / "fake-bin/build-tool"
         script.write_text(f'''#!{sys.executable}
 import os, sys
 from pathlib import Path
@@ -241,7 +251,9 @@ if not marker.exists():
                 if regenerate:
                     framework = self.base / "framework"
                     (framework / "core/cmake").mkdir(parents=True)
-                    (framework / "core/cmake/trussc_app.cmake").touch()
+                    (framework / "core/cmake/trussc_app.cmake").write_text(
+                        'execute_process(COMMAND "' + str(script) + '")\n'
+                        'function(trussc_app)\nendfunction()\n', encoding="utf-8")
                     self.env["TRUSSC_DIR"] = str(framework)
                     (self.project / "CMakeLists.txt").unlink()
                     (self.project / "CMakePresets.json").unlink()
@@ -281,7 +293,7 @@ if not marker.exists():
 
     def test_retained_log_is_bounded_while_callback_and_file_are_complete(self):
         self.child_fixture()
-        script = self.base / "fake-bin/cmake"
+        script = self.base / "fake-bin/build-tool"
         for lines, width in ((20000, 256), (40000, 8)):
             with self.subTest(lines=lines, width=width):
                 script.write_text(f'''#!{sys.executable}
@@ -298,15 +310,16 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
                 full = "FIRST_OUTPUT\n" + ("x" * width + "\n") * lines + "LAST_OUTPUT\n"
                 self.assertIn(full, report["output"])
                 self.assertEqual(report["output"], "".join(event["message"] for event in report["events"]))
-                self.assertEqual((self.project / "build-linux/build.log").read_text(encoding="utf-8"), full)
+                self.assertEqual((self.build_dir / "build.log").read_text(encoding="utf-8"), full)
 
     def test_run_retains_terminal_group_ctrl_c(self):
         self.child_fixture()
-        app = self.project / "bin/sample"
-        app.parent.mkdir()
-        app.write_bytes((self.base / "fake-bin/cmake").read_bytes())
+        app = self.project / ("bin/sample.app/Contents/MacOS/sample"
+                              if sys.platform == "darwin" else "bin/sample")
+        app.parent.mkdir(parents=True)
+        app.write_bytes((self.base / "fake-bin/build-tool").read_bytes())
         app.chmod(0o755)
-        (self.base / "fake-bin/cmake").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (self.base / "fake-bin/build-tool").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         with subprocess.Popen([str(CLI), "run", "-p", str(self.project), "-j1"],
                               env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               start_new_session=True, text=True, encoding="utf-8") as process:
