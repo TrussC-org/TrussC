@@ -3,6 +3,7 @@
 
 #include <cerrno>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 
@@ -38,30 +39,68 @@ struct ProcessRunner {
 #ifdef _WIN32
 static string resolveWindowsProgram(const string& program) {
     if (program.find_first_of("/\\:") != string::npos) return program;
-    auto search = [&](const char* extension) -> string {
-        const DWORD size = SearchPathA(nullptr, program.c_str(), extension, 0, nullptr, nullptr);
-        if (!size) return {};
-        vector<char> path(size);
-        const DWORD length = SearchPathA(nullptr, program.c_str(), extension, size, path.data(), nullptr);
-        return length && length < size ? string(path.data(), length) : string();
-    };
-    if (program.find('.') != string::npos) {
-        const string path = search(nullptr);
-        return path.empty() ? program : path;
+    // The CRT spawn search checks the current directory first, then each
+    // PATH directory with all extensions before moving to the next directory.
+    vector<string> directories{"."};
+    if (const char* environment = getenv("PATH")) {
+        const string path = environment;
+        size_t start = 0;
+        do {
+            const size_t end = path.find(';', start);
+            string directory = path.substr(start, end - start);
+            if (directory.size() >= 2 && directory.front() == '"' && directory.back() == '"')
+                directory = directory.substr(1, directory.size() - 2);
+            if (!directory.empty()) directories.push_back(directory);
+            if (end == string::npos) break;
+            start = end + 1;
+        } while (start < path.size());
     }
-    // Match the CRT spawn search used by inherited CLI commands such as emrun.
-    for (const char* extension : {".com", ".exe", ".bat", ".cmd"}) {
-        const string path = search(extension);
-        if (!path.empty()) return path;
+    const vector<string> extensions = program.find('.') == string::npos
+        ? vector<string>{".com", ".exe", ".bat", ".cmd"} : vector<string>{""};
+    for (const auto& directory : directories) {
+        for (const auto& extension : extensions) {
+            const string candidate = directory + "\\" + program + extension;
+            const DWORD attributes = GetFileAttributesA(candidate.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+            const DWORD size = GetFullPathNameA(candidate.c_str(), 0, nullptr, nullptr);
+            if (!size) continue;
+            vector<char> path(size);
+            const DWORD length = GetFullPathNameA(candidate.c_str(), size, path.data(), nullptr);
+            if (length && length < size) return string(path.data(), length);
+        }
     }
     return program;
 }
 
-static BOOL WINAPI ignoreAttachedSignal(DWORD) { return TRUE; }
+static void requestChildCtrlBreak(DWORD processId) {
+    // Only the internal helper attaches to the child's console. In particular,
+    // never attach/detach the caller around an asynchronous console event.
+    vector<wchar_t> executable(32768);
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length >= executable.size()) return;
+    wstring command = L"\"" + wstring(executable.data(), length) + L"\" --internal-ctrl-break " + to_wstring(processId);
+    STARTUPINFOW startup = {};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION helper = {};
+    if (!CreateProcessW(executable.data(), command.data(), nullptr, nullptr, FALSE,
+                        DETACHED_PROCESS, nullptr, nullptr, &startup, &helper)) return;
+    WaitForSingleObject(helper.hProcess, 1000);
+    CloseHandle(helper.hThread);
+    CloseHandle(helper.hProcess);
+}
+
+struct ChildWindows {
+    DWORD processId;
+    bool found = false;
+};
 static BOOL CALLBACK closeChildWindow(HWND window, LPARAM context) {
+    auto& child = *reinterpret_cast<ChildWindows*>(context);
     DWORD processId = 0;
     GetWindowThreadProcessId(window, &processId);
-    if (processId == static_cast<DWORD>(context)) PostMessageW(window, WM_CLOSE, 0, 0);
+    if (processId == child.processId) {
+        child.found = true;
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    }
     return TRUE;
 }
 #endif
@@ -187,13 +226,11 @@ ProcessResult runProcess(const vector<string>& argv,
 #ifndef _WIN32
             sendSignal(SIGTERM);
 #else
-            // Console children get CTRL_BREAK; the child's GUI windows get
-            // WM_CLOSE. Neither request terminates an unresponsive child.
-            const bool attached = GetConsoleCP() == 0 && AttachConsole(process.dwProcessId);
-            if (attached) SetConsoleCtrlHandler(ignoreAttachedSignal, TRUE);
-            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, attached ? 0 : process.dwProcessId);
-            if (attached) FreeConsole();
-            if (job) EnumWindows(closeChildWindow, static_cast<LPARAM>(process.dwProcessId));
+            // Debug apps can own both a console and windows. Let WM_CLOSE
+            // finish them normally; console-only tools receive CTRL_BREAK.
+            ChildWindows windows{process.dwProcessId};
+            EnumWindows(closeChildWindow, reinterpret_cast<LPARAM>(&windows));
+            if (!windows.found) requestChildCtrlBreak(process.dwProcessId);
 #endif
         }
         const bool outputLimit = options.outputLimitExceeded && *options.outputLimitExceeded;
@@ -263,6 +300,27 @@ ProcessResult runProcess(const vector<string>& argv,
     return result;
 }
 } // namespace projectOps
+
+#ifdef _WIN32
+static BOOL WINAPI ignoreHelperSignal(DWORD) { return TRUE; }
+
+// Private trusscli dispatch only; deliberately absent from the public header.
+int trusscliInternalCtrlBreak(const char* argument) {
+    DWORD processId = 0;
+    if (!*argument) return 1;
+    for (const char* digit = argument; *digit; ++digit) {
+        if (*digit < '0' || *digit > '9') return 1;
+        const DWORD value = static_cast<DWORD>(*digit - '0');
+        if (processId > (MAXDWORD - value) / 10) return 1;
+        processId = processId * 10 + value;
+    }
+    if (!processId || processId == ATTACH_PARENT_PROCESS || !AttachConsole(processId)) return 1;
+    if (!SetConsoleCtrlHandler(ignoreHelperSignal, TRUE)) return 1;
+    // Stay attached until process exit, so a delayed event cannot reach the
+    // caller. The group ID is always the launched child's PID, never zero.
+    return GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, processId) ? 0 : 1;
+}
+#endif
 
 int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData,
                 FILE* stderrFile, const bool* cancel) {
