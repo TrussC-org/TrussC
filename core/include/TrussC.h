@@ -2684,6 +2684,12 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     // Enable clipboard
     desc.enable_clipboard = true;
 
+#ifdef __EMSCRIPTEN__
+    // An Asyncify sleep inside a frame prevents the RAF loop from being re-armed.
+    // Emscripten's main loop pauses and resumes with Asyncify (FPS 0 uses RAF).
+    desc.html5.use_emsc_set_main_loop = true;
+#endif
+
     // Windows: keep console input and output UTF-8 while the app runs.
     // Takes effect whenever the process has a console (Debug builds,
     // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none.
