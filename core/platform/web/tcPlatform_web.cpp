@@ -168,7 +168,7 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 // Screenshot — deferred canvas download; synchronous Pixels stays unsupported.
 // ---------------------------------------------------------------------------
-static bool captureWindowWarned_ = false;
+static OnceGate captureWindowWarning_{5.0};
 
 // Invoked by the afterFrame drain, before returning to the browser. toBlob()
 // snapshots the rendered canvas now, even though its callback runs later, so
@@ -224,8 +224,7 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 
 bool captureWindow(Pixels& outPixels) {
     (void)outPixels;
-    if (!captureWindowWarned_) {
-        captureWindowWarned_ = true;
+    if (captureWindowWarning_.isFirstTime()) {
         logWarning("Screenshot") << "grabScreen()/captureWindow() is not "
             "implemented on web (no canvas readback): no pixels are returned "
             "(returns false). Use the browser's own screenshot feature instead.";
