@@ -316,6 +316,9 @@ def main(*, allow_device_destruction=False):
     parser.add_argument('--frames', type=int, help='For examples: freeze clocks and capture this requestAnimationFrame count')
     parser.add_argument('--ready', default='document.querySelector("#verdict")?.textContent', help='JS expression returning a completed verdict; for examples use a frame-count condition')
     args = parser.parse_args()
+    if args.loop_diagnostics and args.frames:
+        # The heartbeat's RAF calls would consume the fixed-frame budget.
+        parser.error('--loop-diagnostics cannot be combined with --frames')
     if args.build:
         build(args.build_dir.resolve())
     handler = partial(Handler, directory=str(args.build_dir.resolve()))
