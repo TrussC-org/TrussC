@@ -1858,8 +1858,8 @@ inline std::string getBackendName() {
     }
 }
 
-// Get process memory usage in bytes (resident set size)
-inline size_t getMemoryUsage() {
+// Get process resident memory in bytes (the getMemoryUsage() value before v0.9).
+inline size_t getResidentMemoryUsage() {
 #if defined(__APPLE__)
     mach_task_basic_info info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
@@ -1888,6 +1888,33 @@ inline size_t getMemoryUsage() {
 #else
     return 0;
 #endif
+}
+
+// Get private process memory in bytes; zero means unavailable.
+inline size_t getMemoryUsage() {
+#if defined(__APPLE__)
+    task_vm_info_data_t info{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return info.phys_footprint;
+    }
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc))) {
+        return pmc.PrivateUsage;
+    }
+#elif (defined(__linux__) || defined(__ANDROID__)) && !defined(__EMSCRIPTEN__)
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.compare(0, 8, "RssAnon:") != 0) continue;
+        size_t kb = 0;
+        if (std::sscanf(line.c_str(), "RssAnon: %zu", &kb) == 1) return kb * 1024;
+        break;
+    }
+#endif
+    return 0;
 }
 
 // ---------------------------------------------------------------------------

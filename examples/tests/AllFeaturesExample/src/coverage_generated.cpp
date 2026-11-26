@@ -418,6 +418,7 @@ static void cover_memory() {
     (void)getFboCount();
     (void)getMemoryUsage();
     (void)getNodeCount();
+    (void)getResidentMemoryUsage();
     (void)getSokolMemoryAllocs();
     (void)getSokolMemoryBytes();
     (void)getTextureCount();

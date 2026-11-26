@@ -1611,10 +1611,17 @@ void tcApp::update() {
 
 Watch process memory alongside resource caches to distinguish first-use allocation from steady growth. Reuse font sizes, upload only changed pixels, and close videos when a scene ends to keep retained memory down.
 
-`size_t getMemoryUsage()` reports process resident bytes (0 on unsupported platforms); `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
+`size_t getMemoryUsage()` reports private memory for leak watching; `size_t getResidentMemoryUsage()` reports RSS, which also counts memory-mapped files and shared libraries. Both return 0 when unavailable; `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
 ```cpp
 void tcApp::keyPressed(int key) {
-    logNotice("Memory") << getMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+    logNotice("Memory") << getMemoryUsage() << " private bytes, " << getResidentMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+}
+```
+
+In v0.8, `getMemoryUsage()` returned RSS. To keep that measurement in v0.9:
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
 }
 ```
 
@@ -1651,10 +1658,13 @@ void tcApp::keyPressed(int key) {
 }
 ```
 
-Poll the MCP tool `tc_get_health` over time and graph `rssBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample process memory periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
+Poll the MCP tool `tc_get_health` over time and graph `privateBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. `privateBytes` is the number to graph for leaks; `rssBytes` also counts memory-mapped files and shared libraries. OS terms: Windows Private Bytes (Task Manager "Commit size"), Linux/Android RssAnon, macOS/iOS footprint (Activity Monitor "Memory"). On macOS and iOS it also includes GPU memory the app owns, so it can be larger than `rssBytes`, and GPU leaks show up there too. `privateBytes` is omitted when `getMemoryUsage()` returns 0 (Web, read failure, or a zero measurement). Check for 0 before graphing a C++ sample; no private-memory measurement API is available on Web. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample both counters periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
 ```cpp
 void tcApp::update() {
-    if (memorySample.isFirstTime()) logNotice("Memory") << getElapsedTime() << " " << getMemoryUsage();
+    if (memorySample.isFirstTime()) {
+        const auto bytes = getMemoryUsage();
+        if (bytes != 0) logNotice("Memory") << bytes << " private bytes, " << getResidentMemoryUsage() << " RSS bytes";
+    }
 }
 ```
 
@@ -2723,8 +2733,9 @@ void sleepMillis(int millis)  // Pauses the calling thread for a duration in mil
 
 ```cpp
 size_t getFboCount()  // Returns the number of living Fbo objects.
-size_t getMemoryUsage()  // Returns the process memory usage.
+size_t getMemoryUsage()  // Returns private process memory in bytes for watching leaks; returns 0 when unavailable.
 size_t getNodeCount()  // Returns the number of living Node objects.
+size_t getResidentMemoryUsage()  // Returns process RSS in bytes, including memory-mapped files and shared libraries; returns 0 when unavailable.
 int getSokolMemoryAllocs()  // Returns the number of active tracked sokol allocations.
 int getSokolMemoryBytes()  // Returns the current tracked sokol memory usage.
 size_t getTextureCount()  // Returns the Texture object counter.
