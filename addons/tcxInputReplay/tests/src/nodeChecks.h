@@ -25,6 +25,8 @@ inline int saveDialogs = 0;
 inline FileDialogResult saveChoice;
 inline internal::DialogDismiss dialogPresenter(const internal::DialogInputs& inputs, internal::DialogCompletion done) {
     check(inputs.kind == internal::DialogKind::Save, "toolbar requests save dialog");
+    check(inputs.extensions == std::vector<std::string>{"jsonl"} && inputs.defaultName == "session.jsonl",
+        "toolbar delegates the recording extension to the save dialog");
     ++saveDialogs;
     done(saveChoice);
     return {};
@@ -199,46 +201,13 @@ public:
         check(!toolbar->getChildren().at(1)->isVisible(), "successful save hides Save button");
         std::filesystem::remove(target);
 
-        const auto typed = path.parent_path() / "test5";
-        const auto appended = path.parent_path() / "test5.jsonl";
-        std::filesystem::remove(appended);
-        source = start();
-        saveChoice.filePath = typed;
-        click(0);
-        deliverDialogs();
-        check(!std::filesystem::exists(typed) && std::filesystem::exists(appended) &&
-            !std::filesystem::exists(source), "extensionless test5 saves as test5.jsonl and moves staging file");
-        { std::ofstream existing(appended); existing << "keep existing recording"; }
-        bool warned = false;
-        auto listener = getLogger().onLog.listen([&](const LogEventArgs& e) {
-            if (e.level == LogLevel::Warning && e.message.find(pathToUtf8(appended)) != std::string::npos) warned = true;
-        });
-        source = start();
-        click(0);
-        deliverDialogs();
-        toolbar->update();
-        std::ifstream existing(appended);
-        std::string contents((std::istreambuf_iterator<char>(existing)), {});
-        existing.close();
-        check(contents == "keep existing recording" && warned, "appended-path collision preserves target and warns with path");
-        check(std::filesystem::exists(source) && toolbar->getChildren().at(1)->isVisible(),
-            "appended-path collision retains staging file and shows Save");
-        saveChoice.filePath = target;
-        click(1);
-        deliverDialogs();
-        toolbar->update();
-        check(!std::filesystem::exists(source) && std::filesystem::exists(target) &&
-            !toolbar->getChildren().at(1)->isVisible(), "collision retry succeeds with another name");
-        std::filesystem::remove(appended);
-        std::filesystem::remove(target);
-
-        const auto withExtension = path.parent_path() / "tc-inputreplay-save.custom";
+        const auto withExtension = path.parent_path() / "tc-inputreplay-save.custom.jsonl";
         source = start();
         saveChoice.filePath = withExtension;
         click(0);
         deliverDialogs();
         check(std::filesystem::exists(withExtension) && !std::filesystem::exists(source),
-            "chosen name with an extension is used as is");
+            "dialog final filename is used as is");
         std::filesystem::remove(withExtension);
 
         source = start();
