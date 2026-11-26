@@ -83,6 +83,15 @@ GPU_HEALTH_SCRIPT = """
 })();
 """
 
+# Independent of the wasm frame scheduler, so a stalled app still has diagnostics.
+LOOP_PROGRESS_SCRIPT = """
+window.tcHostRafCount = 0;
+requestAnimationFrame(function heartbeat() {
+    ++window.tcHostRafCount;
+    requestAnimationFrame(heartbeat);
+});
+"""
+
 
 def gpu_failure(connection):
     result = connection.call('Runtime.evaluate', {
@@ -298,6 +307,8 @@ def main(*, allow_device_destruction=False):
     parser.add_argument('--adapter', choices=('swiftshader', 'default'), default='swiftshader',
                         help="WebGPU adapter: swiftshader (default), or Chrome's default selection for device checks")
     parser.add_argument('--timeout', type=float, default=180)
+    parser.add_argument('--profile-dir', type=Path, help='Parent for a private temporary Chrome profile')
+    parser.add_argument('--loop-diagnostics', action='store_true', help='Report host RAF and Asyncify app progress')
     parser.add_argument('--url', help='Capture an already served example instead of the harness')
     parser.add_argument('--page', default='index.html', help='Page relative to --build-dir (may include a query string)')
     parser.add_argument('--print-adapter', action='store_true', help="Print the browser's WebGPU adapter (vendor/architecture/fallback) before the verdict")
@@ -313,10 +324,10 @@ def main(*, allow_device_destruction=False):
     url = args.url or f'http://127.0.0.1:{server.server_port}/{args.page}'
     print('URL:', url, flush=True)
     try:
-        with tempfile.TemporaryDirectory(prefix='webgpu-chrome-') as profile:
+        with tempfile.TemporaryDirectory(prefix='webgpu-chrome-', dir=args.profile_dir) as profile:
             command = [args.chrome, '--headless=new', '--password-store=basic', '--no-sandbox', '--disable-dev-shm-usage',
                        '--enable-unsafe-webgpu', '--remote-debugging-port=0',
-                       '--disable-background-networking', '--disable-component-update', '--disable-sync',
+                       '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps',
                        '--no-proxy-server', '--disable-features=NetworkServiceSandbox', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--disable-breakpad',
                        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
                        '--window-size=1280,1024', f'--user-data-dir={profile}', 'about:blank']
@@ -343,6 +354,8 @@ def main(*, allow_device_destruction=False):
                 health_script = GPU_HEALTH_SCRIPT.replace(
                     'ALLOW_DEVICE_DESTRUCTION', 'true' if allow_device_destruction else 'false')
                 connection.call('Page.addScriptToEvaluateOnNewDocument', {'source': health_script})
+                if args.loop_diagnostics:
+                    connection.call('Page.addScriptToEvaluateOnNewDocument', {'source': LOOP_PROGRESS_SCRIPT})
                 if args.frames:
                     script = """
                     (() => {
@@ -391,6 +404,17 @@ def main(*, allow_device_destruction=False):
                     raise RuntimeError('Chrome log exceeded the byte budget') from error
                 raise
             finally:
+                if connection and args.loop_diagnostics:
+                    # Reserve a short diagnostic deadline after the outer watchdog.
+                    # It must not depend on the suspended wasm callback returning.
+                    connection.deadline = time.monotonic() + 2
+                    try:
+                        result = connection.call('Runtime.evaluate', {
+                            'expression': 'JSON.stringify({raf: window.tcHostRafCount, app: window.tcAsyncifyLoop})',
+                            'returnByValue': True})
+                        print('loop progress:', result.get('result', {}).get('value'), flush=True)
+                    except (OSError, RuntimeError, ValueError) as error:
+                        print('loop diagnostics unavailable:', error, flush=True)
                 if connection:
                     connection.socket.close()
                 process.terminate()
