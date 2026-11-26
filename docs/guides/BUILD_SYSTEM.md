@@ -183,68 +183,6 @@ trusscli update
 trusscli build --release
 ```
 
-### クローンしたプロジェクトのビルドと不足ソースの取得
-
-`trusscli build` は構成前に TrussC と外部アドオンのキャッシュを確認します。
-不足があれば `owner/repository@ref` の一覧と `Download now? [Y/n]` を表示します。
-Return または `y`/`Y` で `trusscli update` を実行し、短いコミット指定を完全な ID に固定してから
-ビルドします。`n`/`N` では従来のバージョン未取得エラーで停止します。
-すべてキャッシュ済みなら質問しません。`trusscli run` もビルド・起動前に同じ確認を行います。
-
-クローン後、端末から実行します。
-
-```bash
-trusscli build
-trusscli run
-```
-
-標準入力が端末でない場合、取得には `-y` / `--yes` が必要です。
-スクリプトや CI では次のように指定します。CI の環境変数では判定しません。
-
-```bash
-trusscli build --yes
-trusscli run -y
-```
-
-`trusscli update` と `trusscli use` は従来どおり質問せず取得します。
-取得を先に済ませる場合は次のように実行します。
-
-```bash
-trusscli update
-trusscli build --release
-```
-
-### 복제한 프로젝트 빌드와 누락된 소스 다운로드
-
-`trusscli build`는 구성 전에 TrussC 버전과 외부 애드온 참조의 캐시를 확인합니다.
-누락된 항목이 있으면 `owner/repository@ref` 목록과 `Download now? [Y/n]`을 표시합니다.
-Return 또는 `y`/`Y`를 입력하면 `trusscli update`를 실행하여 짧은 커밋 참조를 전체 ID로
-고정한 다음 빌드합니다. `n`/`N`은 기존 버전 미확보 오류로 중단합니다.
-모두 캐시되어 있으면 질문하지 않습니다. `trusscli run`도 빌드와 실행 전에 같은 확인을 합니다.
-
-복제 후 터미널에서 실행합니다.
-
-```bash
-trusscli build
-trusscli run
-```
-
-표준 입력이 터미널이 아니면 다운로드에 `-y` / `--yes`가 필요합니다.
-스크립트와 CI에서는 다음 명령을 사용합니다. CI 환경 변수로 확인 여부를 판단하지 않습니다.
-
-```bash
-trusscli build --yes
-trusscli run -y
-```
-
-`trusscli update`와 `trusscli use`는 기존처럼 질문 없이 다운로드합니다.
-소스를 먼저 준비하려면 다음과 같이 실행합니다.
-
-```bash
-trusscli update
-trusscli build --release
-```
-
 ### Supported TrussC layouts
 
 TrussC versions with the old `trussc/` layout (v0.1.0–v0.4.4) stop with
