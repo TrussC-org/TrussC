@@ -154,6 +154,12 @@ Decision after reviewing measured times.
 
 ### AddressSanitizer sweep (Linux)
 
+The **Weekly ASan + LSan** workflow (`.github/workflows/weekly-asan-lsan.yml`)
+runs this sweep on Linux with gcc every Sunday at 06:23 UTC, independently of
+PR CI. To run it by hand, open **Actions → Weekly ASan + LSan → Run workflow**
+and select the branch. Sanitizer errors fail the run; failed runs retain the
+full sweep and per-test logs in the `weekly-asan-lsan-logs` artifact for 14 days.
+
 From the repository root, with fresh build directories (CMake caches these
 flags on its first configure):
 

@@ -1,0 +1,67 @@
+name: Weekly ASan + LSan
+
+on:
+  schedule:
+    - cron: '23 6 * * 0' # Sunday 06:23 UTC; daily.yml starts at 18:00 UTC.
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-asan-lsan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # Bound compiler memory on the standard Linux runner. No build caches:
+      # each checkout configures fresh trees with the sanitizer flags below.
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux dependencies
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+
+      - name: Install software display and symbolizer
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+        with:
+          packages: gcc g++ llvm xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+
+      - name: Build trusscli
+        run: ./tools/build_linux.sh --non-interactive --no-launch --jobs 2
+
+      - name: Run AddressSanitizer and LeakSanitizer sweep
+        shell: bash
+        env:
+          CC: gcc
+          CXX: g++
+          CFLAGS: -fsanitize=address -fno-omit-frame-pointer -g
+          CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer -g
+          LDFLAGS: -fsanitize=address
+        run: |
+          set -euo pipefail
+          ASAN_SYMBOLIZER_PATH=$(command -v llvm-symbolizer)
+          export ASAN_SYMBOLIZER_PATH
+          export ASAN_OPTIONS=detect_leaks=1:symbolize=1
+          export LSAN_OPTIONS="suppressions=$GITHUB_WORKSPACE/core/tests/lsan.supp"
+          mkdir -p build-logs
+          xvfb-run -a -s '-screen 0 1280x1024x24' \
+            python3 examples/build_all.py --core-tests-only --include-daily --verbose \
+            2>&1 | tee build-logs/asan-lsan-sweep.log
+
+      - name: Upload sanitizer logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: weekly-asan-lsan-logs
+          path: build-logs/
+          if-no-files-found: warn
+          retention-days: 14
