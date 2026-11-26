@@ -10,6 +10,7 @@
 #ifdef _WIN32
 #include "BuildSetup.h"   // quoteWindowsArgument
 #include <windows.h>
+#include <cwchar>
 #include <io.h>
 #else
 #include <fcntl.h>
@@ -97,10 +98,15 @@ static BOOL CALLBACK closeChildWindow(HWND window, LPARAM context) {
     auto& child = *reinterpret_cast<ChildWindows*>(context);
     DWORD processId = 0;
     GetWindowThreadProcessId(window, &processId);
-    if (processId == child.processId) {
-        child.found = true;
-        PostMessageW(window, WM_CLOSE, 0, 0);
-    }
+    if (processId != child.processId || !IsWindowVisible(window)) return TRUE;
+    // The child's console window also reports the child's PID; closing it
+    // would end every process attached to that console.
+    wchar_t className[32] = {};
+    GetClassNameW(window, className, 32);
+    if (wcscmp(className, L"ConsoleWindowClass") == 0 || wcscmp(className, L"PseudoConsoleWindow") == 0)
+        return TRUE;
+    child.found = true;
+    PostMessageW(window, WM_CLOSE, 0, 0);
     return TRUE;
 }
 #endif
@@ -235,8 +241,8 @@ ProcessResult runProcess(const vector<string>& argv,
 #ifndef _WIN32
             sendSignal(SIGTERM);
 #else
-            // Debug apps can own both a console and windows. Let WM_CLOSE
-            // finish them normally; console-only tools receive CTRL_BREAK.
+            // Rule: visible non-console top-level windows get WM_CLOSE only;
+            // otherwise the child's console group gets CTRL_BREAK.
             ChildWindows windows{process.dwProcessId};
             EnumWindows(closeChildWindow, reinterpret_cast<LPARAM>(&windows));
             if (!windows.found) requestChildCtrlBreak(process.dwProcessId);
