@@ -52244,23 +52244,142 @@ related = ["setMaxUpdateSteps", "setIndependentFps"]
 
 ["getMemoryUsage"]
 category = "memory"
-keywords = ["ram", "rss", "footprint", "heap", "process"]
-description.en = "Returns the process memory usage."
-description.ja = "プロセスのメモリ使用量を返す。"
-description.ko = "프로세스의 메모리 사용량을 반환한다."
+keywords = ["private", "memory", "leak", "ram", "RssAnon", "footprint", "process"]
+description.en = "Returns private process memory in bytes for watching leaks; returns 0 when unavailable."
+description.ja = "リークの監視に使うプロセスのプライベートメモリをバイト数で返します。取得できない場合は 0 を返します。"
+description.ko = "누수 관찰에 사용하는 프로세스의 프라이빗 메모리를 바이트 수로 반환합니다. 조회할 수 없으면 0을 반환합니다."
 details.en = '''
-- Returns a `size_t` byte count: resident memory on Apple platforms and Linux/Android, or the working set on Windows.
-- Returns `0` if the query fails or the platform is unsupported, including Web.
+- Use this `size_t` byte count for watching leaks. `getResidentMemoryUsage()` reports RSS, which also counts memory-mapped files and shared libraries.
+
+Log both counters from a tcApp callback:
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Memory") << getMemoryUsage() << " private bytes, " << getResidentMemoryUsage() << " RSS bytes";
+}
+```
+- Uses Windows Private Bytes (`PrivateUsage`, Task Manager "Commit size"), Linux/Android `RssAnon`, and macOS/iOS footprint (`phys_footprint`, Activity Monitor "Memory").
+- `tc_get_health` uses this function for `privateBytes` and omits the field when the result is 0.
+
+Web and failed queries return 0; skip unavailable samples. No private-memory measurement API is available on Web.
+```cpp
+void tcApp::keyPressed(int key) {
+    if (auto bytes = getMemoryUsage()) logNotice("Memory") << bytes;
+}
+```
+v0.8 returned RSS; to keep the old number:
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
+}
+```
 '''
 details.ja = '''
-- `size_t` 型でバイト数を返します。Apple 環境と Linux/Android では常駐メモリ、Windows ではワーキングセットを取得します。
-- 取得に失敗した場合や、Web などの非対応環境では `0` を返します。
+- リークの監視には、この `size_t` 型のバイト数を使います。`getResidentMemoryUsage()` が返す RSS には、メモリマップされたファイルや共有ライブラリも含まれます。
+
+tcApp のコールバックから両方の値をログに記録します。
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Memory") << getMemoryUsage() << " private bytes, " << getResidentMemoryUsage() << " RSS bytes";
+}
+```
+- Windows では Private Bytes（`PrivateUsage`、タスクマネージャーの「コミット サイズ」）、Linux/Android では `RssAnon`、macOS/iOS では footprint（`phys_footprint`、アクティビティモニタの「メモリ」）を使います。
+- `tc_get_health` はこの関数を `privateBytes` に使い、戻り値が 0 の場合はフィールドを省略します。
+
+Web や取得に失敗した場合は 0 を返すため、計測できないサンプルを除外します。Web ではプライベートメモリを計測する API はありません。
+```cpp
+void tcApp::keyPressed(int key) {
+    if (auto bytes = getMemoryUsage()) logNotice("Memory") << bytes;
+}
+```
+v0.8 では RSS を返していました。以前の値を取得するには、次の関数を使います。
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
+}
+```
 '''
 details.ko = '''
-- `size_t`형의 바이트 수를 반환합니다. Apple 환경과 Linux/Android에서는 상주 메모리를, Windows에서는 작업 집합을 조회합니다.
-- 조회에 실패하거나 Web 등 지원하지 않는 환경에서는 `0`을 반환합니다.
+- 누수 관찰에는 이 `size_t`형 바이트 수를 사용합니다. `getResidentMemoryUsage()`가 반환하는 RSS에는 메모리 매핑 파일과 공유 라이브러리도 포함됩니다.
+
+tcApp 콜백에서 두 값을 함께 기록합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    logNotice("Memory") << getMemoryUsage() << " private bytes, " << getResidentMemoryUsage() << " RSS bytes";
+}
+```
+- Windows에서는 Private Bytes(`PrivateUsage`, 작업 관리자의 "커밋 크기"), Linux/Android에서는 `RssAnon`, macOS/iOS에서는 footprint(`phys_footprint`, 활성 상태 보기의 "메모리")를 사용합니다.
+- `tc_get_health`는 이 함수를 `privateBytes`에 사용하며 반환값이 0이면 필드를 생략합니다.
+
+Web이나 조회 실패 시에는 0을 반환하므로 측정할 수 없는 샘플은 제외합니다. Web에서는 프라이빗 메모리를 측정하는 API가 없습니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    if (auto bytes = getMemoryUsage()) logNotice("Memory") << bytes;
+}
+```
+v0.8에서는 RSS를 반환했습니다. 이전 값을 유지하려면 다음 함수를 사용합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
+}
+```
 '''
-related = ["getSokolMemoryBytes", "getThermalState"]
+related = ["getResidentMemoryUsage", "getSokolMemoryBytes"]
+
+["getResidentMemoryUsage"]
+category = "memory"
+keywords = ["rss", "resident", "memory", "working set", "process"]
+description.en = "Returns process RSS in bytes, including memory-mapped files and shared libraries; returns 0 when unavailable."
+description.ja = "メモリマップされたファイルや共有ライブラリを含むプロセスの RSS をバイト数で返します。取得できない場合は 0 を返します。"
+description.ko = "메모리 매핑 파일과 공유 라이브러리를 포함한 프로세스 RSS를 바이트 수로 반환합니다. 조회할 수 없으면 0을 반환합니다."
+details.en = '''
+- Use this `size_t` byte count to watch resident memory, including memory-mapped files and shared libraries. For leak watching, use `getMemoryUsage()`.
+
+v0.8 returned RSS; to keep the old number:
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
+}
+```
+Web and failed queries return 0; skip unavailable samples.
+```cpp
+void tcApp::keyPressed(int key) {
+    if (auto bytes = getResidentMemoryUsage()) logNotice("Memory") << bytes;
+}
+```
+'''
+details.ja = '''
+- メモリマップされたファイルや共有ライブラリを含む常駐メモリの監視には、この `size_t` 型のバイト数を使います。リークの監視には `getMemoryUsage()` を使います。
+
+v0.8 では RSS を返していました。以前の値を取得するには、次の関数を使います。
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
+}
+```
+Web や取得に失敗した場合は 0 を返すため、計測できないサンプルを除外します。
+```cpp
+void tcApp::keyPressed(int key) {
+    if (auto bytes = getResidentMemoryUsage()) logNotice("Memory") << bytes;
+}
+```
+'''
+details.ko = '''
+- 메모리 매핑 파일과 공유 라이브러리를 포함한 상주 메모리를 관찰하려면 이 `size_t`형 바이트 수를 사용합니다. 누수 관찰에는 `getMemoryUsage()`를 사용합니다.
+
+v0.8에서는 RSS를 반환했습니다. 이전 값을 유지하려면 다음 함수를 사용합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
+}
+```
+Web이나 조회 실패 시에는 0을 반환하므로 측정할 수 없는 샘플은 제외합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    if (auto bytes = getResidentMemoryUsage()) logNotice("Memory") << bytes;
+}
+```
+'''
+related = ["getMemoryUsage", "getSokolMemoryBytes"]
 
 ["getMicAnalysisBuffer"]
 category = "audioengine"

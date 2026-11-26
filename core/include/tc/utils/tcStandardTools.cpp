@@ -22,7 +22,7 @@
 #include <cstdlib>
 #include <limits>
 
-// Platform bits for internal::currentPid() / internal::processRssBytes()
+// Platform bits for internal process health counters
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <unistd.h>
@@ -284,34 +284,6 @@ int64_t currentPid() {
     return 0;
 #else
     return (int64_t)getpid();
-#endif
-}
-
-int64_t processRssBytes() {
-#if defined(__APPLE__)
-    mach_task_basic_info info;
-    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
-                  (task_info_t)&info, &count) == KERN_SUCCESS) {
-        return (int64_t)info.resident_size;
-    }
-    return 0;
-#elif defined(_WIN32)
-    PROCESS_MEMORY_COUNTERS pmc;
-    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
-        return (int64_t)pmc.WorkingSetSize;
-    }
-    return 0;
-#elif defined(__EMSCRIPTEN__)
-    return 0;
-#else
-    // Linux: /proc/self/statm field 2 = resident pages
-    std::ifstream in("/proc/self/statm");
-    long total = 0, resident = 0;
-    if (in >> total >> resident) {
-        return (int64_t)resident * sysconf(_SC_PAGESIZE);
-    }
-    return 0;
 #endif
 }
 
@@ -865,7 +837,7 @@ void registerStandardTools(Server& server) {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    coreTool(server, "tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
+    coreTool(server, "tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, optional private memory bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); privateBytes is the number to graph for leaks; rssBytes also counts memory-mapped files and shared libraries. privateBytes uses Windows Private Bytes (Task Manager Commit size), Linux/Android RssAnon, macOS/iOS footprint (Activity Monitor Memory), and is omitted on Web or read failure; getMemoryUsage() returns the same value or 0 when unavailable; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
         .level(ToolLevel::Public)
         .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .bind([resolveWindowCtx](const json& args) -> json {
@@ -883,7 +855,7 @@ void registerStandardTools(Server& server) {
             const auto dimensions = trussc::internal::windowDimensions(ctx);
             const auto size = trussc::internal::framebufferResizeArgs(dimensions.fbWidth, dimensions.fbHeight,
                 trussc::internal::appSizeDpi(dimensions.dpiScale));
-            return json{{"status", "ok"},
+            json health{{"status", "ok"},
                         {"buildKind", internal::isDevBuild() ? "dev" : "default"},
                         {"toolLevel", internal::toolLevelName(getToolLevel())},
                         {"fps", static_cast<float>(trussc::internal::measuredWindowRate(ctx))},
@@ -895,9 +867,11 @@ void registerStandardTools(Server& server) {
                         {"height", size.height},
                         {"version", trussc::getVersion()},
                         {"pid", internal::currentPid()},
-                        {"rssBytes", internal::processRssBytes()},
+                        {"rssBytes", trussc::getResidentMemoryUsage()},
                         {"mainQueuePending", trussc::internal::getMainThreadQueuePending()},
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
+            if (const auto bytes = trussc::getMemoryUsage()) health["privateBytes"] = bytes;
+            return health;
         });
 
     coreTool(server, "tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; initFailure (last failed init reason, miniaudio result, backend and requested device; omitted after success); stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = the maxPolyphony cap reached, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
