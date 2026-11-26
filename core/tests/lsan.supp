@@ -2,3 +2,9 @@
 leak:libfontconfig.so
 # tcpClientReconnect: clients outlive the scenario to check thread cleanup without destructors.
 leak:makeProcessLifetimeReconnectClient
+# saveContract, userDataPath: GStreamer's VA-API plugin keeps arrays from its device probe.
+leak:libgstvaapi.so
+# videoLoadAsync: the NVIDIA driver keeps memory from cuInit during FFmpeg's CUDA probe.
+leak:libcuda.so
+# mcpAdmissionConstruction: vendor stb drops the old buffer when realloc fails, reached only by the test's injected OOM.
+leak:stbiw__sbgrowf
