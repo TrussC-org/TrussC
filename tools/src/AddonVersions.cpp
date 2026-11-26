@@ -240,6 +240,11 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
         } else {
             auto source = sources.at(spec.name);
             auto owner = spec.owner.empty() ? source.owner : spec.owner;
+            if (owner.empty() && missing && !fetch) {
+                const auto selection = spec.name + (spec.ref.empty() ? "" : "@" + spec.ref);
+                if (std::find(missing->begin(), missing->end(), selection) == missing->end()) missing->push_back(selection);
+                continue; // Confirmed update can resolve ownership using the registry.
+            }
             if (owner.empty()) throw std::runtime_error("unknown owner for addon " + spec.name + "; qualify owner/name or run `trusscli update`");
             auto versionSpec = trusscVersion::parse(owner + "/" + spec.name + "@" + (spec.ref.empty() ? "HEAD" : spec.ref));
             // Dependency manifests retain their author's short ref. Builds use
@@ -266,7 +271,8 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
         auto meta = manifest(path / "addon.json");
         auto range = meta.value("trussc_version", "");
         if (!range.empty() && !selected.empty()) checkRange(spec.name, selected, range);
-        if (meta.contains("dependencies")) {
+        // A missing framework supplies bundled dependencies only after update.
+        if ((!missing || fs::is_directory(trussc)) && meta.contains("dependencies")) {
             if (!meta["dependencies"].is_array()) throw std::runtime_error("addon dependencies must be an array: " + spec.name);
             for (const auto& dependency : meta["dependencies"]) {
                 countWork();

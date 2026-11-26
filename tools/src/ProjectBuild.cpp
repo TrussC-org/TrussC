@@ -206,7 +206,9 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         return 1;
     }
     bool updatedForFetch = false;
-    if (input.confirmFetch) {
+    if (input.confirmFetch && (!explicitTcRoot.empty() ||
+        fs::exists(fs::path(projectPath) / ".trussc-version") ||
+        !trusscVersion::localPath(projectPath).empty())) {
         vector<string> missing;
         auto probeRoot = explicitTcRoot.empty()
             ? trusscVersion::resolve(projectPath, false, &missing) : explicitTcRoot;
@@ -229,6 +231,12 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         if (!selection.empty() && !probeRoot.empty()) {
             ScopedDiagnostics quiet({}); // The ordinary build emits resolver warnings once.
             projectOps::resolveAddons(projectPath, probeRoot, false, input.update.addonLookup, &selection, &missing);
+        }
+        if (!missing.empty() && dryRun) {
+            out << "Not in cache:\n";
+            for (const auto& item : missing) out << "  " << item << "\n";
+            err << "Error: dry run: sources unavailable; run `trusscli update` to download them.\n";
+            return 1;
         }
         if (!missing.empty() && input.confirmFetch(missing)) {
             auto regeneration = input.update;

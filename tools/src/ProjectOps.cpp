@@ -173,7 +173,8 @@ vector<string> readProjectAddons(const string& projectPath) {
     vector<string> out;
     string path = projectPath + "/addons.make";
     if (!fs::exists(path)) return out;
-    ifstream f(path);
+    // Bound (project addon selection): cap addons.make at 16 MiB before materializing it.
+    istringstream f(trusscVersion::readBounded(path, 16 * 1024 * 1024));
     string line;
     while (getline(f, line)) {
         size_t start = line.find_first_not_of(" \t");

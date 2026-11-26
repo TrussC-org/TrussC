@@ -4,6 +4,7 @@ Run through tcbuild.sh, with TRUSSCLI pointing to this tree's compiled CLI.
 TRUSSCLI_BEFORE selects cached-output comparisons with an older binary.
 """
 import errno
+import json
 import os
 import select
 import signal
@@ -131,6 +132,29 @@ class VersionFetchTests(FetchCases, VersionTests):
         self.built = self.project / ("bin/project.app/Contents/MacOS/project"
                                      if NATIVE == "macos" else "bin/project")
 
+    def test_fetch_dry_run_never_changes_project_or_cache(self):
+        build = self.project / f"build-{NATIVE}"
+        build.mkdir()
+        (build / "keep").write_text("keep", encoding="utf-8")
+        before = {p.relative_to(self.project): p.read_bytes()
+                  for p in self.project.rglob("*") if p.is_file()}
+        for flags in ((), ("--yes",)):
+            with self.subTest(flags=flags):
+                output = self.cli("build", "--dry-run", "--clean", *flags, success=False)
+                self.assertIn(self.identity, output)
+                self.assertNotIn("Download now?", output)
+                self.assertNotIn("Project updated:", output)
+                self.assertFalse(self.cached.exists())
+                self.assertEqual(before, {p.relative_to(self.project): p.read_bytes()
+                                         for p in self.project.rglob("*") if p.is_file()})
+
+    def test_fetch_addon_selection_has_size_bound(self):
+        (self.project / "addons.make").write_bytes(b"#" + b"x" * (16 * 1024 * 1024))
+        output = self.cli("build", "--yes", success=False)
+        self.assertIn("addons.make exceeds the 16777216-byte limit", output)
+        self.assertNotIn("Download now?", output)
+        self.assertFalse(self.cached.exists())
+
     def test_fetch_run_asks_once_then_launches(self):
         (self.project / "src/main.cpp").write_text('#include <cstdio>\nint main() { puts("FETCH_APP_RAN"); }\n', encoding="utf-8")
         code, output = self.terminal("run")
@@ -159,6 +183,61 @@ class AddonFetchTests(FetchCases, AddonVersionTests):
         self.identity = "alice/tcxFixture@v1"
         self.cached = self.cache / "addons/alice/tcxFixture/v1"
         self.built = self.project / f"build-{NATIVE}/fixture"
+
+    def test_fetch_missing_framework_defers_cached_addon_dependencies(self):
+        self.cli("update")
+        manifest = self.cached / "addon.json"
+        manifest.write_text(json.dumps({"dependencies": ["tcxBundled"]}), encoding="utf-8")
+        (self.project / ".trussc-version").write_text("main\n", encoding="utf-8")
+        code, output = self.terminal(answer=b"n\n")
+        self.assertEqual(code, 1, output)
+        self.assertIn("  TrussC-org/TrussC@main", output)
+        self.assertEqual(output.count("Download now? [Y/n]"), 1, output)
+        self.assertNotIn("unknown owner", output)
+        self.assertNotIn("  tcxBundled", output)
+
+    def test_fetch_ownerless_selection_with_fresh_registry(self):
+        body = self.registry_path().read_text(encoding="utf-8")
+        self.registry_path().unlink()
+        commands = self.base / "commands"
+        commands.mkdir()
+        marker = self.base / "registry-requested"
+        curl = commands / "curl"
+        curl.write_text("#!/usr/bin/env python3\nfrom pathlib import Path\nPath(" + repr(str(marker)) +
+                        ").touch()\nprint(" + repr(body) + ")\n", encoding="utf-8")
+        curl.chmod(0o755)
+        self.env["PATH"] = str(commands) + os.pathsep + self.env["PATH"]
+        (self.project / "addons.make").write_text("tcxFixture@v1\n", encoding="utf-8")
+        output = self.cli("build", success=False)
+        self.assertIn("  tcxFixture@v1", output)
+        self.assertIn("--yes", output)
+        self.assertFalse(marker.exists())
+        self.assertFalse(self.cached.exists())
+        output = self.cli("build", "--yes", "-j1")
+        self.assertIn("  tcxFixture@v1", output)
+        self.assertTrue(marker.exists())
+        self.assertTrue(self.cached.is_dir())
+        self.assertTrue(self.built.is_file())
+
+    def test_fetch_legacy_project_keeps_inherited_framework_lookup(self):
+        (self.project / ".trussc-version").unlink()
+        (self.project / "addons.make").write_text("tcxBundled\n", encoding="utf-8")
+        presets = self.project / "CMakePresets.json"
+        data = json.loads(presets.read_text(encoding="utf-8"))
+        data["vendor"]["trussc"].pop("localPath", None)
+        native = next(p for p in data["configurePresets"] if p["name"] == NATIVE)
+        variables = native.pop("cacheVariables")
+        variables["TRUSSC_DIR"] = str(self.source / "core")
+        data["configurePresets"].append({"name": "framework-base", "hidden": True,
+                                         "cacheVariables": variables})
+        native["inherits"] = "framework-base"
+        presets.write_text(json.dumps(data), encoding="utf-8")
+        self.env.pop("TRUSSC_DIR", None)
+        before = presets.read_bytes()
+        output = self.cli("build", "-j1")
+        self.assertNotIn("Not in cache", output)
+        self.assertTrue(self.built.is_file())
+        self.assertEqual(presets.read_bytes(), before)
 
     def test_fetch_short_addon_pin_uses_update(self):
         (self.project / "addons.make").write_text("alice/tcxFixture@" + self.addon_initial[:7] + "\n", encoding="utf-8")
