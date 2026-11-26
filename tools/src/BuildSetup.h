@@ -11,7 +11,7 @@
 //     pins the ninja, MSVC and Windows SDK paths found when it was written.
 //     After a Visual Studio update or a move to another VS version those
 //     paths no longer exist. `trusscli doctor` reports this, and
-//     `trusscli build` re-pins them in CMakePresets.json (see main.cpp).
+//     `trusscli build` re-pins them in CMakePresets.json (see ProjectBuild.cpp).
 
 #include "VsDetector.h"
 

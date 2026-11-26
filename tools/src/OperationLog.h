@@ -7,7 +7,9 @@
 // Interfaces install their diagnostic sink; an operation temporarily captures
 // resolver messages for its result and progress callback.
 namespace projectOps {
-enum class MessageKind { Log, Warning, Diagnostic };
+// Output/ErrorOutput are ordered byte chunks, including their own newlines;
+// the other kinds are complete messages presented by the caller.
+enum class MessageKind { Log, Warning, Diagnostic, Output, ErrorOutput };
 using DiagnosticCallback = std::function<void(const std::string&, MessageKind)>;
 inline thread_local DiagnosticCallback diagnosticCallback;
 class ScopedDiagnostics {

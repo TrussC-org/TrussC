@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <utility>
 
 // Project generation settings
 struct ProjectSettings {
@@ -76,6 +77,11 @@ public:
     // Set by the GUI entry point: child processes run hidden instead of on
     // the inherited console (Windows, #417).
     static inline bool runChildrenHidden = false;
+
+    // A build operation routes nested regeneration commands through its owned
+    // launcher. Other update callers retain their existing execution policy.
+    using CommandRunner = std::function<std::pair<int, std::string>(const std::string&)>;
+    static inline thread_local CommandRunner commandRunner;
 
     // Set log callback for progress messages
     void setLogCallback(LogCallback callback) { logCallback_ = callback; }

@@ -169,7 +169,7 @@ string detectProjectRoot(const string& startPath) {
     return "";
 }
 
-static vector<string> readProjectAddons(const string& projectPath) {
+vector<string> readProjectAddons(const string& projectPath) {
     vector<string> out;
     string path = projectPath + "/addons.make";
     if (!fs::exists(path)) return out;
@@ -294,6 +294,7 @@ static Result selectVersion(UpdateInput input, string value, bool local, bool cl
         }
         auto regenerated = update(input, log);
         result.success = regenerated.success;
+        result.exitCode = regenerated.exitCode;
         result.failureReason = regenerated.failureReason;
     } catch (const exception& error) {
         result.failureReason = error.what();
@@ -390,6 +391,7 @@ Result update(const UpdateInput& input, const LogCallback& callback) {
         if (!result.failureReason.empty()) return result;
         if (!input.settings) log("Project updated: " + projectPath);
         result.success = true;
+        result.exitCode = 0;
     } catch (const exception& error) {
         result.failureReason = error.what();
     }

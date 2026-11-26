@@ -47,6 +47,7 @@ static string getCmakePath() {
 
 // Execute command and capture output
 static pair<int, string> executeCommand(const string& cmd) {
+    if (ProjectGenerator::commandRunner) return ProjectGenerator::commandRunner(cmd);
     string output;
 #ifdef _WIN32
     // CLI: configure runs on the caller's console, so it records cl's

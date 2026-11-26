@@ -3,6 +3,7 @@
 #include "AddonVersions.h"
 #include "ProjectState.h"
 #include "OperationLog.h"
+#include "ProcessCapture.h"
 #include <functional>
 #include <optional>
 #include <string>
@@ -43,8 +44,24 @@ struct UseLocalInput {
     bool clear = false;
 };
 
+struct BuildInput {
+    UpdateInput update; // Root detection, offline regeneration and addon lookup.
+    std::string targetPreset; // Empty selects the native desktop preset.
+    std::string buildType;
+    bool clean = false;
+    bool mcp = false;
+    bool warnings = false;
+    bool dryRun = false;
+    bool verbose = false;
+    bool rememberType = true;
+    int jobs = 0;
+    CancelHandle* cancel = nullptr;
+};
+
 struct Result {
     bool success = false;
+    bool stopped = false;
+    int exitCode = 1;
     std::string failureReason;
     // Original final error when a separately logged spawn diagnostic enriches
     // failureReason. The CLI keeps its existing two-message presentation.
@@ -56,6 +73,8 @@ struct Result {
 Result use(const UseInput& input, const LogCallback& log = {});
 Result useLocal(const UseLocalInput& input, const LogCallback& log = {});
 Result update(const UpdateInput& input, const LogCallback& log = {});
+Result build(const BuildInput& input, const LogCallback& log = {});
+std::string findCMake();
 std::string detectProjectRoot(const std::string& startPath = "");
 std::string detectTcRoot(const std::filesystem::path& executablePath);
 addonVersions::Paths resolveAddons(const std::string& project, const std::string& root,
