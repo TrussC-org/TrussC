@@ -3,6 +3,7 @@
 Run through tcbuild.sh. Conditions have bounded waits; no elapsed-time verdicts.
 """
 import json
+import errno
 import os
 from pathlib import Path
 import select
@@ -108,6 +109,13 @@ class BuildOperationTests(unittest.TestCase):
         script = fake / "build-tool"
         script.write_text(f'''#!{sys.executable}
 import os, signal, sys, time
+# The build call (-f Makefile) and execute_process (no arguments) act;
+# any other call is a CMake probe of the make program.
+with open(os.environ["CHILD_PIDS"] + ".calls", "a") as calls:
+    calls.write(repr(sys.argv[1:]) + "\\n")
+if sys.argv[1:] and "-f" not in sys.argv[1:]:
+    print("GNU Make 4.3")
+    sys.exit(0)
 ignore = {ignore!r}
 parent_exits = {parent_exits!r}
 child = 0
@@ -150,6 +158,10 @@ while True: signal.pause()
         self.ready = self.base / "ready"
         self.env.update(CHILD_PIDS=str(self.pids), CHILD_READY=str(self.ready),
                         STOP_MARKERS=str(self.base / "stopped-"))
+
+    def fixture_calls(self):
+        calls = Path(str(self.pids) + ".calls")
+        return "build-tool calls:\n" + (calls.read_text(encoding="utf-8") if calls.exists() else "(none)\n")
 
     def assert_children_exited(self):
         for pid in map(int, self.pids.read_text(encoding="utf-8").split()):
@@ -223,9 +235,23 @@ while True: signal.pause()
                                       env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       start_new_session=True, text=True, encoding="utf-8") as process:
                     try:
-                        wait_for(self.ready.exists)
+                        # The file can appear before CMake/trusscli forward READY.
+                        # Observe the output before terminating that forwarding path.
+                        output = b""
+                        def received_ready():
+                            nonlocal output
+                            if select.select([process.stdout], [], [], 0)[0]:
+                                data = os.read(process.stdout.fileno(), 4096)
+                                self.assertTrue(data, output)
+                                output += data
+                            return b"READY\n" in output
+                        try:
+                            wait_for(received_ready)
+                        except AssertionError:
+                            self.fail("READY was not forwarded: " + repr(output) + "\n" + self.fixture_calls())
                         os.killpg(process.pid, number)
-                        output, _ = process.communicate(timeout=20)
+                        remaining, _ = process.communicate(timeout=20)
+                        output = output.decode("utf-8") + remaining
                         self.assertEqual(process.returncode, -number, output)
                         self.assertIn("READY", output)
                         self.assert_children_exited()
@@ -241,6 +267,13 @@ while True: signal.pause()
         script.write_text(f'''#!{sys.executable}
 import os, sys
 from pathlib import Path
+# The build call (-f Makefile) and execute_process (no arguments) act;
+# any other call is a CMake probe of the make program.
+with open(os.environ["CHILD_PIDS"] + ".calls", "a") as calls:
+    calls.write(repr(sys.argv[1:]) + "\\n")
+if sys.argv[1:] and "-f" not in sys.argv[1:]:
+    print("GNU Make 4.3")
+    sys.exit(0)
 marker = Path(os.environ["CHILD_READY"])
 if not marker.exists():
     Path(str(marker) + ".prompt").touch()
@@ -270,24 +303,31 @@ if not marker.exists():
                 sent = False
                 status = None
                 ended = 0
+                terminal_closed = False
                 try:
                     deadline = time.monotonic() + 20
                     while time.monotonic() < deadline:
-                        if select.select([terminal], [], [], 0.05)[0]:
+                        if not terminal_closed and select.select([terminal], [], [], 0.05)[0]:
                             try:
-                                output += os.read(terminal, 4096)
-                            except OSError:
-                                pass  # Linux ptys report EIO after their last writer exits.
+                                data = os.read(terminal, 4096)
+                                output += data
+                                terminal_closed = not data
+                            except OSError as error:
+                                if error.errno != errno.EIO:
+                                    raise
+                                terminal_closed = True  # Linux PTY EOF; macOS returns b"".
                         if prompt.exists() and not sent:
                             os.write(terminal, b"terminal input\n")
                             sent = True
-                        ended, status = os.waitpid(pid, os.WNOHANG)
-                        if ended:
+                        if not ended:
+                            ended, status = os.waitpid(pid, os.WNOHANG)
+                        # Child exit can precede reading its final PTY output.
+                        if ended and terminal_closed:
                             break
                     else:
                         self.fail("terminal read did not complete: " + repr(output))
                     self.assertEqual(os.waitstatus_to_exitcode(status), 0, output)
-                    self.assertIn(b"READ_DONE", output)
+                    self.assertIn(b"READ_DONE", output, self.fixture_calls())
                 finally:
                     os.close(terminal)
                     try:
