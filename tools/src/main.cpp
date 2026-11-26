@@ -4908,7 +4908,16 @@ static void printTopHelp() {
 // main: subcommand dispatch
 // =============================================================================
 
+#ifdef _WIN32
+// Private helper entry point; not part of the CLI help or project-ops API.
+int trusscliInternalCtrlBreak(const char* argument);
+#endif
+
 int main(int argc, char* argv[]) try {
+#ifdef _WIN32
+    if (argc >= 2 && strcmp(argv[1], "--internal-ctrl-break") == 0)
+        return argc == 3 ? trusscliInternalCtrlBreak(argv[2]) : 1;
+#endif
     projectOps::ScopedDiagnostics consoleDiagnostics(printProjectMessage);
 #ifdef _WIN32
     // Best effort: an earlier process may still have the old image locked.
