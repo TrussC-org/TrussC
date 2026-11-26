@@ -141,8 +141,11 @@ while True: signal.pause()
     def assert_children_exited(self):
         for pid in map(int, self.pids.read_text(encoding="utf-8").split()):
             def ended():
-                status = Path(f"/proc/{pid}/stat")
-                return not status.exists() or status.read_text(encoding="utf-8").split()[2] == "Z"
+                # The process may disappear between any two reads of /proc.
+                try:
+                    return Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[2] == "Z"
+                except (FileNotFoundError, ProcessLookupError):
+                    return True
             wait_for(ended)
 
     def test_request_stop_returns_stopped_result(self):
