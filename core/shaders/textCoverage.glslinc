@@ -1,10 +1,9 @@
 // Shared by immediate and retained glyph rendering.
 @block text_coverage
 // Experimental top level. Rebuild both consuming shaders after changing this.
-// The supplied 16x layout is deferred pending its centroid check.
 #define TC_TEXT_TAPS 8
-#if TC_TEXT_TAPS != 8
-#error Only the validated 8x layout is enabled in this experiment.
+#if TC_TEXT_TAPS != 8 && TC_TEXT_TAPS != 16
+#error TC_TEXT_TAPS must be 8 or 16.
 #endif
 const vec2 textOffsets1[1] = vec2[1](vec2(0.0));
 const vec2 textOffsets4[4] = vec2[4](
@@ -16,8 +15,26 @@ const vec2 textOffsets8[8] = vec2[8](
     vec2(5.0, -1.0) / 16.0, vec2(-3.0, 5.0) / 16.0,
     vec2(-5.0, -5.0) / 16.0, vec2(-7.0, 1.0) / 16.0,
     vec2(3.0, -7.0) / 16.0, vec2(7.0, 7.0) / 16.0);
+// Standard 16x positions shifted by +1/32 pixel on both axes, then y flipped.
+#if TC_TEXT_TAPS == 16
+const vec2 textOffsets16[16] = vec2[16](
+    vec2(1.5, -1.5) / 16.0, vec2(-0.5, 2.5) / 16.0,
+    vec2(-2.5, -2.5) / 16.0, vec2(4.5, 0.5) / 16.0,
+    vec2(-4.5, 1.5) / 16.0, vec2(2.5, -5.5) / 16.0,
+    vec2(5.5, -3.5) / 16.0, vec2(3.5, 4.5) / 16.0,
+    vec2(-1.5, -6.5) / 16.0, vec2(0.5, 6.5) / 16.0,
+    vec2(-3.5, 5.5) / 16.0, vec2(-5.5, -4.5) / 16.0,
+    vec2(-7.5, -0.5) / 16.0, vec2(7.5, 3.5) / 16.0,
+    vec2(6.5, -7.5) / 16.0, vec2(-6.5, 7.5) / 16.0);
+#endif
 // Half gradients reach the font sampler's mip-4 cap at 32 texels/pixel.
+#if TC_TEXT_TAPS == 16
+const int textTransitionCount = 3;
+const float textThresholds[3] = float[3](1.0, 32.0, 64.0);
+#else
+const int textTransitionCount = 2;
 const float textThresholds[2] = float[2](1.0, 32.0);
+#endif
 
 float textCoverageLevel(int level, vec2 uv, vec2 dx, vec2 dy) {
     vec2 gx = dx * 0.5;
@@ -33,11 +50,20 @@ float textCoverageLevel(int level, vec2 uv, vec2 dx, vec2 dy) {
         }
         return coverage * 0.25;
     }
-    for (int i = 0; i < TC_TEXT_TAPS; ++i) {
+#if TC_TEXT_TAPS == 16
+    if (level == 3) {
+        for (int i = 0; i < 16; ++i) {
+            vec2 offset = textOffsets16[i];
+            coverage += textureGrad(sampler2D(tex, smp), uv + dx * offset.x + dy * offset.y, gx, gy).r;
+        }
+        return coverage / 16.0;
+    }
+#endif
+    for (int i = 0; i < 8; ++i) {
         vec2 offset = textOffsets8[i];
         coverage += textureGrad(sampler2D(tex, smp), uv + dx * offset.x + dy * offset.y, gx, gy).r;
     }
-    return coverage / float(TC_TEXT_TAPS);
+    return coverage / 8.0;
 }
 
 float textCoverage(vec2 texcoord) {
@@ -48,7 +74,7 @@ float textCoverage(vec2 texcoord) {
     vec2 dy = dFdy(texcoord);
     vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
     float texelsPerPixel = max(length(dx * size), length(dy * size));
-    for (int level = 0; level < 2; ++level) {
+    for (int level = 0; level < textTransitionCount; ++level) {
         float threshold = textThresholds[level];
         if (texelsPerPixel < threshold * 1.125) {
             float low = textCoverageLevel(level, texcoord, dx, dy);
@@ -58,6 +84,6 @@ float textCoverage(vec2 texcoord) {
             return mix(low, high, t);
         }
     }
-    return textCoverageLevel(2, texcoord, dx, dy);
+    return textCoverageLevel(textTransitionCount, texcoord, dx, dy);
 }
 @end
