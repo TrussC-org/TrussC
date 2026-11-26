@@ -3,6 +3,7 @@
 Run through tcbuild.sh. Conditions have bounded waits; no elapsed-time verdicts.
 """
 import json
+import errno
 import os
 from pathlib import Path
 import select
@@ -220,9 +221,20 @@ while True: signal.pause()
                                       env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       start_new_session=True, text=True, encoding="utf-8") as process:
                     try:
-                        wait_for(self.ready.exists)
+                        # The file can appear before CMake/trusscli forward READY.
+                        # Observe the output before terminating that forwarding path.
+                        output = b""
+                        def received_ready():
+                            nonlocal output
+                            if select.select([process.stdout], [], [], 0)[0]:
+                                data = os.read(process.stdout.fileno(), 4096)
+                                self.assertTrue(data, output)
+                                output += data
+                            return b"READY\n" in output
+                        wait_for(received_ready)
                         os.killpg(process.pid, number)
-                        output, _ = process.communicate(timeout=20)
+                        remaining, _ = process.communicate(timeout=20)
+                        output = output.decode("utf-8") + remaining
                         self.assertEqual(process.returncode, -number, output)
                         self.assertIn("READY", output)
                         self.assert_children_exited()
@@ -267,19 +279,26 @@ if not marker.exists():
                 sent = False
                 status = None
                 ended = 0
+                terminal_closed = False
                 try:
                     deadline = time.monotonic() + 20
                     while time.monotonic() < deadline:
-                        if select.select([terminal], [], [], 0.05)[0]:
+                        if not terminal_closed and select.select([terminal], [], [], 0.05)[0]:
                             try:
-                                output += os.read(terminal, 4096)
-                            except OSError:
-                                pass  # Linux ptys report EIO after their last writer exits.
+                                data = os.read(terminal, 4096)
+                                output += data
+                                terminal_closed = not data
+                            except OSError as error:
+                                if error.errno != errno.EIO:
+                                    raise
+                                terminal_closed = True  # Linux PTY EOF; macOS returns b"".
                         if prompt.exists() and not sent:
                             os.write(terminal, b"terminal input\n")
                             sent = True
-                        ended, status = os.waitpid(pid, os.WNOHANG)
-                        if ended:
+                        if not ended:
+                            ended, status = os.waitpid(pid, os.WNOHANG)
+                        # Child exit can precede reading its final PTY output.
+                        if ended and terminal_closed:
                             break
                     else:
                         self.fail("terminal read did not complete: " + repr(output))
