@@ -3318,6 +3318,9 @@ static void printBuildHelp() {
          << "Build the TrussC project in the current directory. By default builds\n"
          << "for the native platform; use --web / --android / --ios to cross-compile.\n"
          << "\n"
+         << "Missing cached sources: list downloads and ask [Y/n], then run update.\n"
+         << "Without a terminal on stdin, use --yes or run trusscli update first.\n"
+         << "\n"
          << "Options:\n"
          << "      --web                  Build for WebAssembly\n"
          << "      --android              Build for Android\n"
@@ -3329,6 +3332,7 @@ static void printBuildHelp() {
          << "      --clean                Clean before building (--clean-first)\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
+         << "  -y, --yes                  Download missing versions/addons without asking\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
          << "      --verbose              Show the full build output on screen\n"
          << "      --tc-root <path>       Save a local TrussC path, then update\n"
@@ -3495,7 +3499,28 @@ static int parseJobsFlag(const vector<string>& args, size_t& i, int& jobs) {
     return 1;
 }
 
-static int cmdBuild(const vector<string>& args, bool rememberType = true) {
+static bool stdinIsTty();
+
+static auto confirmBuildFetch(bool yes) {
+    return [yes](const vector<string>& missing) {
+        cout << "Not in cache:\n";
+        for (const auto& identity : missing) cout << "  " << identity << "\n";
+        if (yes) return true;
+        if (!stdinIsTty()) {
+            cerr << "Re-run with --yes, or run `trusscli update`.\n";
+            return false;
+        }
+        for (;;) {
+            cout << "Download now? [Y/n] " << flush;
+            string answer;
+            if (!getline(cin, answer)) return false;
+            if (answer.empty() || answer == "y" || answer == "Y") return true;
+            if (answer == "n" || answer == "N") return false;
+        }
+    };
+}
+
+static int cmdBuild(const vector<string>& args, bool rememberType = true, bool offerFetch = true) {
     string explicitPath;
     string explicitTcRoot;
     string targetPreset;
@@ -3505,6 +3530,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     bool warnings = false;
     bool dryRun = false;
     bool verbose = false;   // full build output on screen (the log file is written either way)
+    bool yes = false;
     int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3526,6 +3552,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
             if (!needValue(i, a, explicitTcRoot)) return 1;
         }
         else if (a == "--dry-run") dryRun = true;
+        else if (a == "-y" || a == "--yes") yes = true;
         else if (a == "--verbose") verbose = true;
         else if (a == "--web")     targetPreset = "web";
         else if (a == "--android") targetPreset = "android";
@@ -3566,6 +3593,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     input.verbose = verbose;
     input.rememberType = rememberType;
     input.jobs = jobs;
+    if (offerFetch) input.confirmFetch = confirmBuildFetch(yes);
     auto result = projectOps::build(input, printProjectMessage);
     return result.exitCode;
 }
@@ -3581,6 +3609,9 @@ static void printRunHelp() {
          << "Default: native build + launch. Use --web / --android / --ios to\n"
          << "cross-compile and launch on the appropriate target.\n"
          << "\n"
+         << "Missing cached sources: list downloads and ask [Y/n], then run update.\n"
+         << "Without a terminal on stdin, use --yes or run trusscli update first.\n"
+         << "\n"
          << "Options:\n"
          << "      --web                  Build WASM and start a local HTTP server\n"
          << "      --android              Build, adb install, and launch    [not yet implemented]\n"
@@ -3593,6 +3624,7 @@ static void printRunHelp() {
          << "                            Native: remember type flags; otherwise reuse the saved type (default RelWithDebInfo).\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
+         << "  -y, --yes                  Download missing versions/addons without asking\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
          << "      --verbose              Show the full build output on screen\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -3610,6 +3642,7 @@ static int cmdRun(const vector<string>& args) {
     bool mcp = false;
     bool warnings = false;
     bool verbose = false;   // full build output on screen
+    bool yes = false;
     int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3627,6 +3660,7 @@ static int cmdRun(const vector<string>& args) {
         if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printRunHelp(); return 0; }
+        else if (a == "-y" || a == "--yes") yes = true;
         else if (a == "--verbose")  verbose = true;
         else if (a == "--web")      target = "web";
         else if (a == "--android")  target = "android";
@@ -3670,6 +3704,7 @@ static int cmdRun(const vector<string>& args) {
         input.build.warnings = warnings;
         input.build.verbose = verbose;
         input.build.jobs = jobs;
+        input.build.confirmFetch = confirmBuildFetch(yes);
         input.session = session;
         input.inheritOutput = true;
         return projectOps::run(input, printProjectMessage).exitCode;
@@ -3710,6 +3745,7 @@ static int cmdRun(const vector<string>& args) {
     if (mcp) buildArgs.push_back("--mcp");
     if (warnings) buildArgs.push_back("--warnings");
     if (verbose) buildArgs.push_back("--verbose");
+    if (yes) buildArgs.push_back("--yes");
     if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
@@ -4349,7 +4385,7 @@ static int cmdDist(const vector<string>& args) {
         vector<string> buildArgs = {release ? "--release" : "--relwithdebinfo", "-p", projectDir.string()};
         if (verbose) buildArgs.push_back("--verbose");
         if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
-        if (int rc = cmdBuild(buildArgs, false)) return rc;
+        if (int rc = cmdBuild(buildArgs, false, /*offerFetch=*/false)) return rc;
         cout << "\n";
     } else {
         const string type = readCacheValue(buildDir / "CMakeCache.txt", "CMAKE_BUILD_TYPE");

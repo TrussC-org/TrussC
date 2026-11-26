@@ -73,6 +73,16 @@ class BuildOperationTests(unittest.TestCase):
             "buildPresets": [{"name": self.preset, "configurePreset": self.preset}]}), encoding="utf-8")
         self.env = dict(os.environ)
 
+    def test_empty_fetch_callback_keeps_missing_version_offline(self):
+        (self.project / ".trussc-version").write_text("vMissing\n", encoding="utf-8")
+        cache = self.base / "empty-cache"
+        self.env["TRUSSC_CACHE_DIR"] = str(cache)
+        report = self.operate()
+        self.assertFalse(report["success"])
+        self.assertIn("version is unavailable; run `trusscli update`", report["error"])
+        self.assertNotIn("Download now?", report["output"])
+        self.assertFalse((cache / "versions/TrussC-org/TrussC/vMissing").exists())
+
     def operate(self, mode="build", *args):
         result = subprocess.run([str(self.driver), mode, str(self.project), *args],
                                 env=self.env, capture_output=True, text=True, encoding="utf-8", timeout=40)

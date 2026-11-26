@@ -20,11 +20,12 @@ Spec parse(const std::string& text);
 std::string localPath(const std::filesystem::path& project);
 void setLocalPath(const std::filesystem::path& project, const std::string& path);
 // Empty means no selection: the caller retains the existing autodetection.
-// Fetching is permitted only for an explicit update (including use).
-std::string resolve(const std::filesystem::path& project, bool fetch);
+// Fetching is performed by update (including use and caller-approved builds).
+// A missing list probes absent cache roots without fetching or accepting them as valid.
+std::string resolve(const std::filesystem::path& project, bool fetch, std::vector<std::string>* missing = nullptr);
 // Shared cache acquisition for TrussC and external addons. spec must come from parse().
 std::string acquire(const Spec& spec, bool fetch, bool addon = false,
-                    const std::string& sourceUrl = "");
+                    const std::string& sourceUrl = "", std::vector<std::string>* missing = nullptr);
 std::string readBounded(const std::filesystem::path& path, size_t limit);
 // Records usage only for acquired cache paths; local folders are ignored.
 void markCachedUsed(const std::filesystem::path& path);

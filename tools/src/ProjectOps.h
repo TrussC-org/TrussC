@@ -45,7 +45,7 @@ struct UseLocalInput {
 };
 
 struct BuildInput {
-    UpdateInput update; // Root detection, offline regeneration and addon lookup.
+    UpdateInput update; // Root detection, regeneration and addon lookup.
     std::string targetPreset; // Empty selects the native desktop preset.
     std::string buildType;
     bool clean = false;
@@ -55,6 +55,8 @@ struct BuildInput {
     bool verbose = false;
     bool rememberType = true;
     int jobs = 0;
+    // Empty keeps builds offline; approval runs the ordinary update operation.
+    std::function<bool(const std::vector<std::string>&)> confirmFetch;
     CancelHandle* cancel = nullptr;
 };
 
@@ -89,5 +91,6 @@ std::string detectProjectRoot(const std::string& startPath = "");
 std::string detectTcRoot(const std::filesystem::path& executablePath);
 addonVersions::Paths resolveAddons(const std::string& project, const std::string& root,
     bool fetch, const addonVersions::Lookup& lookup = {},
-    const std::vector<std::string>* selection = nullptr);
+    const std::vector<std::string>* selection = nullptr,
+    std::vector<std::string>* missing = nullptr);
 }

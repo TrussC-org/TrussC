@@ -109,7 +109,7 @@ static string addonOwnerFromURL(const string& url) {
 }
 
 addonVersions::Paths resolveAddons(const string& project, const string& root,
-    bool fetch, const addonVersions::Lookup& lookup, const vector<string>* selection) {
+    bool fetch, const addonVersions::Lookup& lookup, const vector<string>* selection, vector<string>* missing) {
     return addonVersions::resolve(project, root, fetch, [&](const addonVersions::Spec& spec, bool mayFetch) {
         addonVersions::Source source;
         // Installed metadata identifies external sources even without a registry.
@@ -125,7 +125,7 @@ addonVersions::Paths resolveAddons(const string& project, const string& root,
         if (lookup) source = lookup(spec, mayFetch);
         if (source.owner.empty()) source.owner = addonOwnerFromURL(source.url);
         return source;
-    }, selection);
+    }, selection, missing);
 }
 
 string detectTcRoot(const fs::path& executablePath) {
