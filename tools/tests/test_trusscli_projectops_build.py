@@ -38,7 +38,7 @@ class BuildOperationTests(unittest.TestCase):
             '#pragma GCC diagnostic ignored "-Wdangling-reference"\n#endif\n'
             'namespace tc { using Json = nlohmann::json; }\n', encoding="utf-8")
         cls.driver = scratch / "driver"
-        sources = ["ProjectBuild", "ProjectOps", "ProjectGenerator", "ProjectState",
+        sources = ["ProjectRun", "ProjectBuild", "ProjectOps", "ProjectGenerator", "ProjectState",
                    "BuildSetup", "BuildOutputFilter", "IdeHelper", "VsDetector",
                    "AddonVersions", "TrussCVersion", "ProcessCapture"]
         subprocess.run([os.environ.get("CXX", "c++"), "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
@@ -75,7 +75,7 @@ class BuildOperationTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertTrue(report["cwdRestored"])
         self.assertTrue(report["cwdUnchangedDuringProcess"])
-        if mode != "noisy":
+        if mode not in ("noisy", "run-noisy"):
             self.assertEqual(report["logs"], [event["message"] for event in report["events"]])
         return report
 
@@ -299,6 +299,104 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
                 self.assertIn(full, report["output"])
                 self.assertEqual(report["output"], "".join(event["message"] for event in report["events"]))
                 self.assertEqual((self.project / "build-linux/build.log").read_text(encoding="utf-8"), full)
+
+    def run_fixture(self, ignore=False):
+        self.child_fixture(ignore=ignore)
+        app = self.project / "bin/sample"
+        app.parent.mkdir()
+        app.write_bytes((self.base / "fake-bin/cmake").read_bytes())
+        app.chmod(0o755)
+        (self.base / "fake-bin/cmake").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    def test_run_streams_app_output_and_returns_exit_status(self):
+        for code in (0, 7):
+            with self.subTest(code=code):
+                (self.project / "src/main.cpp").write_text(
+                    '#include <cstdio>\nint main() {\n'
+                    'puts("APP_STDOUT"); fflush(stdout);\n'
+                    'fputs("APP_STDERR\\n", stderr);\n'
+                    f'return {code}; }}\n', encoding="utf-8")
+                report = self.operate("run")
+                self.assertEqual(report["success"], code == 0, report)
+                self.assertEqual(report["exitCode"], code)
+                self.assertFalse(report["stopped"])
+                self.assertIn("Launching sample ...\nAPP_STDOUT\nAPP_STDERR\n", report["output"])
+        (self.project / "src/main.cpp").write_text("compile_error\n", encoding="utf-8")
+        report = self.operate("run")
+        self.assertFalse(report["success"])
+        self.assertNotIn("Launching sample", report["output"])
+
+    def test_run_retained_output_is_bounded_but_callback_is_complete(self):
+        self.run_fixture()
+        app = self.project / "bin/sample"
+        app.write_text(f'#!{sys.executable}\n'
+                       'print("FIRST_APP_OUTPUT")\n'
+                       'print("x" * (3 * 1024 * 1024))\n'
+                       'print("LAST_APP_OUTPUT")\n', encoding="utf-8")
+        report = self.operate("run-noisy")
+        self.assertTrue(report["success"], report["error"])
+        self.assertLessEqual(sum(len(line) for line in report["logs"]), 2 * 1024 * 1024)
+        self.assertLessEqual(len(report["logs"]), 32768)
+        self.assertEqual(report["logs"][0], "[Earlier run output truncated]\n")
+        self.assertNotIn("FIRST_APP_OUTPUT", "".join(report["logs"]))
+        self.assertIn("LAST_APP_OUTPUT", "".join(report["logs"]))
+        self.assertIn("FIRST_APP_OUTPUT", report["output"])
+        self.assertEqual(report["output"], "".join(event["message"] for event in report["events"]))
+
+    def test_run_reports_missing_binary(self):
+        self.child_fixture()
+        (self.base / "fake-bin/cmake").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        report = self.operate("run")
+        self.assertFalse(report["success"])
+        self.assertEqual(report["exitCode"], 1)
+        self.assertIn("built binary not found", report["error"])
+
+    def test_run_display_session_launcher_and_spawn_failure(self):
+        self.run_fixture()
+        app = self.project / "bin/sample"
+        app.write_text("#!/bin/sh\nprintf 'SESSION_APP\\n'\n", encoding="utf-8")
+        arguments = self.base / "session-arguments"
+        self.env["SESSION_ARGS"] = str(arguments)
+        labwc = self.base / "fake-bin/labwc"
+        labwc.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$SESSION_ARGS"\nexec "$2"\n', encoding="utf-8")
+        labwc.chmod(0o755)
+        report = self.operate("run", "", "labwc")
+        self.assertTrue(report["success"], report)
+        self.assertIn("Launching via labwc Wayland session ...\nSESSION_APP\n", report["output"])
+        self.assertEqual(arguments.read_text(encoding="utf-8").splitlines(), ["-s", str(app)])
+        # No X server or display socket is created by this spawn-failure fixture.
+        self.env["PATH"] = str(self.base / "fake-bin")
+        report = self.operate("run", "", "x11")
+        self.assertFalse(report["success"])
+        self.assertEqual(report["exitCode"], -1)
+        self.assertIn("failed to spawn xinit", report["error"])
+
+    def test_run_request_stop_ends_cooperative_app(self):
+        self.run_fixture()
+        report = self.operate("run-stop")
+        self.assertFalse(report["success"])
+        self.assertTrue(report["stopped"])
+        self.assertEqual(report["exitCode"], 0)
+        self.assert_children_exited()
+        for pid in self.pids.read_text(encoding="utf-8").split():
+            self.assertTrue((self.base / ("stopped-" + pid)).exists())
+
+    def test_run_still_running_waits_for_explicit_force(self):
+        self.run_fixture(ignore=True)
+        with subprocess.Popen([sys.executable, "-c", "import signal; signal.pause()"],
+                              start_new_session=True) as unrelated:
+            try:
+                report = self.operate("run-force")
+                self.assertIsNone(unrelated.poll())
+            finally:
+                unrelated.terminate()
+                unrelated.wait()
+        self.assertTrue(report["stillRunning"], report)
+        self.assertTrue(report["appAliveBeforeForce"], report)
+        self.assertTrue(report["stopped"])
+        self.assertFalse(report["success"])
+        self.assertEqual(report["exitCode"], -1)
+        self.assert_children_exited()
 
     def test_run_retains_terminal_group_ctrl_c(self):
         self.child_fixture()

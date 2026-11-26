@@ -58,6 +58,12 @@ struct BuildInput {
     CancelHandle* cancel = nullptr;
 };
 
+struct RunInput {
+    BuildInput build; // Native desktop settings; run() supplies cancellation for both phases.
+    std::string session; // Linux display session: empty, "x11", or "labwc".
+    bool inheritOutput = false; // CLI apps keep their terminal streams.
+};
+
 struct Result {
     bool success = false;
     bool stopped = false;
@@ -74,6 +80,9 @@ Result use(const UseInput& input, const LogCallback& log = {});
 Result useLocal(const UseLocalInput& input, const LogCallback& log = {});
 Result update(const UpdateInput& input, const LogCallback& log = {});
 Result build(const BuildInput& input, const LogCallback& log = {});
+// Supplying a cancel handle isolates the build and app process groups/jobs.
+// StillRunning on that handle asks the caller to confirm forceStop().
+Result run(const RunInput& input, const LogCallback& log = {}, CancelHandle* cancel = nullptr);
 std::string findCMake();
 std::string detectProjectRoot(const std::string& startPath = "");
 std::string detectTcRoot(const std::filesystem::path& executablePath);
