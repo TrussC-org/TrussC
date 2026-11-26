@@ -3,7 +3,7 @@
 // Experimental top level. Rebuild both consuming shaders after changing this.
 // Compile-time experiments; defaults retain the existing branch output.
 #ifndef TC_TEXT_PATTERN
-#define TC_TEXT_PATTERN 0 // 0: msaa, 1: nested, 2: nested five-point candidate
+#define TC_TEXT_PATTERN 0 // 0: msaa, 1: nested, 2: nested five-point candidate, 3: C4 nested
 #endif
 #ifndef TC_TEXT_OPENING
 #define TC_TEXT_OPENING 0 // 0: blend, 1: main RGSS spread (msaa only)
@@ -140,6 +140,75 @@ float textCoverage(vec2 texcoord) {
         }
     }
     return textCoverageLevel(textTransitionCount, texcoord, dx, dy);
+}
+#elif TC_TEXT_PATTERN == 3
+#ifndef TC_TEXT_TOP
+#define TC_TEXT_TOP 33
+#endif
+#if TC_TEXT_TOP != 17 && TC_TEXT_TOP != 33
+#error TC_TEXT_TOP must be 17 or 33 for the C4 pattern.
+#endif
+// Pattern 3 schedules: 0 staggered (existing output), 1 A, 2 B.
+#ifndef TC_TEXT_C4_SCHEDULE
+#define TC_TEXT_C4_SCHEDULE 0
+#endif
+#if TC_TEXT_C4_SCHEDULE < 0 || TC_TEXT_C4_SCHEDULE > 2
+#error TC_TEXT_C4_SCHEDULE must be 0 (staggered), 1 (A), or 2 (B).
+#endif
+// Owner's center-relative target-pixel table, Y down; sampling flips Y.
+const vec2 textC4Offsets[] = vec2[](
+    vec2(0.000, 0.000),
+    vec2(0.400, 0.200), vec2(-0.200, 0.400), vec2(-0.400, -0.200), vec2(0.200, -0.400),
+    vec2(0.300, -0.100), vec2(0.100, 0.300), vec2(-0.300, 0.100), vec2(-0.100, -0.300),
+    vec2(0.469, 0.350), vec2(-0.350, 0.469), vec2(-0.469, -0.350), vec2(0.350, -0.469),
+    vec2(-0.050, 0.250), vec2(-0.250, -0.050), vec2(0.050, -0.250), vec2(0.250, 0.050),
+    vec2(0.425, 0.030), vec2(-0.030, 0.425), vec2(-0.425, -0.030), vec2(0.030, -0.425),
+    vec2(-0.311, 0.280), vec2(-0.280, -0.311), vec2(0.311, -0.280), vec2(0.280, 0.311),
+    vec2(0.136, -0.113), vec2(0.113, 0.136), vec2(-0.136, 0.113), vec2(-0.113, -0.136),
+    vec2(-0.442, 0.169), vec2(-0.169, -0.442), vec2(0.442, -0.169), vec2(0.169, 0.442));
+#if TC_TEXT_C4_SCHEDULE == 0
+const int textC4LevelSizes[] = int[](1,5,9,13,17,21,25,29,33);
+const vec2 textC4Bands[] = vec2[](
+    vec2(1.0,1.125), vec2(1.125,32.0),
+    vec2(32.0,45.25), vec2(45.25,64.0),
+    vec2(64.0,76.1), vec2(76.1,90.5),
+    vec2(90.5,107.6), vec2(107.6,128.0));
+#else
+const int textC4LevelSizes[] = int[](1,5,9,17,33);
+#if TC_TEXT_C4_SCHEDULE == 1
+const vec2 textC4Bands[] = vec2[](
+    vec2(1.0,1.125), vec2(32.0,36.0),
+    vec2(64.0,72.0), vec2(128.0,144.0));
+#else
+const vec2 textC4Bands[] = vec2[](
+    vec2(1.0,1.125), vec2(1.125,32.0),
+    vec2(32.0,64.0), vec2(64.0,128.0));
+#endif
+#endif
+
+float textCoverage(vec2 uv) {
+    vec2 dx = dFdx(uv);
+    vec2 dy = dFdy(uv);
+    vec2 size = vec2(textureSize(sampler2D(tex, smp), 0));
+    float rho = max(length(dx * size), length(dy * size));
+    float sum = textureGrad(sampler2D(tex, smp), uv, dx * .5, dy * .5).r;
+    if (rho <= textC4Bands[0].x) return sum;
+    float totalWeight = 1.0;
+    for (int group = 0; group < textC4Bands.length(); ++group) {
+        int first = textC4LevelSizes[group];
+        int end = textC4LevelSizes[group + 1];
+        if (end > TC_TEXT_TOP) break;
+        vec2 band = textC4Bands[group];
+        if (rho <= band.x) break;
+        float w = clamp(log2(rho / band.x) / log2(band.y / band.x), 0.0, 1.0);
+        for (int i = first; i < end; ++i) {
+            vec2 offset = textC4Offsets[i];
+            sum += w * textureGrad(sampler2D(tex, smp), uv + dx * offset.x - dy * offset.y, dx * .5, dy * .5).r;
+        }
+        totalWeight += float(end - first) * w;
+        if (rho < band.y) break;
+    }
+    return sum / totalWeight;
 }
 #else
 // The nested top comes from the arrays; TC_TEXT_TAPS selects the MSAA top.
