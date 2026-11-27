@@ -111,6 +111,10 @@ void testConfig() {
                             config, warnings, error) &&
               config.installer.showEula && config.installer.showNotices && warnings.size() == 1 &&
               contains(warnings[0], "installer.shortcut"));
+    check("dist.json: writableData defaults on and can be turned off",
+          dist::parseConfig("{}", config, warnings, error) && config.installer.writableData &&
+              dist::parseConfig(R"({"installer": {"writableData": false}})", config, warnings, error) &&
+              !config.installer.writableData);
     check("dist.json: installer options must be booleans",
           !dist::parseConfig(R"({"installer": {"showEula": "yes"}})", config, warnings, error) &&
               !dist::parseConfig(R"({"installer": []})", config, warnings, error));
@@ -187,6 +191,17 @@ void testNsis() {
               contains(s, "ReadRegStr $0 HKLM \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\") &&
                   previous != std::string::npos && files != std::string::npos && previous < files &&
                   contains(s, "  noPrevious:\n"));
+    }
+    {
+        const size_t files = s.find("File /r ");
+        const size_t grant = s.find("icacls.exe\" \"$INSTDIR\\data\" /grant *S-1-5-32-545:(OI)(CI)M");
+        check("nsis: data/ made writable for Users (by SID) after copying, only if it exists",
+              files != std::string::npos && grant != std::string::npos && files < grant &&
+                  contains(s, "IfFileExists \"$INSTDIR\\data\\*.*\" 0 +2\n"));
+        auto readOnly = in;
+        readOnly.options.writableData = false;
+        check("nsis: writableData off leaves data/ as installed",
+              !contains(dist::nsisScript(readOnly), "icacls"));
     }
     check("nsis: installed size for Apps & features",
           contains(s, "!include \"FileFunc.nsh\"") && contains(s, "${GetSize} \"$INSTDIR\" \"/S=0K\" $0 $1 $2") &&
@@ -317,6 +332,11 @@ void testLinuxPackage() {
               contains(script, "/usr/share/applications/my-app.desktop") &&
               contains(script, "/usr/share/pixmaps/my-app.png") &&
               contains(script, "ln -s '/opt/my-app/licenses' \"$pkgdir/usr/share/licenses/my-app\""));
+    check("PKGBUILD: data/ writable by every user, when it exists",
+          contains(script, "if [ -d \"$pkgdir/opt/my-app/data\" ]; then\n") &&
+              contains(script, "find \"$pkgdir/opt/my-app/data\" ! -type l -exec chmod a+w {} +\n"));
+    pkg.writableData = false;
+    check("PKGBUILD: writableData off", !contains(dist::pkgbuild(pkg), "chmod"));
 
     check("deb arch", dist::debArch("x64") == "amd64" && dist::debArch("arm64") == "arm64" &&
                           dist::debArch("x86") == "i386");

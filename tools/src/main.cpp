@@ -3820,7 +3820,7 @@ static void printDistHelp() {
          << "\n"
          << "Settings come from dist.json in the project folder (optional; see --init):\n"
          << "name, version, author, eulaFile, include, exclude, licenses, and installer\n"
-         << "(showEula, showNotices). Your license terms (eulaFile, or EULA.txt in the\n"
+         << "(showEula, showNotices, writableData). Your license terms (eulaFile, or EULA.txt in the\n"
          << "project folder) go into the package as EULA.txt. The Windows installer asks\n"
          << "about shortcuts and starting at login.\n"
          << "trusscli collects the license files it finds; checking them is up to you.\n"
@@ -4128,6 +4128,7 @@ static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Pla
     pkg.arch = dist::pacmanArch(plan.arch);
     pkg.packageDir = plan.packageDir;
     pkg.launcher = plan.launcherName;
+    pkg.writableData = input.config.installer.writableData;
 
     cout << "Finding the packages " << input.config.name << " depends on ...\n";
     if (!pacmanDepends(plan.packageDir, pkg.depends, error)) return {};
@@ -4196,6 +4197,18 @@ static fs::path buildDebPackage(const dist::PlanInput& input, const dist::Plan& 
     if (ec) {
         error = "cannot stage the package in " + work.string() + ": " + ec.message();
         return {};
+    }
+    // /opt is root's: let every user write into data/ so the app can save
+    // there. dpkg installs the modes as staged.
+    if (input.config.installer.writableData && fs::is_directory(opt / "data", ec)) {
+        const auto addWrite = [&](const fs::path& path) {
+            fs::permissions(path, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write,
+                            fs::perm_options::add, ec);
+        };
+        addWrite(opt / "data");
+        for (const auto& entry : fs::recursive_directory_iterator(opt / "data", ec)) {
+            if (!entry.is_symlink(ec)) addWrite(entry.path());
+        }
     }
     fs::create_directories(root / "usr" / "bin", ec);
     fs::create_symlink("/opt/" + deb.package + "/" + plan.launcherName, root / "usr" / "bin" / deb.package, ec);

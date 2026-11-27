@@ -45,6 +45,11 @@ struct LicenseEntry {
 struct InstallerOptions {
     bool showEula = false;      // EULA.txt as an acceptance page (needs an EULA)
     bool showNotices = false;   // THIRD_PARTY_NOTICES.txt as a read-only page
+    // The installed data/ folder writable by every local user, so the app can
+    // save into it (settings and the like). Program Files and /opt are
+    // otherwise read-only to the people who run the app. Windows and Linux;
+    // the macOS .app is not installed this way.
+    bool writableData = true;
 };
 
 struct Config {
@@ -321,6 +326,7 @@ struct PacmanInput {
     std::string launcher;   // file name of the launcher in packageDir
     fs::path desktopFile;   // written by desktopEntry
     fs::path icon;          // PNG, any size (goes to /usr/share/pixmaps)
+    bool writableData = true;  // InstallerOptions::writableData
 };
 
 // A PKGBUILD that packages the already-built dist folder (no build step).

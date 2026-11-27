@@ -131,7 +131,8 @@ Optional. `trusscli dist --init` writes it with every key, so turning something 
   "licenses": [],
   "installer": {
     "showEula": false,
-    "showNotices": false
+    "showNotices": false,
+    "writableData": true
   }
 }
 ```
@@ -147,6 +148,7 @@ Optional. `trusscli dist --init` writes it with every key, so turning something 
 | `licenses` | `[]` | `[{"name": "Node.js", "file": "..."}]`: your own third-party notices |
 | `installer.showEula` | `false` | Windows installer: an EULA page with "I Agree" |
 | `installer.showNotices` | `false` | Windows installer: a read-only page with the third-party notices |
+| `installer.writableData` | `true` | Windows installer and Linux packages: every local user may write in the installed `data/` folder, so the app can save settings there. `false` if the app only reads `data/` |
 
 Unknown keys give a warning and are ignored.
 
@@ -159,6 +161,8 @@ winget install NSIS.NSIS
 ```
 
 The installer installs for all users under Program Files and registers in Apps & features, with `author` as the publisher. It asks the person installing whether to add shortcuts (checked by default) and to start the app at login (unchecked). With `showEula`, the person has to click "I Agree" to install; with `showNotices`, the third-party notices are shown for reading. The uninstaller removes exactly the installed files.
+
+Program Files is read-only for people who are not administrators, so an app that saves into `data/` would fail once started from its shortcut (started from the installer's last page it still runs as administrator, which hides the problem). With `writableData` (the default), the installer gives the local Users group Modify on `data/`. Files the app writes there stay after uninstalling. On macOS `data/` is inside the signed `.app` and must not be written to; this setting does not apply there.
 
 Without NSIS, `--installer` fails after the folder (and archive) are written.
 
@@ -186,6 +190,8 @@ The package installs the app to `/opt/<package>/`, links `/usr/bin/<package>` to
 (The `./` matters: without it apt looks for the name in its repositories.)
 
 Packages do not ask questions during installation, so there is no desktop shortcut and no "start at login" choice.
+
+`/opt` belongs to root, so with `installer.writableData` (the default) the package installs `data/` writable by every user, for apps that save there.
 
 Tools needed to build them: `makepkg` and `objdump` (`sudo pacman -S --needed base-devel`), or `dpkg-deb` and `dpkg-shlibdeps` (`sudo apt install dpkg-dev binutils`).
 

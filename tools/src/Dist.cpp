@@ -343,6 +343,7 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
                 bool* target = nullptr;
                 if (option.key() == "showEula") target = &out.installer.showEula;
                 else if (option.key() == "showNotices") target = &out.installer.showNotices;
+                else if (option.key() == "writableData") target = &out.installer.writableData;
                 if (!target) {
                     warnings.push_back("dist.json: unknown key \"installer." + option.key() + "\" ignored");
                     continue;
@@ -387,7 +388,8 @@ std::string configTemplate(const std::string& name, const std::string& version,
     text += "  \"licenses\": [],\n";
     text += "  \"installer\": {\n";
     text += "    \"showEula\": false,\n";
-    text += "    \"showNotices\": false\n";
+    text += "    \"showNotices\": false,\n";
+    text += "    \"writableData\": true\n";
     text += "  }\n";
     text += "}\n";
     return text;
@@ -1297,6 +1299,13 @@ std::string nsisScript(const NsisInput& in) {
     s += "  noPrevious:\n";
     s += "  SetOutPath \"$INSTDIR\"\n";
     s += "  File /r " + q(windowsPath(in.packageDir) + "\\*.*") + "\n";
+    if (in.options.writableData) {
+        // Program Files only lets Users read: grant Modify on data/ (inherited
+        // by what is in it), so the app can save there when not run as admin.
+        // The SID of BUILTIN\Users, whose name is translated ("사용자", ...).
+        s += "  IfFileExists \"$INSTDIR\\data\\*.*\" 0 +2\n";
+        s += "  nsExec::ExecToLog '\"$SYSDIR\\icacls.exe\" \"$INSTDIR\\data\" /grant *S-1-5-32-545:(OI)(CI)M /Q'\n";
+    }
     s += "  WriteUninstaller \"$INSTDIR\\Uninstall.exe\"\n";
     s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"DisplayName\" " + q(in.name) + "\n";
     s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"DisplayVersion\" " + q(in.version) + "\n";
@@ -1509,6 +1518,12 @@ std::string pkgbuild(const PacmanInput& in) {
     s += "package() {\n";
     s += "  install -d \"$pkgdir" + opt + "\"\n";
     s += "  cp -a " + shellQuote(toUtf8(in.packageDir) + "/.") + " \"$pkgdir" + opt + "/\"\n";
+    if (in.writableData) {
+        // /opt is root's: let every user write into data/ so the app can save there.
+        s += "  if [ -d \"$pkgdir" + opt + "/data\" ]; then\n";
+        s += "    find \"$pkgdir" + opt + "/data\" ! -type l -exec chmod a+w {} +\n";
+        s += "  fi\n";
+    }
     s += "  install -d \"$pkgdir/usr/bin\"\n";
     s += "  ln -s " + shellQuote(opt + "/" + in.launcher) + " \"$pkgdir/usr/bin/" + in.pkgname + "\"\n";
     s += "  install -Dm644 " + shellQuote(toUtf8(in.desktopFile)) +
