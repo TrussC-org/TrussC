@@ -1376,7 +1376,24 @@ trusscli update -p path/to/myProject --android   # adds the android preset
 cmake --preset android
 cmake --build --preset android                    # → bin/android/<project>.apk
 ```
-Backend is GLES3. APK signing uses `~/.android/debug.keystore` (without it, only the `.so` is built). Use `adb install -r ...` to deploy, `adb push` for data files. Permissions: the bundled manifest is all-inclusive, so for store builds drop an `android/AndroidManifest.xml.in` and strip the permissions you don't use.
+Backend is GLES3. APK signing uses `~/.android/debug.keystore` (without it, only the `.so` is built). Use `adb install -r ...` to deploy. Permissions: the bundled manifest is all-inclusive, so for store builds drop an `android/AndroidManifest.xml.in` and strip the permissions you don't use.
+
+Android packages `bin/data` into the APK and copies it to `<internalDataPath>/data` before app setup on first launch and after an APK update with changed data. Load files normally:
+
+```cpp
+void tcApp::setup() {
+    Image image;
+    image.load("foo.png");
+}
+```
+
+Large data folders slow those launches and use storage twice (APK assets and copied files). Updates replace the whole data folder; save user files with `getUserDataPath()`:
+
+```cpp
+void tcApp::setup() {
+    saveTextFile(getUserDataPath("settings.txt"), "ready");
+}
+```
 
 ### How do I build for iOS?
 

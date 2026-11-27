@@ -7,6 +7,9 @@
 #ifdef __ANDROID__
 
 #include <android/log.h>
+#include <android/asset_manager.h>
+#include <fstream>
+#include <sstream>
 #include <android/native_activity.h>
 #include <jni.h>
 #include "sokol_app_tc.h"
@@ -17,6 +20,111 @@
 #include "../gl/tcGLReadbackState.h"
 
 namespace trussc {
+
+// Copy before framework/App setup so loaders keep using ordinary file paths.
+void internal::copyAndroidDataAssets() {
+    fs::path idPath;
+    try {
+        auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
+        if (!activity || !activity->assetManager) return;
+        if (!activity->internalDataPath || !activity->internalDataPath[0] ||
+            !fs::path(activity->internalDataPath).is_absolute()) {
+            logError("AndroidData") << "Invalid internal storage path; skipping packaged data";
+            return;
+        }
+        using Asset = std::unique_ptr<AAsset, decltype(&AAsset_close)>;
+        Asset manifest(AAssetManager_open(activity->assetManager, "trussc-data.manifest",
+                                         AASSET_MODE_STREAMING), AAsset_close);
+        if (!manifest) return; // APKs without packaged data retain the old behavior.
+
+        const fs::path root = fs::path(activity->internalDataPath) / "data";
+        idPath = root / ".trussc-data-id";
+        const fs::path temporary = fs::path(activity->internalDataPath) / ".trussc-data-copy";
+        auto error = [](const auto& file) {
+            logError("AndroidData") << "Cannot copy packaged data: " << file;
+        };
+        // Bound (64 KiB): fixed memory use while streaming even large media files.
+        char chunk[64 * 1024];
+        std::string contents;
+        int count;
+        while ((count = AAsset_read(manifest.get(), chunk, sizeof(chunk))) > 0) {
+            contents.append(chunk, static_cast<size_t>(count));
+        }
+        if (count < 0) {
+            error("trussc-data.manifest");
+            std::error_code ignored;
+            fs::remove(idPath, ignored);
+            return;
+        }
+        std::istringstream lines(contents);
+        std::string buildId;
+        if (!std::getline(lines, buildId) || buildId.empty()) {
+            error("trussc-data.manifest");
+            std::error_code ignored;
+            fs::remove(idPath, ignored);
+            return;
+        }
+        std::string previousId;
+        std::ifstream previous(idPath);
+        std::getline(previous, previousId);
+        previous.close();
+        if (previousId == buildId) {
+            logNotice("AndroidData") << "Packaged data unchanged; skipping copy";
+            return;
+        }
+        std::error_code ec;
+        fs::remove(idPath, ec); // Never retain a success marker after a failed update.
+        if (ec) { error(idPath); return; }
+        fs::remove_all(root, ec);
+        if (ec) { error(root); return; }
+        fs::create_directories(root, ec);
+        if (ec) { error(root); return; }
+
+        bool copied = true;
+        std::string relative;
+        while (std::getline(lines, relative)) {
+            const fs::path entry(relative);
+            if (relative.empty() || entry.is_absolute() ||
+                std::find(entry.begin(), entry.end(), fs::path("..")) != entry.end()) {
+                error(relative);
+                copied = false;
+                continue;
+            }
+            const fs::path destination = root / entry;
+            fs::create_directories(destination.parent_path(), ec);
+            if (ec) { error(relative); copied = false; continue; }
+            Asset asset(AAssetManager_open(activity->assetManager, ("data/" + relative).c_str(),
+                                          AASSET_MODE_STREAMING), AAsset_close);
+            if (!asset) { error(relative); copied = false; continue; }
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            while (output && (count = AAsset_read(asset.get(), chunk, sizeof(chunk))) > 0) {
+                output.write(chunk, count);
+            }
+            output.close();
+            if (!output || count < 0) { error(relative); copied = false; continue; }
+            fs::rename(temporary, destination, ec);
+            if (ec) { error(relative); copied = false; continue; }
+        }
+        fs::remove(temporary, ec);
+        if (!copied) return;
+        std::ofstream id(idPath, std::ios::trunc);
+        id << buildId << '\n';
+        id.close();
+        if (!id) {
+            error(idPath);
+            fs::remove(idPath, ec);
+            return;
+        }
+        logNotice("AndroidData") << "Packaged data copied to " << root;
+    } catch (...) {
+        try {
+            std::error_code ignored;
+            if (!idPath.empty()) fs::remove(idPath, ignored);
+            logError("AndroidData") << "Cannot copy packaged data";
+        } catch (...) {
+        }
+    }
+}
 
 static bool immersiveMode_ = false;
 
@@ -219,8 +327,7 @@ fs::path getExecutablePath() {
 }
 
 fs::path getExecutableDir() {
-    // On Android, assets are accessed via AAssetManager, not filesystem paths.
-    // For files that need a real path, use internal storage.
+    // Packaged assets are copied to data/ inside internal storage at startup.
     auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
     if (activity && activity->internalDataPath) {
         return fs::path(activity->internalDataPath);
