@@ -438,13 +438,53 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
         report = self.operate("run", "", "labwc")
         self.assertTrue(report["success"], report)
         self.assertIn("Launching via labwc Wayland session ...\nSESSION_APP\n", report["output"])
-        self.assertEqual(arguments.read_text(encoding="utf-8").splitlines(), ["-s", str(app)])
+        self.assertEqual(arguments.read_text(encoding="utf-8").splitlines(), ["-S", str(app)])
         # No X server or display socket is created by this spawn-failure fixture.
         self.env["PATH"] = str(self.base / "fake-bin")
         report = self.operate("run", "", "x11")
         self.assertFalse(report["success"])
         self.assertEqual(report["exitCode"], -1)
         self.assertIn("failed to spawn xinit", report["error"])
+
+    @unittest.skipUnless(sys.platform == "linux", "X11 session launch is Linux-only")
+    def test_run_xinit_timeout_reaps_cooperative_and_stubborn_children(self):
+        if Path("/tmp/.X11-unix/X0").exists():
+            self.skipTest("requires no existing :0 display socket")
+        self.run_fixture()
+        child_info = self.base / "xinit-child.json"
+        self.env["XINIT_CHILD_INFO"] = str(child_info)
+        xinit = self.base / "fake-bin/xinit"
+        self.env["PATH"] = str(xinit.parent) + os.pathsep + self.env["PATH"]
+        for ignore_term in (False, True):
+            with self.subTest(ignore_term=ignore_term):
+                xinit.write_text(f'''#!{sys.executable}
+import json, os, signal, sys
+def on_term(*_):
+    with open(os.environ["XINIT_CHILD_INFO"] + ".term", "w") as marker:
+        marker.write("term")
+    if not {ignore_term!r}:
+        sys.exit(0)
+signal.signal(signal.SIGTERM, on_term)
+with open(os.environ["XINIT_CHILD_INFO"], "w") as info:
+    json.dump([os.getpid(), sys.argv[1]], info)
+while True:
+    signal.pause()
+''', encoding="utf-8")
+                xinit.chmod(0o755)
+                term_marker = Path(str(child_info) + ".term")
+                try:
+                    # run returns only after trusscli has reaped xinit, so the
+                    # child's PID is never signaled from here.
+                    report = self.operate("run", "", "x11")
+                    self.assertFalse(report["success"])
+                    self.assertIn("X server did not start within 6 seconds", report["error"])
+                    _, xinitrc = json.loads(child_info.read_text(encoding="utf-8"))
+                    # Both children got SIGTERM first; the stubborn one was then killed.
+                    self.assertEqual(term_marker.read_text(encoding="utf-8"), "term")
+                    self.assertFalse(Path(xinitrc).exists())
+                finally:
+                    child_info.unlink(missing_ok=True)
+                    term_marker.unlink(missing_ok=True)
 
     def test_run_request_stop_ends_cooperative_app(self):
         self.run_fixture()
