@@ -1466,7 +1466,7 @@ static int cmdUpgrade(const vector<string>& args) {
     if (!ec) {
         // The batch script handles VS setup. Avoid launching a second GUI.
         _putenv_s("TC_NO_LAUNCH", "1");
-        rc = runInherited({"cmd", "/c", "tools\\build_win.bat"});
+        rc = runInherited({"tools\\build_win.bat"});
         fs::current_path(previousDir, ec);
     }
     if (rc == 0) {

@@ -5,6 +5,7 @@
 #include "ProjectName.h"
 #include "GeneratedFile.h"
 #include "TrussCVersion.h"
+#include "WindowsCommand.h"
 #include "TrussC.h"
 #include <algorithm>
 #include <deque>
@@ -170,8 +171,7 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         string output;
         auto options = processOptions;
 #ifdef _WIN32
-        // Preserve cmd.exe's existing quoting, including vcvarsall.bat.
-        options.windowsCommandLine = "cmd.exe /c " + command + " 2>&1";
+        options.windowsCommandLine = windowsShellCommandLine(command);
         const vector<string> arguments = {"cmd.exe"};
 #else
         const vector<string> arguments = {"/bin/sh", "-c", command};

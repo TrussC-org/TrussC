@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
             events.push_back({{"message", text}, {"kind", static_cast<int>(kind)}});
             if (output.find("READY") != std::string::npos) ready = true;
         };
+        if (mode == "update") return projectOps::update(input.update, log);
         if (runOperation) {
             projectOps::RunInput runInput;
             runInput.build = input;

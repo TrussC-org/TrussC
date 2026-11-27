@@ -117,6 +117,60 @@ class BuildOperationTests(unittest.TestCase):
         self.assertNotEqual(report["exitCode"], 0)
         self.assertIn("error:", (self.build_dir / "build.log").read_text(encoding="utf-8"))
 
+    @unittest.skipUnless(sys.platform == "linux", "fake tools on PATH")
+    def test_update_build_and_run_in_ampersand_path(self):
+        folder = self.base / "a&b space 日本語"
+        folder.mkdir()
+        self.project = self.project.rename(folder / "sample")
+        (self.project / "CMakeLists.txt").write_text("# TRUSSC_DIR\n", encoding="utf-8")
+        self.build_dir = self.project / "build-linux"
+        self.app = self.project / "bin/sample"
+        self.app.parent.mkdir()
+        self.app.write_text('#!/bin/sh\nprintf "app ran\\n"\n', encoding="utf-8")
+        self.app.chmod(0o755)
+        framework = self.base / "framework"
+        (framework / "core/cmake").mkdir(parents=True)
+        (framework / "core/cmake/trussc_app.cmake").touch()
+        fake_bin = self.base / "fake-bin"
+        fake_bin.mkdir()
+        cmake = fake_bin / "cmake"
+        cmake.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+with open(os.environ["CMAKE_CALLS"], "a", encoding="utf-8") as log:
+    log.write(json.dumps([os.getcwd(), sys.argv[1:]]) + "\\n")
+build = Path("build-linux")
+if "--preset" in sys.argv:
+    build.mkdir(exist_ok=True)
+    (build / "Makefile").touch()
+    (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\\n")
+elif "--build" not in sys.argv:
+    sys.exit(2)
+''', encoding="utf-8")
+        cmake.chmod(0o755)
+        ninja = fake_bin / "ninja"
+        ninja.write_text('#!/bin/sh\necho 1.11.1\n', encoding="utf-8")
+        ninja.chmod(0o755)
+        calls_path = self.base / "cmake-calls.jsonl"
+        self.env.update(PATH=str(fake_bin), TRUSSC_DIR=str(framework),
+                        CMAKE_CALLS=str(calls_path))
+        # Direct update uses the generator executor. Missing metadata on build
+        # uses ProjectBuild's command runner for the same configure operation.
+        for mode in ("update", "build", "run"):
+            if mode == "build":
+                (self.project / "CMakeLists.txt").unlink()
+                (self.project / "CMakePresets.json").unlink()
+            report = self.operate(mode)
+            self.assertTrue(report["success"], report)
+            if mode == "run":
+                self.assertIn("app ran", report["output"])
+        calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(calls), 4, calls)
+        self.assertTrue(all(cwd == str(self.project) for cwd, _ in calls), calls)
+        self.assertEqual([args for _, args in calls[:2]],
+                         [["--preset", "linux"], ["--preset", "linux"]])
+        self.assertTrue(all(args[:3] == ["--build", "--preset", "linux"]
+                            for _, args in calls[2:]), calls)
+
     def child_fixture(self, ignore=False, parent_exits=False):
         fake = self.base / "fake-bin"
         fake.mkdir()
