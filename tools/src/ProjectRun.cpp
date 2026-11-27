@@ -3,8 +3,10 @@
 #include "ProjectName.h"
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #ifdef __linux__
 #include <cerrno>
 #include <chrono>
@@ -22,6 +24,17 @@ namespace fs = std::filesystem;
 namespace projectOps {
 
 #ifdef __linux__
+struct SessionTempDirectory {
+    char path[sizeof("/tmp/trusscli-session-XXXXXX")] = "/tmp/trusscli-session-XXXXXX";
+    SessionTempDirectory() {
+        if (!mkdtemp(path)) throw runtime_error("failed to create session temporary directory");
+    }
+    ~SessionTempDirectory() {
+        error_code error;
+        fs::remove_all(path, error);
+    }
+};
+
 static void stopXinit(pid_t pid) {
     kill(pid, SIGTERM);
     // Bound (xinit may ignore SIGTERM): wait 3 s, then SIGKILL and reap.
@@ -40,7 +53,39 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
     const function<ProcessResult(const vector<string>&)>& launch, const LogCallback& emit, CancelHandle* cancel) {
     if (session == "labwc") {
         emit("Launching via labwc Wayland session ...\n", MessageKind::Output);
-        return launch({"labwc", "-S", binPath});
+        SessionTempDirectory temp;
+        const string stem = string(temp.path) + "/app";
+        const string scriptPath = stem + ".sh", rcPath = stem + ".rc";
+        string quotedBinary = "'";
+        for (const char ch : binPath) {
+            if (ch == '\'') quotedBinary += "'\\''";
+            else quotedBinary += ch;
+        }
+        quotedBinary += "'";
+        {
+            ofstream script(scriptPath, ios::binary);
+            script << "#!/bin/sh\n" << quotedBinary
+                   << "\nprintf '%s\\n' \"$?\" > '" << rcPath << "'\n";
+            script.close();
+            if (!script) throw runtime_error("failed to write labwc wrapper");
+        }
+        if (chmod(scriptPath.c_str(), 0700) != 0)
+            throw runtime_error("failed to make labwc wrapper executable");
+        auto child = launch({"labwc", "-S", scriptPath});
+        // labwc can crash on shutdown after the app exits; prefer the app's status.
+        ifstream statusFile(rcPath, ios::binary);
+        // Bound (status file): read at most 16 bytes; longer content keeps labwc's result.
+        char bytes[16];
+        statusFile.read(bytes, sizeof(bytes));
+        const auto size = statusFile.gcount();
+        if (statusFile.bad() || statusFile.peek() != char_traits<char>::eof()) return child;
+        istringstream status(string(bytes, static_cast<size_t>(size)));
+        int appCode;
+        if (status >> appCode && appCode >= 0 && appCode <= 255) {
+            status >> ws;
+            if (status.eof()) child.exitCode = appCode;
+        }
+        return child;
     }
     if (session == "x11") {
         // On Pi 5 (modesetting + V3D), running the binary directly as
@@ -64,7 +109,8 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
         // — it helps with multi-window scenarios such as file dialogs,
         // popups, or apps that open additional windows. Otherwise just
         // keep the X session alive with sleep infinity.
-        string xinitrcPath = "/tmp/trusscli-x11-" + to_string(getpid()) + ".sh";
+        SessionTempDirectory temp;
+        const string xinitrcPath = string(temp.path) + "/xinitrc.sh";
         {
             ostringstream f;
             f << "#!/bin/sh\n"
@@ -98,7 +144,6 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
         posix_spawnattr_destroy(&attributes);
         if (error != 0) {
             emit("Error: failed to spawn xinit (is xserver-xorg installed?)\n", MessageKind::ErrorOutput);
-            std::remove(xinitrcPath.c_str());
             return {-1, false};
         }
 
@@ -111,7 +156,6 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
         if (!xReady) {
             emit("Error: X server did not start within 6 seconds\n", MessageKind::ErrorOutput);
             stopXinit(xinitPid);
-            std::remove(xinitrcPath.c_str());
             return {-1, false};
         }
         sleep(1);  // let twm settle
@@ -130,7 +174,6 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
 
         // 5. Tear down the X session.
         stopXinit(xinitPid);
-        std::remove(xinitrcPath.c_str());
         return rc;
     }
     return launch({binPath});

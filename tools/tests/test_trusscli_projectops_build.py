@@ -432,19 +432,89 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
         self.env["SESSION_ARGS"] = str(arguments)
         (self.base / "fake-bin/cmake").symlink_to(shutil.which("cmake"))
         labwc = self.base / "fake-bin/labwc"
-        labwc.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$SESSION_ARGS"\nexec "$2"\n', encoding="utf-8")
+        labwc.write_text(f'''#!{sys.executable}
+import json, os, sys
+from pathlib import Path
+script = Path(sys.argv[2])
+Path(os.environ["SESSION_ARGS"]).write_text(json.dumps(
+    [sys.argv[1], str(script), script.parent.stat().st_mode & 0o777]))
+os.execv(str(script), [str(script)])
+''', encoding="utf-8")
         labwc.chmod(0o755)
         self.env["PATH"] = str(self.base / "fake-bin") + os.pathsep + self.env["PATH"]
         report = self.operate("run", "", "labwc")
         self.assertTrue(report["success"], report)
         self.assertIn("Launching via labwc Wayland session ...\nSESSION_APP\n", report["output"])
-        self.assertEqual(arguments.read_text(encoding="utf-8").splitlines(), ["-S", str(app)])
+        self.assert_labwc_temp_files_removed(arguments)
         # No X server or display socket is created by this spawn-failure fixture.
         self.env["PATH"] = str(self.base / "fake-bin")
         report = self.operate("run", "", "x11")
         self.assertFalse(report["success"])
         self.assertEqual(report["exitCode"], -1)
         self.assertIn("failed to spawn xinit", report["error"])
+
+    def assert_session_temp_removed(self, script, mode):
+        script = Path(script)
+        self.assertEqual(script.parent.parent, Path("/tmp"))
+        self.assertRegex(script.parent.name, r"^trusscli-session-[A-Za-z0-9]{6}$")
+        self.assertEqual(mode, 0o700)
+        self.assertFalse(script.exists())
+        self.assertFalse(script.parent.exists())
+
+    def assert_labwc_temp_files_removed(self, arguments):
+        option, script, mode = json.loads(arguments.read_text(encoding="utf-8"))
+        self.assertEqual(option, "-S")
+        self.assert_session_temp_removed(script, mode)
+
+    @unittest.skipUnless(sys.platform == "linux", "labwc session launch is Linux-only")
+    def test_run_labwc_prefers_app_status_and_falls_back_without_status(self):
+        # Exercise spaces, a single quote, and CR in the app path.
+        parent = self.base / "owner's projects\r"
+        parent.mkdir()
+        self.project = self.project.rename(parent / "sample")
+        self.build_dir = self.project / ("build-" + self.preset)
+        self.app = self.project / "bin/sample"
+        self.run_fixture()
+        arguments = self.base / "session-arguments"
+        self.env["SESSION_ARGS"] = str(arguments)
+        labwc = self.base / "fake-bin/labwc"
+        labwc.write_text(f'''#!{sys.executable}
+import json, os, resource, signal, subprocess, sys
+from pathlib import Path
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+script = Path(sys.argv[2])
+Path(os.environ["SESSION_ARGS"]).write_text(json.dumps(
+    [sys.argv[1], str(script), script.parent.stat().st_mode & 0o777]))
+mode = os.environ["LABWC_MODE"]
+if mode == "crash":
+    subprocess.run([sys.argv[2]], check=False)
+    os.kill(os.getpid(), signal.SIGSEGV)
+if mode == "invalid":
+    Path(sys.argv[2]).with_suffix(".rc").write_text("invalid\\n")
+if mode in ("boundary", "long"):
+    script.with_suffix(".rc").write_text("3" + " " * (15 if mode == "boundary" else 16))
+sys.exit(7)
+''', encoding="utf-8")
+        labwc.chmod(0o755)
+        self.env["PATH"] = str(labwc.parent) + os.pathsep + self.env["PATH"]
+        for mode, app_code in (("crash", 0), ("crash", 3), ("skip", 0), ("invalid", 0),
+                               ("boundary", 3), ("long", 0)):
+            with self.subTest(mode=mode, app_code=app_code):
+                self.env["LABWC_MODE"] = mode
+                self.app.write_text("#!/bin/sh\nprintf 'APP_STDOUT\\n'\n"
+                                    "printf 'APP_STDERR\\n' >&2\n"
+                                    f"exit {app_code}\n", encoding="utf-8")
+                report = self.operate("run", "", "labwc")
+                expected = app_code if mode in ("crash", "boundary") else 7
+                self.assertEqual(report["exitCode"], expected, report)
+                self.assertEqual(report["success"], expected == 0, report)
+                self.assertFalse(report["stopped"])
+                for marker in ("APP_STDOUT", "APP_STDERR"):
+                    if mode == "crash":
+                        self.assertIn(marker, report["output"])
+                    else:
+                        self.assertNotIn(marker, report["output"])
+                self.assert_labwc_temp_files_removed(arguments)
 
     @unittest.skipUnless(sys.platform == "linux", "X11 session launch is Linux-only")
     def test_run_xinit_timeout_reaps_cooperative_and_stubborn_children(self):
@@ -459,6 +529,7 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
             with self.subTest(ignore_term=ignore_term):
                 xinit.write_text(f'''#!{sys.executable}
 import json, os, signal, sys
+from pathlib import Path
 def on_term(*_):
     with open(os.environ["XINIT_CHILD_INFO"] + ".term", "w") as marker:
         marker.write("term")
@@ -466,7 +537,7 @@ def on_term(*_):
         sys.exit(0)
 signal.signal(signal.SIGTERM, on_term)
 with open(os.environ["XINIT_CHILD_INFO"], "w") as info:
-    json.dump([os.getpid(), sys.argv[1]], info)
+    json.dump([os.getpid(), sys.argv[1], Path(sys.argv[1]).parent.stat().st_mode & 0o777], info)
 while True:
     signal.pause()
 ''', encoding="utf-8")
@@ -478,10 +549,10 @@ while True:
                     report = self.operate("run", "", "x11")
                     self.assertFalse(report["success"])
                     self.assertIn("X server did not start within 6 seconds", report["error"])
-                    _, xinitrc = json.loads(child_info.read_text(encoding="utf-8"))
+                    _, xinitrc, mode = json.loads(child_info.read_text(encoding="utf-8"))
                     # Both children got SIGTERM first; the stubborn one was then killed.
                     self.assertEqual(term_marker.read_text(encoding="utf-8"), "term")
-                    self.assertFalse(Path(xinitrc).exists())
+                    self.assert_session_temp_removed(xinitrc, mode)
                 finally:
                     child_info.unlink(missing_ok=True)
                     term_marker.unlink(missing_ok=True)
