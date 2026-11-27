@@ -1,5 +1,6 @@
 #include "ProcessCapture.h"
 #include "OperationLog.h"
+#include "WindowsCommand.h"
 
 #include <cerrno>
 #include <cctype>
@@ -182,8 +183,7 @@ ProcessResult runProcess(const vector<string>& argv,
         for (char& c : extension) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
         if (extension == "bat" || extension == "cmd") {
             application = resolveWindowsProgram("cmd.exe");
-            // /s strips this outer pair, leaving the quoted script and argv.
-            commandLine = quoteWindowsArgument(application) + " /d /s /c \"" + commandLine + '"';
+            commandLine = windowsShellCommandLine(commandLine, application);
         }
     }
     SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
