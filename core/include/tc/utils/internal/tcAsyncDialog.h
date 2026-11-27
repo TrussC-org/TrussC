@@ -17,6 +17,7 @@ struct DialogInputs {
     // Lock and check isOpen() on main before resolving the native owner.
     // Linux retains null native parents.
     std::weak_ptr<Window> requestingWindow;
+    std::vector<std::string> extensions;
 };
 // Confirm uses success; alert ignores the result. Dismissal never calls user code.
 using DialogCompletion = std::function<void(FileDialogResult)>;

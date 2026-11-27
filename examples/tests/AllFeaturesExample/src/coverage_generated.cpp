@@ -758,12 +758,16 @@ static void cover_window_input() {
     (void)isSuperPressed();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
     (void)loadDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>());
+    (void)loadDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<const std::vector<std::string>>());
 #endif
     (void)loadDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<std::function<void (const FileDialogResult &)>>());
+    (void)loadDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<const std::vector<std::string>>(), af::val<std::function<void (const FileDialogResult &)>>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
     (void)saveDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>());
+    (void)saveDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>(), af::val<const std::vector<std::string>>());
 #endif
     (void)saveDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>(), af::val<std::function<void (const FileDialogResult &)>>());
+    (void)saveDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>(), af::val<const std::vector<std::string>>(), af::val<std::function<void (const FileDialogResult &)>>());
     (void)setCursor(af::val<Cursor>());
     (void)setTouchAsMouse(af::val<bool>());
     (void)showCursor();

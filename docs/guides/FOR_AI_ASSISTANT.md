@@ -2691,10 +2691,10 @@ bool isOverlayFocused()  // Report whether an overlay claims keyboard input.
 bool isOverlayHovered()  // Report whether an overlay claims mouse input.
 bool isShiftPressed()  // Returns whether either Shift key is recorded as pressed.
 bool isSuperPressed()  // Returns whether either Super, Command, or Windows key is recorded as pressed.
-FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Shows a file or folder selection dialog.
-void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Shows a file or folder picker with a result callback.
-FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Shows a file save dialog.
-void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Shows a save destination picker with a result callback.
+FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [+1] [macos,windows,linux,android]  // Selects a file or folder, with an extension-list overload for case-insensitive file filtering.
+void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) [+1]  // Selects a file or folder, with an extension-list overload for case-insensitive file filtering.
+FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [+1] [macos,windows,linux,android]  // Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation.
+void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback) [+1]  // Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation.
 void setCursor(Cursor cursor)  // Sets the mouse cursor shape.
 void setTouchAsMouse(bool enabled)  // Controls whether touch input also generates mouse events.
 void showCursor()  // Shows the mouse cursor.

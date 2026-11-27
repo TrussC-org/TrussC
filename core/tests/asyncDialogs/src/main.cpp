@@ -115,6 +115,24 @@ void fakeTests() {
         prelude();
         check("alert completion, confirm/load cancel and save success", alerts == 1 && confirms == 1 && files == 2);
 
+        const size_t filteredStart = presented.size(), filteredReplies = replies.size();
+        {
+            std::vector<std::string> extensions{"PnG", "jpg"};
+            loadDialogAsync("filtered load", "", {}, false, extensions, nullptr);
+            extensions[0] = "changed";
+        }
+        saveDialogAsync("filtered save", "", {}, "session", {"jsonl"}, nullptr);
+        prelude();
+        check("filtered requests own extension lists",
+              presented.size() == filteredStart + 2 &&
+              presented[filteredStart].extensions == std::vector<std::string>({"PnG", "jpg"}) &&
+              presented[filteredStart + 1].extensions == std::vector<std::string>({"jsonl"}));
+        check("existing requests remain unfiltered", presented[start + 2].extensions.empty() &&
+              presented[start + 3].extensions.empty());
+        replies[filteredReplies]({});
+        replies[filteredReplies + 1]({});
+        prelude();
+
         failPresentation = true;
         int failed = 0;
         alertDialogAsync("", "", [&] { ++failed; });

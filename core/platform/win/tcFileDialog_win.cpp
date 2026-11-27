@@ -17,6 +17,7 @@
 #include "tc/utils/internal/tcAsyncDialog.h"
 #include <memory>
 #include <thread>
+#include "tc/utils/internal/tcDialogFilter.h"
 
 namespace {
 
@@ -29,12 +30,28 @@ std::wstring toWide(const std::string& str) {
     return result;
 }
 
+// The OS handles extensionless names. Explicit unsupported suffixes also need
+// appending and confirmation of the final destination before returning it.
+bool finishSavePath(trussc::fs::path& path, const std::vector<std::string>& extensions, HWND owner) {
+    if (extensions.empty()) return true;
+    const auto appended = trussc::utf8ToPath(trussc::internal::dialogSaveName(trussc::pathToUtf8(path), extensions));
+    if (appended == path) return true;
+    std::error_code error;
+    const bool exists = trussc::fs::exists(appended, error);
+    if (error || (exists && MessageBoxW(owner, appended.c_str(), L"Replace file?",
+            MB_YESNO | MB_ICONQUESTION) != IDYES)) return false;
+    path = appended;
+    return true;
+}
+
 // Only native values cross into the detached thread. Resolve Window on main.
 struct NativeDialog {
     trussc::internal::DialogKind kind;
     HWND owner = nullptr;
     std::wstring title, message, defaultPath, defaultName;
     std::wstring filterName = L"All Files", filterPattern = L"*.*";
+    std::wstring defaultExtension;
+    std::vector<std::string> extensions;
     bool folderSelection = false;
     trussc::internal::DialogCompletion complete;
 };
@@ -85,6 +102,8 @@ trussc::FileDialogResult runDialog(const NativeDialog& native) {
         const COMDLG_FILTERSPEC filter{native.filterName.c_str(), native.filterPattern.c_str()};
         if (FAILED(dialog->SetFileTypes(1, &filter))) return {};
     }
+    if (native.kind == DialogKind::Save && !native.defaultExtension.empty() &&
+        FAILED(dialog->SetDefaultExtension(native.defaultExtension.c_str()))) return {};
     if (!native.defaultPath.empty()) {
         IShellItem* folder = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(native.defaultPath.c_str(), nullptr,
@@ -105,6 +124,9 @@ trussc::FileDialogResult runDialog(const NativeDialog& native) {
     // Use the existing checked UTF-16/UTF-8 conversion, never the active code page.
     const auto pathUtf8 = trussc::pathToUtf8(trussc::fs::path(shellPath));
     result.filePath = trussc::utf8ToPath(pathUtf8);
+    if (native.kind == DialogKind::Save && !finishSavePath(result.filePath, native.extensions, native.owner)) return {};
+    if (native.kind == DialogKind::Load && !native.folderSelection &&
+        !trussc::internal::dialogExtensionMatches(pathUtf8, native.extensions)) return {};
     result.fileName = result.filePath.filename();
     result.success = true;
     return result;
@@ -128,6 +150,12 @@ trussc::internal::DialogDismiss presentDialog(const trussc::internal::DialogInpu
         native->defaultPath = inputs.defaultPath.wstring();
         native->defaultName = inputs.defaultName.wstring();
         native->folderSelection = inputs.folderSelection;
+        native->extensions = inputs.extensions;
+        native->filterPattern = toWide(trussc::internal::dialogWindowsPattern(inputs.extensions));
+        if (!inputs.extensions.empty()) {
+            native->filterName = native->filterPattern;
+            native->defaultExtension = toWide(inputs.extensions.front());
+        }
         native->complete = complete;
         std::thread([native] {
             trussc::FileDialogResult result;
@@ -191,7 +219,8 @@ void confirmDialogAsync(const std::string& title,
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            bool folderSelection) {
+                            bool folderSelection,
+                            const std::vector<std::string>& extensions) {
     FileDialogResult result;
     (void)message;  // Windows file dialog doesn't support message
 
@@ -208,7 +237,12 @@ FileDialogResult loadDialog(const std::string& title,
         ofn.lpstrFile = szFileName;
         // Bound (platform): the dialog must fit the MAX_PATH buffer. Overflow fails the dialog call, so no path is returned.
         ofn.nMaxFile = MAX_PATH;
-        ofn.lpstrFilter = L"All Files\0*.*\0";
+        const auto pattern = toWide(internal::dialogWindowsPattern(extensions));
+        std::wstring filter = pattern;
+        filter += L'\0';
+        filter += pattern;
+        filter += L'\0';
+        ofn.lpstrFilter = extensions.empty() ? L"All Files\0*.*\0" : filter.c_str();
         ofn.nFilterIndex = 1;
         ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
 
@@ -275,6 +309,8 @@ FileDialogResult loadDialog(const std::string& title,
         CoUninitialize();
     }
 
+    if (result.success && !folderSelection &&
+        !internal::dialogExtensionMatches(pathToUtf8(result.filePath), extensions)) return {};
     return result;
 }
 
@@ -282,10 +318,12 @@ void loadDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      bool folderSelection,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
     internal::DialogInputs inputs{};
     inputs.kind = internal::DialogKind::Load; inputs.title = title; inputs.message = message;
     inputs.defaultPath = defaultPath; inputs.folderSelection = folderSelection;
+    inputs.extensions = extensions;
     internal::requestAsyncDialog(std::move(inputs), [callback = std::move(callback)](FileDialogResult result) {
         if (callback) callback(result);
     }, presentDialog);
@@ -297,7 +335,8 @@ void loadDialogAsync(const std::string& title,
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            const fs::path& defaultName) {
+                            const fs::path& defaultName,
+                            const std::vector<std::string>& extensions) {
     FileDialogResult result;
     (void)message;  // Windows file dialog doesn't support message
 
@@ -318,7 +357,14 @@ FileDialogResult saveDialog(const std::string& title,
     ofn.lpstrFile = szFileName;
     // Bound (platform): the save dialog must fit the MAX_PATH buffer. Overflow fails the dialog call, so no path is returned.
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"All Files\0*.*\0";
+    const auto pattern = toWide(internal::dialogWindowsPattern(extensions));
+    std::wstring filter = pattern;
+    filter += L'\0';
+    filter += pattern;
+    filter += L'\0';
+    ofn.lpstrFilter = extensions.empty() ? L"All Files\0*.*\0" : filter.c_str();
+    const auto defaultExtension = extensions.empty() ? std::wstring{} : toWide(extensions.front());
+    ofn.lpstrDefExt = defaultExtension.empty() ? nullptr : defaultExtension.c_str();
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY;
 
@@ -337,8 +383,9 @@ FileDialogResult saveDialog(const std::string& title,
     }
 
     if (GetSaveFileNameW(&ofn)) {
-        result.success = true;
         result.filePath = fs::path(szFileName);
+        if (!finishSavePath(result.filePath, extensions, ofn.hwndOwner)) return {};
+        result.success = true;
         result.fileName = result.filePath.filename();
     }
 
@@ -349,13 +396,36 @@ void saveDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
     internal::DialogInputs inputs{};
     inputs.kind = internal::DialogKind::Save; inputs.title = title; inputs.message = message;
     inputs.defaultPath = defaultPath; inputs.defaultName = defaultName;
+    inputs.extensions = extensions;
     internal::requestAsyncDialog(std::move(inputs), [callback = std::move(callback)](FileDialogResult result) {
         if (callback) callback(result);
     }, presentDialog);
+}
+
+
+// Preserve the original entry points and their unfiltered behavior.
+FileDialogResult loadDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, bool folderSelection) {
+    return loadDialog(title, message, defaultPath, folderSelection, {});
+}
+void loadDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, bool folderSelection,
+                     std::function<void(const FileDialogResult&)> callback) {
+    loadDialogAsync(title, message, defaultPath, folderSelection, {}, std::move(callback));
+}
+FileDialogResult saveDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, const fs::path& defaultName) {
+    return saveDialog(title, message, defaultPath, defaultName, {});
+}
+void saveDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, const fs::path& defaultName,
+                     std::function<void(const FileDialogResult&)> callback) {
+    saveDialogAsync(title, message, defaultPath, defaultName, {}, std::move(callback));
 }
 
 } // namespace trussc
