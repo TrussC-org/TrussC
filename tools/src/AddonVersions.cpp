@@ -146,7 +146,7 @@ static void checkRange(const std::string& name, std::string selected, const std:
     else if (!accepted) projectOps::diagnostic(name + " requires TrussC " + range + "; project selects " + selected, projectOps::MessageKind::Warning);
 }
 
-Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const Lookup& lookup, const std::vector<std::string>* selection) {
+Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const Lookup& lookup, const std::vector<std::string>* selection, std::vector<std::string>* missing) {
     size_t graphWork = 0;
     auto countWork = [&] {
         // Bound (untrusted dependency graph): cap total nodes and edges at 4096.
@@ -240,6 +240,11 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
         } else {
             auto source = sources.at(spec.name);
             auto owner = spec.owner.empty() ? source.owner : spec.owner;
+            if (owner.empty() && missing && !fetch) {
+                const auto selection = spec.name + (spec.ref.empty() ? "" : "@" + spec.ref);
+                if (std::find(missing->begin(), missing->end(), selection) == missing->end()) missing->push_back(selection);
+                continue; // Confirmed update can resolve ownership using the registry.
+            }
             if (owner.empty()) throw std::runtime_error("unknown owner for addon " + spec.name + "; qualify owner/name or run `trusscli update`");
             auto versionSpec = trusscVersion::parse(owner + "/" + spec.name + "@" + (spec.ref.empty() ? "HEAD" : spec.ref));
             // Dependency manifests retain their author's short ref. Builds use
@@ -254,7 +259,7 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
                     versionSpec = trusscVersion::parse(owner + "/" + spec.name + "@" + ref);
                 }
             }
-            path = trusscVersion::acquire(versionSpec, fetch, true, source.url);
+            path = trusscVersion::acquire(versionSpec, fetch, true, source.url, missing);
             const auto ref = path.filename().string();
             if (fetch && versionSpec.shortCommit && ref.size() == 40 && trusscVersion::parse(ref).commit) {
                 result.resolvedPins[spec.name] = ref;
@@ -266,7 +271,8 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
         auto meta = manifest(path / "addon.json");
         auto range = meta.value("trussc_version", "");
         if (!range.empty() && !selected.empty()) checkRange(spec.name, selected, range);
-        if (meta.contains("dependencies")) {
+        // A missing framework supplies bundled dependencies only after update.
+        if ((!missing || fs::is_directory(trussc)) && meta.contains("dependencies")) {
             if (!meta["dependencies"].is_array()) throw std::runtime_error("addon dependencies must be an array: " + spec.name);
             for (const auto& dependency : meta["dependencies"]) {
                 countWork();
@@ -318,7 +324,7 @@ Paths resolve(const fs::path& project, const fs::path& trussc, bool fetch, const
         if (!result.order.empty()) result.order += ";";
         result.order += name;
     }
-    if (external) {
+    if (external && (!missing || missing->empty())) {
         auto hook = trussc / "core/cmake/use_addon.cmake";
         // Bound (core capability check): cap the CMake hook at 16 MiB.
         if (!fs::exists(hook) || trusscVersion::readBounded(hook, 16 * 1024 * 1024).find("TRUSSC_ADDON_PATHS") == std::string::npos) {

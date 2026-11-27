@@ -57,7 +57,9 @@ void confirmDialogAsync(const std::string& title,
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            bool folderSelection) {
+                            bool folderSelection,
+                            const std::vector<std::string>& extensions) {
+    (void)extensions;
     (void)title; (void)message; (void)defaultPath; (void)folderSelection;
     logWarning("tcFileDialog") << "loadDialog is not supported on Web/WASM";
     return FileDialogResult();
@@ -67,8 +69,9 @@ void loadDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      bool folderSelection,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
-    FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
+    FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection, extensions);
     if (callback) callback(result);
 }
 
@@ -78,7 +81,9 @@ void loadDialogAsync(const std::string& title,
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            const fs::path& defaultName) {
+                            const fs::path& defaultName,
+                            const std::vector<std::string>& extensions) {
+    (void)extensions;
     (void)title; (void)message; (void)defaultPath; (void)defaultName;
     logWarning("tcFileDialog") << "saveDialog is not supported on Web/WASM";
     return FileDialogResult();
@@ -88,9 +93,31 @@ void saveDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
-    FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
+    FileDialogResult result = saveDialog(title, message, defaultPath, defaultName, extensions);
     if (callback) callback(result);
+}
+
+
+// Preserve the original entry points and their unfiltered behavior.
+FileDialogResult loadDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, bool folderSelection) {
+    return loadDialog(title, message, defaultPath, folderSelection, {});
+}
+void loadDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, bool folderSelection,
+                     std::function<void(const FileDialogResult&)> callback) {
+    loadDialogAsync(title, message, defaultPath, folderSelection, {}, std::move(callback));
+}
+FileDialogResult saveDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, const fs::path& defaultName) {
+    return saveDialog(title, message, defaultPath, defaultName, {});
+}
+void saveDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, const fs::path& defaultName,
+                     std::function<void(const FileDialogResult&)> callback) {
+    saveDialogAsync(title, message, defaultPath, defaultName, {}, std::move(callback));
 }
 
 } // namespace trussc

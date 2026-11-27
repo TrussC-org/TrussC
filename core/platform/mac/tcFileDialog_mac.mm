@@ -10,6 +10,8 @@
 #if defined(__APPLE__)
 
 #import <Cocoa/Cocoa.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include "tc/utils/internal/tcDialogFilter.h"
 
 // Unattached alerts use their laid-out window and ordinary button actions.
 // The native application's quit preflight cancels tracked UI before calling
@@ -94,6 +96,31 @@ NSWindow* visibleDialogOwner(const internal::DialogInputs& inputs) {
     return nil;
 }
 
+// UTType may accept aliases such as .jpeg for .jpg. Confirm the actual
+// destination if the native panel leaves a suffix outside the supplied list.
+FileDialogResult finishSave(FileDialogResult result, const std::vector<std::string>& extensions) {
+    if (!result.success || internal::dialogExtensionMatches(result.fileName.string(), extensions)) return result;
+    result.filePath = internal::dialogSaveName(result.filePath.string(), extensions);
+    result.fileName = result.filePath.filename();
+    std::error_code error;
+    const bool exists = fs::exists(result.filePath, error);
+    if (error || (exists && !confirmDialog("Replace file?",
+            "Replace the existing file?\n" + result.filePath.string()))) return {};
+    return result;
+}
+
+void setFilter(NSSavePanel* panel, const std::vector<std::string>& extensions) {
+    if (extensions.empty()) return;
+    NSMutableArray<UTType*>* types = [NSMutableArray array];
+    for (const auto& extension : extensions) {
+        const auto lowercase = internal::dialogLowercase(extension);
+        UTType* type = [UTType typeWithFilenameExtension:[NSString stringWithUTF8String:lowercase.c_str()]];
+        if (type) [types addObject:type];
+    }
+    panel.allowedContentTypes = types;
+    panel.allowsOtherFileTypes = NO;
+}
+
 internal::DialogDismiss presentDialog(const internal::DialogInputs& inputs,
                                      internal::DialogCompletion complete) {
     using internal::DialogKind;
@@ -142,6 +169,7 @@ internal::DialogDismiss presentDialog(const internal::DialogInputs& inputs,
             if (!inputs.defaultPath.empty()) {
                 panel.directoryURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:inputs.defaultPath.c_str()]];
             }
+            if (save || !inputs.folderSelection) setFilter(panel, inputs.extensions);
             panel.canCreateDirectories = YES;
             if (save) {
                 if (!inputs.defaultName.empty()) panel.nameFieldStringValue = [NSString stringWithUTF8String:inputs.defaultName.c_str()];
@@ -152,13 +180,17 @@ internal::DialogDismiss presentDialog(const internal::DialogInputs& inputs,
                 open.allowsMultipleSelection = NO;
                 open.resolvesAliases = YES;
             }
-            pending = trackDialogSheet(panel, [complete, panel](NSModalResponse response) {
+            pending = trackDialogSheet(panel, [complete, panel, save, folderSelection = inputs.folderSelection,
+                                                extensions = inputs.extensions](NSModalResponse response) {
                 FileDialogResult result;
                 if (response == NSModalResponseOK && panel.URL) {
                     result.success = true;
                     result.filePath = panel.URL.path.UTF8String;
                     result.fileName = panel.URL.lastPathComponent.UTF8String;
                 }
+                if (save) result = finishSave(std::move(result), extensions);
+                if (!save && !folderSelection && result.success &&
+                    !internal::dialogExtensionMatches(result.fileName.string(), extensions)) result = {};
                 complete(std::move(result));
             });
             auto handler = ^(NSModalResponse response) { completeDialogSheet(pending, response); };
@@ -222,7 +254,8 @@ void confirmDialogAsync(const std::string& title,
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            bool folderSelection) {
+                            bool folderSelection,
+                            const std::vector<std::string>& extensions) {
     FileDialogResult result;
 
     @autoreleasepool {
@@ -244,6 +277,7 @@ FileDialogResult loadDialog(const std::string& title,
             [panel setCanChooseDirectories:NO];
         }
 
+        if (!folderSelection) setFilter(panel, extensions);
         [panel setAllowsMultipleSelection:NO];
         [panel setResolvesAliases:YES];
 
@@ -263,6 +297,8 @@ FileDialogResult loadDialog(const std::string& title,
         }
     }
 
+    if (!folderSelection && result.success &&
+        !internal::dialogExtensionMatches(result.fileName.string(), extensions)) return {};
     return result;
 }
 
@@ -270,8 +306,9 @@ void loadDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      bool folderSelection,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
-    internal::requestAsyncDialog({internal::DialogKind::Load, title, message, defaultPath, {}, folderSelection},
+    internal::requestAsyncDialog({internal::DialogKind::Load, title, message, defaultPath, {}, folderSelection, {}, extensions},
         std::move(callback), presentDialog);
 }
 
@@ -281,11 +318,13 @@ void loadDialogAsync(const std::string& title,
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            const fs::path& defaultName) {
+                            const fs::path& defaultName,
+                            const std::vector<std::string>& extensions) {
     FileDialogResult result;
 
     @autoreleasepool {
         NSSavePanel* panel = [NSSavePanel savePanel];
+        setFilter(panel, extensions);
 
         if (!title.empty()) {
             [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
@@ -314,16 +353,38 @@ FileDialogResult saveDialog(const std::string& title,
         }
     }
 
-    return result;
+    return finishSave(std::move(result), extensions);
 }
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
-    internal::requestAsyncDialog({internal::DialogKind::Save, title, message, defaultPath, defaultName},
+    internal::requestAsyncDialog({internal::DialogKind::Save, title, message, defaultPath, defaultName, false, {}, extensions},
         std::move(callback), presentDialog);
+}
+
+
+// Preserve the original entry points and their unfiltered behavior.
+FileDialogResult loadDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, bool folderSelection) {
+    return loadDialog(title, message, defaultPath, folderSelection, {});
+}
+void loadDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, bool folderSelection,
+                     std::function<void(const FileDialogResult&)> callback) {
+    loadDialogAsync(title, message, defaultPath, folderSelection, {}, std::move(callback));
+}
+FileDialogResult saveDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, const fs::path& defaultName) {
+    return saveDialog(title, message, defaultPath, defaultName, {});
+}
+void saveDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, const fs::path& defaultName,
+                     std::function<void(const FileDialogResult&)> callback) {
+    saveDialogAsync(title, message, defaultPath, defaultName, {}, std::move(callback));
 }
 
 } // namespace trussc

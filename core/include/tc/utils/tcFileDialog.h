@@ -78,6 +78,30 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback);
 
+// Extension filters use names without dots (for example, {"png", "jpg"}).
+// Matching ignores case. Empty lists preserve the unfiltered behavior.
+// Folder selection ignores extensions. Save appends the first extension when
+// none matches, before confirming replacement of an existing destination.
+TC_PLATFORMS("macos,windows,linux,android") FileDialogResult loadDialog(
+    const std::string& title, const std::string& message,
+    const fs::path& defaultPath, bool folderSelection,
+    const std::vector<std::string>& extensions);
+
+void loadDialogAsync(const std::string& title, const std::string& message,
+    const fs::path& defaultPath, bool folderSelection,
+    const std::vector<std::string>& extensions,
+    std::function<void(const FileDialogResult&)> callback);
+
+TC_PLATFORMS("macos,windows,linux,android") FileDialogResult saveDialog(
+    const std::string& title, const std::string& message,
+    const fs::path& defaultPath, const fs::path& defaultName,
+    const std::vector<std::string>& extensions);
+
+void saveDialogAsync(const std::string& title, const std::string& message,
+    const fs::path& defaultPath, const fs::path& defaultName,
+    const std::vector<std::string>& extensions,
+    std::function<void(const FileDialogResult&)> callback);
+
 } // namespace trussc
 
 // Alias

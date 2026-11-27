@@ -45,7 +45,7 @@ struct UseLocalInput {
 };
 
 struct BuildInput {
-    UpdateInput update; // Root detection, offline regeneration and addon lookup.
+    UpdateInput update; // Root detection, regeneration and addon lookup.
     std::string targetPreset; // Empty selects the native desktop preset.
     std::string buildType;
     bool clean = false;
@@ -55,7 +55,16 @@ struct BuildInput {
     bool verbose = false;
     bool rememberType = true;
     int jobs = 0;
+    // Empty keeps builds offline; approval runs the ordinary update operation.
+    std::function<bool(const std::vector<std::string>&)> confirmFetch;
     CancelHandle* cancel = nullptr;
+};
+
+struct RunInput {
+    BuildInput build; // Native desktop settings; run() supplies cancellation for both phases.
+    std::string session; // Linux display session: empty, "x11", or "labwc".
+    // Session startup and teardown are not covered by CancelHandle Stop, and the GUI does not let users pick a session (the session path is only for starting a display server on devices like a Raspberry Pi).
+    bool inheritOutput = false; // CLI apps keep their terminal streams.
 };
 
 struct Result {
@@ -74,10 +83,14 @@ Result use(const UseInput& input, const LogCallback& log = {});
 Result useLocal(const UseLocalInput& input, const LogCallback& log = {});
 Result update(const UpdateInput& input, const LogCallback& log = {});
 Result build(const BuildInput& input, const LogCallback& log = {});
+// Supplying a cancel handle isolates the build and app process groups/jobs.
+// StillRunning on that handle asks the caller to confirm forceStop().
+Result run(const RunInput& input, const LogCallback& log = {}, CancelHandle* cancel = nullptr);
 std::string findCMake();
 std::string detectProjectRoot(const std::string& startPath = "");
 std::string detectTcRoot(const std::filesystem::path& executablePath);
 addonVersions::Paths resolveAddons(const std::string& project, const std::string& root,
     bool fetch, const addonVersions::Lookup& lookup = {},
-    const std::vector<std::string>* selection = nullptr);
+    const std::vector<std::string>* selection = nullptr,
+    std::vector<std::string>* missing = nullptr);
 }

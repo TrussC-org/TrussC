@@ -6,6 +6,7 @@
 
 #include "tc/utils/tcFileDialog.h"
 #include "tc/utils/tcMainThread.h"
+#include "tc/utils/internal/tcDialogFilter.h"
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -75,7 +76,9 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            bool folderSelection) {
+                            bool folderSelection,
+                            const std::vector<std::string>& extensions) {
+    (void)extensions;
     logError() << "[FileDialog] Sync loadDialog is not supported on iOS. Use loadDialogAsync.";
     return FileDialogResult{};
 }
@@ -83,7 +86,9 @@ FileDialogResult loadDialog(const std::string& title,
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            const fs::path& defaultName) {
+                            const fs::path& defaultName,
+                            const std::vector<std::string>& extensions) {
+    (void)extensions;
     logError() << "[FileDialog] Sync saveDialog is not supported on iOS. Use saveDialogAsync.";
     return FileDialogResult{};
 }
@@ -179,10 +184,12 @@ void loadDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      bool folderSelection,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
     callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
+    const auto ownedExtensions = extensions;
     NSString* nsDefaultPath = defaultPath.empty() ? nil :
         [NSString stringWithUTF8String:defaultPath.c_str()];
 
@@ -199,7 +206,13 @@ void loadDialogAsync(const std::string& title,
         if (folderSelection) {
             types = @[UTTypeFolder];
         } else {
-            types = @[UTTypeItem];
+            NSMutableArray<UTType*>* allowed = [NSMutableArray array];
+            for (const auto& extension : ownedExtensions) {
+                const auto lowercase = internal::dialogLowercase(extension);
+                UTType* type = [UTType typeWithFilenameExtension:[NSString stringWithUTF8String:lowercase.c_str()]];
+                if (type) [allowed addObject:type];
+            }
+            types = ownedExtensions.empty() ? @[UTTypeItem] : allowed;
         }
 
         UIDocumentPickerViewController* picker =
@@ -220,6 +233,8 @@ void loadDialogAsync(const std::string& title,
                 result.fileName = [[url lastPathComponent] UTF8String];
                 [url stopAccessingSecurityScopedResource];
             }
+            if (!folderSelection && result.success &&
+                !internal::dialogExtensionMatches(result.fileName.string(), ownedExtensions)) result = {};
             if (internal::appRunIsAlive(token) && cb) cb(result);
             _tc_activePickerDelegate = nil;
         };
@@ -240,10 +255,12 @@ void saveDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
     callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
+    const auto saveName = internal::dialogSaveName(defaultName.empty() ? "untitled" : defaultName.string(), extensions);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!internal::appRunIsAlive(token)) return;
@@ -256,9 +273,7 @@ void saveDialogAsync(const std::string& title,
 
         // Create temp file for export
         NSString* tempDir = NSTemporaryDirectory();
-        NSString* fileName = defaultName.empty() ?
-            @"untitled" :
-            [NSString stringWithUTF8String:defaultName.c_str()];
+        NSString* fileName = [NSString stringWithUTF8String:saveName.c_str()];
         NSString* tempPath = [tempDir stringByAppendingPathComponent:fileName];
 
         // Create empty file
@@ -291,6 +306,27 @@ void saveDialogAsync(const std::string& title,
 
         [vc presentViewController:picker animated:YES completion:nil];
     });
+}
+
+
+// Preserve the original entry points and their unfiltered behavior.
+FileDialogResult loadDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, bool folderSelection) {
+    return loadDialog(title, message, defaultPath, folderSelection, {});
+}
+void loadDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, bool folderSelection,
+                     std::function<void(const FileDialogResult&)> callback) {
+    loadDialogAsync(title, message, defaultPath, folderSelection, {}, std::move(callback));
+}
+FileDialogResult saveDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, const fs::path& defaultName) {
+    return saveDialog(title, message, defaultPath, defaultName, {});
+}
+void saveDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, const fs::path& defaultName,
+                     std::function<void(const FileDialogResult&)> callback) {
+    saveDialogAsync(title, message, defaultPath, defaultName, {}, std::move(callback));
 }
 
 } // namespace trussc

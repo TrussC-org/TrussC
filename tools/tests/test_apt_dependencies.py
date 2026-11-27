@@ -123,7 +123,9 @@ class CiAptTests(unittest.TestCase):
             ('build.yml', 'render-regression', 'Install software display'):
                 ['xvfb', 'libgl1-mesa-dri', 'mesa-utils'],
             ('daily.yml', 'sweep', 'Install software display'):
-                ['xvfb', 'xauth', 'libgl1-mesa-dri', 'libglx-mesa0', 'libegl-mesa0']})
+                ['xvfb', 'xauth', 'libgl1-mesa-dri', 'libglx-mesa0', 'libegl-mesa0'],
+            ('weekly-asan-lsan.yml', 'sanitizer', 'Install software display and symbolizer'):
+                ['gcc', 'g++', 'llvm', 'xvfb', 'xauth', 'libgl1-mesa-dri', 'libglx-mesa0', 'libegl-mesa0']})
 
     @unittest.skipIf(sys.platform == 'win32', 'CI bash scripts')
     def test_actual_apt_scripts_retry_and_propagate_failure(self):

@@ -52,11 +52,14 @@ helpers = helpers.replace('    NSAlert* alert = nil;\n', '').replace(
 common = (ROOT / 'core/include/tc/utils/tcAsyncDialog.cpp').read_text(encoding='utf-8')
 # Exercise the real common completion, including its macOS EXIT_PROTOCOL branch.
 reply = body(common, '[request](FileDialogResult result) {')
+# Inspect the native overloads; the original load/save entry points now forward
+# to those overloads with an empty extension list.
+native_mac = mac[:mac.index('// Preserve the original entry points')]
 for kind in ('alert', 'confirm', 'load', 'save'):
-    async_body = body(mac, 'void ' + kind + 'DialogAsync(')
+    async_body = body(native_mac, 'void ' + kind + 'DialogAsync(')
     assert 'internal::requestAsyncDialog(' in async_body
     assert 'runModal' not in async_body and 'appOwnedCallback' not in async_body
-    assert 'runModal' in body(mac, ('bool ' if kind == 'confirm' else
+    assert 'runModal' in body(native_mac, ('bool ' if kind == 'confirm' else
         'void ' if kind == 'alert' else 'FileDialogResult ') + kind + 'Dialog(')
 presenter = body(mac, 'internal::DialogDismiss presentDialog(')
 assert 'runModal' not in presenter and 'runModal' not in helpers
