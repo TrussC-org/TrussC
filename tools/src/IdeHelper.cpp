@@ -1,6 +1,7 @@
 #include "IdeHelper.h"
 #include "ProjectName.h"
 #include "GeneratedFile.h"
+#include "WindowsCommand.h"
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
@@ -52,7 +53,7 @@ string IdeHelper::openInIde(IdeType ideType, const string& path) {
         case IdeType::Cursor: {
             // code / cursor コマンドをコンソール非表示で実行
             string exe = (ideType == IdeType::VSCode) ? "code" : "cursor";
-            string fullCmd = "cmd.exe /c " + exe + " \"" + path + "\"";
+            string fullCmd = windowsShellCommandLine(exe + " \"" + path + "\"");
             STARTUPINFOA si = {};
             si.cb = sizeof(si);
             si.dwFlags = STARTF_USESHOWWINDOW;
@@ -85,8 +86,9 @@ string IdeHelper::openInIde(IdeType ideType, const string& path) {
         }
         case IdeType::CMakeOnly:
             // ターミナルを意図的に表示する
-            cmd = "start cmd /k \"cd /d " + path + "\"";
-            break;
+            return reinterpret_cast<INT_PTR>(ShellExecuteA(nullptr, "open", "cmd.exe",
+                "/k", path.c_str(), SW_SHOWNORMAL)) > 32
+                ? "" : "Failed to open project in " + string(getIdeName(ideType));
     }
 #else
     // Linux

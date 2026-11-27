@@ -61,6 +61,7 @@ class BuildOperationTests(unittest.TestCase):
                         "-I", str(ROOT / "tools/src"), "-I", str(ROOT / "core/include"),
                         str(ROOT / "tools/tests/projectops_build_driver.cpp"),
                         *[str(ROOT / "tools/src" / (name + ".cpp")) for name in sources],
+                        *(["-Wl,--wrap=access"] if sys.platform == "linux" else []),
                         "-o", str(cls.driver)], check=True)
 
     def setUp(self):
@@ -85,6 +86,9 @@ class BuildOperationTests(unittest.TestCase):
             "binaryDir": "${sourceDir}/build-" + self.preset, "cacheVariables": {"FETCHCONTENT_FULLY_DISCONNECTED": "ON"}}],
             "buildPresets": [{"name": self.preset, "configurePreset": self.preset}]}), encoding="utf-8")
         self.env = dict(os.environ)
+        self.x11_directory = self.base / "fake-x11"
+        self.x11_directory.mkdir()
+        self.env["TEST_X11_DIRECTORY"] = str(self.x11_directory)
 
     def test_empty_fetch_callback_keeps_missing_version_offline(self):
         (self.project / ".trussc-version").write_text("vMissing\n", encoding="utf-8")
@@ -125,6 +129,60 @@ class BuildOperationTests(unittest.TestCase):
         self.assertFalse(report["stopped"])
         self.assertNotEqual(report["exitCode"], 0)
         self.assertIn("error:", (self.build_dir / "build.log").read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(sys.platform == "linux", "fake tools on PATH")
+    def test_update_build_and_run_in_ampersand_path(self):
+        folder = self.base / "a&b space 日本語"
+        folder.mkdir()
+        self.project = self.project.rename(folder / "sample")
+        (self.project / "CMakeLists.txt").write_text("# TRUSSC_DIR\n", encoding="utf-8")
+        self.build_dir = self.project / "build-linux"
+        self.app = self.project / "bin/sample"
+        self.app.parent.mkdir()
+        self.app.write_text('#!/bin/sh\nprintf "app ran\\n"\n', encoding="utf-8")
+        self.app.chmod(0o755)
+        framework = self.base / "framework"
+        (framework / "core/cmake").mkdir(parents=True)
+        (framework / "core/cmake/trussc_app.cmake").touch()
+        fake_bin = self.base / "fake-bin"
+        fake_bin.mkdir()
+        cmake = fake_bin / "cmake"
+        cmake.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+with open(os.environ["CMAKE_CALLS"], "a", encoding="utf-8") as log:
+    log.write(json.dumps([os.getcwd(), sys.argv[1:]]) + "\\n")
+build = Path("build-linux")
+if "--preset" in sys.argv:
+    build.mkdir(exist_ok=True)
+    (build / "Makefile").touch()
+    (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\\n")
+elif "--build" not in sys.argv:
+    sys.exit(2)
+''', encoding="utf-8")
+        cmake.chmod(0o755)
+        ninja = fake_bin / "ninja"
+        ninja.write_text('#!/bin/sh\necho 1.11.1\n', encoding="utf-8")
+        ninja.chmod(0o755)
+        calls_path = self.base / "cmake-calls.jsonl"
+        self.env.update(PATH=str(fake_bin), TRUSSC_DIR=str(framework),
+                        CMAKE_CALLS=str(calls_path))
+        # Direct update uses the generator executor. Missing metadata on build
+        # uses ProjectBuild's command runner for the same configure operation.
+        for mode in ("update", "build", "run"):
+            if mode == "build":
+                (self.project / "CMakeLists.txt").unlink()
+                (self.project / "CMakePresets.json").unlink()
+            report = self.operate(mode)
+            self.assertTrue(report["success"], report)
+            if mode == "run":
+                self.assertIn("app ran", report["output"])
+        calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(calls), 4, calls)
+        self.assertTrue(all(cwd == str(self.project) for cwd, _ in calls), calls)
+        self.assertEqual([args for _, args in calls[:2]],
+                         [["--preset", "linux"], ["--preset", "linux"]])
+        self.assertTrue(all(args[:3] == ["--build", "--preset", "linux"]
+                            for _, args in calls[2:]), calls)
 
     def child_fixture(self, ignore=False, parent_exits=False):
         fake = self.base / "fake-bin"
@@ -530,9 +588,33 @@ sys.exit(7)
                 self.assert_labwc_temp_files_removed(arguments)
 
     @unittest.skipUnless(sys.platform == "linux", "X11 session launch is Linux-only")
+    def test_run_x11_busy_display_rejects_socket_or_lock_before_launch(self):
+        self.run_fixture()
+        marker = self.base / "unexpected-launch"
+        self.env["UNEXPECTED_LAUNCH"] = str(marker)
+        for binary in (self.app, self.base / "fake-bin/xinit", self.base / "fake-bin/xhost"):
+            binary.write_text('#!/bin/sh\nprintf launched >> "$UNEXPECTED_LAUNCH"\n', encoding="utf-8")
+            binary.chmod(0o755)
+        self.env["PATH"] = str(self.base / "fake-bin") + os.pathsep + self.env["PATH"]
+        for entries in (("X0",), (".X0-lock",), ("X0", ".X0-lock")):
+            with self.subTest(entries=entries):
+                for entry in entries:
+                    (self.x11_directory / entry).touch()
+                try:
+                    report = self.operate("run", "", "x11")
+                    self.assertFalse(report["success"], report)
+                    self.assertNotEqual(report["exitCode"], 0)
+                    self.assertFalse(report["stopped"])
+                    self.assertIn("display :0 is already in use (is a desktop running?)", report["error"])
+                    self.assertIn("--session x11 is for a machine without a desktop session.", report["error"])
+                    self.assertNotIn("Launching via xinit", report["output"])
+                    self.assertFalse(marker.exists(), report)
+                finally:
+                    for entry in entries:
+                        (self.x11_directory / entry).unlink()
+
+    @unittest.skipUnless(sys.platform == "linux", "X11 session launch is Linux-only")
     def test_run_xinit_timeout_reaps_cooperative_and_stubborn_children(self):
-        if Path("/tmp/.X11-unix/X0").exists():
-            self.skipTest("requires no existing :0 display socket")
         self.run_fixture()
         child_info = self.base / "xinit-child.json"
         self.env["XINIT_CHILD_INFO"] = str(child_info)

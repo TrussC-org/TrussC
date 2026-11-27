@@ -48,6 +48,10 @@ class HelpTests(unittest.TestCase):
                     self.assertTrue(output.startswith("Usage: trusscli " + " ".join(command)),
                                     output)
 
+    def test_run_help_describes_busy_x11_display(self):
+        output = self.cli("run", "--help")
+        self.assertIn("x11 errors if the display :0 socket or lock file already exists.", output)
+
     def test_version_help_does_not_print_version(self):
         for flag in ("--help", "-h"):
             with self.subTest(flag=flag):

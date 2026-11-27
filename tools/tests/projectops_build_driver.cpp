@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -14,6 +15,20 @@
 #include <sys/prctl.h>
 #endif
 #include <sys/wait.h>
+
+#if defined(__linux__)
+// Linked only into this test driver with --wrap=access. Never inspect host X paths.
+extern "C" int __real_access(const char*, int);
+extern "C" int __wrap_access(const char* path, int mode) {
+    if (std::strcmp(path, "/tmp/.X11-unix/X0") == 0 || std::strcmp(path, "/tmp/.X0-lock") == 0) {
+        const char* directory = std::getenv("TEST_X11_DIRECTORY");
+        if (!directory || !*directory) std::abort();
+        const auto fixture = fs::path(directory) / fs::path(path).filename();
+        return __real_access(fixture.c_str(), mode);
+    }
+    return __real_access(path, mode);
+}
+#endif
 
 void writeGeneratedFile(const fs::path& path, const std::string& text) {
     std::ofstream(path, std::ios::binary) << text;
@@ -51,6 +66,7 @@ int main(int argc, char** argv) {
             events.push_back({{"message", text}, {"kind", static_cast<int>(kind)}});
             if (output.find("READY") != std::string::npos) ready = true;
         };
+        if (mode == "update") return projectOps::update(input.update, log);
         if (distOperation) {
             projectOps::DistInput distInput;
             distInput.build = input;
