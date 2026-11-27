@@ -3,6 +3,7 @@
 #include "AddonVersions.h"
 #include "ProcessCapture.h"
 #include "GeneratedFile.h"
+#include "PromptInput.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
@@ -768,7 +769,7 @@ static bool confirmCacheRemoval() {
     }
     std::cout << "Remove these cached files? [y/N] " << std::flush;
     std::string answer;
-    std::getline(std::cin, answer);
+    trusscli::readPromptLine(answer);
     return answer == "y" || answer == "Y";
 }
 
