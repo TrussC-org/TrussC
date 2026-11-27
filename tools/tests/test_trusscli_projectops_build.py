@@ -48,6 +48,7 @@ class BuildOperationTests(unittest.TestCase):
                         "-I", str(ROOT / "tools/src"), "-I", str(ROOT / "core/include"),
                         str(ROOT / "tools/tests/projectops_build_driver.cpp"),
                         *[str(ROOT / "tools/src" / (name + ".cpp")) for name in sources],
+                        *(["-Wl,--wrap=access"] if sys.platform == "linux" else []),
                         "-o", str(cls.driver)], check=True)
 
     def setUp(self):
@@ -72,6 +73,9 @@ class BuildOperationTests(unittest.TestCase):
             "binaryDir": "${sourceDir}/build-" + self.preset, "cacheVariables": {"FETCHCONTENT_FULLY_DISCONNECTED": "ON"}}],
             "buildPresets": [{"name": self.preset, "configurePreset": self.preset}]}), encoding="utf-8")
         self.env = dict(os.environ)
+        self.x11_directory = self.base / "fake-x11"
+        self.x11_directory.mkdir()
+        self.env["TEST_X11_DIRECTORY"] = str(self.x11_directory)
 
     def test_empty_fetch_callback_keeps_missing_version_offline(self):
         (self.project / ".trussc-version").write_text("vMissing\n", encoding="utf-8")
@@ -517,9 +521,33 @@ sys.exit(7)
                 self.assert_labwc_temp_files_removed(arguments)
 
     @unittest.skipUnless(sys.platform == "linux", "X11 session launch is Linux-only")
+    def test_run_x11_busy_display_rejects_socket_or_lock_before_launch(self):
+        self.run_fixture()
+        marker = self.base / "unexpected-launch"
+        self.env["UNEXPECTED_LAUNCH"] = str(marker)
+        for binary in (self.app, self.base / "fake-bin/xinit", self.base / "fake-bin/xhost"):
+            binary.write_text('#!/bin/sh\nprintf launched >> "$UNEXPECTED_LAUNCH"\n', encoding="utf-8")
+            binary.chmod(0o755)
+        self.env["PATH"] = str(self.base / "fake-bin") + os.pathsep + self.env["PATH"]
+        for entries in (("X0",), (".X0-lock",), ("X0", ".X0-lock")):
+            with self.subTest(entries=entries):
+                for entry in entries:
+                    (self.x11_directory / entry).touch()
+                try:
+                    report = self.operate("run", "", "x11")
+                    self.assertFalse(report["success"], report)
+                    self.assertNotEqual(report["exitCode"], 0)
+                    self.assertFalse(report["stopped"])
+                    self.assertIn("display :0 is already in use (is a desktop running?)", report["error"])
+                    self.assertIn("--session x11 is for a machine without a desktop session.", report["error"])
+                    self.assertNotIn("Launching via xinit", report["output"])
+                    self.assertFalse(marker.exists(), report)
+                finally:
+                    for entry in entries:
+                        (self.x11_directory / entry).unlink()
+
+    @unittest.skipUnless(sys.platform == "linux", "X11 session launch is Linux-only")
     def test_run_xinit_timeout_reaps_cooperative_and_stubborn_children(self):
-        if Path("/tmp/.X11-unix/X0").exists():
-            self.skipTest("requires no existing :0 display socket")
         self.run_fixture()
         child_info = self.base / "xinit-child.json"
         self.env["XINIT_CHILD_INFO"] = str(child_info)
