@@ -18,6 +18,11 @@ Local-file results may exceed the retained-result budget. One best-effort Notice
 per run is posted to main; it can be omitted if its run or batch is discarded.
 URL and network-buffer admission limits remain in effect; see the API cards.
 
-Background code requests orderly shutdown with `exitApp()`;
-the request is posted to main, whose shutdown drains resource workers. Calling
-`std::exit` directly from a resource worker is unsupported.
+End a TrussC app with `exitApp()`; the request is posted to main, whose
+shutdown drains resource workers. Don't use `std::exit`; from any non-main
+thread it is unsupported. See [EXIT_PROTOCOL.md › Request app shutdown with exitApp](EXIT_PROTOCOL.md#request-app-shutdown-with-exitapp).
+
+```cpp
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+exitApp(0);
+```

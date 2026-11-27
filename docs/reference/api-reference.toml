@@ -48628,10 +48628,17 @@ class tcApp : public App {
 '''
 
 ["exitApp"]
-description.en = "Asks the process to quit, with an exit code."
-description.ja = "終了コードを指定して、プロセスの終了を要求する。"
-description.ko = "종료 코드를 지정해 프로세스 종료를 요청한다."
+description.en = "Requests orderly app shutdown with an exit code; use exitApp() instead of std::exit."
+description.ja = "終了コードを指定してアプリの正常な終了を要求します。std::exit の代わりに exitApp() を使います。"
+description.ko = "종료 코드로 앱의 정상 종료를 요청합니다. std::exit 대신 exitApp()을 사용합니다."
 details.en = '''
+Don't use `std::exit`; from a non-main thread it is unsupported.
+
+```cpp
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+exitApp(0);
+```
+
 - `exitApp(code)` sets the exit code (default `0`) and returns at once. Use a nonzero code to report failure. On Windows and Linux, `runApp()` returns this code to `main()`. On macOS, a normal quit does not return from `runApp()`: the process ends after cleanup with this code (see `runApp`).
 - **The quit can be canceled.** At the next safe point, TrussC sends `exitRequested`; if no listener cancels it, every App ends normally (`exit()` and `cleanup()`) and the process ends. See `RuntimeEvents::exitRequested`.
 - This is the one way to quit, in windowed and headless apps alike. `requestExitApp()` and `App::requestExit()` are deprecated aliases that call `exitApp()`.
@@ -48643,6 +48650,13 @@ details.en = '''
 - On Linux and macOS, while a signal-triggered quit is pending, further SIGTERM signals are ignored so normal cleanup can finish. A further SIGINT (Ctrl+C) immediately exits with code `130`, skipping cleanup, even after SIGTERM. SIGTERM after SIGINT is ignored. A stuck app is left to the supervisor's SIGKILL.
 '''
 details.ja = '''
+`std::exit` は使わないでください。メインスレッド以外からの呼び出しはサポートされません。
+
+```cpp
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+exitApp(0);
+```
+
 - `exitApp(code)` は終了コード（既定値 `0`）を設定して、すぐに戻ります。失敗を伝えたいときは 0 以外のコードを使ってください。Windows と Linux では、`runApp()` がこのコードを `main()` に返します。macOS の通常の終了では `runApp()` は戻らず、cleanup のあとにこのコードでプロセスが終了します（`runApp` を参照）。
 - **終了は取り消せます。** 次の安全なタイミングで TrussC が `exitRequested` を送り、どのリスナーも取り消さなければ、すべての App が通常どおり終わり（`exit()` と `cleanup()`）、プロセスが終了します。`RuntimeEvents::exitRequested` を参照してください。
 - 終了する方法はこれ一つで、ウィンドウのあるアプリでもヘッドレスアプリでも同じです。`requestExitApp()` と `App::requestExit()` は、`exitApp()` を呼ぶだけの非推奨の別名です。
@@ -48654,6 +48668,13 @@ details.ja = '''
 - Linux と macOS では、シグナルによる終了が保留中の間、追加の SIGTERM を無視し、通常の終了処理を続けます。追加の SIGINT（Ctrl+C）は、最初のシグナルが SIGTERM でも、終了処理を省略してコード `130` で即時終了します。SIGINT のあとの SIGTERM は無視します。アプリが応答しない場合は、監視プロセスの SIGKILL に任せます。
 '''
 details.ko = '''
+`std::exit`을 사용하지 마십시오. 메인 스레드 이외에서의 호출은 지원하지 않습니다.
+
+```cpp
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+exitApp(0);
+```
+
 - `exitApp(code)`는 종료 코드(기본값 `0`)를 설정하고 바로 반환합니다. 실패를 알리려면 0이 아닌 코드를 사용하세요. Windows와 Linux에서는 `runApp()`이 이 코드를 `main()`에 반환합니다. macOS의 정상 종료에서는 `runApp()`이 반환되지 않고, cleanup 뒤에 이 코드로 프로세스가 끝납니다(`runApp` 참조).
 - **종료는 취소할 수 있습니다.** 다음 안전한 시점에 TrussC가 `exitRequested`를 보내고, 어떤 리스너도 취소하지 않으면 모든 App이 정상적으로 끝나며(`exit()`와 `cleanup()`) 프로세스가 종료됩니다. `RuntimeEvents::exitRequested`를 참조하세요.
 - 종료하는 방법은 이것 하나이며, 윈도우가 있는 앱과 헤드리스 앱에서 똑같습니다. `requestExitApp()`과 `App::requestExit()`는 `exitApp()`을 호출할 뿐인 사용이 권장되지 않는 별칭입니다.
@@ -65979,24 +66000,39 @@ void tcApp::setup() {
 
 ["mcp::stopHttpServer"]
 category = "mcp"
-description.en = "Stops the MCP HTTP listener."
-description.ja = "MCP の HTTP リスナーを停止する。"
-description.ko = "MCP HTTP 리스너를 중지한다."
+description.en = "Stops the MCP HTTP listener from the main thread and waits for it to finish."
+description.ja = "メインスレッドから MCP の HTTP リスナーを停止し、終了を待ちます。"
+description.ko = "메인 스레드에서 MCP HTTP 리스너를 중지하고 종료를 기다립니다."
 details.en = '''
-- Answers queued, deferred, and other active requests with shutdown errors to release waiting workers, then stops the listener. Results arriving after a shutdown reply are discarded.
-- Normally waits for the listener thread to finish; when called from HTTP handling or the listener thread, it detaches instead of joining itself.
+- Stops the MCP HTTP listener and waits for it to finish. Call it from the main thread in setup, update, or event handlers; calling it from a two-stage reply thunk or any HTTP worker is not supported. For example, stop it when a key is pressed:
+```cpp
+void tcApp::keyPressed(int key) {
+    mcp::stopHttpServer();
+}
+```
+- Answers queued, deferred, and other active requests with shutdown errors to release waiting workers. Results arriving after a shutdown reply are discarded.
 - Resets the HTTP port to 0 and clears explicit-open and health-only state.
 - For platform availability, see `mcp::startHttpServer`.
 '''
 details.ja = '''
-- キュー内、遅延中、その他の処理中の要求に停止エラーを返して待機中のワーカーを解放し、リスナーを停止します。停止の応答後に届いた結果は破棄します。
-- 通常はリスナースレッドの終了を待ちます。HTTP 要求の処理中またはリスナースレッドから呼んだ場合は、自分自身の終了を待たずに切り離します。
+- MCP の HTTP リスナーを停止し、終了を待ちます。setup、update、イベントハンドラーなど、メインスレッドから呼んでください。二段階応答の thunk や HTTP ワーカーからの呼び出しはサポートしていません。たとえば、キーを押したときに停止します。
+```cpp
+void tcApp::keyPressed(int key) {
+    mcp::stopHttpServer();
+}
+```
+- キュー内、遅延中、その他の処理中の要求に停止エラーを返して待機中のワーカーを解放します。停止の応答後に届いた結果は破棄します。
 - HTTP ポートを 0 にし、明示的な起動とヘルス確認専用の状態を解除します。
 - 対応プラットフォームは `mcp::startHttpServer` を参照してください。
 '''
 details.ko = '''
-- 대기열, 지연 중인 요청 및 그 밖의 처리 중인 요청에 종료 오류를 반환하여 기다리는 워커를 해제한 뒤 리스너를 중지합니다. 종료 응답 이후 도착한 결과는 버립니다.
-- 일반적으로 리스너 스레드의 종료를 기다립니다. HTTP 요청 처리 중이거나 리스너 스레드에서 호출하면 자기 자신의 종료를 기다리는 대신 분리합니다.
+- MCP HTTP 리스너를 중지하고 종료를 기다립니다. setup, update 또는 이벤트 핸들러 등 메인 스레드에서 호출합니다. 2단계 응답 thunk나 HTTP 워커에서의 호출은 지원하지 않습니다. 예를 들어 키를 누를 때 중지합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    mcp::stopHttpServer();
+}
+```
+- 대기열, 지연 중인 요청 및 그 밖의 처리 중인 요청에 종료 오류를 반환하여 기다리는 워커를 해제합니다. 종료 응답 이후 도착한 결과는 버립니다.
 - HTTP 포트를 0으로 설정하고 명시적 시작 및 상태 확인 전용 상태를 해제합니다.
 - 지원 플랫폼은 `mcp::startHttpServer`를 참조하세요.
 '''

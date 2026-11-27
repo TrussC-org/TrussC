@@ -3,6 +3,11 @@
 #include <atomic>
 #include <chrono>
 
+// End a TrussC app with exitApp(). Don't use std::exit; from a non-main
+// thread it is unsupported.
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+//     exitApp(0);
+
 // Internal, process-wide exit bookkeeping shared by the runtime and backends.
 namespace trussc::internal {
 int& appExitCode();  // defined in tcGlobal.cpp; shared by host, guests and backends
