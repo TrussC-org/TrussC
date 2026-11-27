@@ -1,0 +1,7 @@
+file(READ "${INPUT}" _source)
+string(FIND "${_source}" "void androidBackgroundTick() noexcept {" _start)
+string(FIND "${_source}" "#endif\nvoid singleWindowFrame()" _end)
+math(EXPR _length "${_end} - ${_start}")
+string(SUBSTRING "${_source}" ${_start} ${_length} _entry)
+string(REPLACE "androidBackgroundTick" "backgroundTickForTests" _entry "${_entry}")
+file(WRITE "${OUTPUT}" "#include <TrussC.h>\nnamespace trussc::internal {\n${_entry}\n}\n")

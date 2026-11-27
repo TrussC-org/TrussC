@@ -1,4 +1,6 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
+#include <span>
 
 #include "tcxOscMessage.h"
 #include <memory>
@@ -109,10 +111,12 @@ public:
     // it. The preflight also limits the whole outer packet to 65,536 bytes
     // (the UDP datagram size); nesting depth has no limit of its own.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
+    TC_LUA_SKIP static OscBundle fromBytes(std::span<const uint8_t> data, bool& ok) { return fromBytes(data.data(), data.size(), ok); }
     // Same, and paddingMissing tells whether any message in the bundle ends
     // before its zero padding to 4 bytes (it still parses, as in
     // OscMessage::fromBytes()).
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing);
+    TC_LUA_SKIP static OscBundle fromBytes(std::span<const uint8_t> data, bool& ok, bool& paddingMissing) { return fromBytes(data.data(), data.size(), ok, paddingMissing); }
 
     // -------------------------------------------------------------------------
     // Bundle detection (check if data starts with "#bundle")

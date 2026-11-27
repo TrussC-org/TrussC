@@ -10,6 +10,7 @@
 #include <cstring>
 #include "tc/utils/internal/tcAsyncDialog.h"
 #include <memory>
+#include "tc/utils/internal/tcDialogFilter.h"
 
 namespace {
 
@@ -34,10 +35,32 @@ void processGtkEvents() {
     }
 }
 
+void setFilter(GtkWidget* widget, const std::vector<std::string>& extensions) {
+    if (extensions.empty()) return;
+    GtkFileFilter* filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "Allowed files");
+    for (const auto& extension : extensions)
+        gtk_file_filter_add_pattern(filter, trussc::internal::dialogGtkPattern(extension).c_str());
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(widget), filter);
+}
+
+trussc::FileDialogResult finishSave(trussc::FileDialogResult result,
+                                  const std::vector<std::string>& extensions) {
+    if (!result.success || extensions.empty()) return result;
+    result.filePath = trussc::internal::dialogSaveName(result.filePath.string(), extensions);
+    result.fileName = result.filePath.filename();
+    std::error_code error;
+    const bool exists = trussc::fs::exists(result.filePath, error);
+    if (error || (exists && !trussc::confirmDialog("Replace file?",
+            "Replace the existing file?\n" + result.filePath.string()))) return {};
+    return result;
+}
+
 struct NativeDialog {
     std::shared_ptr<GtkWidget*> handle;
     trussc::internal::DialogKind kind;
     trussc::internal::DialogCompletion complete;
+    std::vector<std::string> extensions;
 };
 size_t openDialogs = 0;
 bool cleanupPending = false;
@@ -64,8 +87,13 @@ void dialogResponse(GtkDialog* widget, gint response, gpointer data) {
             g_free(filename);
         }
     }
+    const auto extensions = dialog->extensions;
+    const auto kind = dialog->kind;
     auto complete = std::move(dialog->complete);
     gtk_widget_destroy(GTK_WIDGET(widget));
+    if (kind == trussc::internal::DialogKind::Save) result = finishSave(std::move(result), extensions);
+    if (kind == trussc::internal::DialogKind::Load && result.success &&
+        !trussc::internal::dialogExtensionMatches(result.fileName.string(), extensions)) result = {};
     if (complete) complete(std::move(result));
 }
 
@@ -91,15 +119,17 @@ trussc::internal::DialogDismiss presentDialog(const trussc::internal::DialogInpu
             save ? "_Save" : inputs.folderSelection ? "_Select" : "_Open", GTK_RESPONSE_ACCEPT, nullptr);
         if (!inputs.defaultPath.empty())
             gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(widget), inputs.defaultPath.c_str());
+        if (!inputs.folderSelection) setFilter(widget, inputs.extensions);
         if (save) {
             // GTK's internal overwrite confirmation still blocks (owner-approved).
-            gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(widget), TRUE);
+            gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(widget), inputs.extensions.empty());
             if (!inputs.defaultName.empty())
                 gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(widget), inputs.defaultName.c_str());
         }
     }
     auto handle = std::make_shared<GtkWidget*>(widget);
-    auto* dialog = new NativeDialog{handle, inputs.kind, std::move(complete)};
+    auto* dialog = new NativeDialog{handle, inputs.kind, std::move(complete),
+        inputs.folderSelection ? std::vector<std::string>{} : inputs.extensions};
     g_signal_connect(widget, "response", G_CALLBACK(dialogResponse), dialog);
     g_signal_connect(widget, "destroy", G_CALLBACK(dialogDestroyed), dialog);
     ++openDialogs;
@@ -194,7 +224,8 @@ void confirmDialogAsync(const std::string& title,
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            bool folderSelection) {
+                            bool folderSelection,
+                            const std::vector<std::string>& extensions) {
     FileDialogResult result;
     (void)message;  // GTK file chooser doesn't have a message field
 
@@ -223,6 +254,7 @@ FileDialogResult loadDialog(const std::string& title,
         gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), defaultPath.c_str());
     }
 
+    if (!folderSelection) setFilter(dialog, extensions);
     gtk_window_set_keep_above(GTK_WINDOW(dialog), TRUE);
 
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
@@ -238,6 +270,8 @@ FileDialogResult loadDialog(const std::string& title,
     gtk_widget_destroy(dialog);
     processGtkEvents();
 
+    if (!folderSelection && result.success &&
+        !internal::dialogExtensionMatches(result.fileName.string(), extensions)) return {};
     return result;
 }
 
@@ -245,8 +279,9 @@ void loadDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      bool folderSelection,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
-    internal::requestAsyncDialog({internal::DialogKind::Load, title, message, defaultPath, {}, folderSelection},
+    internal::requestAsyncDialog({internal::DialogKind::Load, title, message, defaultPath, {}, folderSelection, {}, extensions},
         std::move(callback), presentDialog);
 }
 
@@ -256,7 +291,8 @@ void loadDialogAsync(const std::string& title,
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
                             const fs::path& defaultPath,
-                            const fs::path& defaultName) {
+                            const fs::path& defaultName,
+                            const std::vector<std::string>& extensions) {
     FileDialogResult result;
     (void)message;  // GTK file chooser doesn't have a message field
 
@@ -273,7 +309,8 @@ FileDialogResult saveDialog(const std::string& title,
         nullptr
     );
 
-    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
+    setFilter(dialog, extensions);
+    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), extensions.empty());
 
     if (!defaultPath.empty()) {
         gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), defaultPath.c_str());
@@ -297,16 +334,38 @@ FileDialogResult saveDialog(const std::string& title,
     gtk_widget_destroy(dialog);
     processGtkEvents();
 
-    return result;
+    return finishSave(std::move(result), extensions);
 }
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
+                     const std::vector<std::string>& extensions,
                      std::function<void(const FileDialogResult&)> callback) {
-    internal::requestAsyncDialog({internal::DialogKind::Save, title, message, defaultPath, defaultName},
+    internal::requestAsyncDialog({internal::DialogKind::Save, title, message, defaultPath, defaultName, false, {}, extensions},
         std::move(callback), presentDialog);
+}
+
+
+// Preserve the original entry points and their unfiltered behavior.
+FileDialogResult loadDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, bool folderSelection) {
+    return loadDialog(title, message, defaultPath, folderSelection, {});
+}
+void loadDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, bool folderSelection,
+                     std::function<void(const FileDialogResult&)> callback) {
+    loadDialogAsync(title, message, defaultPath, folderSelection, {}, std::move(callback));
+}
+FileDialogResult saveDialog(const std::string& title, const std::string& message,
+                            const fs::path& defaultPath, const fs::path& defaultName) {
+    return saveDialog(title, message, defaultPath, defaultName, {});
+}
+void saveDialogAsync(const std::string& title, const std::string& message,
+                     const fs::path& defaultPath, const fs::path& defaultName,
+                     std::function<void(const FileDialogResult&)> callback) {
+    saveDialogAsync(title, message, defaultPath, defaultName, {}, std::move(callback));
 }
 
 } // namespace trussc

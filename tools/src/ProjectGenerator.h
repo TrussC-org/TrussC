@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <utility>
 
 // Project generation settings
 struct ProjectSettings {
@@ -50,6 +51,9 @@ struct ProjectSettings {
     }
 };
 
+// Native generator, cache variables and environment shared by projects and A-1.
+std::string nativeToolchainPreset(const ProjectSettings& settings);
+
 // The toolchainFile to write into a web / android preset. `detected` is what
 // this shell finds (empty when nothing was found), `saved` the toolchainFile
 // of the existing preset, `envFallback` the $env{...} form CMake resolves at
@@ -74,6 +78,11 @@ public:
     // the inherited console (Windows, #417).
     static inline bool runChildrenHidden = false;
 
+    // A build operation routes nested regeneration commands through its owned
+    // launcher. Other update callers retain their existing execution policy.
+    using CommandRunner = std::function<std::pair<int, std::string>(const std::string&)>;
+    static inline thread_local CommandRunner commandRunner;
+
     // Set log callback for progress messages
     void setLogCallback(LogCallback callback) { logCallback_ = callback; }
     void setConfigureOutputCallback(ConfigureOutputCallback callback) {
@@ -84,8 +93,11 @@ public:
     // Returns empty string on success, error message on failure
     std::string generate();
 
+    // Check the existing project signature before any update writes.
+    static std::string validateProject(const std::string& projectPath);
+
     // Update existing project
-    std::string update(const std::string& projectPath);
+    std::string update(const std::string& projectPath, bool resolveInstalledAddons = false);
 
     // Write only CMakePresets.json into an existing project, from the current
     // settings (no addons.make, CMakeLists.txt, IDE files or configure).
@@ -139,7 +151,7 @@ private:
     void runCMakeConfigure(const std::string& path);
 
     // Write addons.make
-    void writeAddonsMake(const std::string& destPath);
+    void writeAddonsMake(const std::string& destPath, bool preserveExisting = false);
 
     // Regenerate the standard CMake file, naming changed targets explicitly.
     void writeCMakeLists(const std::string& projectPath);

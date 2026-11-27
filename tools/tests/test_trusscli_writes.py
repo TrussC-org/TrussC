@@ -89,6 +89,10 @@ class WriteTests(unittest.TestCase):
 
     def test_new_normalizes_crlf_template(self):
         framework = self.base / "framework"
+        # --tc-root now saves a validated local TrussC selection.
+        core = framework / "core/cmake"
+        core.mkdir(parents=True)
+        (core / "trussc_app.cmake").write_text("", encoding="utf-8")
         template = framework / "examples/templates/emptyExample"
         shutil.copytree(ROOT / "examples/templates/emptyExample", template,
                         ignore=shutil.ignore_patterns("build*", "CMakePresets.json"))

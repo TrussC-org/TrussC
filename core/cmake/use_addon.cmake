@@ -32,6 +32,55 @@
 # Track which addons have already been added
 set(_TC_LOADED_ADDONS "" CACHE INTERNAL "List of loaded TrussC addons")
 
+# trusscli resolves versions before configuring. This map is also usable by
+# manual CMake callers: -DTRUSSC_ADDON_PATHS='{"tcxFoo":"/path/to/tcxFoo"}'.
+function(_tc_addon_path ADDON_NAME OUTPUT)
+    if(TRUSSC_ADDON_PATHS)
+        string(JSON _TC_PATH ERROR_VARIABLE _TC_PATH_ERROR GET "${TRUSSC_ADDON_PATHS}" "${ADDON_NAME}")
+        if(NOT _TC_PATH_ERROR)
+            set(${OUTPUT} "${_TC_PATH}" PARENT_SCOPE)
+            return()
+        endif()
+    endif()
+    get_filename_component(_TC_PATH "${TRUSSC_DIR}/../addons/${ADDON_NAME}" ABSOLUTE)
+    set(${OUTPUT} "${_TC_PATH}" PARENT_SCOPE)
+endfunction()
+
+# Share the normalized selection with normal and hot-reload app builds.
+function(_tc_project_addons OUTPUT)
+    set(_TC_NAMES "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/addons.make")
+        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/addons.make" _TC_LINES)
+        foreach(_TC_LINE IN LISTS _TC_LINES)
+            string(STRIP "${_TC_LINE}" _TC_LINE)
+            if(_TC_LINE AND NOT _TC_LINE MATCHES "^#")
+                string(REGEX REPLACE "@.*$" "" _TC_NAME "${_TC_LINE}")
+                string(REGEX REPLACE "^.*/" "" _TC_NAME "${_TC_NAME}")
+                if(NOT TRUSSC_ADDON_PATHS AND NOT _TC_LINE STREQUAL _TC_NAME)
+                    message(FATAL_ERROR "Addon versions require resolution; run trusscli update, then trusscli build")
+                endif()
+                list(APPEND _TC_NAMES "${_TC_NAME}")
+            endif()
+        endforeach()
+    endif()
+    if(TRUSSC_ADDON_PATHS)
+        string(JSON _TC_COUNT LENGTH "${TRUSSC_ADDON_PATHS}")
+        if(_TC_COUNT GREATER 0)
+            math(EXPR _TC_LAST "${_TC_COUNT} - 1")
+            foreach(_TC_INDEX RANGE ${_TC_LAST})
+                string(JSON _TC_NAME MEMBER "${TRUSSC_ADDON_PATHS}" ${_TC_INDEX})
+                list(APPEND _TC_NAMES "${_TC_NAME}")
+            endforeach()
+        endif()
+    endif()
+    if(TRUSSC_ADDON_ORDER)
+        # The resolver supplies parent-before-dependency order for static archives.
+        set(_TC_NAMES ${TRUSSC_ADDON_ORDER} ${_TC_NAMES})
+    endif()
+    list(REMOVE_DUPLICATES _TC_NAMES)
+    set(${OUTPUT} "${_TC_NAMES}" PARENT_SCOPE)
+endfunction()
+
 # _tc_load_addon(addon_name)
 # Create the addon's CMake target without linking it to anything. Used by
 # both `use_addon` (which then links to the requested target) and the hot
@@ -48,7 +97,7 @@ macro(_tc_load_addon _ADDON_NAME)
     endif()
     list(FIND _TC_LOADED_ADDONS ${_ADDON_NAME} _ADDON_INDEX)
     if(_ADDON_INDEX EQUAL -1)
-        get_filename_component(_ADDON_PATH "${TRUSSC_DIR}/../addons/${_ADDON_NAME}" ABSOLUTE)
+        _tc_addon_path("${_ADDON_NAME}" _ADDON_PATH)
 
         if(NOT EXISTS "${_ADDON_PATH}")
             message(FATAL_ERROR "TrussC addon not found: ${_ADDON_NAME}\n  Looked in: ${_ADDON_PATH}")
@@ -197,18 +246,10 @@ endmacro()
 # Read the addons.make file and apply every addon listed in it.
 # Comments (lines starting with #) and blank lines are ignored.
 macro(apply_addons TARGET_NAME)
-    set(_ADDONS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/addons.make")
-    if(EXISTS "${_ADDONS_FILE}")
-        file(STRINGS "${_ADDONS_FILE}" _ADDON_LINES)
-        foreach(_LINE ${_ADDON_LINES})
-            # Trim whitespace
-            string(STRIP "${_LINE}" _LINE)
-            # Skip blank lines and comment lines
-            if(_LINE AND NOT _LINE MATCHES "^#")
-                use_addon(${TARGET_NAME} ${_LINE})
-            endif()
-        endforeach()
-    endif()
+    _tc_project_addons(_TC_PROJECT_ADDONS)
+    foreach(_TC_PROJECT_ADDON IN LISTS _TC_PROJECT_ADDONS)
+        use_addon(${TARGET_NAME} ${_TC_PROJECT_ADDON})
+    endforeach()
 endmacro()
 
 # =============================================================================

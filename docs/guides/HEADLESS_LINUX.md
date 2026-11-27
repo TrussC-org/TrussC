@@ -225,7 +225,7 @@ not recreated. Other graphics backends do not gain device-loss detection.
 - **GPU**: VideoCore VI (Pi 4) or VideoCore VII (Pi 5) — TrussC uses OpenGL ES 3.0
 - **HW video decode** (auto-detected by TrussC, falls back to SW):
   - **Pi 4**: V4L2M2M interface exposes H.264 / HEVC HW decoder
-  - **Pi 5**: H.264 HW decoder removed; HEVC still available via DRM (prime interop)
+  - **Pi 5**: H.264 HW decoder removed. TrussC decodes HEVC in software too, because its hardware frames cannot be transferred and playback falls back (#1489)
 - **Boot to CLI**: `sudo raspi-config` → System Options → Boot / Auto Login → Console
 - **Remote access**: SSH for development, physical display for final output
 

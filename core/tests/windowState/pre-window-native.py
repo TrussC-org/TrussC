@@ -61,7 +61,7 @@ class Window;
 namespace headless { bool active=false; bool isActive() { return active; } }
 namespace internal {
 struct WindowContext {
-    Window* hostWindow=nullptr; bool drawWhileHidden=false;
+    Window* hostWindow=nullptr; bool drawWhileHidden=false, updateWhileHidden=true;
     void *deferredResponseTarget=nullptr,*acquireSwapchain=nullptr,*acquireSwapchainUser=nullptr,*activateNative=nullptr;
     float dpiScale=1; int fbWidth=0,fbHeight=0;
 };
@@ -87,6 +87,7 @@ struct WindowRequestAccess {
 bool pixels=false;
 bool& pixelPerfectMode() { return pixels; }
 bool& defaultDrawWhileHidden() { static bool allow=false; return allow; }
+bool& defaultUpdateWhileHidden() { static bool allow=true; return allow; }
 int framebufferToLogical(int pixels,float dpi);
 struct Target { bool isFbo=false; int width=1001,height=667; } target;
 Target& currentTarget() { return target; }

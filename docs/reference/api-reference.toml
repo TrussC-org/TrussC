@@ -1798,7 +1798,7 @@ description.ko = "오디오 출력 엔진을 초기화하거나 재초기화한�
 details.en = '''
 - `init(settings)` opens output using `AudioSettings`; without a device object, an empty device name selects the system default. The device object takes precedence over name and backend. An unmatched device name logs a warning and fails without opening another device.
 - Positive sample rate, channel count, buffer size, and polyphony values are used as supplied; nonpositive values select `48000` Hz, `2` channels, backend-selected buffer size (`0`), and no voice cap (`0`) respectively.
-- These four settings are stored even if initialization fails. `init()` without arguments reuses them, but always requests the system default device with `AudioBackend::Default`; device name and backend are not retained.
+- These four settings, `performanceProfile`, and `contentType` are stored even if initialization fails. `init()` without arguments reuses them, but always requests the system default device with `AudioBackend::Default`; device name and backend are not retained.
 - Returns `true` after opening and starting output, then notifying `audioDeviceChanged`; returns `false` on selection, backend creation, device opening, or device start failure. Missing selections and unavailable backends log a Warning; device open/start failures use `logError("AudioEngine")`, identifying the requested device when supplied.
 - Reinitialization closes the running device first, so it causes an output gap and a failed attempt leaves the engine stopped. Lowering a polyphony cap discards slots beyond the new cap.
 - During live reinitialization that changes the sample rate, active voices are migrated to the new rate while preserving playback time; streams of unknown length restart from the beginning, and streams whose decoder cannot reopen are stopped.
@@ -1811,7 +1811,7 @@ details.en = '''
 details.ja = '''
 - `init(settings)` は `AudioSettings` に従って出力を開きます。デバイスオブジェクトがなければ、空の名前でシステム既定を選びます。オブジェクトは名前とバックエンドの指定より優先します。名前に一致するデバイスがなければ警告を出し、別のデバイスを開かず失敗します。
 - サンプルレート、チャンネル数、バッファサイズ、同時再生数が正なら指定値を使います。0 以下なら、それぞれ `48000` Hz、`2` チャンネル、バックエンドが選ぶサイズ（`0`）、上限なし（`0`）を使います。
-- この 4 項目は初期化に失敗しても保存します。引数なしの `init()` はこれらを再利用しますが、常に `AudioBackend::Default` でシステム既定のデバイスを要求します。デバイス名とバックエンドは引き継ぎません。
+- この 4 項目と `performanceProfile`、`contentType` は初期化に失敗しても保存します。引数なしの `init()` はこれらを再利用しますが、常に `AudioBackend::Default` でシステム既定のデバイスを要求します。デバイス名とバックエンドは引き継ぎません。
 - 出力を開いて開始し、`audioDeviceChanged` を通知した後に `true` を返します。デバイスの選択、バックエンドの作成、デバイスのオープン、出力の開始に失敗すると `false` を返します。選択したデバイスが見つからない場合やバックエンドを利用できない場合は Warning、デバイスのオープンや開始の失敗は `logError("AudioEngine")` で記録します。デバイス名を指定していた場合は、その名前も示します。
 - 再初期化では先に動作中のデバイスを閉じるため、出力が一時的に途切れ、失敗するとエンジンは停止したままになります。同時再生数の上限を下げると、新しい上限を超えるスロットを破棄します。
 - 動作中の再初期化でサンプルレートが変わる場合は、再生位置の時間を保ってアクティブな再生を新しいレートへ移行します。この場合、長さが不明なストリームは先頭から再開し、デコーダーを開き直せないストリームは停止します。
@@ -1824,7 +1824,7 @@ details.ja = '''
 details.ko = '''
 - `init(settings)`는 `AudioSettings`에 따라 출력을 엽니다. 장치 객체가 없고 이름이 비어 있으면 시스템 기본 장치를 선택합니다. 객체는 이름과 백엔드 지정보다 우선합니다. 일치하는 이름이 없으면 경고를 기록하고 다른 장치를 열지 않고 실패합니다.
 - 샘플 레이트, 채널 수, 버퍼 크기, 동시 재생 수가 양수이면 지정값을 사용합니다. 0 이하이면 각각 `48000` Hz, `2`채널, 백엔드가 선택하는 크기(`0`), 상한 없음(`0`)을 사용합니다.
-- 이 네 설정은 초기화에 실패해도 저장합니다. 인수 없는 `init()`은 이를 재사용하지만 항상 `AudioBackend::Default`로 시스템 기본 장치를 요청합니다. 장치 이름과 백엔드는 유지하지 않습니다.
+- 이 네 설정과 `performanceProfile`, `contentType`은 초기화에 실패해도 저장합니다. 인수 없는 `init()`은 이를 재사용하지만 항상 `AudioBackend::Default`로 시스템 기본 장치를 요청합니다. 장치 이름과 백엔드는 유지하지 않습니다.
 - 출력을 열고 시작한 뒤 `audioDeviceChanged`를 알리고 `true`를 반환합니다. 장치 선택, 백엔드 생성, 장치 열기, 출력 시작에 실패하면 `false`를 반환합니다. 선택한 장치가 없거나 백엔드를 사용할 수 없으면 Warning을 기록하고, 장치 열기나 시작에 실패하면 `logError("AudioEngine")`로 기록하며, 장치 이름을 지정했다면 그 이름도 표시합니다.
 - 재초기화는 실행 중인 장치를 먼저 닫으므로 출력이 잠시 끊기며, 실패하면 엔진이 정지한 상태로 남습니다. 동시 재생 수 상한을 줄이면 새 상한을 넘는 슬롯을 버립니다.
 - 실행 중 재초기화로 샘플 레이트가 바뀌면 재생 시간을 유지하며 활성 재생을 새 레이트로 이전합니다. 이 경우 길이가 알려지지 않은 스트림은 처음부터 다시 시작하고, 디코더를 다시 열 수 없는 스트림은 정지합니다.
@@ -2643,21 +2643,21 @@ description.en = "Configures audio engine initialization."
 description.ja = "オーディオエンジンの初期化を設定する。"
 description.ko = "오디오 엔진 초기화를 설정한다."
 details.en = '''
-- Pass this type to `AudioEngine::init(settings)` to choose the sample rate, output channels, device buffer size, maximum simultaneous voices, and playback device.
+- Pass this type to `AudioEngine::init(settings)` to choose the sample rate, output channels, device buffer size, maximum simultaneous voices, playback device, performance profile, and AAudio content type.
 - Defaults are `sampleRate = 0` for 48000 Hz, `channels = 2` for stereo, `bufferSize = 0` for automatic device selection of the period size, and `maxPolyphony = 0` for no cap on simultaneous voices. The buffer size is requested in frames; nonpositive `sampleRate`, `channels` and `bufferSize` select the corresponding engine defaults.
 - An empty `deviceName` selects the system default playback device. A nonempty name is matched against `AudioEngine::listDevices()`; if no match is found, the engine logs a warning and fails without opening another device. `device`, when set, selects by ID and overrides both `deviceName` and `backend`.
 - `backend` defaults to `AudioBackend::Default`. Set it to `AudioBackend::Null` for a silent mixer that runs without a physical audio device.
 - Initialization failures and live reinitialization follow the rules of `AudioEngine::init`.
 '''
 details.ja = '''
-- `AudioEngine::init(settings)` に渡し、サンプルレート、出力チャンネル数、デバイスのバッファサイズ、最大同時再生数、再生デバイスを指定します。
+- `AudioEngine::init(settings)` に渡し、サンプルレート、出力チャンネル数、デバイスのバッファサイズ、最大同時再生数、再生デバイス、パフォーマンスプロファイル、AAudioのコンテンツ種別を指定します。
 - 既定値は、48000 Hz を選ぶ `sampleRate = 0`、ステレオの `channels = 2`、デバイスに周期の選択を任せる `bufferSize = 0`、同時再生数に上限を設けない `maxPolyphony = 0` です。バッファサイズの要求値はフレーム数で指定します。`sampleRate`、`channels`、`bufferSize` が 0 以下の場合は、それぞれのエンジン既定値を使います。
 - `deviceName` が空ならシステム既定の再生デバイスを選びます。空でない場合は `AudioEngine::listDevices()` の名前と照合し、見つからなければ警告を記録して別のデバイスを開かず失敗します。`device` を設定するとIDで選び、`deviceName` と `backend` より優先します。
 - `backend` の既定値は `AudioBackend::Default` です。物理オーディオデバイスを使わず無音でミキサーを動かす場合は、`AudioBackend::Null` を指定します。
 - 初期化の失敗と実行中の再初期化については、`AudioEngine::init` の規則に従います。
 '''
 details.ko = '''
-- `AudioEngine::init(settings)`에 전달하여 샘플레이트, 출력 채널 수, 장치 버퍼 크기, 최대 동시 재생 수, 재생 장치를 지정합니다.
+- `AudioEngine::init(settings)`에 전달하여 샘플레이트, 출력 채널 수, 장치 버퍼 크기, 최대 동시 재생 수, 재생 장치, 성능 프로파일, AAudio 콘텐츠 유형을 지정합니다.
 - 기본값은 48000 Hz를 선택하는 `sampleRate = 0`, 스테레오인 `channels = 2`, 장치가 주기 크기를 선택하도록 하는 `bufferSize = 0`, 동시 재생 수에 상한을 두지 않는 `maxPolyphony = 0`입니다. 버퍼 크기는 프레임 수로 요청합니다. `sampleRate`, `channels`, `bufferSize`가 0 이하이면 각각의 엔진 기본값을 사용합니다.
 - `deviceName`이 비어 있으면 시스템 기본 재생 장치를 선택합니다. 비어 있지 않으면 `AudioEngine::listDevices()`의 이름과 비교하며, 일치하는 장치가 없으면 경고를 기록하고 다른 장치를 열지 않고 실패합니다. `device`를 설정하면 ID로 선택하며 `deviceName`과 `backend`보다 우선합니다.
 - `backend`의 기본값은 `AudioBackend::Default`입니다. 물리적 오디오 장치 없이 믹서를 무음으로 실행하려면 `AudioBackend::Null`을 지정합니다.
@@ -7252,14 +7252,17 @@ description.ko = "요청에 따른 그리기를 지정한다."
 details.en = '''
 - This float constant is 0. With `setFps(EVENT_DRIVEN)`, the current window updates and draws together when `redraw()` requests a frame.
 - With `setIndependentFps`, an `EVENT_DRIVEN` draw rate waits for `redraw()`, while an `EVENT_DRIVEN` update rate disables independent updates.
+- Besides `redraw()`, the window also draws once when it is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame.
 '''
 details.ja = '''
 - 値が 0 の float 定数です。`setFps(EVENT_DRIVEN)` を指定すると、現在のウィンドウは `redraw()` でフレームを要求したときに更新と描画を一緒に行います。
 - `setIndependentFps` では、描画レートを `EVENT_DRIVEN` にすると `redraw()` を待ち、更新レートを `EVENT_DRIVEN` にすると独立した更新を行わなくなります。
+- `redraw()` のほかに、ウィンドウが最初に表示されたとき（1 回）、大きさが変わったとき（2 回）、スクリーンショットや MCP の取り込みでフレームが必要なときにも描画します。
 '''
 details.ko = '''
 - 값이 0인 float 상수입니다. `setFps(EVENT_DRIVEN)`을 지정하면 현재 윈도우는 `redraw()`로 프레임을 요청했을 때 업데이트와 그리기를 함께 수행합니다.
 - `setIndependentFps`에서 그리기 레이트를 `EVENT_DRIVEN`으로 지정하면 `redraw()`를 기다리며, 업데이트 레이트를 `EVENT_DRIVEN`으로 지정하면 독립 업데이트를 수행하지 않습니다.
+- `redraw()` 외에도 윈도우가 처음 표시될 때(1회), 크기가 바뀐 뒤(2회), 스크린샷이나 MCP 캡처에 프레임이 필요할 때도 그립니다.
 '''
 
 ["EaseMode"]
@@ -9611,104 +9614,232 @@ details.ko = '''
 
 ["Fbo::readPixels"]
 category = "graphics_fbo"
-keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a top-first CPU RGBA8 buffer."
-description.ja = "フレームバッファの内容を、上の行から並ぶ CPU RGBA8 バッファに読み出します。"
-description.ko = "프레임버퍼 내용을 위쪽 행부터 배치한 CPU RGBA8 버퍼로 읽습니다."
+keywords = ["download", "cpu", "Pixels"]
+description.en = "Reads an ended Fbo as RGBA8 into Pixels with automatic sizing or a byte buffer allocated by the caller."
+description.ja = "end 後の Fbo を RGBA8 として、自動サイズ調整する Pixels または呼び出し側で確保したバイト配列に読み出します。"
+description.ko = "종료된 Fbo를 RGBA8로 자동 크기 조정 Pixels 또는 호출자가 할당한 바이트 버퍼에 읽습니다."
 details.en = '''
-- `readPixels(unsigned char* pixels)` requires space for `getWidth() * getHeight() * 4` bytes. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
+- Use the Pixels overload for CPU RGBA8 pixels without calculating buffer capacity. It returns bool, resizes on success and leaves the output unchanged on failure. Call after ending every active Fbo.
 
-Read the completed Fbo:
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- Call after `end()`, outside every Fbo rendering scope in the current window. Calling inside any such scope logs an error and returns `false`, even when reading a different Fbo.
-- Reads mip level 0 of the current color texture, using the resolved result for MSAA. Output is tightly packed RGBA with the top row first and pixels ordered left to right; native GL rows are reversed only where needed, so no additional vertical flip is needed.
-- Always converts to RGBA8 regardless of the attachment format: values are clamped to 0–1 and quantized to 8 bits, missing G/B components in R/RG formats become 0, and missing alpha becomes 1. BGRA is reordered to RGBA; see `TextureFormat` for source formats.
-- Conversion rounds to nearest. CPU conversion rounds halfway cases up, while native desktop GL conversion may differ by at most one byte value. Use `readPixelsFloat()` to avoid the RGBA8 conversion.
-- Readback is synchronous: GPU work must complete before CPU pixels are available, which can stall rendering and require staging memory. See `Texture` for main-thread GPU resource rules.
-- Window drawing can continue after readback; an open window pass resumes with its color and depth preserved.
-- WebGL2 supports synchronous readback. WebGPU does not support it and returns `false` with a warning.
+- Reads resolved mip level 0, tightly packed with the top row first. Readback synchronizes GPU work. Unallocated sources, active Fbo passes and backend failures return false.
+- Output is four-channel U8 RGBA regardless of source format: clamp to 0–1, quantize to 8 bits; missing G/B become 0 and alpha becomes 1. BGRA is reordered. Rounding is to nearest; CPU ties round up and native desktop GL can differ by one byte value.
+
+Use F32 to retain precision:
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- Window drawing can continue after readback; an open window pass resumes with color and depth preserved.
+
+The pointer overload remains supported without deprecation; allocate enough storage before calling it:
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
 '''
 details.ja = '''
-- `readPixels(unsigned char* pixels)` には `getWidth() * getHeight() * 4` バイト分の領域が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
+- バッファ容量を計算せず CPU の RGBA8 ピクセルを取得するには Pixels 版を使います。bool を返し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
 
-描画を終えた Fbo を読み出します。
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- `end()` のあと、現在のウィンドウのすべての Fbo 描画スコープの外で呼んでください。読み出し対象が別の Fbo でも、そのようなスコープ内ではエラーを記録して `false` を返します。
-- 現在のカラーテクスチャのミップレベル 0 を読み出し、MSAA では解決済みの結果を使います。出力は隙間のない RGBA 配列で、上の行から順に、各行は左から右へ並びます。ネイティブ GL の行は必要な場合だけ反転するため、追加の上下反転は不要です。
-- 添付画像の形式にかかわらず RGBA8 に変換します。値は 0〜1 にクランプして 8 ビットに量子化し、R/RG 形式で不足する G/B は 0、アルファは 1 にします。BGRA は RGBA 順に並べ替えます。元の形式は `TextureFormat` を参照してください。
-- 最も近い値に丸めます。CPU 変換では中間値を切り上げ、デスクトップ GL のネイティブ変換との差は最大で 1 バイト値です。RGBA8 への変換を避けるには `readPixelsFloat()` を使ってください。
-- 読み出しは同期処理です。CPU ピクセルが利用可能になる前に GPU 処理の完了を待つため、描画を停止させたり作業用メモリを必要としたりします。メインスレッドでの GPU リソースの扱いは `Texture` を参照してください。
-- 読み出し後もウィンドウへの描画を続けられます。開いていたウィンドウのパスは色と深度を保持して再開します。
-- WebGL2 は同期読み出しに対応しています。WebGPU は対応しておらず、警告を記録して `false` を返します。
+- 解決済みのミップレベル 0 を、上の行から隙間なく読み出します。GPU と同期します。未確保の描画元、アクティブな Fbo パス、バックエンドの失敗では false を返します。
+- 元の形式にかかわらず 4 チャンネル U8 RGBA です。0〜1 にクランプして 8 ビットに量子化し、不足する G/B は 0、アルファは 1 にします。BGRA は並べ替えます。最も近い値に丸め、CPU は中間値を切り上げます。デスクトップ GL との差は最大 1 バイト値です。
+
+精度を保つには F32 を使います。
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 読み出し後もウィンドウへ描画できます。開いていたウィンドウのパスは色と深度を保持して再開します。
+
+ポインター版も非推奨にせず維持します。呼ぶ前に十分な領域を確保します。
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
 '''
 details.ko = '''
-- `readPixels(unsigned char* pixels)`에는 `getWidth() * getHeight() * 4`바이트의 공간이 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
+- 버퍼 용량을 계산하지 않고 CPU RGBA8 픽셀을 얻으려면 Pixels 오버로드를 사용합니다. bool을 반환하며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
 
-그리기를 마친 Fbo를 읽습니다.
 ```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    std::vector<unsigned char> pixels(fbo.getWidth() * fbo.getHeight() * 4);
-    fbo.readPixels(pixels.data());
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixels(pixels);
 }
 ```
 
-- `end()` 이후 현재 윈도우의 모든 Fbo 렌더링 스코프 밖에서 호출해야 합니다. 다른 Fbo를 읽는 경우에도 이러한 스코프 안에서는 오류를 기록하고 `false`를 반환합니다.
-- 현재 컬러 텍스처의 밉 레벨 0을 읽으며 MSAA에서는 리졸브된 결과를 사용합니다. 출력은 빈틈없이 배치된 RGBA 배열이며 위쪽 행부터 각 행의 왼쪽에서 오른쪽 순서로 저장합니다. 네이티브 GL 행은 필요한 경우에만 뒤집으므로 추가 상하 반전이 필요하지 않습니다.
-- 첨부 이미지 형식과 관계없이 항상 RGBA8로 변환합니다. 값을 0–1로 제한하고 8비트로 양자화하며 R/RG 형식에 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 RGBA 순서로 재배열하며 원본 형식은 `TextureFormat`을 참조하십시오.
-- 가장 가까운 값으로 반올림합니다. CPU 변환은 중간값을 올림하며 데스크톱 GL의 네이티브 변환과는 최대 한 바이트 값만큼 차이가 날 수 있습니다. RGBA8 변환을 피하려면 `readPixelsFloat()`를 사용합니다.
-- 읽기는 동기식입니다. CPU 픽셀을 사용할 수 있으려면 GPU 작업이 완료되어야 하므로 렌더링을 멈추게 하거나 작업용 메모리가 필요할 수 있습니다. 메인 스레드의 GPU 리소스 규칙은 `Texture`를 참조하십시오.
-- 읽기 이후에도 윈도우에 계속 그릴 수 있으며 열려 있던 윈도우 패스는 색상과 깊이를 유지하여 재개합니다.
-- WebGL2는 동기 읽기를 지원합니다. WebGPU는 지원하지 않으며 경고를 기록하고 `false`를 반환합니다.
+- 리졸브된 밉 레벨 0을 위쪽 행부터 빈틈없이 읽습니다. GPU 작업과 동기화합니다. 미할당 소스, 활성 Fbo 패스 및 백엔드 실패는 false를 반환합니다.
+- 원본 형식과 관계없이 4채널 U8 RGBA입니다. 0–1로 제한하고 8비트로 양자화하며 없는 G/B는 0, 알파는 1로 채웁니다. BGRA는 재배열합니다. 가장 가까운 값으로 반올림하며 CPU는 중간값을 올리고 데스크톱 GL과 최대 한 바이트 값만큼 다를 수 있습니다.
+
+정밀도를 유지하려면 F32를 사용합니다.
+```cpp
+void tcApp::draw() {
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 읽기 후에도 윈도우에 그릴 수 있으며 열린 윈도우 패스는 색상과 깊이를 유지하며 재개합니다.
+
+포인터 오버로드도 사용 중단 없이 유지합니다. 호출 전에 충분한 공간을 할당합니다.
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), 4);
+    fbo.readPixels(pixels.getData());
+}
+```
+
+- WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
 '''
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
 category = "graphics_fbo"
-keywords = ["download", "cpu"]
-description.en = "Reads framebuffer contents into a CPU float buffer."
-description.ja = "フレームバッファの内容を CPU の float バッファに読み出す。"
-description.ko = "프레임버퍼 내용을 CPU float 버퍼로 읽는다."
+keywords = ["download", "cpu", "Pixels"]
+description.en = "Reads an ended Fbo as F32 into Pixels with automatic sizing or a float buffer allocated by the caller, using the source channel count."
+description.ja = "end 後の Fbo を元のチャンネル数の F32 として、自動サイズ調整する Pixels または呼び出し側で確保した float 配列に読み出します。"
+description.ko = "종료된 Fbo를 원본 채널 수의 F32로 자동 크기 조정 Pixels 또는 호출자가 할당한 float 버퍼에 읽습니다."
 details.en = '''
-- `readPixelsFloat(float* pixels)` requires `getWidth() * getHeight() * channelCount(getTextureFormat())` float elements. Returns `true` on success and `false` for an unallocated Fbo, a null pointer, or a readback failure.
-- Outputs 32-bit floats using the source format's channel count without adding missing channels. Float formats retain their values without 0–1 clamping; half-floats are expanded to float, normalized integer formats become 0–1 values, and BGRA components are reordered to RGBA. See `TextureFormat` for format definitions.
-- On GL ES 3 and WebGL2, non-float formats pass through 8-bit readback, including `RGBA16`. Desktop GL, Metal, and D3D11 convert `RGBA16` using its 16-bit normalized values.
-- Call after `end()`, outside every Fbo scope in the current window; otherwise an error is logged and `false` is returned. See `Fbo::readPixels` for synchronous readback cost, top-left row order, MSAA resolution, continued window drawing, and WebGPU restrictions.
+- Use the Pixels overload for full-precision CPU readback without calculating buffer capacity. It produces F32 Pixels with the source channel count (RGBA for RGBA attachments), resizes on success and preserves output on failure. Call after ending every active Fbo.
+
+```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
+void tcApp::draw() {
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- Reads resolved mip level 0, tightly packed with the top row first. Readback synchronizes GPU work. Unallocated sources, active Fbo passes and backend failures return false.
+- F32 preserves float attachment values without clamping; half-floats expand to float and normalized integer formats become 0–1. Missing channels are not added; BGRA is reordered to RGBA.
+- GL ES 3 and WebGL2 read non-float formats (including RGBA16) through 8-bit data; desktop GL, Metal and D3D11 retain RGBA16 normalization precision. Allocate a float attachment to retain floating-point precision:
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+The pointer overload remains supported without deprecation; allocate enough storage before calling it:
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2 supports synchronous readback. WebGPU returns false; no synchronous readback API is available there.
 '''
 details.ja = '''
-- `readPixelsFloat(float* pixels)` には `getWidth() * getHeight() * channelCount(getTextureFormat())` 個の float 要素が必要です。成功時は `true`、未確保の Fbo、null ポインター、読み出し失敗では `false` を返します。
-- 元の形式のチャンネル数で 32 ビット float を出力し、不足するチャンネルは追加しません。浮動小数点形式の値は 0〜1 にクランプせずに保持し、半精度浮動小数点は float に展開し、正規化整数形式は 0〜1 の値に変換し、BGRA 成分は RGBA 順に並べ替えます。形式の定義は `TextureFormat` を参照してください。
-- GL ES 3 と WebGL2 では、`RGBA16` を含む非浮動小数点形式は 8 ビットの読み出しを経由します。デスクトップ GL、Metal、D3D11 は `RGBA16` を 16 ビットの正規化値から変換します。
-- `end()` のあと、現在のウィンドウのすべての Fbo スコープの外で呼んでください。それ以外ではエラーを記録して `false` を返します。同期読み出しの負荷、左上からの行順、MSAA の解決処理、ウィンドウ描画の継続、WebGPU の制限は `Fbo::readPixels` を参照してください。
+- バッファ容量を計算せず精度を保って CPU に読み出すには Pixels 版を使います。元のチャンネル数（RGBA 添付画像では RGBA）の F32 Pixels を生成し、成功時はサイズを調整し、失敗時は出力を保持します。すべてのアクティブな Fbo を終了してから呼びます。
+
+```cpp
+// tcApp.h: Fbo fbo;
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
+void tcApp::draw() {
+    fbo.begin();
+    drawCircle(16, 16, 8);
+    fbo.end();
+    fbo.readPixelsFloat(pixels);
+}
+```
+
+- 解決済みのミップレベル 0 を、上の行から隙間なく読み出します。GPU と同期します。未確保の描画元、アクティブな Fbo パス、バックエンドの失敗では false を返します。
+- F32 は浮動小数点添付画像の値をクランプせず保持します。半精度は float に展開し、正規化整数形式は 0〜1 に変換します。不足するチャンネルは追加せず、BGRA は RGBA に並べ替えます。
+- GL ES 3 と WebGL2 は RGBA16 を含む非浮動小数点形式を 8 ビット経由で読み出します。デスクトップ GL、Metal、D3D11 は RGBA16 の正規化精度を保持します。浮動小数点の精度を保持するには浮動小数点添付画像を確保します。
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+ポインター版も非推奨にせず維持します。呼ぶ前に十分な領域を確保します。
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2 は同期読み出しに対応します。WebGPU は false を返し、同期読み出し API はありません。
 '''
 details.ko = '''
-- `readPixelsFloat(float* pixels)`에는 `getWidth() * getHeight() * channelCount(getTextureFormat())`개의 float 요소가 필요합니다. 성공하면 `true`를 반환하며 할당되지 않은 Fbo, null 포인터 또는 읽기 실패에서는 `false`를 반환합니다.
-- 원본 형식의 채널 수로 32비트 float를 출력하며 없는 채널을 추가하지 않습니다. 부동소수점 형식의 값은 0–1로 제한하지 않고 유지하며 반정밀도 값은 float로 확장하고 정규화 정수 형식은 0–1 값으로 변환하며 BGRA 성분은 RGBA 순서로 재배열합니다. 형식 정의는 `TextureFormat`을 참조하세요.
-- GL ES 3와 WebGL2에서 `RGBA16`을 포함한 비부동소수점 형식은 8비트 읽기를 거칩니다. 데스크톱 GL, Metal, D3D11은 `RGBA16`을 16비트 정규화 값으로 변환합니다.
-- `end()` 이후 현재 윈도우의 모든 Fbo 스코프 밖에서 호출해야 하며 그렇지 않으면 오류를 기록하고 `false`를 반환합니다. 동기 읽기 비용, 왼쪽 위부터의 행 순서, MSAA 리졸브, 윈도우 그리기 지속, WebGPU 제한은 `Fbo::readPixels`를 참조하세요.
-'''
-related = ["Fbo::readPixels"]
-snippet = '''
+- 버퍼 용량을 계산하지 않고 정밀도를 유지한 CPU 읽기에는 Pixels 오버로드를 사용합니다. 원본 채널 수(RGBA 어태치먼트는 RGBA)의 F32 Pixels를 만들며 성공 시 크기를 조정하고 실패 시 출력을 보존합니다. 모든 활성 Fbo를 종료한 후 호출합니다.
+
+```cpp
 // tcApp.h: Fbo fbo;
-void tcApp::setup() { fbo.allocate(64, 64, 1, TextureFormat::RGBA32F); }
+// tcApp.h: Pixels pixels;
+void tcApp::setup() { fbo.allocate(32, 32); }
 void tcApp::draw() {
-    fbo.begin(0.2f, 0.4f, 0.6f);
+    fbo.begin();
+    drawCircle(16, 16, 8);
     fbo.end();
-    vector<float> pixels(64 * 64 * channelCount(fbo.getTextureFormat()));
-    bool ok = fbo.readPixelsFloat(pixels.data());
+    fbo.readPixelsFloat(pixels);
 }
+```
+
+- 리졸브된 밉 레벨 0을 위쪽 행부터 빈틈없이 읽습니다. GPU 작업과 동기화합니다. 미할당 소스, 활성 Fbo 패스 및 백엔드 실패는 false를 반환합니다.
+- F32는 부동소수점 어태치먼트 값을 제한 없이 보존합니다. 반정밀도는 float로 확장하고 정규화 정수 형식은 0–1로 변환합니다. 없는 채널은 추가하지 않으며 BGRA는 RGBA로 재배열합니다.
+- GL ES 3와 WebGL2는 RGBA16을 포함한 비부동소수점 형식을 8비트 데이터로 읽습니다. 데스크톱 GL, Metal, D3D11은 RGBA16 정규화 정밀도를 유지합니다. 부동소수점 정밀도를 유지하려면 부동소수점 어태치먼트를 할당합니다.
+```cpp
+void tcApp::setup() {
+    fbo.allocate(32, 32, 1, TextureFormat::RGBA16F);
+}
+```
+
+포인터 오버로드도 사용 중단 없이 유지합니다. 호출 전에 충분한 공간을 할당합니다.
+```cpp
+void tcApp::draw() {
+    pixels.allocate(fbo.getWidth(), fbo.getHeight(), channelCount(fbo.getTextureFormat()), PixelFormat::F32);
+    fbo.readPixelsFloat(pixels.getDataF32());
+}
+```
+
+- WebGL2는 동기 읽기를 지원합니다. WebGPU는 false를 반환하며 동기 읽기 API가 없습니다.
 '''
+related = ["Fbo::readPixels", "Pixels"]
 
 ["Fbo::save"]
 description.en = "Saves framebuffer contents to an image file."
@@ -11595,7 +11726,10 @@ void tcApp::draw() {
 - The default pipeline disables blending and overwrites covered pixels; after drawing, the current target's drawing state is reapplied.
 - Quad position and texture-coordinate attributes each have two components. See `Shader` for loading, threading and GPU resource lifetime rules.
 - Only native GL/GLES contexts log a startup Notice with the V-flip workaround; supported paths log nothing, and there is no public orientation switch.
-- Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal, D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same everywhere.
+- Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal, D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same everywhere. On the main window (swapchain), GL is bottom-up and Metal/D3D11/WebGPU are top-down. With `uv` passed from the vertex shader's texture coordinates, build a gradient in the fragment shader:
+```glsl
+float hue = fract(uv.x + uv.y);
+```
 '''
 details.ja = '''
 - フルスクリーンのクアッド頂点を用意せず、`Shader` の特殊化としてポストプロセスのフィルターを実行できます。対応バックエンドの Fbo 入力は通常の UV を使います。#1419 の入力反転が必要なのは Mesa flip_y と clip control のどちらもないコンテキストだけです。バックエンド一覧は `Fbo` を参照してください。
@@ -11613,7 +11747,10 @@ void tcApp::draw() {
 - 既定のパイプラインはブレンドを無効にし、クアッドが覆うピクセルを上書きします。描画後は現在のターゲットの描画状態を再適用します。
 - クアッドの位置とテクスチャ座標は、それぞれ 2 成分の属性です。読み込み、スレッド、GPU リソースの寿命の扱いは `Shader` を参照してください。
 - ネイティブの GL/GLES コンテキストだけが、V 反転の回避策を含む起動時の Notice を出します。対応パスはログを出さず、公開の向き切り替え設定もありません。
-- public Fbo 内では、`gl_FragCoord.y` は Metal、D3D11、WebGPU、clip control 対応の GL/GLES（NVIDIA Linux の非 Mesa デスクトップ GL や `EXT_clip_control` 対応の GLES/WebGL2 など）では上端から下向きに増え、Mesa flip_y とネイティブ GL では下端から上向きに増えます。論理的な下端に向かって増える値の `dFdy(v)` は前者で正、後者で負になるため、どの環境でも同じ動作が必要なシェーダーでは `gl_FragCoord`/`dFdy` の代わりにテクスチャ座標を使ってください。
+- public Fbo 内では、`gl_FragCoord.y` は Metal、D3D11、WebGPU、clip control 対応の GL/GLES（NVIDIA Linux の非 Mesa デスクトップ GL や `EXT_clip_control` 対応の GLES/WebGL2 など）では上端から下向きに増え、Mesa flip_y とネイティブ GL では下端から上向きに増えます。論理的な下端に向かって増える値の `dFdy(v)` は前者で正、後者で負になるため、どの環境でも同じ動作が必要なシェーダーでは `gl_FragCoord`/`dFdy` の代わりにテクスチャ座標を使ってください。メインウィンドウ（スワップチェーン）では、GL は下端から上向き、Metal/D3D11/WebGPU は上端から下向きに増えます。頂点シェーダーのテクスチャ座標を `uv` として渡し、フラグメントシェーダーでグラデーションを作ります。
+```glsl
+float hue = fract(uv.x + uv.y);
+```
 '''
 details.ko = '''
 - 전체 화면 쿼드 정점을 준비하지 않고 `Shader`의 특수화로 후처리 필터를 실행합니다. 지원 백엔드의 Fbo 입력에는 일반 UV를 사용합니다. #1419의 입력 반전은 Mesa flip_y와 clip control이 모두 없는 컨텍스트에서만 필요합니다. 백엔드 목록은 `Fbo`를 참조합니다.
@@ -11631,7 +11768,10 @@ void tcApp::draw() {
 - 기본 파이프라인은 블렌딩을 비활성화하고 쿼드가 덮는 픽셀을 덮어씁니다. 그린 뒤에는 현재 타깃의 그리기 상태를 다시 적용합니다.
 - 쿼드 위치와 텍스처 좌표 속성은 각각 2성분입니다. 로드, 스레드 및 GPU 리소스 수명 규칙은 `Shader`를 참조하십시오.
 - 네이티브 GL/GLES 컨텍스트만 V 반전 우회 방법을 담은 시작 Notice를 기록합니다. 지원 경로는 로그를 기록하지 않으며 공개된 방향 전환 설정도 없습니다.
-- public Fbo 안에서 `gl_FragCoord.y`는 Metal, D3D11, WebGPU 및 clip control을 지원하는 GL/GLES(NVIDIA Linux의 비 Mesa 데스크톱 GL 또는 `EXT_clip_control`을 지원하는 GLES/WebGL2 등)에서는 위쪽에서 아래로 증가하고, Mesa flip_y와 네이티브 GL에서는 아래쪽에서 위로 증가합니다. 논리적 아래쪽으로 증가하는 값의 `dFdy(v)`는 전자에서 양수이고 후자에서 음수이므로, 모든 환경에서 같은 동작이 필요한 셰이더에서는 `gl_FragCoord`/`dFdy` 대신 텍스처 좌표를 사용합니다.
+- public Fbo 안에서 `gl_FragCoord.y`는 Metal, D3D11, WebGPU 및 clip control을 지원하는 GL/GLES(NVIDIA Linux의 비 Mesa 데스크톱 GL 또는 `EXT_clip_control`을 지원하는 GLES/WebGL2 등)에서는 위쪽에서 아래로 증가하고, Mesa flip_y와 네이티브 GL에서는 아래쪽에서 위로 증가합니다. 논리적 아래쪽으로 증가하는 값의 `dFdy(v)`는 전자에서 양수이고 후자에서 음수이므로, 모든 환경에서 같은 동작이 필요한 셰이더에서는 `gl_FragCoord`/`dFdy` 대신 텍스처 좌표를 사용합니다. 메인 윈도우(스왑체인)에서는 GL은 아래쪽에서 위로, Metal/D3D11/WebGPU는 위쪽에서 아래로 증가합니다. 버텍스 셰이더의 텍스처 좌표를 `uv`로 전달하고 프래그먼트 셰이더에서 그라데이션을 만듭니다.
+```glsl
+float hue = fract(uv.x + uv.y);
+```
 '''
 related = ["Shader", "Fbo", "Shader::setUniform"]
 
@@ -28759,37 +28899,58 @@ related = ["Serial::isConnected", "Serial::onDisconnect"]
 
 ["Serial::readBytes"]
 description.en = "Reads received bytes into a buffer or string."
-description.ja = "受信したバイト列をバッファまたは文字列に読み取る。"
-description.ko = "수신한 바이트를 버퍼나 문자열로 읽는다."
+description.ja = "受信したバイト列をバッファまたは文字列に読み取ります。"
+description.ko = "수신한 바이트를 버퍼나 문자열로 읽습니다."
 details.en = '''
+- `readBytes(span<unsigned char>)` uses the writable byte count and returns the actual count or -1 without resizing the buffer.
 - `readBytes(void* buffer, int length)` consumes up to `length` bytes from the receive buffer and returns the actual count, including 0 when empty. It does not wait for new data; provide writable storage for at least `length` bytes when the length is positive.
 - Returns -1 when disconnected or when device loss is detected. A detected loss closes the connection and fires `onDisconnect`; see `Serial::onDisconnect` for notification details.
 - For the pointer overload, a connected port with `length <= 0` returns 0 after the loss check.
 - `readBytes(string& buffer, int length)` first resizes the string to `length`, then reads into it and resizes it to the actual count on success. On a -1 result, the string remains resized to the requested length; a negative length reaches string resizing before the pointer overload checks it.
 - See `Serial::setup` for threading rules and `Serial::getDroppedByteCount` for receive-buffer overflow.
+
+Use writable storage with its own length:
+```cpp
+void tcApp::update() {
+    logNotice() << serial.readBytes(bytes);
+}
+```
 '''
 details.ja = '''
+- `readBytes(span<unsigned char>)` は書き込み可能なバイト数を使い、リサイズせず実際の数または -1 を返します。
 - `readBytes(void* buffer, int length)` は受信バッファから最大 `length` バイトを取り出し、実際に読み取った数を返します。空なら 0 を返します。新しいデータは待ちません。正の長さを渡す場合は、少なくとも `length` バイトを書き込める領域を用意してください。
 - 未接続またはデバイス消失の検出時は -1 を返します。消失を検出すると接続を閉じて `onDisconnect` を発火します。通知の詳細は `Serial::onDisconnect` を参照してください。
 - ポインタ版では、接続中で `length <= 0` の場合、消失の確認後に 0 を返します。
 - `readBytes(string& buffer, int length)` は先に文字列を `length` にリサイズし、読み取り成功時に実際のバイト数へ再度リサイズします。結果が -1 の場合は要求した長さのままです。負の長さも、ポインタ版で確認する前に文字列のリサイズへ渡されます。
 - スレッドの扱いは `Serial::setup`、受信バッファの容量超過は `Serial::getDroppedByteCount` を参照してください。
+
+書き込み可能な領域の長さをそのまま使います。
+```cpp
+void tcApp::update() {
+    logNotice() << serial.readBytes(bytes);
+}
+```
 '''
 details.ko = '''
+- `readBytes(span<unsigned char>)`는 쓰기 가능한 바이트 수를 사용하며 크기를 변경하지 않고 실제 개수 또는 -1을 반환합니다.
 - `readBytes(void* buffer, int length)`는 수신 버퍼에서 최대 `length`바이트를 꺼내 실제로 읽은 수를 반환하며 버퍼가 비어 있으면 0을 반환합니다. 새 데이터를 기다리지 않습니다. 양수 길이를 전달한다면 최소 `length`바이트를 쓸 수 있는 공간을 준비하세요.
 - 연결되지 않았거나 장치 소실을 감지하면 -1을 반환합니다. 소실을 감지하면 연결을 닫고 `onDisconnect`를 발생시킵니다. 알림의 자세한 내용은 `Serial::onDisconnect`를 참조하세요.
 - 포인터 버전에서는 연결 중이고 `length <= 0`이면 소실 확인 후 0을 반환합니다.
 - `readBytes(string& buffer, int length)`는 먼저 문자열 크기를 `length`로 바꾸고 읽기에 성공하면 실제 바이트 수로 다시 바꿉니다. 결과가 -1이면 요청한 길이를 유지합니다. 음수 길이도 포인터 버전에서 확인하기 전에 문자열 크기 변경에 전달됩니다.
 - 스레드 규칙은 `Serial::setup`, 수신 버퍼 용량 초과는 `Serial::getDroppedByteCount`를 참조하세요.
+
+쓰기 가능한 저장소 자체의 길이를 사용합니다.
+```cpp
+void tcApp::update() {
+    logNotice() << serial.readBytes(bytes);
+}
+```
 '''
 related = ["Serial::isConnected", "Serial::available", "Serial::onDisconnect"]
 snippet = '''
 void tcApp::update() {
-    static Serial serial;
-    if (!serial.isConnected()) serial.setup(0, 115200);
-    unsigned char buffer[64];
-    int count = serial.readBytes(buffer, sizeof(buffer));
-    if (count > 0) logNotice() << "Received " << count << " bytes";
+    vector<unsigned char> bytes(64);
+    logNotice() << serial.readBytes(bytes);
 }
 '''
 
@@ -28886,10 +29047,11 @@ related = ["Serial::writeBytes", "Serial::setup"]
 
 ["Serial::writeBytes"]
 description.en = "Writes bytes from a buffer or string to the serial connection."
-description.ja = "バッファまたは文字列のバイト列をシリアル接続に書き込む。"
-description.ko = "버퍼나 문자열의 바이트를 시리얼 연결에 쓴다."
+description.ja = "バッファまたは文字列のバイト列をシリアル接続に書き込みます。"
+description.ko = "버퍼나 문자열의 바이트를 시리얼 연결에 씁니다."
 related = ["Serial::isConnected", "Serial::onDisconnect"]
 details.en = '''
+- `writeBytes(span<const unsigned char>)` uses the span byte count and returns the actual count, preserving partial writes and errors.
 - `writeBytes(const void* buffer, int length)` writes up to `length` bytes and returns the actual count, or -1 on an error with no reported progress. `writeBytes(const string& buffer)` writes the string's bytes, including embedded null bytes, without adding a terminator.
 - A disconnected port returns -1. After the loss and connection checks, a nonpositive length returns 0.
 - On macOS and Linux, the port is nonblocking: a write can transfer fewer bytes than requested or return -1 while the output buffer is full, without closing the port.
@@ -28899,8 +29061,17 @@ details.en = '''
 - An Android transfer error logs an error and returns earlier progress, or -1 if none; that error alone does not close the connection. Once the receive worker records a loss, a subsequent reporting I/O call closes it and fires `onDisconnect`.
 - A loss detected by this call closes the connection, fires `onDisconnect`, and returns -1; see `Serial::onDisconnect` for notification details. On Windows, receive status/read failures other than canceled reads also count as loss; framing and parity flags only produce warnings.
 - Use a separate thread when a slow write must not stall the app; receive calls do not wait for the write itself. See `Serial::setup` for shared threading rules.
+
+Keep unsent bytes using the returned count; call on a worker when blocking is unacceptable:
+```cpp
+void tcApp::sendBytes() {
+    int count = serial.writeBytes(bytes);
+    if (count > 0) bytes.erase(bytes.begin(), bytes.begin() + count);
+}
+```
 '''
 details.ja = '''
+- `writeBytes(span<const unsigned char>)` は span のバイト数を使い、部分送信やエラーを含む実際の数を返します。
 - `writeBytes(const void* buffer, int length)` は最大 `length` バイトを書き込み、実際のバイト数を返します。転送済みのバイトが報告されないエラーでは -1 を返します。`writeBytes(const string& buffer)` は、途中の null バイトも含めて文字列のバイトを書き込み、終端文字は追加しません。
 - 未接続の場合は -1 を返します。消失と接続状態の確認後、長さが 0 以下なら 0 を返します。
 - macOS と Linux のポートはノンブロッキングです。要求より少ないバイト数だけを書き込む場合や、出力バッファが満杯の間に -1 を返す場合があり、その場合はポートを閉じません。
@@ -28910,8 +29081,17 @@ details.ja = '''
 - Android の転送エラーでは、エラーをログに出し、それまでの転送済みバイト数、または転送済みがなければ -1 を返します。そのエラーだけでは接続を閉じません。受信ワーカーが消失を記録すると、後続の報告する I/O 呼び出しが接続を閉じて `onDisconnect` を発火します。
 - この呼び出しが消失を検出した場合は、接続を閉じて `onDisconnect` を発火し、-1 を返します。通知の詳細は `Serial::onDisconnect` を参照してください。Windows では、キャンセルされた読み取りを除く受信状態の取得や読み取りの失敗も消失として扱います。framing と parity のフラグは警告だけを出します。
 - 遅い書き込みでアプリを止めたくない場合は、別スレッドを使ってください。受信の呼び出しは書き込み自体の完了を待ちません。共通のスレッドの扱いは `Serial::setup` を参照してください。
+
+戻り値の数で未送信部分を管理します。ブロックを避ける必要があればワーカーから呼びます。
+```cpp
+void tcApp::sendBytes() {
+    int count = serial.writeBytes(bytes);
+    if (count > 0) bytes.erase(bytes.begin(), bytes.begin() + count);
+}
+```
 '''
 details.ko = '''
+- `writeBytes(span<const unsigned char>)`는 span 바이트 수를 사용하며 부분 쓰기와 오류를 포함한 실제 개수를 반환합니다.
 - `writeBytes(const void* buffer, int length)`는 최대 `length`바이트를 쓰고 실제 바이트 수를 반환합니다. 전송 진행량이 보고되지 않는 오류에서는 -1을 반환합니다. `writeBytes(const string& buffer)`는 중간의 null 바이트를 포함한 문자열 바이트를 쓰며 종료 문자를 추가하지 않습니다.
 - 연결되지 않은 포트에서는 -1을 반환합니다. 소실과 연결 상태를 확인한 뒤 길이가 0 이하이면 0을 반환합니다.
 - macOS와 Linux의 포트는 논블로킹입니다. 요청보다 적은 바이트만 쓰거나 출력 버퍼가 가득 찬 동안 -1을 반환할 수 있으며 이 경우 포트를 닫지 않습니다.
@@ -28921,13 +29101,19 @@ details.ko = '''
 - Android 전송 오류에서는 오류를 로그에 남기고 이전까지 전송한 바이트 수를 반환하며 전송한 바이트가 없으면 -1을 반환합니다. 그 오류만으로 연결을 닫지는 않습니다. 수신 워커가 소실을 기록하면 이후 보고하는 I/O 호출이 연결을 닫고 `onDisconnect`를 발생시킵니다.
 - 이 호출이 소실을 감지하면 연결을 닫고 `onDisconnect`를 발생시킨 뒤 -1을 반환합니다. 알림의 자세한 내용은 `Serial::onDisconnect`를 참조하세요. Windows에서는 취소된 읽기를 제외한 수신 상태 조회나 읽기 실패도 소실로 취급합니다. framing과 parity 플래그는 경고만 남깁니다.
 - 느린 쓰기로 앱이 멈추면 안 된다면 별도 스레드를 사용하세요. 수신 호출은 쓰기 자체의 완료를 기다리지 않습니다. 공통 스레드 규칙은 `Serial::setup`을 참조하세요.
+
+반환 개수로 미전송 부분을 관리합니다. 차단을 피해야 한다면 작업 스레드에서 호출합니다.
+```cpp
+void tcApp::sendBytes() {
+    int count = serial.writeBytes(bytes);
+    if (count > 0) bytes.erase(bytes.begin(), bytes.begin() + count);
+}
+```
 '''
 snippet = '''
-void tcApp::setup() {
-    static Serial serial;
-    if (serial.setup(0, 115200)) {
-        serial.writeBytes("hello\n");
-    }
+void tcApp::update() {
+    vector<unsigned char> bytes{1, 2, 3};
+    logNotice() << serial.writeBytes(bytes);
 }
 '''
 
@@ -37587,37 +37773,63 @@ void tcApp::setup() {
 
 ["UdpSocket::receive"]
 description.en = "Receives one UDP datagram into a buffer."
-description.ja = "UDP データグラムを 1 個バッファに受信する。"
-description.ko = "UDP 데이터그램 하나를 버퍼로 수신한다."
+description.ja = "UDP データグラムを 1 個バッファに受信します。"
+description.ko = "UDP 데이터그램 하나를 버퍼로 수신합니다."
 details.en = '''
+- `receive(span<unsigned char>)` uses the writable byte count and returns the received count or -1 without resizing; the sender-address overload also accepts a span.
 - Writes up to `bufferSize` bytes into `buffer` and returns the received byte count, `0` for an empty datagram, or `-1` for an invalid socket or receive failure; it does not emit `onReceive` or `onError`.
 - The overload with `remoteHost` and `remotePort` updates those output arguments only when the returned count is positive, using a numeric IPv4 address and sender port.
 - Use `bind(port, false)` for synchronous reception without a competing event receiver; a newly created socket blocks until data arrives unless non-blocking mode or a receive timeout is set.
 - See `UdpSocket::startReceiving` for changes to blocking mode when starting or stopping event reception.
 - If the buffer is too small, an oversized datagram is truncated on POSIX or causes a receive failure on Windows.
+
+Bind without event reception, limit the receive wait to 100 ms, and provide space for the complete datagram:
+```cpp
+void tcApp::setup() {
+    udp.bind(9000, false);
+    udp.setReceiveTimeout(100);
+    bytes.resize(65536);
+}
+```
 '''
 details.ja = '''
+- `receive(span<unsigned char>)` は書き込み可能なバイト数を使い、リサイズせず受信数または -1 を返します。送信元アドレス付きの版も span に対応します。
 - `buffer` に最大 `bufferSize` バイトを書き込み、受信バイト数を返します。空のデータグラムでは `0`、ソケットが無効な場合や受信に失敗した場合は `-1` を返します。`onReceive` と `onError` は発火しません。
 - `remoteHost` と `remotePort` を受け取るオーバーロードは、戻り値が正の場合だけ出力引数を更新し、送信元の数値形式の IPv4 アドレスとポートを設定します。
 - 同期受信では、イベント受信と競合しないように `bind(port, false)` を使ってください。作成直後のソケットは、ノンブロッキングモードまたは受信タイムアウトを設定しない限り、データが届くまで待ちます。
 - イベント受信の開始や停止によるブロッキングモードの変化については、`UdpSocket::startReceiving` を参照してください。
 - バッファが小さすぎる場合、大きすぎるデータグラムは POSIX では切り詰められ、Windows では受信に失敗します。
+
+イベント受信なしで bind し、受信待ちを 100 ms に制限して、データグラム全体の領域を用意します。
+```cpp
+void tcApp::setup() {
+    udp.bind(9000, false);
+    udp.setReceiveTimeout(100);
+    bytes.resize(65536);
+}
+```
 '''
 details.ko = '''
+- `receive(span<unsigned char>)`는 쓰기 가능한 바이트 수를 사용하며 크기를 변경하지 않고 수신 개수 또는 -1을 반환합니다. 송신자 주소 오버로드도 span을 받습니다.
 - `buffer`에 최대 `bufferSize`바이트를 쓰고 수신 바이트 수를 반환합니다. 빈 데이터그램이면 `0`을, 소켓이 무효이거나 수신에 실패하면 `-1`을 반환합니다. `onReceive`와 `onError`는 발생시키지 않습니다.
 - `remoteHost`와 `remotePort`를 받는 오버로드는 반환값이 양수일 때만 출력 인수를 갱신하여 송신자의 숫자 형식 IPv4 주소와 포트를 설정합니다.
 - 동기 수신에서는 이벤트 수신과 경쟁하지 않도록 `bind(port, false)`를 사용합니다. 새로 생성한 소켓은 논블로킹 모드나 수신 타임아웃을 설정하지 않으면 데이터가 도착할 때까지 기다립니다.
 - 이벤트 수신의 시작과 중지에 따른 블로킹 모드 변경은 `UdpSocket::startReceiving`을 참조하세요.
 - 버퍼가 너무 작으면 큰 데이터그램은 POSIX에서 잘리고 Windows에서는 수신에 실패합니다.
+
+이벤트 수신 없이 bind하고 수신 대기를 100 ms로 제한한 뒤 전체 데이터그램을 담을 공간을 준비합니다.
+```cpp
+void tcApp::setup() {
+    udp.bind(9000, false);
+    udp.setReceiveTimeout(100);
+    bytes.resize(65536);
+}
+```
 '''
 snippet = '''
-void tcApp::setup() {
-    UdpSocket udp;
-    if (!udp.bind(9000, false)) return;
-    udp.setReceiveTimeout(100);
-    char buffer[1024];
-    int received = udp.receive(buffer, sizeof(buffer));
-    if (received > 0) logNotice() << string(buffer, received);
+void tcApp::update() {
+    vector<unsigned char> bytes(65536);
+    logNotice() << udp.receive(bytes);
 }
 '''
 
@@ -37627,16 +37839,19 @@ description.ja = "設定済みの宛先に UDP データグラムを送信する
 description.ko = "설정된 대상으로 UDP 데이터그램을 전송한다."
 details.en = '''
 - Call `connect(host, port)` successfully first; pass either a data pointer and byte count or a `string`, whose bytes are sent without an added null terminator.
+- `send(span<const unsigned char>)` sends the span bytes and returns the same bool as the pointer overload.
 - Returns `true` if the OS send call succeeds; an invalid socket, missing destination, or send failure emits `onError` and returns `false`.
 - Success reports the send operation only and does not confirm delivery or receipt.
 '''
 details.ja = '''
 - 先に `connect(host, port)` を成功させてください。データのポインターとバイト数、または `string` を渡せます。文字列は終端のヌル文字を追加せず、そのバイト列を送信します。
+- `send(span<const unsigned char>)` は span のバイト列を送り、ポインタ版と同じ bool を返します。
 - OS の送信処理に成功すると `true` を返します。ソケットが無効、宛先が未設定、または送信に失敗した場合は、`onError` を発火して `false` を返します。
 - 成功は送信操作の成功だけを示し、宛先への到達や受信は確認しません。
 '''
 details.ko = '''
 - 먼저 `connect(host, port)`가 성공해야 합니다. 데이터 포인터와 바이트 수 또는 `string`을 전달할 수 있습니다. 문자열은 끝에 널 문자를 추가하지 않고 해당 바이트를 전송합니다.
+- `send(span<const unsigned char>)`는 span 바이트를 보내며 포인터 버전과 같은 bool을 반환합니다.
 - OS의 전송 처리가 성공하면 `true`를 반환합니다. 소켓이 무효이거나 대상이 설정되지 않았거나 전송에 실패하면 `onError`를 발생시키고 `false`를 반환합니다.
 - 성공은 전송 작업의 성공만 나타내며 대상에 대한 도달이나 수신을 확인하지 않습니다.
 '''
@@ -37650,30 +37865,57 @@ void tcApp::setup() {
 
 ["UdpSocket::sendTo"]
 description.en = "Sends a UDP datagram to a specified host and port."
-description.ja = "指定したホストとポートに UDP データグラムを送信する。"
-description.ko = "지정한 호스트와 포트로 UDP 데이터그램을 전송한다."
+description.ja = "指定したホストとポートに UDP データグラムを送信します。"
+description.ko = "지정한 호스트와 포트로 UDP 데이터그램을 전송합니다."
 details.en = '''
+- `sendTo(host, port, span<const unsigned char>)` sends the span bytes and returns the same bool as the pointer overload.
 - Accepts an IPv4 address or hostname, a destination port, and either a data pointer with byte count or a `string`; strings are sent without an added null terminator.
 - Creates the socket if necessary and resolves the host synchronously on every call; it does not update the destination stored by `connect()`.
 - Returns `true` if the OS send call succeeds; socket creation, resolution, or send failure emits `onError` and returns `false`. Success does not confirm delivery.
 - For broadcast, enable `setBroadcast(true)` first; multicast sending does not require group membership.
+
+Enable broadcast before sending a broadcast datagram:
+```cpp
+void tcApp::setup() {
+    udp.setBroadcast(true);
+    udp.sendTo("255.255.255.255", 9000, bytes);
+}
+```
 '''
 details.ja = '''
+- `sendTo(host, port, span<const unsigned char>)` は span のバイト列を送り、ポインタ版と同じ bool を返します。
 - IPv4 アドレスまたはホスト名、宛先ポート、データのポインターとバイト数、または `string` を受け取ります。文字列は終端のヌル文字を追加せずに送信します。
 - 必要に応じてソケットを作成し、呼び出すたびにホスト名を同期的に解決します。`connect()` で保存した宛先は更新しません。
 - OS の送信処理に成功すると `true` を返します。ソケットの作成、名前解決、送信に失敗すると、`onError` を発火して `false` を返します。成功しても到達は確認しません。
 - ブロードキャストでは先に `setBroadcast(true)` を設定してください。マルチキャスト送信ではグループへの参加は不要です。
+
+ブロードキャストの送信前に有効にします。
+```cpp
+void tcApp::setup() {
+    udp.setBroadcast(true);
+    udp.sendTo("255.255.255.255", 9000, bytes);
+}
+```
 '''
 details.ko = '''
+- `sendTo(host, port, span<const unsigned char>)`는 span 바이트를 보내며 포인터 버전과 같은 bool을 반환합니다.
 - IPv4 주소 또는 호스트 이름, 대상 포트, 데이터 포인터와 바이트 수 또는 `string`을 받습니다. 문자열은 끝에 널 문자를 추가하지 않고 전송합니다.
 - 필요한 경우 소켓을 생성하고 호출할 때마다 호스트를 동기적으로 확인합니다. `connect()`로 저장한 대상은 갱신하지 않습니다.
 - OS의 전송 처리가 성공하면 `true`를 반환합니다. 소켓 생성, 이름 확인 또는 전송에 실패하면 `onError`를 발생시키고 `false`를 반환합니다. 성공하더라도 도달 여부는 확인하지 않습니다.
 - 브로드캐스트에는 먼저 `setBroadcast(true)`를 설정합니다. 멀티캐스트 전송에는 그룹 가입이 필요하지 않습니다.
+
+브로드캐스트 데이터그램을 보내기 전에 활성화합니다.
+```cpp
+void tcApp::setup() {
+    udp.setBroadcast(true);
+    udp.sendTo("255.255.255.255", 9000, bytes);
+}
+```
 '''
 snippet = '''
-void tcApp::setup() {
-    UdpSocket udp;
-    if (!udp.sendTo("127.0.0.1", 9000, "hello")) logError() << "UDP send failed";
+void tcApp::update() {
+    vector<unsigned char> bytes{1, 2, 3};
+    udp.sendTo("127.0.0.1", 9000, bytes);
 }
 '''
 
@@ -43416,70 +43658,645 @@ void tcApp::setup() {
 related = ["Window::setPosition"]
 
 ["Window::setDrawWhileHidden"]
-keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
-description.en = "Keeps this window drawing while hidden when enabled."
-description.ja = "有効にすると、非表示中もこのウィンドウの描画を続けます。"
-description.ko = "활성화하면 숨겨진 동안에도 이 윈도우의 그리기를 계속합니다."
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder", "android"]
+description.en = "Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android."
+description.ja = "デスクトップの非表示中も Spout/Syphon/NDI への送信や録画用に描画します。iOS/Android では効果がありません。"
+description.ko = "데스크톱에서 숨겨진 동안 Spout/Syphon/NDI 전송이나 녹화를 위해 그립니다. iOS/Android에서는 효과가 없습니다."
 details.en = '''
-- With `true`, update and draw keep running while minimized or fully covered. Use this when `draw()` sends frames to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
-- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see `setDrawWhileHidden`).
-- The default is `false`: hidden windows keep updating and stop drawing. This window inherits the global default at creation; the last global or per-window call wins. A local call does not change the default for future windows.
-- Call on the main thread. The setting survives App replacement on this Window.
-- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+- Default: false on every OS. Desktop windows keep updating by default; iOS/Android stop receiving frames while hidden. This setting never changes the update policy.
+
+Enable hidden desktop draws in setup:
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- Targets this Window only, inherits the global default at creation, and survives App replacement. The last global or per-window call wins; a local call leaves the default unchanged. Call on the main thread.
+
+- iOS/Android have no drawable surface or frame source while hidden; there is no API for drawing there. For Android CPU-only updates use `setUpdateWhileHidden` and `setAndroidForegroundService` instead.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- Desktop hidden ticks run at about the display base rate (~60 Hz); faster pacing and swapInterval are not preserved. Choose a fixed rate explicitly:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ja = '''
-- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送る場合に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
-- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（`setDrawWhileHidden` を参照）。
-- 既定値は `false` で、非表示中も更新を続けますが描画は停止します。作成時にグローバルの既定値を引き継ぎ、その後はグローバルとウィンドウ単位の最後の呼び出しが優先されます。この呼び出しは今後作成するウィンドウの既定値を変更しません。
-- メインスレッドで呼び出してください。この Window の App を差し替えても設定を保持します。
-- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+- 既定値は全 OS で false です。デスクトップは既定で非表示中も更新し、iOS/Android は非表示中にフレームが届きません。更新設定は変更しません。
+
+setup でデスクトップの非表示描画を有効にします：
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- この Window のみを対象にし、作成時にグローバルの既定値を継承します。App 交換後も保持し、グローバルと窓単位の最後の呼び出しが優先されます。ローカル呼び出しは既定値を変えません。メインスレッドで呼びます。
+
+- iOS/Android は非表示中に描画サーフェスもフレーム源もなく、そこで描画する API はありません。Android の CPU のみの更新には setUpdateWhileHidden と setAndroidForegroundService を使います。
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- デスクトップの非表示 tick は画面の基本レート（約 60 Hz）です。それ以上のペースと swapInterval は保たれません。固定レートを明示します：
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ko = '''
-- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 보낼 때 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
-- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(`setDrawWhileHidden` 참조).
-- 기본값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다. 생성 시 전역 기본값을 상속하며 이후에는 전역 호출과 윈도우별 호출 중 마지막 호출이 우선합니다. 이 호출은 앞으로 생성할 윈도우의 기본값을 변경하지 않습니다.
-- 메인 스레드에서 호출합니다. 이 Window의 App을 교체해도 설정을 유지합니다.
-- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+- 기본값은 모든 OS에서 false입니다. 데스크톱은 기본적으로 숨겨져도 업데이트하며 iOS/Android는 숨겨진 동안 프레임을 받지 않습니다. 업데이트 설정은 바꾸지 않습니다.
+
+setup에서 데스크톱 숨김 그리기를 켭니다:
+```cpp
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
+```
+
+- 이 Window만 대상으로 하며 생성 시 전역 기본값을 상속하고 App 교체 후에도 유지합니다. 전역/창별 호출 중 마지막 호출이 우선하며 창별 호출은 기본값을 바꾸지 않습니다. 메인 스레드에서 호출합니다.
+
+- iOS/Android는 숨겨진 동안 그릴 surface나 프레임 소스가 없으며 그 상태에서 그리는 API가 없습니다. Android CPU 전용 업데이트에는 setUpdateWhileHidden과 setAndroidForegroundService를 사용합니다.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- 데스크톱 숨김 tick은 디스플레이 기본 레이트(약 60 Hz)입니다. 더 빠른 속도와 swapInterval은 유지되지 않습니다. 고정 레이트를 지정합니다:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
-related = ["setDrawWhileHidden", "Window::isOccluded", "Window::setVisible", "Window::setFps"]
+related = ["setUpdateWhileHidden", "Window::setUpdateWhileHidden", "setAndroidForegroundService"]
 snippet = '''
-window->setDrawWhileHidden(true);
+void tcApp::setup() {
+    getWindow()->setDrawWhileHidden(true);
+}
 '''
 
 ["setDrawWhileHidden"]
-keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
-description.en = "Sets drawing while hidden for all existing windows and the default for new ones."
-description.ja = "非表示中に描画するかを全ウィンドウに設定し、新規ウィンドウの既定値にします。"
-description.ko = "숨겨진 동안 그릴지 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다."
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder", "android"]
+description.en = "Keeps desktop windows drawing while hidden for Spout/Syphon/NDI or recording; has no effect on iOS/Android."
+description.ja = "デスクトップの非表示中も Spout/Syphon/NDI への送信や録画用に描画します。iOS/Android では効果がありません。"
+description.ko = "데스크톱에서 숨겨진 동안 Spout/Syphon/NDI 전송이나 녹화를 위해 그립니다. iOS/Android에서는 효과가 없습니다."
 details.en = '''
-- Sets every existing window and becomes the default for new windows, even when called from one App's callbacks. The initial default is `false`: hidden windows keep updating and stop drawing.
-- With `true`, hidden windows keep updating and drawing, including while minimized or fully covered. This supports sending frames from `draw()` to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
-- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see the snippet).
-- `Window::setDrawWhileHidden()` changes one window only. The last global or per-window call wins. Call on the main thread; setup may set the policy before the first draw.
-- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display. On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+- Default: false on every OS. Desktop windows keep updating by default; iOS/Android stop receiving frames while hidden. This setting never changes the update policy.
+
+Enable hidden desktop draws in setup:
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- Sets all existing windows and the default for future windows, even from one App callback. The last global or per-window call wins. Call on the main thread.
+
+- iOS/Android have no drawable surface or frame source while hidden; there is no API for drawing there. For Android CPU-only updates use `setUpdateWhileHidden` and `setAndroidForegroundService` instead.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- Desktop hidden ticks run at about the display base rate (~60 Hz); faster pacing and swapInterval are not preserved. Choose a fixed rate explicitly:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- On X11 compositors that throttle covered windows (e.g. labwc/Xwayland on Raspberry Pi), covering the first-created visible window slows every window to ~1 Hz until it's uncovered or minimized. Keep that window uncovered, or minimize or hide it to hand pacing to another window (`getWindow()->setVisible(false);`). Known issue #1367.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ja = '''
-- ある App のコールバックから呼んだ場合も、既存のすべてのウィンドウに設定し、新規ウィンドウの既定値にします。初期値は `false` で、非表示中も更新を続けますが描画は停止します。
-- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送り続ける用途に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
-- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（スニペット参照）。
-- `Window::setDrawWhileHidden()` は 1 つのウィンドウだけを変更し、最後の呼び出しが優先されます。メインスレッドで呼び出してください。setup で初回描画の前に設定できます。
-- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+- 既定値は全 OS で false です。デスクトップは既定で非表示中も更新し、iOS/Android は非表示中にフレームが届きません。更新設定は変更しません。
+
+setup でデスクトップの非表示描画を有効にします：
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- ある App のコールバックから呼んでも、既存の全窓と今後の既定値に設定します。グローバルと窓単位の最後の呼び出しが優先されます。メインスレッドで呼びます。
+
+- iOS/Android は非表示中に描画サーフェスもフレーム源もなく、そこで描画する API はありません。Android の CPU のみの更新には setUpdateWhileHidden と setAndroidForegroundService を使います。
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- デスクトップの非表示 tick は画面の基本レート（約 60 Hz）です。それ以上のペースと swapInterval は保たれません。固定レートを明示します：
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 覆われたウィンドウを間引く X11 コンポジター（Raspberry Pi の labwc/Xwayland など）では、表示中で最初に作成されたウィンドウを覆うと、覆いを外すか最小化するまですべてのウィンドウが約 1 Hz に落ちます。そのウィンドウを覆わないようにするか、最小化または非表示にして別のウィンドウにペーシングを渡してください（`getWindow()->setVisible(false);`）。既知の問題 #1367 です。
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
 details.ko = '''
-- 한 App의 콜백에서 호출해도 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다. 초기값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다.
-- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 계속 보내는 데 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
-- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(스니펫 참조).
-- `Window::setDrawWhileHidden()`는 하나의 윈도우만 변경하며 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다. setup에서 첫 그리기 전에 설정할 수 있습니다.
-- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다. 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+- 기본값은 모든 OS에서 false입니다. 데스크톱은 기본적으로 숨겨져도 업데이트하며 iOS/Android는 숨겨진 동안 프레임을 받지 않습니다. 업데이트 설정은 바꾸지 않습니다.
+
+setup에서 데스크톱 숨김 그리기를 켭니다:
+```cpp
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+```
+
+- 한 App 콜백에서 호출해도 모든 기존 창과 새 창의 기본값에 적용합니다. 전역/창별 호출 중 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다.
+
+- iOS/Android는 숨겨진 동안 그릴 surface나 프레임 소스가 없으며 그 상태에서 그리는 API가 없습니다. Android CPU 전용 업데이트에는 setUpdateWhileHidden과 setAndroidForegroundService를 사용합니다.
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- 데스크톱 숨김 tick은 디스플레이 기본 레이트(약 60 Hz)입니다. 더 빠른 속도와 swapInterval은 유지되지 않습니다. 고정 레이트를 지정합니다:
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+
+```cpp
+void tcApp::setup() {
+    setFps(30);
+}
+```
+
+- 가려진 창을 제한하는 X11 컴포지터(Raspberry Pi의 labwc/Xwayland 등)에서는 표시 중 가장 먼저 생성된 창을 가리면 가림을 해제하거나 최소화할 때까지 모든 창이 약 1Hz로 느려집니다. 그 창을 가리지 않거나 최소화 또는 숨겨서 다른 창에 페이싱을 넘기십시오(`getWindow()->setVisible(false);`). 알려진 문제 #1367입니다.
+```cpp
+void tcApp::setup() {
+    getWindow()->setVisible(false);
+}
+```
 '''
-related = ["Window::setDrawWhileHidden", "Window::isOccluded", "setFps"]
+related = ["setUpdateWhileHidden", "Window::setUpdateWhileHidden", "setAndroidForegroundService"]
 snippet = '''
-EventListener occListener;  // member
-setDrawWhileHidden(true);
-// Optional: a slower rate while hidden
-occListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
-    setFps(e.occluded ? 10 : VSYNC);
-});
+void tcApp::setup() {
+    setDrawWhileHidden(true);
+}
+'''
+
+["setUpdateWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "background", "android", "update", "pause"]
+description.en = "Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet."
+description.ja = "非表示中の更新を制御します。デスクトップの処理停止や Android の CPU バックグラウンド処理に使い、iOS の有効化は未対応です。"
+description.ko = "숨김 업데이트를 제어하여 데스크톱 작업을 멈추거나 Android CPU 백그라운드 작업을 켭니다. iOS 활성화는 아직 지원하지 않습니다."
+details.en = '''
+- Default: true on desktop/Web, false on iOS/Android. Drawing is independent: draw=true/update=false draws without updating. Resuming paused updates resets timing without a catch-up burst.
+
+Choose the update policy in setup:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- Sets all existing windows and the default for future windows, even from one App callback. The last global or per-window call wins. Call on the main thread.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
+
+- Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- setUpdateWhileHidden(true) has no effect on iOS yet. Keep the default and use the existing Sound/AudioEngine audio thread for playback; TrussC has no iOS background update API. Audio background mode still needs app Info.plist configuration:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ja = '''
+- 既定値はデスクトップ/Web で true、iOS/Android で false です。描画とは独立し、draw=true/update=false は更新なしで描画します。再開時は時間をリセットし、停止分をまとめて更新しません。
+
+setup で更新設定を選びます：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- ある App のコールバックから呼んでも、既存の全窓と今後の既定値に設定します。グローバルと窓単位の最後の呼び出しが優先されます。メインスレッドで呼びます。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
+
+- Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS では setUpdateWhileHidden(true) はまだ効果がありません。既定値を保ち、再生には既存の Sound/AudioEngine の音声スレッドを使います。iOS のバックグラウンド更新 API はありません。音声の background mode はアプリの Info.plist 設定が必要です：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ko = '''
+- 기본값은 데스크톱/Web에서 true, iOS/Android에서 false입니다. 그리기와 독립적이므로 draw=true/update=false이면 업데이트 없이 그립니다. 재개 시 시간을 초기화해 밀린 업데이트를 몰아서 실행하지 않습니다.
+
+setup에서 업데이트 정책을 선택합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+
+- 한 App 콜백에서 호출해도 모든 기존 창과 새 창의 기본값에 적용합니다. 전역/창별 호출 중 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
+
+- Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS에서는 setUpdateWhileHidden(true)가 아직 효과가 없습니다. 기본값을 유지하고 재생에는 기존 Sound/AudioEngine 오디오 스레드를 사용합니다. iOS 백그라운드 업데이트 API는 없습니다. 오디오 background mode는 앱 Info.plist 설정이 필요합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+related = ["setDrawWhileHidden", "setAndroidForegroundService", "isWindowOccluded", "CoreEvents::occludedChanged"]
+snippet = '''
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+'''
+
+["Window::setUpdateWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "background", "android", "update", "pause"]
+description.en = "Controls updates while hidden: pause desktop work or opt in to Android background CPU work; iOS opt-in is not supported yet."
+description.ja = "非表示中の更新を制御します。デスクトップの処理停止や Android の CPU バックグラウンド処理に使い、iOS の有効化は未対応です。"
+description.ko = "숨김 업데이트를 제어하여 데스크톱 작업을 멈추거나 Android CPU 백그라운드 작업을 켭니다. iOS 활성화는 아직 지원하지 않습니다."
+details.en = '''
+- Default: true on desktop/Web, false on iOS/Android. Drawing is independent: draw=true/update=false draws without updating. Resuming paused updates resets timing without a catch-up burst.
+
+Choose the update policy in setup:
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- Targets this Window only, inherits the global default at creation, and survives App replacement. The last global or per-window call wins; a local call leaves the default unchanged. Call on the main thread.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android hidden ticks deliver updates, queued `runOnMainThread()` work, external `Deliver::Main` events and `SoundBuffer::loadAsync()` completions. These callbacks must also avoid GPU work. Image/Font/Video completions, other resource callbacks and GPU readbacks wait for a visible host turn; TrussC has no API for background GPU work.
+
+- Android ticks without a surface use a timed looper poll (~60 Hz before scheduler throttling). Without a foreground service Android may freeze or kill the background process. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- setUpdateWhileHidden(true) has no effect on iOS yet. Keep the default and use the existing Sound/AudioEngine audio thread for playback; TrussC has no iOS background update API. Audio background mode still needs app Info.plist configuration:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ja = '''
+- 既定値はデスクトップ/Web で true、iOS/Android で false です。描画とは独立し、draw=true/update=false は更新なしで描画します。再開時は時間をリセットし、停止分をまとめて更新しません。
+
+setup で更新設定を選びます：
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- この Window のみを対象にし、作成時にグローバルの既定値を継承します。App 交換後も保持し、グローバルと窓単位の最後の呼び出しが優先されます。ローカル呼び出しは既定値を変えません。メインスレッドで呼びます。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android の非表示 tick は更新、`runOnMainThread()` の待機処理、外部の `Deliver::Main` イベント、`SoundBuffer::loadAsync()` の完了処理を実行します。これらのコールバックでも GPU 処理を避けてください。Image/Font/Video の完了処理、その他のリソースコールバック、GPU readback は表示中のホスト処理まで待ちます。バックグラウンドで GPU を使う API はありません。
+
+- Android のサーフェスなし tick は looper の時間指定 poll（スケジューラで間引く前は約 60 Hz）を使います。foreground service がないと Android がバックグラウンドプロセスを停止・終了する場合があります。表示中に有効化します：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS では setUpdateWhileHidden(true) はまだ効果がありません。既定値を保ち、再生には既存の Sound/AudioEngine の音声スレッドを使います。iOS のバックグラウンド更新 API はありません。音声の background mode はアプリの Info.plist 設定が必要です：
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+details.ko = '''
+- 기본값은 데스크톱/Web에서 true, iOS/Android에서 false입니다. 그리기와 독립적이므로 draw=true/update=false이면 업데이트 없이 그립니다. 재개 시 시간을 초기화해 밀린 업데이트를 몰아서 실행하지 않습니다.
+
+setup에서 업데이트 정책을 선택합니다:
+```cpp
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+```
+
+- 이 Window만 대상으로 하며 생성 시 전역 기본값을 상속하고 App 교체 후에도 유지합니다. 전역/창별 호출 중 마지막 호출이 우선하며 창별 호출은 기본값을 바꾸지 않습니다. 메인 스레드에서 호출합니다.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+
+- Android 숨김 tick은 업데이트, 대기 중인 `runOnMainThread()` 작업, 외부 `Deliver::Main` 이벤트와 `SoundBuffer::loadAsync()` 완료 처리를 실행합니다. 이 콜백에서도 GPU 작업을 피해야 합니다. Image/Font/Video 완료 처리, 기타 리소스 콜백과 GPU readback은 표시 중인 호스트 처리까지 기다립니다. 백그라운드 GPU 작업용 API는 없습니다.
+
+- Android의 surface 없는 tick은 looper의 시간 지정 poll(스케줄러 제한 전 약 60 Hz)을 사용합니다. foreground service 없이는 Android가 백그라운드 프로세스를 정지하거나 종료할 수 있습니다. 표시 중에 켭니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+    setUpdateWhileHidden(true);
+}
+```
+
+- iOS에서는 setUpdateWhileHidden(true)가 아직 효과가 없습니다. 기본값을 유지하고 재생에는 기존 Sound/AudioEngine 오디오 스레드를 사용합니다. iOS 백그라운드 업데이트 API는 없습니다. 오디오 background mode는 앱 Info.plist 설정이 필요합니다:
+```cpp
+void tcApp::setup() {
+    setUpdateWhileHidden(false);
+}
+```
+'''
+related = ["setDrawWhileHidden", "setAndroidForegroundService", "isWindowOccluded", "CoreEvents::occludedChanged"]
+snippet = '''
+void tcApp::setup() {
+    getWindow()->setUpdateWhileHidden(false);
+}
+'''
+
+["setAndroidForegroundService"]
+keywords = ["android", "background", "foreground service", "mediaPlayback", "audio", "notification"]
+description.en = "Opts in to Android mediaPlayback foreground service for background playback; visible opt-in requests notification permission on Android 13+ without delaying the service. No wake lock is acquired."
+description.ja = "Android のバックグラウンド再生用 mediaPlayback foreground service を有効にします。Android 13 以降は表示中の有効化で通知権限を要求し、結果を待たずにサービスを開始します。wake lock は取得しません。"
+description.ko = "Android 백그라운드 재생용 mediaPlayback foreground service를 켭니다. Android 13 이상에서는 표시 중에 활성화하면 알림 권한을 요청하고 결과를 기다리지 않고 서비스를 시작합니다. wake lock은 획득하지 않습니다."
+details.en = '''
+- Default: stopped on Android; no service runs until true is passed. Other OSes do nothing and log one Notice per call.
+
+- Android 12+ rejects starting a foreground service from the background. Call true in setup() or another visible callback:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+Stop the service when background playback ends:
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- On Android 13+, visible true calls request POST_NOTIFICATIONS if it is not granted, at most once per Activity instance. The service starts without waiting: denial or dismissal leaves it running, with its notification hidden from the drawer. Android < 13, false, and hidden calls request nothing. With permission, the low-importance ongoing notification appears. Opt in while visible:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- A custom AndroidManifest.xml must declare POST_NOTIFICATIONS; without it the system request has no effect. Add this declaration inside <manifest>:
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+- No wake lock is acquired. Active audio normally keeps the CPU awake; this service alone does not guarantee CPU-only ticks with the screen off. TrussC has no background wake-lock API.
+- For targetSdk 34+, justify the mediaPlayback foreground service type in Play Console. Unused store builds should remove the service and the three related permissions from their project manifest; see BUILD_SYSTEM.md › Android background media playback.
+
+- While hidden on mobile, update() must not create/update textures, Fbos, images or fonts, or flush GPU work. Check visibility before GPU work:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+details.ja = '''
+- Android の既定は停止で、true を渡すまで動きません。他 OS は何もせず、呼び出しごとに Notice を 1 回出します。
+
+- Android 12 以降はバックグラウンドからの foreground service 開始を拒否します。setup() または表示中のコールバックで true を呼びます：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+バックグラウンド再生が終わったらサービスを停止します：
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13 以降は表示中に true を呼ぶと、未許可の POST_NOTIFICATIONS を Activity ごとに最大 1 回要求します。サービスは結果を待たずに開始します。拒否やダイアログを閉じた場合も動作を続けますが、通知一覧には表示されません。Android 13 未満、false、非表示中の呼び出しでは要求しません。許可されていれば重要度の低い継続通知を表示します。表示中に有効にします：
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- 独自の AndroidManifest.xml には POST_NOTIFICATIONS の宣言が必要です。宣言がなければシステムへの要求は効果がありません。<manifest> 内に追加します：
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+- wake lock は取得しません。音声再生中は通常 CPU が動き続けますが、サービス単体では画面オフ中の CPU 更新を保証しません。TrussC にバックグラウンド wake-lock API はありません。
+- targetSdk 34 以降は Play Console で mediaPlayback 型の説明が必要です。使わないストア用アプリは自身の manifest から service と関連する 3 権限を削除します。BUILD_SYSTEM.md › Android background media playback を参照してください。
+
+- モバイルの非表示中、update() でテクスチャ・Fbo・画像・フォントを作成や更新したり GPU を flush したりしないでください。GPU 処理の前に表示状態を確認します：
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+details.ko = '''
+- Android 기본값은 중지이며 true를 전달할 때만 실행합니다. 다른 OS에서는 아무것도 하지 않고 호출마다 Notice를 한 번 기록합니다.
+
+- Android 12 이상은 백그라운드에서 foreground service 시작을 거부합니다. setup() 또는 표시 중인 콜백에서 true를 호출합니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+백그라운드 재생이 끝나면 서비스를 중지합니다:
+```cpp
+void tcApp::cleanup() {
+    setAndroidForegroundService(false);
+}
+```
+
+- Android 13 이상에서 표시 중에 true를 호출하면 허용되지 않은 POST_NOTIFICATIONS를 Activity 인스턴스마다 최대 한 번 요청합니다. 서비스는 결과를 기다리지 않고 시작합니다. 거부하거나 대화 상자를 닫아도 서비스는 계속 실행되지만 알림 목록에는 표시되지 않습니다. Android 13 미만, false, 숨김 상태의 호출에서는 요청하지 않습니다. 허용된 경우 중요도가 낮은 지속 알림을 표시합니다. 표시 중에 활성화합니다:
+```cpp
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
+```
+
+- 사용자 지정 AndroidManifest.xml에는 POST_NOTIFICATIONS 선언이 필요합니다. 선언이 없으면 시스템 요청은 효과가 없습니다. <manifest> 안에 추가합니다:
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+- wake lock을 획득하지 않습니다. 오디오 재생 중에는 보통 CPU가 깨어 있지만 서비스만으로 화면이 꺼진 동안의 CPU 업데이트를 보장하지 않습니다. TrussC에는 백그라운드 wake-lock API가 없습니다.
+- targetSdk 34 이상은 Play Console에서 mediaPlayback 유형의 용도를 설명해야 합니다. 사용하지 않는 스토어 빌드는 자체 manifest에서 service와 관련 권한 3개를 제거합니다. BUILD_SYSTEM.md › Android background media playback을 참고하세요.
+
+- 모바일 숨김 상태의 update()에서는 텍스처, Fbo, 이미지, 폰트를 생성/갱신하거나 GPU flush를 하면 안 됩니다. GPU 작업 전에 표시 상태를 확인합니다:
+```cpp
+void tcApp::update() {
+    if (isWindowOccluded()) return;
+}
+```
+'''
+related = ["setUpdateWhileHidden", "isWindowOccluded"]
+snippet = '''
+void tcApp::setup() {
+    setAndroidForegroundService(true);
+}
 '''
 
 ["Window::setFps"]
@@ -51313,17 +52130,17 @@ description.ko = "공유 오디오 출력 엔진을 초기화한다."
 details.en = '''
 - Calls `AudioEngine::getInstance().init()` only while the engine is uninitialized. It returns no value and leaves an already initialized engine unchanged.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, and both `loadFromBuffer()` overloads attempt initialization automatically while the engine is uninitialized; `play()` does not. Call this helper to start output before using synthesis through `audioOut`.
-- Initialization reuses the numeric configuration from the last `AudioEngine::init(AudioSettings)` call, or the initial defaults described in `AudioEngine`, and selects the system default device with the default backend selection. Use `AudioEngine::init(settings)` for custom configuration and its boolean result, or check `isInitialized()` after this helper; startup failures are logged.
+- Initialization reuses the numeric configuration, performance profile, and content type from the last `AudioEngine::init(AudioSettings)` call, or the initial defaults described in `AudioEngine`, and selects the system default device with the default backend selection. Use `AudioEngine::init(settings)` for custom configuration and its boolean result, or check `isInitialized()` after this helper; startup failures are logged.
 '''
 details.ja = '''
 - エンジンが未初期化のときだけ `AudioEngine::getInstance().init()` を呼びます。戻り値はなく、初期化済みの場合は変更しません。
 - `Sound::load()`、`loadStream()`、`loadTestTone()`、両方の `loadFromBuffer()` は、エンジンが未初期化なら自動的に初期化を試みます。`play()` は初期化しません。`audioOut` による音声合成などで先に出力を開始するには、この関数を呼んでください。
-- 最後の `AudioEngine::init(AudioSettings)` の数値設定を再利用し、まだ呼んでいない場合は `AudioEngine` に記載した初期の既定値を使います。デバイスはシステム既定、バックエンドは既定の選択方法になります。独自の設定と成否の戻り値が必要な場合は `AudioEngine::init(settings)` を使うか、この関数のあとで `isInitialized()` を確認してください。開始に失敗した場合はログに出力されます。
+- 最後の `AudioEngine::init(AudioSettings)` の数値設定、パフォーマンスプロファイル、コンテンツ種別を再利用し、まだ呼んでいない場合は `AudioEngine` に記載した初期の既定値を使います。デバイスはシステム既定、バックエンドは既定の選択方法になります。独自の設定と成否の戻り値が必要な場合は `AudioEngine::init(settings)` を使うか、この関数のあとで `isInitialized()` を確認してください。開始に失敗した場合はログに出力されます。
 '''
 details.ko = '''
 - 엔진이 초기화되지 않았을 때만 `AudioEngine::getInstance().init()`를 호출합니다. 반환값은 없으며 이미 초기화된 엔진은 변경하지 않습니다.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, 두 `loadFromBuffer()` 오버로드는 엔진이 초기화되지 않았으면 자동으로 초기화를 시도합니다. `play()`는 초기화하지 않습니다. `audioOut`을 통한 음성 합성 등에서 출력을 먼저 시작하려면 이 함수를 호출합니다.
-- 마지막 `AudioEngine::init(AudioSettings)`의 숫자 설정을 재사용하며 아직 호출하지 않았다면 `AudioEngine`에 설명된 초기 기본값을 사용합니다. 장치는 시스템 기본 장치를 선택하고 백엔드는 기본 선택 방식을 사용합니다. 사용자 설정과 성공 여부 반환값이 필요하면 `AudioEngine::init(settings)`를 사용하거나 이 함수 뒤에 `isInitialized()`를 확인합니다. 시작 실패는 로그에 기록합니다.
+- 마지막 `AudioEngine::init(AudioSettings)`의 숫자 설정, 성능 프로파일, 콘텐츠 유형을 재사용하며 아직 호출하지 않았다면 `AudioEngine`에 설명된 초기 기본값을 사용합니다. 장치는 시스템 기본 장치를 선택하고 백엔드는 기본 선택 방식을 사용합니다. 사용자 설정과 성공 여부 반환값이 필요하면 `AudioEngine::init(settings)`를 사용하거나 이 함수 뒤에 `isInitialized()`를 확인합니다. 시작 실패는 로그에 기록합니다.
 '''
 related = ["AudioEngine::getInstance", "shutdownAudio", "AudioEngine::init"]
 snippet = '''
@@ -52092,10 +52909,22 @@ platform_note.ko = '''
 category = "window_input"
 keywords = ["open", "file", "picker", "browse", "chooser"]
 of = ["ofSystemLoadDialog"]
-description.en = "Shows a file or folder selection dialog."
-description.ja = "ファイルまたはフォルダーの選択ダイアログを表示する。"
-description.ko = "파일 또는 폴더 선택 대화상자를 표시한다."
+description.en = "Selects a file or folder, with an extension-list overload for case-insensitive file filtering."
+description.ja = "ファイルやフォルダーを選択します。拡張子リストを受け取る形式では、大文字と小文字を区別せずファイルを絞り込みます。"
+description.ko = "파일이나 폴더를 선택합니다. 확장자 목록을 받는 형식은 대소문자를 구분하지 않고 파일을 필터링합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` as the last argument. Extensions are ASCII letters and digits, such as png or jsonl, without dots; matching ignores ASCII case and an empty list keeps the original behavior. Folder selection ignores the list.
+
+Select allowed file types:
+```cpp
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
+    }
+}
+```
+
 - Arguments are `title`, `message`, `defaultPath` for the initial directory, and `folderSelection`. Text and path arguments default to empty values, and `folderSelection` defaults to `false`.
 - Selects one file, or one folder when `folderSelection` is `true`; this function does not read the selected file.
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and the final path component in `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
@@ -52103,6 +52932,18 @@ details.en = '''
 - While it waits, all windows pause. [`loadDialogAsync`](#loadDialogAsync) takes a callback instead of returning the result.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を最後の引数に受け取ります。拡張子は png や jsonl のような ASCII の英数字で、ドットなしで指定します。ASCII の大文字と小文字は区別せず、空のリストは従来どおりに動作します。フォルダーの選択ではリストを使いません。
+
+選択する拡張子を指定します。
+```cpp
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
+    }
+}
+```
+
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、`folderSelection` です。文字列とパスのデフォルトは空で、`folderSelection` のデフォルトは `false` です。
 - ファイルを 1 個選択します。`folderSelection` が `true` ならフォルダーを 1 個選択します。この関数自体は選択したファイルを読み込みません。
 - 選択後は、`success = true`、フルパスの `filePath`、パスの最後の要素を格納した `fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
@@ -52110,6 +52951,18 @@ details.ja = '''
 - 待機中はすべてのウィンドウが停止します。[`loadDialogAsync`](#loadDialogAsync) は結果を返す代わりにコールバックで受け取ります。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 마지막 인수로 받습니다. 확장자는 png나 jsonl처럼 ASCII 영문자와 숫자로, 점 없이 지정합니다. ASCII 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 폴더 선택에서는 목록을 사용하지 않습니다.
+
+선택할 확장자를 지정합니다.
+```cpp
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
+    }
+}
+```
+
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, `folderSelection`입니다. 문자열과 경로의 기본값은 비어 있으며, `folderSelection`의 기본값은 `false`입니다.
 - 파일 하나를 선택합니다. `folderSelection`이 `true`이면 폴더 하나를 선택합니다. 이 함수 자체는 선택한 파일을 읽지 않습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, 경로의 마지막 요소를 담은 `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
@@ -52133,10 +52986,10 @@ platform_note.ko = '''
 - iOS는 오류를 로그에 기록하고 빈 결과를 반환합니다. `loadDialogAsync()`를 사용해야 합니다. Android는 선택기가 구현되어 있지 않아 빈 결과를 반환합니다. Web/WASM은 경고를 로그에 기록하고 빈 결과를 반환합니다.
 '''
 snippet = '''
-void tcApp::setup() {
-    auto result = loadDialog("Open a text file");
-    if (result.success) {
-        logNotice() << loadTextFile(result.filePath);
+void tcApp::keyPressed(int key) {
+    if (key == 'o') {
+        auto result = loadDialog("Open image", "", {}, false, {"png", "jpg"});
+        if (result.success) image.load(result.filePath);
     }
 }
 '''
@@ -52144,10 +52997,21 @@ void tcApp::setup() {
 ["loadDialogAsync"]
 category = "window_input"
 keywords = ["open", "file", "picker", "callback"]
-description.en = "Shows a file or folder picker with a result callback."
-description.ja = "結果コールバック付きのファイルまたはフォルダー選択ダイアログを表示する。"
-description.ko = "결과 콜백이 있는 파일 또는 폴더 선택 대화상자를 표시한다."
+description.en = "Selects a file or folder, with an extension-list overload for case-insensitive file filtering."
+description.ja = "ファイルやフォルダーを選択します。拡張子リストを受け取る形式では、大文字と小文字を区別せずファイルを絞り込みます。"
+description.ko = "파일이나 폴더를 선택합니다. 확장자 목록을 받는 형식은 대소문자를 구분하지 않고 파일을 필터링합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` before `callback`. Extensions are ASCII letters and digits, such as png or jsonl, without dots; matching ignores ASCII case and an empty list keeps the original behavior. Folder selection ignores the list.
+
+Select allowed file types:
+```cpp
+void tcApp::setup() {
+    loadDialogAsync("Open image", "", {}, false, {"png", "jpg"}, [](const FileDialogResult& result) {
+        if (result.success) logNotice() << result.filePath;
+    });
+}
+```
+
 - Takes `title`, `message`, `defaultPath`, `folderSelection`, and `callback`, with no default arguments; `defaultPath` is the initial directory, and `folderSelection` selects folders when `true` or files when `false`.
 - Pass `{}` for no initial directory; paths are passed to the platform picker without resolution through `getDataPath()`.
 - The `void(const FileDialogResult&)` callback receives `success = true`, the selected full `filePath`, and its `fileName` on selection; cancellation or failure gives `success = false` and empty paths. The picker does not read the selected file.
@@ -52156,6 +53020,17 @@ details.en = '''
 - See `alertDialogAsync` for shared threading, callback timing, and app run lifetime rules.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を `callback` の直前に受け取ります。拡張子は png や jsonl のような ASCII の英数字で、ドットなしで指定します。ASCII の大文字と小文字は区別せず、空のリストは従来どおりに動作します。フォルダーの選択ではリストを使いません。
+
+選択する拡張子を指定します。
+```cpp
+void tcApp::setup() {
+    loadDialogAsync("Open image", "", {}, false, {"png", "jpg"}, [](const FileDialogResult& result) {
+        if (result.success) logNotice() << result.filePath;
+    });
+}
+```
+
 - `title`、`message`、`defaultPath`、`folderSelection`、`callback` を受け取り、既定の引数はありません。`defaultPath` は初期ディレクトリで、`folderSelection` が `true` ならフォルダー、`false` ならファイルを選択します。
 - 初期ディレクトリを指定しない場合は `{}` を渡してください。パスは `getDataPath()` で解決せず、プラットフォームの選択画面へ渡します。
 - 選択時は `void(const FileDialogResult&)` コールバックに `success = true`、選択したフルパス `filePath`、ファイル名 `fileName` を渡します。キャンセルや失敗では `success = false` となり、パスは空になります。選択したファイルの読み込みは行いません。
@@ -52164,6 +53039,17 @@ details.ja = '''
 - 共通のスレッドの扱い、コールバックのタイミング、アプリの実行期間に関する規則は `alertDialogAsync` を参照してください。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 `callback` 바로 앞으로 받습니다. 확장자는 png나 jsonl처럼 ASCII 영문자와 숫자로, 점 없이 지정합니다. ASCII 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 폴더 선택에서는 목록을 사용하지 않습니다.
+
+선택할 확장자를 지정합니다.
+```cpp
+void tcApp::setup() {
+    loadDialogAsync("Open image", "", {}, false, {"png", "jpg"}, [](const FileDialogResult& result) {
+        if (result.success) logNotice() << result.filePath;
+    });
+}
+```
+
 - `title`, `message`, `defaultPath`, `folderSelection`, `callback`을 받으며 기본 인수는 없습니다. `defaultPath`는 초기 디렉터리이며 `folderSelection`이 `true`이면 폴더를, `false`이면 파일을 선택합니다.
 - 초기 디렉터리를 지정하지 않으려면 `{}`를 전달하세요. 경로는 `getDataPath()`로 해석하지 않고 플랫폼 선택 화면에 전달합니다.
 - 선택하면 `void(const FileDialogResult&)` 콜백에 `success = true`, 선택한 전체 경로 `filePath`, 파일 이름 `fileName`을 전달합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다. 선택한 파일을 읽지는 않습니다.
@@ -52200,37 +53086,117 @@ void tcApp::setup() {
 ["loadJson"]
 category = "file"
 keywords = ["read", "open", "parse"]
-description.en = "Loads a JSON value from a file."
-description.ja = "ファイルから JSON 値を読み込む。"
-description.ko = "파일에서 JSON 값을 읽는다."
+description.en = "Loads a JSON file; use the LoadResult overload to distinguish failure from valid null."
+description.ja = "JSON ファイルを読み込み、LoadResult を返す形式で失敗と正常な null を区別する。"
+description.ko = "JSON 파일을 읽고 LoadResult 형식으로 실패와 유효한 null을 구분한다."
 details.en = '''
-- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
-- Local files have no byte-size cap. Files above 16 MiB produce a Notice. Caught allocation exceptions log an Error and return `Json()`; recovery during JSON DOM cleanup is not guaranteed.
-- Accepts a file path and returns the parsed `Json` value. Relative paths resolve through `getDataPath()`; absolute paths are used directly.
-- A missing, unreadable, or non-regular file, or a JSON parse error, logs an Error and returns `Json()`, which holds JSON `null`.
-- A valid file containing `null` returns the same value as these failures. Caught parsing and allocation exceptions are reported as failures.
-'''
-details.ja = '''
-- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
-- ローカルファイルのバイト数に上限はありません。16 MiB を超えるファイルは Notice を出力します。捕捉したメモリ確保の例外は Error を出力して `Json()` を返しますが、JSON DOM の破棄中の復旧は保証しません。
-- ファイルパスを受け取り、解析した `Json` 値を返します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使用します。
-- ファイルが存在しない場合、読み取れない場合、通常のファイルではない場合、JSON の解析に失敗した場合は、Error をログに出力して JSON の `null` を保持する `Json()` を返します。
-- 正常なファイルに `null` が入っている場合も、これらの失敗時と同じ値になります。捕捉した解析とメモリ確保の例外は失敗として報告します。
-'''
-details.ko = '''
-- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
-- 로컬 파일의 바이트 크기 제한은 없습니다. 16 MiB가 넘는 파일은 Notice를 기록합니다. 처리한 메모리 할당 예외는 Error를 기록하고 `Json()`을 반환하지만 JSON DOM 소멸 중의 복구는 보장하지 않습니다.
-- 파일 경로를 받아 파싱한 `Json` 값을 반환합니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
-- 파일이 없거나 읽을 수 없거나 일반 파일이 아닌 경우, 또는 JSON 파싱에 실패하면 Error 로그를 출력하고 JSON `null`을 보유하는 `Json()`을 반환합니다.
-- 정상적인 파일에 `null`이 들어 있어도 이러한 실패 시와 같은 값을 반환합니다. 처리한 파싱과 메모리 할당 예외는 실패로 보고합니다.
-'''
-related = ["Json", "saveJson", "parseJson", "loadTextFile"]
-snippet = '''
+- Use `loadJson(input, out)` to check success separately from the JSON value; failure leaves `out` unchanged. Valid JSON `null` is success.
+- The quick one-argument `loadJson(input)` returns `Json()` on failure, indistinguishable from a valid `null`. Check failures with the overload:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
+}
+```
+For quick value-only loading:
+```cpp
 void tcApp::setup() {
     Json settings = loadJson("settings.json");
-    if (!settings.is_null()) {
-        logNotice() << toJsonString(settings);
-    }
+}
+```
+
+- Failures log one Error. `LoadResult.message` includes the file path and, for invalid JSON, the one-based parse byte position when available. Missing or unreadable files return `FileNotFound`; invalid JSON returns `DecodeFailed`.
+- Empty input and raw NUL bytes fail; escaped NUL is valid. Relative paths resolve through `getDataPath()`; absolute paths are used directly. Documents above 16 MiB produce a Notice; there is no byte-size cap for sized documents.
+Use a JSON escape for a NUL character:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- Caught allocation exceptions are reported as failures. No API guarantees recovery during JSON DOM cleanup.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result. Inspect top-level data without recursive traversal:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
+'''
+details.ja = '''
+- `loadJson(input, out)` は JSON 値と別に成否を返し、失敗時は `out` を保持します。正常な JSON `null` は成功です。
+- 手軽な一引数形式 `loadJson(input)` は失敗時に `Json()` を返すため、正常な `null` と区別できません。成否の確認にはオーバーロードを使います：
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
+}
+```
+値だけを手軽に読み込む場合：
+```cpp
+void tcApp::setup() {
+    Json settings = loadJson("settings.json");
+}
+```
+
+- 失敗時は Error を一度記録します。`LoadResult.message` はファイルパスと、不正な JSON の場合は取得できるときに 1 始まりの解析バイト位置を含みます。存在しない、または開けないファイルは `FileNotFound`、不正な JSON は `DecodeFailed` です。
+- 空の入力と生の NUL バイトは失敗し、エスケープした NUL は有効です。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使用します。16 MiB を超える文書は Notice を出力し、サイズが既知の文書にはバイト数の上限がありません。
+NUL 文字には JSON のエスケープを使います：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 捕捉したメモリ確保の例外は失敗として報告します。JSON DOM の破棄中の復旧を保証する API はありません。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。例えば、再帰せずに最上位のデータを確認します：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
+'''
+details.ko = '''
+- `loadJson(input, out)`은 JSON 값과 별도로 성공 여부를 반환하며 실패 시 `out`을 유지합니다. 유효한 JSON `null`은 성공입니다.
+- 간편한 단일 인수 `loadJson(input)`은 실패 시 `Json()`을 반환하므로 유효한 `null`과 구분할 수 없습니다. 실패 확인에는 오버로드를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
+}
+```
+값만 간편하게 읽는 경우:
+```cpp
+void tcApp::setup() {
+    Json settings = loadJson("settings.json");
+}
+```
+
+- 실패 시 Error를 한 번 기록합니다. `LoadResult.message`에는 파일 경로와 잘못된 JSON의 파싱 바이트 위치를 알 수 있으면 1부터 시작하는 위치가 포함됩니다. 없거나 열 수 없는 파일은 `FileNotFound`, 잘못된 JSON은 `DecodeFailed`를 반환합니다.
+- 빈 입력과 원시 NUL 바이트는 실패하며 이스케이프한 NUL은 유효합니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다. 16 MiB가 넘는 문서는 Notice를 기록하며 크기가 알려진 문서에는 바이트 크기 제한이 없습니다.
+NUL 문자에는 JSON 이스케이프를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 처리한 메모리 할당 예외는 실패로 보고합니다. JSON DOM 소멸 중의 복구를 보장하는 API는 없습니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다. 예를 들어 재귀 없이 최상위 데이터를 확인하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
+'''
+related = ["Json", "saveJson", "parseJson", "loadTextFile", "LoadResult"]
+snippet = '''
+void tcApp::setup() {
+    Json settings;
+    auto result = loadJson("settings.json", settings);
+    if (!result) return;
 }
 '''
 
@@ -52824,36 +53790,117 @@ details.ko = '''
 ["parseJson"]
 category = "utility"
 keywords = ["deserialize", "decode"]
-description.en = "Parses a JSON string into a Json value."
-description.ja = "JSON 文字列を解析して Json 値に変換する。"
-description.ko = "JSON 문자열을 파싱하여 Json 값으로 변환한다."
+description.en = "Parses JSON text; use the LoadResult overload to distinguish failure from valid null."
+description.ja = "JSON 文字列を解析し、LoadResult を返す形式で失敗と正常な null を区別する。"
+description.ko = "JSON 문자열을 파싱하고 LoadResult 형식으로 실패와 유효한 null을 구분한다."
 details.en = '''
-- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
-- Input has no byte-size cap; documents above 16 MiB produce a Notice.
-- Accepts a `const string&` and returns its parsed JSON value without accessing a file.
-- Syntax failures, raw NUL bytes, and caught allocation exceptions log an Error and return `Json()`, which holds JSON `null`. Recovery during JSON DOM cleanup is not guaranteed.
-- Valid input `"null"` returns the same value as a parse failure, so `is_null()` alone cannot distinguish them.
+- Use `parseJson(input, out)` to check success separately from the JSON value; failure leaves `out` unchanged. Valid JSON `null` is success.
+- The quick one-argument `parseJson(input)` returns `Json()` on failure, indistinguishable from a valid `null`. Check failures with the overload:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
+}
+```
+For quick value-only loading:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("null");
+}
+```
+
+- Failures log one Error. `LoadResult.message` includes the one-based parse byte position when available; invalid JSON returns `DecodeFailed`.
+- Empty input and raw NUL bytes fail; escaped NUL is valid. Documents above 16 MiB produce a Notice; there is no byte-size cap for sized documents.
+Use a JSON escape for a NUL character:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- Caught allocation exceptions are reported as failures. No API guarantees recovery during JSON DOM cleanup.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result. Inspect top-level data without recursive traversal:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
 '''
 details.ja = '''
-- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
-- 入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。
-- `const string&` を受け取り、ファイルへアクセスせずに解析した JSON 値を返します。
-- 構文エラー、生の NUL バイト、捕捉したメモリ確保の例外は Error を出力し、JSON の `null` を保持する `Json()` を返します。JSON DOM の破棄中の復旧は保証しません。
-- 正常な入力 `"null"` も解析失敗時と同じ値になるため、`is_null()` だけでは区別できません。
+- `parseJson(input, out)` は JSON 値と別に成否を返し、失敗時は `out` を保持します。正常な JSON `null` は成功です。
+- 手軽な一引数形式 `parseJson(input)` は失敗時に `Json()` を返すため、正常な `null` と区別できません。成否の確認にはオーバーロードを使います：
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
+}
+```
+値だけを手軽に読み込む場合：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("null");
+}
+```
+
+- 失敗時は Error を一度記録します。`LoadResult.message` は取得できるときに 1 始まりの解析バイト位置を含み、不正な JSON は `DecodeFailed` です。
+- 空の入力と生の NUL バイトは失敗し、エスケープした NUL は有効です。16 MiB を超える文書は Notice を出力し、サイズが既知の文書にはバイト数の上限がありません。
+NUL 文字には JSON のエスケープを使います：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 捕捉したメモリ確保の例外は失敗として報告します。JSON DOM の破棄中の復旧を保証する API はありません。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。例えば、再帰せずに最上位のデータを確認します：
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
 '''
 details.ko = '''
-- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
-- 입력 바이트 크기에 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다.
-- `const string&`를 받아 파일에 접근하지 않고 파싱한 JSON 값을 반환합니다.
-- 구문 오류, 원시 NUL 바이트, 처리한 메모리 할당 예외는 Error를 기록하고 JSON `null`을 보유하는 `Json()`을 반환합니다. JSON DOM 소멸 중의 복구는 보장하지 않습니다.
-- 정상적인 입력 `"null"`도 파싱 실패 시와 같은 값을 반환하므로 `is_null()`만으로는 구분할 수 없습니다.
+- `parseJson(input, out)`은 JSON 값과 별도로 성공 여부를 반환하며 실패 시 `out`을 유지합니다. 유효한 JSON `null`은 성공입니다.
+- 간편한 단일 인수 `parseJson(input)`은 실패 시 `Json()`을 반환하므로 유효한 `null`과 구분할 수 없습니다. 실패 확인에는 오버로드를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
+}
+```
+값만 간편하게 읽는 경우:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("null");
+}
+```
+
+- 실패 시 Error를 한 번 기록합니다. `LoadResult.message`에는 파싱 바이트 위치를 알 수 있으면 1부터 시작하는 위치가 포함되며 잘못된 JSON은 `DecodeFailed`를 반환합니다.
+- 빈 입력과 원시 NUL 바이트는 실패하며 이스케이프한 NUL은 유효합니다. 16 MiB가 넘는 문서는 Notice를 기록하며 크기가 알려진 문서에는 바이트 크기 제한이 없습니다.
+NUL 문자에는 JSON 이스케이프를 사용하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson(R"({"text":"\u0000"})");
+}
+```
+- 처리한 메모리 할당 예외는 실패로 보고합니다. JSON DOM 소멸 중의 복구를 보장하는 API는 없습니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다. 예를 들어 재귀 없이 최상위 데이터를 확인하세요:
+```cpp
+void tcApp::setup() {
+    Json settings = parseJson("{}");
+    logNotice() << settings.size();
+}
+```
 '''
-related = ["Json", "toJsonString", "loadJson"]
+related = ["Json", "toJsonString", "loadJson", "LoadResult"]
 snippet = '''
 void tcApp::setup() {
-    auto limit = [](int depth, Json::parse_event_t, Json&) { if (depth > 64) throw runtime_error("JSON nesting too deep"); return true; };
-    try { settings = Json::parse(loadTextFile("settings.json"), limit); }
-    catch (const exception& e) { logWarning() << "settings.json: " << e.what(); }
+    Json settings;
+    auto result = parseJson("null", settings);
+    if (!result) return;
 }
 '''
 
@@ -53411,18 +54458,21 @@ description.ko = "이벤트 기반 렌더링에서 추가 프레임을 요청한
 details.en = '''
 - Acts on the current window, including secondary setup, event, update and draw callbacks. Each window has its own scheduler; tick-source rate and visibility follow the OS.
 - With `setFps(EVENT_DRIVEN)`, requests `count` draws, defaulting to `1`; the usual synchronized update also runs for each drawn frame.
+- TrussC also draws on its own in this mode: once when the window is first shown, twice after a resize, and when a screenshot or an MCP capture needs a frame. Call `redraw()` for every change of your own that should appear on screen.
 - Sets the remaining draw count to the larger of its current value and `count`, rather than adding counts. Zero or negative values do not cancel pending draws, and continuous rendering modes keep their normal pacing.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
 - 副窓の setup・event・update・draw 内も含め、現在のウィンドウを対象にします。各窓は個別のスケジューラを持ち、tick の頻度と可視性は OS に従います。
 - `setFps(EVENT_DRIVEN)` のときに、`count` 回の描画を要求します。既定値は `1` で、通常の同期更新も描画フレームごとに実行します。
+- このモードでも、ウィンドウが最初に表示されたとき（1 回）、大きさが変わったとき（2 回）、スクリーンショットや MCP の取り込みでフレームが必要なときは、自動で描画します。画面に出したい自分の変更には、毎回 `redraw()` を呼んでください。
 - 残りの描画回数は加算せず、現在値と `count` の大きい方にします。`0` や負の値では保留中の描画を取り消せず、連続描画モードでは通常の描画間隔を維持します。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
-- `getDrawCount()`는 각 윈도우의 실제 그리기를 셉니다. 동작 변경: 이 모드에서 메인의 `getDrawCount() % N` 주기는 이전 장치 프레임 기준 주기와 다릅니다.
+- 보조 창의 setup·event·update·draw 안을 포함해 현재 윈도우를 대상으로 합니다. 각 창은 개별 스케줄러를 가지며 tick 빈도와 가시성은 OS를 따릅니다.
 - `setFps(EVENT_DRIVEN)` 상태에서 `count`회의 그리기를 요청합니다. 기본값은 `1`이며 일반적인 동기 갱신도 그리는 프레임마다 실행합니다.
+- 이 모드에서도 윈도우가 처음 표시될 때(1회), 크기가 바뀐 뒤(2회), 스크린샷이나 MCP 캡처에 프레임이 필요할 때는 자동으로 그립니다. 화면에 반영할 변경에는 매번 `redraw()`를 호출하세요.
 - 남은 그리기 횟수에 더하지 않고 현재 값과 `count` 중 큰 값을 설정합니다. `0`이나 음수로 대기 중인 그리기를 취소할 수 없으며 연속 렌더링 모드에서는 기존 그리기 간격을 유지합니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 '''
@@ -54055,10 +55105,20 @@ related = ["isPrivate", "getLocalIp"]
 category = "window_input"
 keywords = ["file", "picker", "browse", "export"]
 of = ["ofSystemSaveDialog"]
-description.en = "Shows a file save dialog."
-description.ja = "ファイルの保存ダイアログを表示する。"
-description.ko = "파일 저장 대화상자를 표시한다."
+description.en = "Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation."
+description.ja = "保存先を選択します。拡張子リストを受け取る形式では、許可された拡張子がなければ上書き確認の前に追加します。"
+description.ko = "저장 위치를 선택합니다. 확장자 목록을 받는 형식은 허용된 확장자가 없으면 덮어쓰기 확인 전에 추가합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` as the last argument. Extensions are ASCII letters and digits, such as png or jsonl, without dots; matching ignores ASCII case and an empty list keeps the original behavior. If none matches the typed name, the first extension is appended before confirming replacement.
+
+Choose the recording extension:
+```cpp
+void tcApp::setup() {
+    auto result = saveDialog("Save recording", "", {}, "session.jsonl", {"jsonl"});
+    if (result.success) logNotice() << result.filePath;
+}
+```
+
 - Arguments are `title`, `message`, `defaultPath` for the initial directory, and `defaultName` for the initial filename; all default to empty values.
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
 - Selects a destination without writing the file. Check `success`, then save data to `filePath` with a file-writing API.
@@ -54066,6 +55126,16 @@ details.en = '''
 - While it waits, all windows pause. [`saveDialogAsync`](#saveDialogAsync) takes a callback instead of returning the result.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を最後の引数に受け取ります。拡張子は png や jsonl のような ASCII の英数字で、ドットなしで指定します。ASCII の大文字と小文字は区別せず、空のリストは従来どおりに動作します。入力した名前に一致する拡張子がなければ、上書きを確認する前に先頭の拡張子を追加します。
+
+記録ファイルの拡張子を指定します。
+```cpp
+void tcApp::setup() {
+    auto result = saveDialog("Save recording", "", {}, "session.jsonl", {"jsonl"});
+    if (result.success) logNotice() << result.filePath;
+}
+```
+
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、初期ファイル名を指定する `defaultName` です。デフォルトはすべて空です。
 - 選択後は、`success = true`、フルパスの `filePath`、`fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
 - 保存先を選ぶだけで、ファイルには書き込みません。`success` を確認してから、ファイル書き込み API で `filePath` にデータを保存してください。
@@ -54073,6 +55143,16 @@ details.ja = '''
 - 待機中はすべてのウィンドウが停止します。[`saveDialogAsync`](#saveDialogAsync) は結果を返す代わりにコールバックで受け取ります。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 마지막 인수로 받습니다. 확장자는 png나 jsonl처럼 ASCII 영문자와 숫자로, 점 없이 지정합니다. ASCII 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 입력한 이름에 일치하는 확장자가 없으면 덮어쓰기를 확인하기 전에 첫 확장자를 추가합니다.
+
+기록 파일의 확장자를 지정합니다.
+```cpp
+void tcApp::setup() {
+    auto result = saveDialog("Save recording", "", {}, "session.jsonl", {"jsonl"});
+    if (result.success) logNotice() << result.filePath;
+}
+```
+
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, 초기 파일명을 지정하는 `defaultName`입니다. 기본값은 모두 비어 있습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
 - 저장할 위치만 선택하며 파일을 쓰지는 않습니다. `success`를 확인한 뒤 파일 쓰기 API로 `filePath`에 데이터를 저장해야 합니다.
@@ -54107,10 +55187,22 @@ void tcApp::setup() {
 ["saveDialogAsync"]
 category = "window_input"
 keywords = ["file", "picker", "callback"]
-description.en = "Shows a save destination picker with a result callback."
-description.ja = "結果コールバック付きの保存先選択ダイアログを表示する。"
-description.ko = "결과 콜백이 있는 저장 위치 선택 대화상자를 표시한다."
+description.en = "Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation."
+description.ja = "保存先を選択します。拡張子リストを受け取る形式では、許可された拡張子がなければ上書き確認の前に追加します。"
+description.ko = "저장 위치를 선택합니다. 확장자 목록을 받는 형식은 허용된 확장자가 없으면 덮어쓰기 확인 전에 추가합니다."
 details.en = '''
+- The overload takes `const vector<string>& extensions` before `callback`. Extensions are ASCII letters and digits, such as png or jsonl, without dots; matching ignores ASCII case and an empty list keeps the original behavior. If none matches the typed name, the first extension is appended before confirming replacement.
+
+Choose the recording extension:
+```cpp
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
+```
+
 - Takes `title`, `message`, `defaultPath`, `defaultName`, and `callback`, with no default arguments; `defaultPath` is the initial directory and `defaultName` is the initial filename.
 - Pass `{}` for an unspecified directory or filename; paths are passed to the platform picker without resolution through `getDataPath()`.
 - On desktop platforms, selects a destination without writing your data; after a successful result, write the data to `result.filePath`.
@@ -54119,6 +55211,18 @@ details.en = '''
 - See `loadDialogAsync` for result reference lifetime and the shared iOS picker restriction, and `alertDialogAsync` for threading, callback timing, and app run lifetime rules.
 '''
 details.ja = '''
+- オーバーロードは `const vector<string>& extensions` を `callback` の直前に受け取ります。拡張子は png や jsonl のような ASCII の英数字で、ドットなしで指定します。ASCII の大文字と小文字は区別せず、空のリストは従来どおりに動作します。入力した名前に一致する拡張子がなければ、上書きを確認する前に先頭の拡張子を追加します。
+
+記録ファイルの拡張子を指定します。
+```cpp
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
+```
+
 - `title`、`message`、`defaultPath`、`defaultName`、`callback` を受け取り、既定の引数はありません。`defaultPath` は初期ディレクトリ、`defaultName` は初期ファイル名です。
 - ディレクトリやファイル名を指定しない場合は `{}` を渡してください。パスは `getDataPath()` で解決せず、プラットフォームの選択画面へ渡します。
 - デスクトップでは保存先を選ぶだけで、データは書き込みません。成功した結果を受け取った後に `result.filePath` へデータを書き込んでください。
@@ -54127,6 +55231,18 @@ details.ja = '''
 - 結果の参照の有効期間と iOS の選択画面の共有制限は `loadDialogAsync`、スレッドの扱い、コールバックのタイミング、アプリの実行期間に関する規則は `alertDialogAsync` を参照してください。
 '''
 details.ko = '''
+- 오버로드는 `const vector<string>& extensions`를 `callback` 바로 앞으로 받습니다. 확장자는 png나 jsonl처럼 ASCII 영문자와 숫자로, 점 없이 지정합니다. ASCII 대소문자를 구분하지 않으며 빈 목록은 기존 동작을 유지합니다. 입력한 이름에 일치하는 확장자가 없으면 덮어쓰기를 확인하기 전에 첫 확장자를 추가합니다.
+
+기록 파일의 확장자를 지정합니다.
+```cpp
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
+```
+
 - `title`, `message`, `defaultPath`, `defaultName`, `callback`을 받으며 기본 인수는 없습니다. `defaultPath`는 초기 디렉터리이고 `defaultName`은 초기 파일 이름입니다.
 - 디렉터리나 파일 이름을 지정하지 않으려면 `{}`를 전달하세요. 경로는 `getDataPath()`로 해석하지 않고 플랫폼 선택 화면에 전달합니다.
 - 데스크톱에서는 저장 위치만 선택하며 데이터를 기록하지 않습니다. 성공 결과를 받은 뒤 `result.filePath`에 데이터를 기록하세요.
@@ -54149,6 +55265,14 @@ platform_note.ko = '''
 - iOS는 내보내기용 `UIDocumentPickerViewController`를 사용하며 `title`, `message`, `defaultPath`는 사용하지 않습니다.
 - Windows와 Linux는 `message`를 사용하지 않습니다. Windows는 네이티브 IFileDialog 선택 화면을 사용합니다.
 - Android는 JNI Intent가 구현되지 않아 선택 화면 없이 즉시 빈 결과를 전달합니다. Web/WASM은 경고를 로그에 출력하고 빈 결과를 전달합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    saveDialogAsync("Save recording", "", {}, "session.jsonl", {"jsonl"},
+                    [](const FileDialogResult& result) {
+        if (result.success) logNotice() << "saved to " << result.filePath;
+    });
+}
 '''
 
 ["saveJson"]
@@ -55932,20 +57056,47 @@ void tcApp::setup() {
 ["setWindowDecorated"]
 category = "window_system"
 keywords = ["borderless", "titlebar", "chrome", "frame", "decoration"]
-description.en = "Controls the resolved Window's standard decorations."
-description.ja = "対象 Window の標準装飾を切り替える。"
-description.ko = "대상 Window의 표준 장식을 전환한다."
+description.en = "Shows or hides window decorations while keeping the client size on Windows, macOS and X11."
+description.ja = "Windows・macOS・X11 で内容領域のサイズを保ちながら、ウィンドウの標準装飾を切り替えます。"
+description.ko = "Windows, macOS, X11에서 클라이언트 영역 크기를 유지하면서 창의 표준 장식을 전환합니다."
 details.en = '''
+- On Windows, macOS and X11, changing decorations keeps the client (drawable) size, including after a change requested while fullscreen takes effect on return to windowed mode.
+
+Hide the decorations:
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - Changing decoration while fullscreen keeps the window fullscreen. The requested decoration takes effect after leaving fullscreen.
 - Pass `false` to hide the title bar, borders, and window buttons, or `true` to restore standard decorations; keyboard focus and programmatic closing remain available.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
+- Windows・macOS・X11 では、装飾を変更しても内容（描画）領域のサイズを保ちます。フルスクリーン中に要求した変更を解除後に反映するときも同じです。
+
+装飾を非表示にします。
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - フルスクリーン中に装飾を変更してもフルスクリーンを維持します。指定した装飾は解除後に反映します。
 - `false` でタイトルバー、枠、ウィンドウボタンを隠し、`true` で標準装飾に戻します。キーボードフォーカスとプログラムからの終了は引き続き使えます。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
+- Windows, macOS, X11에서는 장식을 변경해도 클라이언트(그리기) 영역 크기를 유지합니다. 전체화면 중 요청한 변경을 창 모드로 돌아온 뒤 적용할 때도 동일합니다.
+
+장식을 숨깁니다.
+```cpp
+void tcApp::setup() {
+    setWindowDecorated(false);
+}
+```
+
 - 전체화면 중에 장식을 변경해도 전체화면을 유지합니다. 요청한 장식은 전체화면을 종료한 뒤 적용합니다.
 - `false`이면 제목 표시줄, 테두리, 윈도우 버튼을 숨기고 `true`이면 표준 장식을 복원합니다. 키보드 포커스와 프로그램을 통한 종료는 계속 사용할 수 있습니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
@@ -67884,23 +69035,49 @@ description.en = "Uploads CPU bytes to the beginning of persistent storage once 
 description.ja = "デバイスフレームごとに一度、永続バッファの先頭へ CPU のバイト列を転送します。"
 description.ko = "디바이스 프레임마다 한 번 영구 버퍼의 시작 부분에 CPU 바이트를 업로드합니다."
 details.en = '''
+- `update(values)` accepts a vector, array or span and forwards its size in bytes; it returns the pointer overload’s bool without resizing or converting elements.
 - update(data, size) requires allocated storage, non-null data and a positive size divisible by four that does not exceed getSize(). Bytes beyond this range are preserved. No typed conversion or resizing occurs.
 - This sokol revision uses sg_write_buffer_transient plus sg_copy_buffer_to_buffer rather than sg_update_buffer. A lazily allocated GPU upload buffer is written and copied outside a pass. Using a real GPU copy also preserves WebGPU command ordering. Sokol forbids rewriting that staging source after a copy in the same frame, so a second update before the next sg_commit returns false with a warning. Device frames are shared across windows; setup and the first update may share one. Initial data in allocate does not consume this update.
+
+Upload from update() once per device frame:
+```cpp
+void tcApp::update() {
+    buffer.update(values);
+}
+```
 - Flushes earlier recorded drawing before the copy, using the same continuation as compute dispatch; later draws/dispatches see the new bytes. CPU data may be released on return; no GPU completion wait occurs. Invalid input or unavailable resources warn and return false without changing storage.
 '''
 details.ja = '''
+- `update(values)` は vector、array、span を受け取り、サイズをバイト数へ換算して転送します。サイズ変更や要素の変換は行わず、ポインタ版と同じ bool を返します。
 - update(data, size) には確保済みの領域、null でない data、getSize() 以下の正の 4 の倍数のサイズが必要です。範囲より後ろの内容は保持します。型変換やサイズ変更はしません。
 - この sokol 版では sg_update_buffer の代わりに sg_write_buffer_transient と sg_copy_buffer_to_buffer を使います。必要になった時に GPU 転送用バッファを確保し、パスの外で書き込みとコピーを行います。GPU 間のコピーによって WebGPU のコマンド順序も維持します。sokol は同じフレームのコピー後に元のステージングへ再度書くことを禁止するため、次の sg_commit より前の 2 回目の更新は警告を出して false を返します。デバイスフレームはウィンドウ間で共有し、setup と最初の update が同じフレームになる場合があります。allocate の初期データは更新回数に含みません。
+
+デバイスフレームごとに一度 update() から転送します。
+```cpp
+void tcApp::update() {
+    buffer.update(values);
+}
+```
 - コピー前に記録済みの描画を送り出し、compute dispatch と同じ継続処理を使います。後続の描画・dispatch は新しい内容を読みます。戻った後は CPU データを解放できます。GPU 完了は待ちません。不正な入力や利用できないリソースでは警告を出して false を返し、内容を変更しません。
 '''
 details.ko = '''
+- `update(values)`는 vector, array, span을 받아 크기를 바이트 수로 변환하여 전달합니다. 크기 변경이나 요소 변환 없이 포인터 버전과 같은 bool을 반환합니다.
 - update(data, size)는 할당된 저장소, null이 아닌 data, getSize() 이하의 양의 4의 배수 크기를 요구합니다. 범위 뒤의 내용은 유지합니다. 타입 변환이나 크기 변경은 수행하지 않습니다.
 - 이 sokol 버전은 sg_update_buffer 대신 sg_write_buffer_transient와 sg_copy_buffer_to_buffer를 사용합니다. 필요할 때 GPU 업로드 버퍼를 할당하고 패스 밖에서 쓰기와 복사를 수행합니다. GPU 간 복사는 WebGPU 명령 순서도 유지합니다. sokol은 같은 프레임에서 복사한 스테이징 원본의 재작성을 금지하므로 다음 sg_commit 전 두 번째 업데이트는 경고 후 false를 반환합니다. 디바이스 프레임은 창 사이에 공유하며 setup과 첫 update가 같은 프레임일 수 있습니다. allocate의 초기 데이터는 업데이트 횟수에 포함하지 않습니다.
+
+디바이스 프레임마다 한 번 update()에서 업로드합니다.
+```cpp
+void tcApp::update() {
+    buffer.update(values);
+}
+```
 - 복사 전에 기록된 그리기를 전송하며 compute dispatch와 같은 재개 처리를 사용합니다. 이후 그리기와 dispatch는 새 내용을 읽습니다. 반환 후 CPU 데이터를 해제할 수 있으며 GPU 완료를 기다리지 않습니다. 잘못된 입력이나 사용 불가능한 리소스는 경고 후 false를 반환하며 저장소를 변경하지 않습니다.
 '''
 snippet = '''
-std::array<Vec4, 4> values = {};
-bool uploaded = buffer.update(values.data(), sizeof(values));
+void tcApp::update() {
+    vector<float> values(4);
+    buffer.update(values);
+}
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
@@ -67909,24 +69086,49 @@ description.en = "Reads bytes from the start of storage and blocks until GPU com
 description.ja = "領域の先頭からバイト列を読み取り、GPU の完了までブロックします（ネイティブ専用です。Web では readAsync() を使います）。"
 description.ko = "저장소의 시작부터 바이트를 읽고 GPU 완료까지 차단합니다(네이티브 전용이며 Web에서는 readAsync()를 사용합니다)."
 details.en = '''
+- `read(values)` fills a writable vector, array or span without resizing and returns the pointer overload’s bool.
 - read(destination, bytes) immediately submits preceding recorded draws and dispatches in order and blocks until completion. The frame stalls while it waits; calling it every frame can lower fps. No frame commit occurs, and later drawing continues normally. Available on Metal, D3D11, GL 4.3 and GLES 3.1, including Raspberry Pi 5. It is not available on Web: calling it there is a compile error.
+
+Use asynchronous readback to avoid blocking, including on Web:
+```cpp
+void tcApp::update() {
+    buffer.readAsync([](ReadbackResult result) { logNotice() << result.ok(); });
+}
+```
 - Copies bytes from offset zero without conversion. Partial reads, including byte counts not divisible by four, are allowed. A zero-byte read succeeds without allocated storage or a destination and submits no work. A nonzero read requires allocated storage, a non-null destination with room for bytes, and bytes <= getSize(). Invalid input or native readback failure returns false with a warning (at most once every 5 seconds per buffer), and leaves the destination untouched. A successful result is a CPU snapshot that later GPU writes cannot change.
 - Every StorageBuffer allocation includes copy-source usage automatically. Call on the main thread with an initialized windowed GPU; this API does not enable headless compute.
 '''
 details.ja = '''
+- `read(values)` は書き込み可能な vector、array、span にサイズを変更せず書き込み、ポインタ版と同じ bool を返します。
 - read(destination, bytes) は先行する記録済みの描画と dispatch を順番どおり直ちに送信し、完了までブロックします。待機中はフレームが停止し、毎フレーム呼ぶと fps が低下する場合があります。フレームの commit は行わず、その後も描画を続けられます。Metal、D3D11、GL 4.3、GLES 3.1（Raspberry Pi 5 を含みます）に対応します。Web では利用できず、呼ぶとコンパイルエラーになります。
+
+Web を含め、ブロックを避けるには非同期で読み取ります。
+```cpp
+void tcApp::update() {
+    buffer.readAsync([](ReadbackResult result) { logNotice() << result.ok(); });
+}
+```
 - オフセット 0 から bytes バイトを変換せずコピーします。4 の倍数でないバイト数を含め、部分読み取りができます。0 バイトなら確保済み領域や出力先は不要で、GPU へ送信せず true を返します。0 より大きい場合は、確保済み領域、bytes バイト以上の null でない出力先、bytes <= getSize() が必要です。不正な入力やネイティブ読み取り失敗では、警告を出して false を返し、出力先を変更しません。警告はバッファごとに 5 秒に 1 回までです。成功時の CPU スナップショットは、その後の GPU 書き込みでは変わりません。
 - すべての StorageBuffer は自動的にコピー元として確保します。ウィンドウの GPU が初期化された状態で、メインスレッドから呼びます。ヘッドレス compute を有効にする API ではありません。
 '''
 details.ko = '''
+- `read(values)`는 쓰기 가능한 vector, array, span에 크기를 변경하지 않고 쓰며 포인터 버전과 같은 bool을 반환합니다.
 - read(destination, bytes)는 앞서 기록된 그리기와 dispatch를 순서대로 즉시 제출하고 완료까지 차단합니다. 기다리는 동안 프레임이 멈추며 매 프레임 호출하면 fps가 낮아질 수 있습니다. 프레임 commit은 수행하지 않으며 이후 그리기를 계속합니다. Metal, D3D11, GL 4.3, GLES 3.1(Raspberry Pi 5 포함)을 지원합니다. Web에서는 사용할 수 없으며 호출하면 컴파일 오류가 발생합니다.
+
+Web을 포함하여 차단을 피하려면 비동기로 읽습니다.
+```cpp
+void tcApp::update() {
+    buffer.readAsync([](ReadbackResult result) { logNotice() << result.ok(); });
+}
+```
 - 오프셋 0부터 bytes바이트를 변환 없이 복사합니다. 4의 배수가 아닌 바이트 수를 포함하여 부분 읽기를 허용합니다. 0바이트 읽기는 할당된 저장소나 출력 대상 없이 성공하며 GPU 작업을 제출하지 않습니다. 0보다 큰 읽기는 할당된 저장소, bytes바이트 이상을 담는 null이 아닌 출력 대상, bytes <= getSize()를 요구합니다. 잘못된 입력이나 네이티브 읽기 실패 시 경고하고 false를 반환하며 출력 대상을 변경하지 않습니다. 경고는 버퍼마다 5초에 한 번까지 출력합니다. 성공한 CPU 스냅샷은 이후 GPU 쓰기로 변경되지 않습니다.
 - 모든 StorageBuffer는 자동으로 복사 원본 용도를 포함하여 할당합니다. 창의 GPU를 초기화한 상태에서 메인 스레드에서 호출합니다. 이 API는 헤드리스 compute를 활성화하지 않습니다.
 '''
 snippet = '''
-compute.dispatch(groups);
-std::vector<float> values(count);
-if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << values[0];
+void tcApp::update() {
+    vector<float> values(4);
+    if (buffer.read(values)) logNotice() << values[0];
+}
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
@@ -71054,3 +72256,249 @@ struct tcApp : App {
 - 조기 return에서도 그때까지 추가한 정점으로 쌍을 종료합니다. close의 기본값은 false이며 true는 마지막 정점을 첫 정점에 연결합니다.
 - 가드를 이름 있는 변수에 저장합니다. 복사와 이동은 불가능합니다. 명시적인 begin/end 쌍이 계속 기본 형태입니다. C++ 전용이며 Lua에는 스코프로 닫는 가드 API가 없습니다.
 '''
+
+["AudioPerformanceProfile"]
+category = "sound"
+description.en = "Selects the output performance profile for instruments or BGM."
+description.ja = "楽器演奏やBGM向けの出力パフォーマンスプロファイルを選ぶ。"
+description.ko = "악기 연주 또는 BGM용 출력 성능 프로파일을 선택한다."
+details.en = "`LowLatency` (default) and `Conservative` map to miniaudio's low-latency and conservative profiles. Set `AudioSettings::performanceProfile` before opening output."
+details.ja = "`LowLatency`（既定値）と `Conservative` はminiaudioの低レイテンシーと保守的なプロファイルに対応します。出力を開く前に `AudioSettings::performanceProfile` に設定します。"
+details.ko = "`LowLatency`(기본값)와 `Conservative`는 miniaudio의 저지연 및 보수적 프로파일에 대응합니다. 출력을 열기 전에 `AudioSettings::performanceProfile`에 설정합니다."
+related = ["AudioSettings::performanceProfile"]
+
+["AudioContentType"]
+category = "sound"
+description.en = "Selects the AAudio output content type for background music."
+description.ja = "BGM向けのAAudio出力のコンテンツ種別を選ぶ。"
+description.ko = "BGM용 AAudio 출력의 콘텐츠 유형을 선택한다."
+details.en = "`Default` leaves miniaudio's content type unchanged; `Music` selects music. Set `AudioSettings::contentType` before opening output."
+details.ja = "`Default` はminiaudioのコンテンツ種別を変更せず、`Music` は音楽を指定します。出力を開く前に `AudioSettings::contentType` に設定します。"
+details.ko = "`Default`는 miniaudio의 콘텐츠 유형을 유지하며 `Music`은 음악을 선택합니다. 출력을 열기 전에 `AudioSettings::contentType`에 설정합니다."
+related = ["AudioSettings::contentType"]
+
+["AudioSettings::performanceProfile"]
+category = "sound"
+description.en = "Chooses low latency for instruments or a conservative profile for long BGM playback."
+description.ja = "楽器向けの低レイテンシーか、長時間のBGM再生向けの保守的なプロファイルを選びます。"
+description.ko = "악기용 저지연 또는 장시간 BGM 재생용 보수적 프로파일을 선택합니다."
+details.en = '''
+- `LowLatency` is the default for instruments; `Conservative` requests larger default periods for long BGM playback, including on desktop backends, when `bufferSize` is 0 (automatic), subject to backend negotiation. A positive `bufferSize` is used as-is.
+- Conservative can raise latency; use low latency for instruments:
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
+}
+```
+- On AAudio, conservative maps to `AAUDIO_PERFORMANCE_MODE_NONE`. `POWER_SAVING` has no TrussC API.
+- Settings apply when `AudioEngine::init(settings)` opens or reopens output. Editing the local settings object does not change a running device; pass it to `init(settings)` again to apply it. Zero-argument `init()` retains the last profile and content type, including after a failed initialization.
+- On Android, after an automatic reroute (headphones, Bluetooth), TrussC reopens output once more to restore Conservative, so there is a second short gap.
+'''
+details.ja = '''
+- 楽器向けの `LowLatency` が既定値で、`Conservative` は `bufferSize` が0（自動）のとき、デスクトップを含むバックエンドに長時間のBGM再生向けの大きい既定の処理周期を要求します。実際の周期はバックエンドとの交渉で決まり、正の `bufferSize` はそのまま使います。
+- Conservativeではレイテンシーが増えることがあるため、楽器演奏には低レイテンシーを使います。
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
+}
+```
+- AAudioではConservativeが `AAUDIO_PERFORMANCE_MODE_NONE` に対応します。`POWER_SAVING` を指定するTrussC APIはありません。
+- `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用します。ローカルの設定オブジェクトの編集だけでは動作中のデバイスは変わりません。適用するには再度 `init(settings)` に渡します。引数なしの `init()` は、初期化が失敗した場合も最後のプロファイルとコンテンツ種別を再利用します。
+- Androidでは自動的な出力先の切り替え（ヘッドホン、Bluetooth）の後、Conservativeを復元するためにTrussCが出力をもう一度開き直すので、短い中断がもう一度発生します。
+'''
+details.ko = '''
+- 악기용 `LowLatency`가 기본값이며 `Conservative`는 `bufferSize`가 0(자동)일 때 데스크톱을 포함한 백엔드에 장시간 BGM 재생용으로 더 큰 기본 처리 주기를 요청합니다. 실제 주기는 백엔드와의 협상에 따라 결정되며 양수 `bufferSize`는 그대로 사용합니다.
+- Conservative는 지연을 늘릴 수 있으므로 악기 연주에는 저지연을 사용합니다.
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.performanceProfile = AudioPerformanceProfile::LowLatency});
+}
+```
+- AAudio에서 Conservative는 `AAUDIO_PERFORMANCE_MODE_NONE`에 대응합니다. `POWER_SAVING`을 지정하는 TrussC API는 없습니다.
+- `AudioEngine::init(settings)`가 출력을 열거나 다시 열 때 적용합니다. 로컬 설정 객체를 편집하는 것만으로 실행 중인 장치는 바뀌지 않습니다. 적용하려면 다시 `init(settings)`에 전달합니다. 인자 없는 `init()`은 초기화 실패 후에도 마지막 프로파일과 콘텐츠 유형을 재사용합니다.
+- Android에서는 자동 출력 경로 변경(헤드폰, Bluetooth) 후 TrussC가 Conservative를 복원하기 위해 출력을 한 번 더 열므로 짧은 재생 중단이 한 번 더 발생합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    AudioSettings settings;
+    settings.performanceProfile = AudioPerformanceProfile::Conservative;
+    settings.contentType = AudioContentType::Music;
+    AudioEngine::getInstance().init(settings);
+}
+'''
+
+["AudioSettings::contentType"]
+category = "sound"
+description.en = "Labels AAudio output as music for BGM or background playback."
+description.ja = "BGMやバックグラウンド再生のAAudio出力を音楽として指定します。"
+description.ko = "BGM 또는 백그라운드 재생의 AAudio 출력을 음악으로 지정합니다."
+details.en = '''
+- `Default` skips the AAudio content-type setter (AAudio's effective default is MUSIC); `Music` explicitly requests `AAUDIO_CONTENT_TYPE_MUSIC` for BGM, independently of the platform default. Other backends ignore this field; there is no content-type API for those backends.
+- Applied when output opens or reopens through `AudioEngine::init(settings)`; zero-argument `init()` retains the last content type. To apply a changed settings object, reopen output:
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.contentType = AudioContentType::Music});
+}
+```
+'''
+details.ja = '''
+- `Default` はAAudioのコンテンツ種別の設定を省略し、AAudioの実効的な既定値はMUSICです。`Music` はプラットフォームの既定値に依存せず、BGM向けに `AAUDIO_CONTENT_TYPE_MUSIC` を明示的に要求します。他のバックエンドでは無視され、それらのコンテンツ種別を指定するAPIはありません。
+- `AudioEngine::init(settings)` で出力を開く、または開き直すときに適用し、引数なしの `init()` は最後の種別を再利用します。変更した設定オブジェクトを適用するには出力を開き直します。
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.contentType = AudioContentType::Music});
+}
+```
+'''
+details.ko = '''
+- `Default`는 AAudio 콘텐츠 유형 설정을 생략하며 AAudio의 실제 기본값은 MUSIC입니다. `Music`은 플랫폼 기본값과 관계없이 BGM용 `AAUDIO_CONTENT_TYPE_MUSIC`을 명시적으로 요청합니다. 다른 백엔드는 이 필드를 무시하며 해당 백엔드의 콘텐츠 유형을 지정하는 API는 없습니다.
+- `AudioEngine::init(settings)`로 출력을 열거나 다시 열 때 적용하며 인자 없는 `init()`은 마지막 유형을 재사용합니다. 변경한 설정 객체를 적용하려면 출력을 다시 엽니다.
+```cpp
+void tcApp::setup() {
+    AudioEngine::getInstance().init(AudioSettings{.contentType = AudioContentType::Music});
+}
+```
+'''
+snippet = '''
+void tcApp::setup() {
+    AudioSettings settings;
+    settings.performanceProfile = AudioPerformanceProfile::Conservative;
+    settings.contentType = AudioContentType::Music;
+    AudioEngine::getInstance().init(settings);
+}
+'''
+
+["median"]
+category = "math_general"
+description.en = "Returns the middle value, averaging the middle pair for an even count."
+description.ja = "中央の値を返し、偶数個では中央の2値を平均します。"
+description.ko = "중앙값을 반환하며 짝수 개이면 가운데 두 값을 평균합니다."
+details.en = '''
+Accepts `std::span<const float>` and copies the input to preserve its order. Ignores NaN; empty or all-NaN input returns `nullopt`. Equivalent to `percentile(values, 0.5)`. Returns `optional<float>`; infinities are retained, but interpolation between opposite infinities returns `nullopt`. Check the result before use:
+'''
+details.ja = '''
+`std::span<const float>` を受け取り、順序を保つため入力をコピーします。NaN は除外し、空またはすべて NaN の入力には `nullopt` を返します。`percentile(values, 0.5)` と同じです。戻り値は `optional<float>` です。無限大は残しますが、正負の無限大間の補間は `nullopt` になります。使用前に結果を確認します。
+'''
+details.ko = '''
+`std::span<const float>`를 받고 순서를 유지하도록 입력을 복사합니다. NaN은 제외하며 빈 입력이나 모두 NaN인 입력에는 `nullopt`를 반환합니다. `percentile(values, 0.5)`와 같습니다. 반환형은 `optional<float>`입니다. 무한대는 유지하지만 양과 음의 무한대 사이의 보간은 `nullopt`를 반환합니다. 사용 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> values{9, 1, 5, 3};
+    auto result = median(values);
+    if (result) logNotice("Stats") << *result;
+}
+'''
+
+["percentile"]
+category = "math_general"
+description.en = "Returns an interpolated percentile with a fraction p from 0 to 1."
+description.ja = "0〜1 の割合 p に対応する補間したパーセンタイルを返します。"
+description.ko = "0부터 1까지의 비율 p에 해당하는 보간된 백분위수를 반환합니다."
+details.en = '''
+Accepts `std::span<const float>` and returns `optional<float>`. Copies the input, ignores NaN, and linearly interpolates rank `p * (n - 1)`. Empty/all-NaN input or nonfinite/out-of-range p returns `nullopt`; p is not clamped. Infinities are retained; interpolation between opposite infinities returns `nullopt`. Check the result before use:
+'''
+details.ja = '''
+`std::span<const float>` を受け取り、`optional<float>` を返します。入力をコピーし、NaN を除外して順位 `p * (n - 1)` を線形補間します。空またはすべて NaN の入力、非有限または範囲外の p は `nullopt` になります。p はクランプしません。無限大は残しますが、正負の無限大間の補間は `nullopt` になります。使用前に結果を確認します。
+'''
+details.ko = '''
+`std::span<const float>`를 받고 `optional<float>`를 반환합니다. 입력을 복사하고 NaN을 제외한 뒤 순위 `p * (n - 1)`를 선형 보간합니다. 빈 입력, 모두 NaN인 입력, 유한하지 않거나 범위를 벗어난 p에는 `nullopt`를 반환합니다. p를 제한하지 않습니다. 무한대는 유지하지만 양과 음의 무한대 사이의 보간은 `nullopt`를 반환합니다. 사용 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> values{9, 1, 5, 3};
+    auto result = percentile(values, 0.25);
+    if (result) logNotice("Stats") << *result;
+}
+'''
+
+["histogram"]
+category = "math_general"
+description.en = "Counts values in equal-width bins over [low, high)."
+description.ja = "[low, high) の範囲を等幅のビンに分けて値を数えます。"
+description.ko = "[low, high) 범위를 같은 너비의 구간으로 나누어 값을 셉니다."
+details.en = '''
+Accepts `std::span<const float>` and returns `optional<vector<size_t>>`. Empty input returns a vector containing `bins` zeros. Skips NaN, infinities, and values outside `[low, high)`; low is included and high is excluded. Zero bins, nonfinite bounds, or low >= high returns `nullopt`. Check the result before reading counts:
+'''
+details.ja = '''
+`std::span<const float>` を受け取り、`optional<vector<size_t>>` を返します。空入力では bins 個のゼロを返します。NaN、無限大、`[low, high)` の範囲外の値は数えません。low は含み、high は含みません。bins が0、境界が非有限、または low >= high の場合は `nullopt` を返します。件数を読む前に結果を確認します。
+'''
+details.ko = '''
+`std::span<const float>`를 받고 `optional<vector<size_t>>`를 반환합니다. 빈 입력에는 bins개의 0을 반환합니다. NaN, 무한대, `[low, high)` 밖의 값은 세지 않습니다. low는 포함하고 high는 제외합니다. bins가 0이거나 경계가 유한하지 않거나 low >= high이면 `nullopt`를 반환합니다. 개수를 읽기 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> values{0, 0.25f, 0.5f, 1};
+    auto counts = histogram(values, 4, 0, 1);
+    if (counts) logNotice("Stats") << counts->at(0);
+}
+'''
+
+["correlation"]
+category = "math_general"
+description.en = "Returns the Pearson correlation of paired float values."
+description.ja = "対になる float 値のピアソン相関係数を返します。"
+description.ko = "쌍을 이루는 float 값의 피어슨 상관계수를 반환합니다."
+details.en = '''
+Accepts two `std::span<const float>` inputs and returns `optional<double>`. Uses scalar double accumulation in two passes, subtracting the means before computing moments. Empty input, unequal lengths, fewer than two pairs, any NaN/infinity, or zero variance in either input returns `nullopt`. Check the result before use:
+'''
+details.ja = '''
+2つの `std::span<const float>` を受け取り、`optional<double>` を返します。スカラーの double で2回走査し、平均を引いてからモーメントを計算します。空入力、長さの不一致、2組未満、NaN・無限大の混入、どちらかの分散が0の場合は `nullopt` を返します。使用前に結果を確認します。
+'''
+details.ko = '''
+두 `std::span<const float>` 입력을 받고 `optional<double>`를 반환합니다. 스칼라 double로 두 번 순회하며 평균을 뺀 뒤 모멘트를 계산합니다. 빈 입력, 길이 불일치, 두 쌍 미만, NaN이나 무한대 포함, 어느 한 입력의 분산이 0이면 `nullopt`를 반환합니다. 사용 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> x{0, 1, 2}, y{3, 5, 7};
+    auto result = correlation(x, y);
+    if (result) logNotice("Stats") << *result;
+}
+'''
+
+["fitLine"]
+category = "math_general"
+description.en = "Fits y = slope * x + intercept by least squares."
+description.ja = "最小二乗法で y = slope * x + intercept を当てはめます。"
+description.ko = "최소제곱법으로 y = slope * x + intercept를 맞춥니다."
+details.en = '''
+Accepts two `std::span<const float>` inputs and returns `optional<LineFit>` with double slope and intercept to preserve calculation precision. Uses scalar double accumulation in two passes after centering. Empty input, unequal lengths, fewer than two pairs, any NaN/infinity, or zero x variance returns `nullopt`. Constant y gives a horizontal line. Check the result before reading coefficients:
+'''
+details.ja = '''
+2つの `std::span<const float>` を受け取り、計算精度を保つ double の slope と intercept を持つ `optional<LineFit>` を返します。スカラーの double で2回走査し、平均を引いて計算します。空入力、長さの不一致、2組未満、NaN・無限大の混入、x の分散が0の場合は `nullopt` を返します。y が一定なら水平線になります。係数を読む前に結果を確認します。
+'''
+details.ko = '''
+두 `std::span<const float>` 입력을 받고 계산 정밀도를 유지하는 double slope와 intercept를 가진 `optional<LineFit>`를 반환합니다. 스칼라 double로 두 번 순회하며 평균을 뺀 뒤 계산합니다. 빈 입력, 길이 불일치, 두 쌍 미만, NaN이나 무한대 포함, x의 분산이 0이면 `nullopt`를 반환합니다. y가 일정하면 수평선이 됩니다. 계수를 읽기 전에 결과를 확인합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> x{0, 1, 2}, y{3, 5, 7};
+    auto line = fitLine(x, y);
+    if (line) logNotice("Stats") << line->slope << ", " << line->intercept;
+}
+'''
+
+["LineFit"]
+category = "math_general"
+description.en = "Least-squares line coefficients returned by fitLine, stored as doubles."
+description.ja = "fitLine が返す最小二乗直線の係数を double で保持します。"
+description.ko = "fitLine이 반환하는 최소제곱 직선 계수를 double로 저장합니다."
+snippet = '''
+void tcApp::setup() {
+    std::vector<float> x{0, 1, 2}, y{3, 5, 7};
+    auto line = fitLine(x, y);
+    if (line) logNotice("Stats") << line->slope << ", " << line->intercept;
+}
+'''
+
+["LineFit::slope"]
+category = "math_general"
+description.en = "Slope in y = slope * x + intercept."
+description.ja = "y = slope * x + intercept の傾きです。"
+description.ko = "y = slope * x + intercept의 기울기입니다."
+
+["LineFit::intercept"]
+category = "math_general"
+description.en = "Intercept in y = slope * x + intercept."
+description.ja = "y = slope * x + intercept の切片です。"
+description.ko = "y = slope * x + intercept의 절편입니다."

@@ -398,6 +398,35 @@ public:
         return readPixelsFloatPlatform(pixels);
     }
 
+    // Automatically sized RGBA8 output; unchanged on failure.
+    TC_PLATFORMS("macos,windows,linux,ios,android,web") bool readPixels(Pixels& pixels) const {
+        if (!allocated_) return false;
+        Pixels result;
+        try {
+            result.allocate(target_.width, target_.height, 4, PixelFormat::U8);
+            if (!readPixels(result.getData())) return false;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        pixels = std::move(result);
+        return true;
+    }
+
+    // Automatically sized F32 output using the source channel count (RGBA for
+    // RGBA attachments), just like the pointer overload; unchanged on failure.
+    TC_PLATFORMS("macos,windows,linux,ios,android,web") bool readPixelsFloat(Pixels& pixels) const {
+        if (!allocated_) return false;
+        Pixels result;
+        try {
+            result.allocate(target_.width, target_.height, channelCount(format_), PixelFormat::F32);
+            if (!readPixelsFloat(result.getDataF32())) return false;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        pixels = std::move(result);
+        return true;
+    }
+
     // Stencil diagnostics for ended, owned, single-sample Fbos only.
     // Draw opaque gray (byte / 255), nearest sampled, at attachment size in
     // the current coordinate system. Does not use the current tint/blend mode.

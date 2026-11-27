@@ -30,10 +30,10 @@ ConfigurePlan planConfigure(const ConfigureInputs& in) {
     // configure time. Only the native preset is managed: web / android bake
     // their own build type (MinSizeRel / Release) into the preset, and iOS
     // uses the multi-config Xcode generator, where --config applies.
-    // The default (no flag) is RelWithDebInfo, the trussc_app.cmake default,
-    // so a cache left on another type by an earlier flag goes back to it.
+    // cmdBuild resolves the remembered type before planning. Multi-config
+    // generators choose the type at build time through --config.
     string pinType;
-    if (in.isNative) {
+    if (in.isNative && !in.multiConfig) {
         const string effective = in.requestedBuildType.empty()
             ? "RelWithDebInfo" : in.requestedBuildType;
         const bool knownType = in.hasCache && !in.cachedBuildType.empty();
@@ -151,6 +151,7 @@ ConfigureInputs inspectBuildFolder(const string& projectDir,
     error_code ec;
     in.hasCache = fs::is_regular_file(dir / "CMakeCache.txt", ec);
     in.generated = hasBuildSystem(dir);
+    in.multiConfig = !readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_CONFIGURATION_TYPES").empty();
     in.cachedBuildType = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_BUILD_TYPE");
     string mcp = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "TRUSSC_MCP_DEV");
     transform(mcp.begin(), mcp.end(), mcp.begin(),

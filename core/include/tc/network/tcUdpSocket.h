@@ -1,4 +1,5 @@
 #pragma once
+#include <span>
 #include "tc/utils/tcAnnotations.h"
 #include "tc/network/tcNetworkState.h"
 #include "tc/utils/tcKeptThreads.h"
@@ -204,13 +205,17 @@ public:
     // Send to specified host and port
     bool sendTo(const std::string& host, int port, const void* data, size_t size);
     bool sendTo(const std::string& host, int port, const std::string& message);
+    TC_LUA_SKIP bool sendTo(const std::string& host, int port, std::span<const unsigned char> data) { return sendTo(host, port, data.data(), data.size()); }
     // Send to destination set by connect()
     bool send(const void* data, size_t size);
     bool send(const std::string& message);
+    TC_LUA_SKIP bool send(std::span<const unsigned char> data) { return send(data.data(), data.size()); }
     // Synchronous receive (blocking) - for when not using events
     // Returns: received byte count, -1 on error
     int receive(void* buffer, size_t bufferSize);
     int receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort);
+    TC_LUA_SKIP int receive(std::span<unsigned char> buffer) { return receive(buffer.data(), buffer.size()); }
+    TC_LUA_SKIP int receive(std::span<unsigned char> buffer, std::string& remoteHost, int& remotePort) { return receive(buffer.data(), buffer.size(), remoteHost, remotePort); }
     // -------------------------------------------------------------------------
     // Receive thread control
     // -------------------------------------------------------------------------

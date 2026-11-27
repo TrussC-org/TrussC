@@ -57,6 +57,7 @@ static void cover_file() {
     (void)listDirectory(af::val<const fs::path>());
     (void)loadErrorName(af::val<LoadError>());
     (void)loadJson(af::val<const fs::path>());
+    (void)loadJson(af::val<const fs::path>(), af::val<Json>());
     (void)loadTextFile(af::val<const fs::path>());
     (void)loadXml(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
@@ -304,6 +305,7 @@ static void cover_math_general() {
     (void)applyWindow(af::val<std::vector<float>>(), af::val<WindowType>());
     (void)applyWindow(af::val<std::vector<std::complex<float>>>(), af::val<WindowType>());
     (void)binToFrequency(af::val<int>(), af::val<int>(), af::val<int>());
+    (void)correlation(af::val<std::span<const float>>(), af::val<std::span<const float>>());
     (void)fft(af::val<std::vector<std::complex<float>>>());
     (void)fftMagnitude(af::val<const std::vector<std::complex<float>>>());
     (void)fftMagnitudeDb(af::val<const std::vector<std::complex<float>>>(), af::val<float>());
@@ -311,14 +313,18 @@ static void cover_math_general() {
     (void)fftPower(af::val<const std::vector<std::complex<float>>>());
     (void)fftReal(af::val<const std::vector<float>>());
     (void)fftReal(af::val<const std::vector<float>>(), af::val<WindowType>());
+    (void)fitLine(af::val<std::span<const float>>(), af::val<std::span<const float>>());
     (void)fract(af::val<float>());
     (void)frequencyToBin(af::val<float>(), af::val<int>(), af::val<int>());
+    (void)histogram(af::val<std::span<const float>>(), af::val<std::size_t>(), af::val<float>(), af::val<float>());
     (void)ifft(af::val<std::vector<std::complex<float>>>());
     (void)isPowerOfTwo(af::val<int>());
     (void)mean(af::val<std::span<const float>>());
+    (void)median(af::val<std::span<const float>>());
     (void)minMax(af::val<std::span<const float>>());
     (void)mse(af::val<std::span<const float>>(), af::val<std::span<const float>>());
     (void)nextPowerOfTwo(af::val<int>());
+    (void)percentile(af::val<std::span<const float>>(), af::val<double>());
     (void)rms(af::val<std::span<const float>>());
     (void)sigmoid(af::val<float>());
     (void)sign(af::val<float>());
@@ -507,8 +513,10 @@ static void cover_other() {
     (void)operator*(af::val<float>(), af::val<const Vec4>());
     (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
+    (void)setAndroidForegroundService(af::val<bool>());
     (void)setDrawWhileHidden(af::val<bool>());
     (void)setResourceLoadConcurrency(af::val<int>());
+    (void)setUpdateWhileHidden(af::val<bool>());
 }
 
 static void cover_platform() {
@@ -669,6 +677,7 @@ static void cover_utility() {
     (void)logWarning(af::val<const std::string>());
     (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
     (void)parseJson(af::val<const std::string>());
+    (void)parseJson(af::val<const std::string>(), af::val<Json>());
     (void)parseXml(af::val<const std::string>());
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());
@@ -749,12 +758,16 @@ static void cover_window_input() {
     (void)isSuperPressed();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
     (void)loadDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>());
+    (void)loadDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<const std::vector<std::string>>());
 #endif
     (void)loadDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<std::function<void (const FileDialogResult &)>>());
+    (void)loadDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<const std::vector<std::string>>(), af::val<std::function<void (const FileDialogResult &)>>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
     (void)saveDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>());
+    (void)saveDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>(), af::val<const std::vector<std::string>>());
 #endif
     (void)saveDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>(), af::val<std::function<void (const FileDialogResult &)>>());
+    (void)saveDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>(), af::val<const std::vector<std::string>>(), af::val<std::function<void (const FileDialogResult &)>>());
     (void)setCursor(af::val<Cursor>());
     (void)setTouchAsMouse(af::val<bool>());
     (void)showCursor();
@@ -1067,9 +1080,11 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
         (void)af::val<AudioSettings>().backend;
         (void)af::val<AudioSettings>().bufferSize;
         (void)af::val<AudioSettings>().channels;
+        (void)af::val<AudioSettings>().contentType;
         (void)af::val<AudioSettings>().device;
         (void)af::val<AudioSettings>().deviceName;
         (void)af::val<AudioSettings>().maxPolyphony;
+        (void)af::val<AudioSettings>().performanceProfile;
         (void)af::val<AudioSettings>().sampleRate;
     }
 };
@@ -1566,9 +1581,11 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().lifetimeToken();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixels(af::val<unsigned char *>());
+        (void)af::val<const Fbo>().readPixels(af::val<Pixels>());
 #endif
 #if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
+        (void)af::val<const Fbo>().readPixelsFloat(af::val<Pixels>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readStencil(af::val<Pixels>());
@@ -2144,6 +2161,14 @@ struct Cover_Light : af::Scope<Light> {
         (void)af::val<Light>().setSpecular(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Light>().setSpot(af::val<const Vec3>(), af::val<const Vec3>(), af::val<float>(), af::val<float>());
         (void)af::val<Light>().setSpot(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    }
+};
+
+struct Cover_LineFit : af::Scope<LineFit> {
+    ~Cover_LineFit(); // Never instantiated.
+    static void run() {
+        (void)af::val<LineFit>().intercept;
+        (void)af::val<LineFit>().slope;
     }
 };
 
@@ -3696,6 +3721,7 @@ struct Cover_Serial : af::Scope<Serial> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().readBytes(af::val<void *>(), af::val<int>());
+        (void)af::val<Serial>().readBytes(af::val<std::span<unsigned char>>());
         (void)af::val<Serial>().readBytes(af::val<std::string>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
@@ -3708,6 +3734,7 @@ struct Cover_Serial : af::Scope<Serial> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().writeBytes(af::val<const void *>(), af::val<int>());
+        (void)af::val<Serial>().writeBytes(af::val<std::span<const unsigned char>>());
         (void)af::val<Serial>().writeBytes(af::val<const std::string>());
 #endif
     }
@@ -4430,14 +4457,18 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().receive(af::val<void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().receive(af::val<void *>(), af::val<size_t>(), af::val<std::string>(), af::val<int>());
+        (void)af::val<UdpSocket>().receive(af::val<std::span<unsigned char>>());
+        (void)af::val<UdpSocket>().receive(af::val<std::span<unsigned char>>(), af::val<std::string>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().send(af::val<const std::string>());
+        (void)af::val<UdpSocket>().send(af::val<std::span<const unsigned char>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const std::string>());
+        (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<std::span<const unsigned char>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setBindAddress(af::val<const std::string>());
@@ -5226,6 +5257,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().setQuitOnClose(af::val<bool>());
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setTitle(af::val<const std::string>());
+        (void)af::val<Window>().setUpdateWhileHidden(af::val<bool>());
         (void)af::val<Window>().setVisible(af::val<bool>());
         (void)af::val<Window>().toggleFullscreen();
     }
@@ -5460,6 +5492,7 @@ void af::coverGenerated() {
     af_generated::Cover_KeyEventArgs::run();
     af_generated::Cover_LayoutMod::run();
     af_generated::Cover_Light::run();
+    af_generated::Cover_LineFit::run();
     af_generated::Cover_LoadResult::run();
     af_generated::Cover_Location::run();
     af_generated::Cover_LogEventArgs::run();

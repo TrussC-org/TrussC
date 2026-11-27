@@ -90,6 +90,54 @@ class ReadPixelsApp : public App {
               internal::currentWindowContext().currentTarget == parent && sgl_num_vertices() == vertices);
     }
 
+    void checkPixelsOverloads() {
+        Pixels pixels;
+        Fbo unallocated;
+        check("unallocated read preserves empty Pixels", !unallocated.readPixels(pixels) && !pixels.isAllocated());
+        pixels.allocate(1, 3, 2, PixelFormat::F32);
+        for (int i = 0; i < 6; ++i) pixels.getDataF32()[i] = -7.0f;
+        const void* originalData = pixels.getDataVoid();
+        auto unchanged = [&] {
+            bool same = pixels.getDataVoid() == originalData && pixels.getWidth() == 1 &&
+                        pixels.getHeight() == 3 && pixels.getChannels() == 2 && pixels.isFloat();
+            for (int i = 0; i < 6; ++i) same &= pixels.getDataF32()[i] == -7.0f;
+            return same;
+        };
+        check("byte failure preserves Pixels storage, metadata and contents", !unallocated.readPixels(pixels) && unchanged());
+        check("float failure preserves Pixels storage, metadata and contents", !unallocated.readPixelsFloat(pixels) && unchanged());
+        Fbo fbo;
+        fbo.allocate(3, 2, 1, TextureFormat::RGBA16F);
+        fbo.begin(0.25f, 0.5f, 0.75f, 1.0f);
+        check("active pass byte failure preserves Pixels", !fbo.readPixels(pixels) && unchanged());
+        check("active pass float failure preserves Pixels", !fbo.readPixelsFloat(pixels) && unchanged());
+        fbo.end();
+        check("byte overload resizes wrong-sized float Pixels", fbo.readPixels(pixels) &&
+              pixels.getWidth() == 3 && pixels.getHeight() == 2 &&
+              pixels.getChannels() == 4 && pixels.getFormat() == PixelFormat::U8);
+        const unsigned char expected[] = {64, 128, 191, 255};
+        bool bytesMatch = true;
+        for (int i = 0; i < 24; ++i) bytesMatch &= std::abs(int(pixels.getData()[i]) - expected[i % 4]) <= 1;
+        check("byte Pixels contains known clear color in every pixel", bytesMatch);
+        check("float overload replaces byte Pixels with F32 RGBA", fbo.readPixelsFloat(pixels) &&
+              pixels.getWidth() == 3 && pixels.getHeight() == 2 && pixels.getChannels() == 4 && pixels.isFloat());
+        const float expectedFloat[] = {0.25f, 0.5f, 0.75f, 1.0f};
+        bool floatsMatch = true;
+        for (int i = 0; i < 24; ++i) floatsMatch &= pixels.getDataF32()[i] == expectedFloat[i % 4];
+        check("float Pixels contains exact clear color in every pixel", floatsMatch);
+        pixels.clear();
+        check("byte overload allocates empty Pixels", fbo.readPixels(pixels) && pixels.getTotalBytes() == 24);
+        pixels.clear();
+        check("float overload allocates empty Pixels", fbo.readPixelsFloat(pixels) && pixels.getTotalBytes() == 24 * sizeof(float));
+        if (!sg_query_pixelformat(toSokolFormat(TextureFormat::R32F)).render) return;
+        Fbo red;
+        red.allocate(2, 1, 1, TextureFormat::R32F);
+        red.begin(2.0f, 0, 0, 1);
+        red.end();
+        check("float overload preserves pointer channel count and HDR values", red.readPixelsFloat(pixels) &&
+              pixels.getWidth() == 2 && pixels.getHeight() == 1 && pixels.getChannels() == 1 &&
+              pixels.isFloat() && pixels.getDataF32()[0] == 2.0f && pixels.getDataF32()[1] == 2.0f);
+    }
+
     void checkAllocationFailures() {
         const int limit = sg_query_limits().max_image_size_2d;
         for (auto format : {TextureFormat::RGBA8, TextureFormat::RGBA16F, TextureFormat::RGBA32F}) {
@@ -121,6 +169,7 @@ class ReadPixelsApp : public App {
         // Some devices render RGBA32F without supporting blending on it.
         // Select the disabled role before begin() creates a format pipeline.
         setBlendMode(BlendMode::Disabled);
+        checkPixelsOverloads();
         checkAllocationFailures();
         // Distinct top/bottom rows, odd width, and several reads catch stride,
         // vertical orientation and stale-version errors as well as conversion.

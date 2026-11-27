@@ -42,19 +42,27 @@ def source(native):
 #include "util/sokol_window_fullscreen.h"
 int failures=0;
 void check(bool ok) { if (!ok) ++failures; }
-using LONG_PTR=long; using UINT=unsigned; using Atom=unsigned long;
+using LONG_PTR=long; using DWORD=unsigned long; using UINT=unsigned; using Atom=unsigned long;
+constexpr bool FALSE=false;
 constexpr int WS_CAPTION=1, WS_THICKFRAME=2, WS_MINIMIZEBOX=4, WS_MAXIMIZEBOX=8,
  WS_SYSMENU=16, WS_POPUP=32, WS_VISIBLE=64, GWL_STYLE=0, GWL_EXSTYLE=1,
  SWP_NOMOVE=1, SWP_NOSIZE=2, SWP_NOZORDER=4, SWP_FRAMECHANGED=8, SWP_NOACTIVATE=16,
  MONITOR_DEFAULTTONEAREST=0, HWND_TOP=0, PropertyNotify=28, MapNotify=19, XA_ATOM=4,
  SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=1;
-struct RECT { int left=0,top=0,right=480,bottom=300; };
+struct RECT { int left=0,top=0,right=0,bottom=0; };
+UINT dpi(int) { return 96; }
+bool adjust(RECT* rect,DWORD style,bool,DWORD,UINT) {
+ if (style&WS_CAPTION) { rect->right+=16; rect->bottom+=39; }
+ return true;
+}
+bool AdjustWindowRectEx(RECT* rect,DWORD style,bool menu,DWORD ex) { return adjust(rect,style,menu,ex,96); }
 struct MONITORINFO { unsigned cbSize; RECT rcMonitor{0,0,1920,1080},rcWork{0,0,1920,1040}; };
 struct sapp_tc_window { unsigned id; };
 constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0, _SAPP_TC_X11_VISIBILITY_MAPPING=1;
 struct _sapp_tc_window_t {
  bool native_visible=false, fullscreen=false, fullscreen_requested=false, fullscreen_on_map=false, restore_valid=false, decoration_pending=false;
  double fullscreen_sent=0;
+ int windowed_width=800,windowed_height=600,decoration_width=0,decoration_height=0;
  struct { bool hidden=false, borderless=false; } desc;
  int hwnd=1,xwin=1, visibility_op=0,window=1;
  LONG_PTR stored_style=0,stored_ex_style=0;
@@ -63,7 +71,9 @@ struct _sapp_tc_window_t {
 };
 _sapp_tc_window_t record;
 struct { struct { _sapp_tc_window_t* main=nullptr; } app;
- int display=1,constructing=0; Atom NET_WM_STATE=10,NET_WM_STATE_FULLSCREEN=11; } _sapp_tc;
+ int display=1,constructing=0; Atom NET_WM_STATE=10,NET_WM_STATE_FULLSCREEN=11;
+ UINT (*GetDpiForWindow)(int)=dpi;
+ bool (*AdjustWindowRectExForDpi)(RECT*,DWORD,bool,DWORD,UINT)=adjust; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_tc_window w) { return w.id==1 ? &record : nullptr; }
 LONG_PTR style=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_VISIBLE,exstyle=7;
 RECT current; int positions=0,requests=0,swpFlags=0; bool requested=false;
@@ -72,7 +82,11 @@ void SetWindowLongPtrW(int,int index,LONG_PTR value) { (index==GWL_STYLE ? style
 int MonitorFromWindow(int,int) { return 1; }
 bool GetMonitorInfoW(int,MONITORINFO*) { return true; }
 void GetWindowRect(int,RECT* rect) { *rect=current; }
-void SetWindowPos(int,std::nullptr_t,int,int,int,int,int) { ++positions; }
+bool GetClientRect(int,RECT* rect) {
+ *rect={0,0,current.right-current.left-((style&WS_CAPTION)?16:0),current.bottom-current.top-((style&WS_CAPTION)?39:0)};
+ return true;
+}
+void SetWindowPos(int,std::nullptr_t,int,int,int width,int height,int) { current.right=current.left+width; current.bottom=current.top+height; ++positions; }
 void SetWindowPos(int,int,int x,int y,int width,int height,int flags) { current={x,y,x+width,y+height}; ++positions; swpFlags=flags; }
 #define _WIN32
 ''' + decoration + '\n#undef _WIN32\n' + win + r'''
@@ -88,6 +102,10 @@ void _sapp_tc_x11_send_event(int,Atom,long op,long,long,long,long) { ++requests;
 double now=100; double _sapp_tc_now() { return now; }
 int decorWrites=0; bool decorValue=true;
 void _sapp_tc_x11_set_decorated(_sapp_tc_window_t*,bool decorated) { ++decorWrites; decorValue=decorated; }
+struct XWindowAttributes { int width=0,height=0; };
+int resizes=0, attributeReads=0, liveW=800, liveH=600; unsigned resizeW=0,resizeH=0;
+int XGetWindowAttributes(int,int,XWindowAttributes* a) { ++attributeReads; a->width=liveW; a->height=liveH; return 1; }
+void XResizeWindow(int,int,unsigned w,unsigned h) { ++resizes; resizeW=w; resizeH=h; }
 ''' + request + observe + toggle_x11 + decoration_x11 + '\nnamespace web { struct { bool fullscreen=false; } _sapp_tc;\nvoid _sapp_tc_js_toggle_fullscreen() {}\n' + web + '\n}\n' + r'''
 struct XEvent { int type=PropertyNotify; struct { Atom atom; int state=0; } xproperty; };
 void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
@@ -115,17 +133,20 @@ int main() {
  web::_sapp_tc.fullscreen=true; web::_sapp_tc_emsc_toggle_fullscreen(); check(web::_sapp_tc.fullscreen);
  const LONG_PTR chrome=WS_CAPTION|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_SYSMENU;
  for (bool initial : {false,true}) for (bool decorated : {false,true}) for (bool hidden : {false,true}) {
-  record={}; record.desc.hidden=hidden;
-  style=WS_VISIBLE|(initial?chrome:0); exstyle=7; current={20,30,500,330}; positions=0;
+  record={}; record.desc.hidden=hidden; record.desc.borderless=!initial;
+  style=WS_VISIBLE|(initial?chrome:0); exstyle=7;
+  current={20,30,500+(initial?16:0),330+(initial?39:0)}; positions=0;
   _sapp_tc_win32_set_fullscreen(&record,true,0);
   check(!(swpFlags&SWP_NOACTIVATE)==!hidden); // a hidden window must not take the foreground
   const auto fullStyle=style; const auto fullPositions=positions;
   sapp_tc_window_set_decorated({1},decorated);
   check(style==fullStyle && !(style&(WS_CAPTION|WS_THICKFRAME)) && positions==fullPositions);
   check(current.right==1920 && current.bottom==1080 && record.fullscreen);
+  check(record.stored_window_rect.right==500+(decorated?16:0) && record.stored_window_rect.bottom==330+(decorated?39:0)); // new restore frame keeps the 480x300 client
   _sapp_tc_win32_set_fullscreen(&record,false,0);
   check(!record.fullscreen && !(style&WS_POPUP) && (style&chrome)==(decorated?chrome:0));
-  check(current.left==20 && current.top==30 && current.right==500 && current.bottom==330 && exstyle==7);
+  RECT client; GetClientRect(1,&client);
+  check(current.left==20 && current.top==30 && client.right==480 && client.bottom==300 && exstyle==7);
   sapp_tc_window_set_decorated({1},!decorated);
   check((style&chrome)==(!decorated?chrome:0));
  }
@@ -212,8 +233,11 @@ int main() {
  property={99}; process(&record,_sapp_tc.NET_WM_STATE); // unrelated update before entry
  check(decorWrites==1 && record.decoration_pending);
  property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
- property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
+ resizes=0; property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
  check(decorWrites==2 && !decorValue && !record.decoration_pending);
+ check(resizes==1 && resizeW==800 && resizeH==600); // deferred change keeps the client size once
+ process(&record,_sapp_tc.NET_WM_STATE);
+ check(resizes==1); // later observations cannot repeat the resize
  // Entry and exit can both complete before either notification is read.
  record={}; decorWrites=0; now=400; property.clear();
  sapp_tc_window_toggle_fullscreen({1}); x11_set_decorated({1},false); sapp_tc_window_toggle_fullscreen({1});
@@ -222,11 +246,15 @@ int main() {
  // A decoration change made while fullscreen is written again on exit (labwc).
  for (bool decorated : {false,true}) {
   record={}; record.fullscreen=record.fullscreen_requested=true; record.desc.borderless=decorated;
+  liveW=1920; liveH=1080;
   decorWrites=0; x11_set_decorated({1},decorated);
   check(decorWrites==1 && decorValue==decorated && record.desc.borderless==!decorated && record.decoration_pending);
   property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
   check(decorWrites==1); // still fullscreen
+  liveW=960; liveH=decorated ? 601 : 638;
+  int reads=attributeReads; resizes=0;
   property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
+  check(attributeReads==reads && resizes==1 && resizeW==800 && resizeH==600);
   check(decorWrites==2 && decorValue==decorated && !record.decoration_pending); // exit replays once
   process(&record,_sapp_tc.NET_WM_STATE); check(decorWrites==2);
   x11_set_decorated({1},!decorated);
@@ -255,7 +283,8 @@ def main():
     variants = {'baseline': NATIVE}
     if args.mutations:
         changes = {
-            'win-live-style': ('LONG_PTR style = w->fullscreen ? w->stored_style : GetWindowLongPtrW(w->hwnd, GWL_STYLE);', 'LONG_PTR style = GetWindowLongPtrW(w->hwnd, GWL_STYLE);'),
+            'win-live-style': ('const LONG_PTR old_style = w->fullscreen ? w->stored_style : GetWindowLongPtrW(w->hwnd, GWL_STYLE);', 'const LONG_PTR old_style = GetWindowLongPtrW(w->hwnd, GWL_STYLE);'),
+            'win-no-restore-size': ('w->stored_window_rect.right = w->stored_window_rect.left + (rect.right - rect.left);', '(void)rect;'),
             'win-no-defer': ('if (w->fullscreen) {\n        w->stored_style = style;', 'if (false) {\n        w->stored_style = style;'),
             'win-no-restore': ('w->stored_style = style;', '(void)style;'),
             'win-hidden-activates': ('swp_flags | SWP_FRAMECHANGED | (w->desc.hidden ? SWP_NOACTIVATE : 0)', 'swp_flags | SWP_FRAMECHANGED'),
@@ -269,6 +298,7 @@ def main():
             'x11-echo-overwrites-request': ('if (changed && !waiting && !w->desc.hidden', 'if (changed && !w->desc.hidden'),
             'x11-wait-forever': ('_sapp_tc_now() - w->fullscreen_sent < 0.5', 'true'),
             'x11-no-decoration-replay': ('if (!full && w->decoration_pending && (changed || !w->fullscreen_requested))', 'if (false)'),
+            'x11-wrong-deferred-size': ('(unsigned int)w->decoration_width, (unsigned int)w->decoration_height);', '(unsigned int)w->decoration_width + 1, (unsigned int)w->decoration_height);'),
             'x11-decoration-replay-before-entry': ('(changed || !w->fullscreen_requested)', '(true)'),
             'x11-decoration-replay-needs-observed-exit': ('(changed || !w->fullscreen_requested)', '(changed)'),
             'x11-decoration-replay-inverted': ('_sapp_tc_x11_set_decorated(w, !w->desc.borderless);', '_sapp_tc_x11_set_decorated(w, w->desc.borderless);'),

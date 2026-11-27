@@ -41,7 +41,6 @@
 # the header.
 
 # --- TrussC.h: window / projection settings
-core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set by the launcher, applied in _setup_cb
 
 # --- TrussC.h: sokol_gl / GPU budgets
 core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)

@@ -11,7 +11,7 @@
 //     pins the ninja, MSVC and Windows SDK paths found when it was written.
 //     After a Visual Studio update or a move to another VS version those
 //     paths no longer exist. `trusscli doctor` reports this, and
-//     `trusscli build` re-pins them in CMakePresets.json (see main.cpp).
+//     `trusscli build` re-pins them in CMakePresets.json (see ProjectBuild.cpp).
 
 #include "VsDetector.h"
 
@@ -27,10 +27,11 @@ struct ConfigureInputs {
     bool generated = false;           // a configure finished there: the build system
                                       // (Makefile, build.ninja, *.xcodeproj, ...) exists
     std::string cachedBuildType;      // CMAKE_BUILD_TYPE in that cache ("" if none)
-    std::string requestedBuildType;   // from --debug / --release / --relwithdebinfo ("" if none)
+    std::string requestedBuildType;   // effective native type selected by cmdBuild ("" uses the default)
     bool cachedMcp = false;           // TRUSSC_MCP_DEV in that cache (missing is OFF)
     bool mcp = false;                 // --mcp (never sticky)
     bool warnings = false;            // --warnings
+    bool multiConfig = false;         // CMAKE_CONFIGURATION_TYPES is set; use --config instead
 };
 
 struct ConfigurePlan {

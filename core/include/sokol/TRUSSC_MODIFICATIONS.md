@@ -926,7 +926,7 @@ Mac display/Metal validation and post-implementation review remain required.
 
 Upstream fixes `sg_desc.uniform_buffer_size` at `sg_setup()` (4 MiB, ~8k draws);
 overflow `SOKOL_ASSERT` disappears in release, silently corrupting uniforms. R2 growth makes
-`WindowSettings::reserveUniformBuffer` an optimization, not a correctness need.
+`RuntimeSettings::reserveUniformBuffer` an optimization, not a correctness need.
 
 - `_sg_mtl_grow_uniform_buffer()` doubles the current rotate slot, defers old
   storage release, resets `cur_ub_offset` and logs `METAL_UNIFORM_BUFFER_GROWN`
@@ -1446,6 +1446,18 @@ The framework retains equal sg/sgl pool capacities and the public default 1024;
 there is no eviction or upstream issue. Tests: `sglPoolLimits`, `sglVertexLayout`,
 and the unchanged display suite / renderRegression pixel comparison.
 
+## Borderless client size (#1639)
+
+[TrussC] `sapp_desc._tc_borderless` and `_sapp_tc_normalize_main_window`
+forward launch decorations to the shared desktop constructors before mapping.
+Runtime decoration changes preserve the current client size: X11 queues one
+`XResizeWindow` request after the Motif property change, Win32 adjusts the outer
+rectangle for the new style at the current DPI, and macOS restores the content
+size after changing the style mask. Existing fullscreen deferral is retained.
+X11 snapshots the windowed client size at the decoration request and uses it on fullscreen exit, without sampling the WM's intermediate restore geometry.
+Borderless macOS creation uses the runtime decoration helper before showing main and sub-windows, preserving native fullscreen resizing.
+Tests: `runtimeSettings` and `tools/tests/test_window_decoration.py`.
+
 ## Per-draw stencil references (#1512, part 2b)
 
 [TrussC fork] `sgl_tc_stencil_ref(uint8_t)` supplies CPU recording state per
@@ -1478,3 +1490,17 @@ and baked 61 through pipeline loads and pops.
 counts; the existing path matrix covers all ordinary non-zero stencil draws.
 That matrix includes LUT color grading, synthetic NV12 textures on Linux, and
 independent ImGui contexts, with distinct nonzero refs for each submission path.
+
+## Android update-only background ticks (#1594)
+
+`_sapp_tc_android_t::background_tick` and Android-only
+`sapp_tc_android_set_background_tick` store an optional app-thread callback.
+`_sapp_tc_android_should_background_update` admits it only after initialization,
+while visible frames are unavailable, before cleanup/quit.
+`_sapp_tc_android_background_update` delivers one callback without EGL/GL.
+`_sapp_tc_android_loop` uses a 16 ms timed looper poll in that state, including
+handoff from the legacy fallback poll; a monotonic deadline also ticks when
+sensor/input events prevent a timeout. Foreground Choreographer is unchanged.
+Android `sapp_tc_window_occluded` also reports a missing EGL surface as hidden.
+No pbuffer or GPU support is added to background updates. The TrussC callback
+skips GPU queues/readbacks; app updates must avoid all GPU work while hidden.

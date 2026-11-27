@@ -1301,6 +1301,8 @@ void internal::endGpuFrame() {
     }
 
     sg_commit();
+    if (internal::textureUploadStaging)
+        internal::textureUploadStaging->retireIdle(internal::deviceFrameCount());
     // Only the committing owner completes immediate CPU work. Raw draws keep
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;
@@ -1728,7 +1730,7 @@ void runMainUpdate(double fixedDelta,
     } restore{wctx, previous, previousCallback, previousFixed, previousTime};
     ++wctx.updateCount;
     EntryStackGuard guard(AppEntry::Update);
-    bufferReadbacks().poll();
+    if (!backgroundUpdateOnly()) bufferReadbacks().poll();
     internal::currentWindowContext().coreEvents->update.notify();
 }
 
@@ -1870,21 +1872,11 @@ uint64_t deviceFrameCount() {
     return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;
 }
 
-// One hidden-window rule for every window (#997): a hidden window keeps
-// updating on every supplied tick and only its draw stops. Desktop native
-// sources keep ticking hidden windows and deliver them here as draw-gated
-// ticks. Only native mobile lifecycle suspension pauses updates.
-static bool nativeSuspensionPausesUpdate() {
-#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
-    return true;
-#else
-    return false;
-#endif
-}
-
+// Every window uses the same independent hidden update/draw policies (#997).
+// Defaults retain desktop updates and mobile suspension; Android can opt in.
 void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
-    // Observe lifecycle state before raw listeners can throw. Only native
-    // mobile suspension pauses updates.
+    // Observe mobile lifecycle state before raw listeners can throw. Hidden
+    // update admission is decided independently by the per-window policy.
 #if defined(__ANDROID__)
     if (type == SAPP_EVENTTYPE_UNFOCUSED) ctx.visibilityPaused = true;
 #endif
@@ -1899,7 +1891,11 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
     // Lifecycle suspension has a separate reason. Visibility was sampled before
     // this call and remains authoritative for raw listeners and the typed event.
     if (type == SAPP_EVENTTYPE_SUSPENDED) {
-        ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+        ctx.lifecycleSuspended = true;
+#else
+        ctx.lifecycleSuspended = false;
+#endif
         if (ctx.lifecycleSuspended) {
             ctx.visibilityPaused = true;
             ctx.mainUpdateCallTimeInitialized = false;
@@ -1945,30 +1941,33 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
 #endif
         return false;
     };
-    const bool updateHidden = hidden && nativeSuspensionPausesUpdate();
-    const bool paused = updateHidden && (nativeDrawGated || !capturePending);
-    if (paused || (!hidden && ctx.visibilityPaused)
-        || (updateHidden && (!ctx.visibilityPaused || !ctx.mainUpdateCallTimeInitialized))) {
+    bool pauseUpdates = hidden && !ctx.updateWhileHidden;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS has no background tick source or GPU-safe background execution yet.
+    pauseUpdates = hidden;
+#endif
+    if (pauseUpdates || ctx.visibilityPaused) {
         ctx.loop.lastUpdateTimeInitialized = false;
-        ctx.loop.lastDrawTimeInitialized = false;
+        if (!pauseUpdates) ctx.loop.lastDrawTimeInitialized = false;
         ctx.loop.updateAccumulator = ctx.loop.updateTargetFps > 0.0f ? 1.0 / ctx.loop.updateTargetFps : 0.0;
-        ctx.loop.drawAccumulator = ctx.loop.drawTargetFps > 0.0f ? 1.0 / ctx.loop.drawTargetFps : 0.0;
+        if (!pauseUpdates)
+            ctx.loop.drawAccumulator = ctx.loop.drawTargetFps > 0.0f ? 1.0 / ctx.loop.drawTargetFps : 0.0;
         ctx.mainUpdateCallTime = now;
-        ctx.mainUpdateCallTimeInitialized = !paused;
+        ctx.mainUpdateCallTimeInitialized = !pauseUpdates;
     }
-    ctx.visibilityPaused = updateHidden;
-    if (paused) return nonPresentingExit();
+    ctx.visibilityPaused = pauseUpdates;
+    if (pauseUpdates && nativeDrawGated) return nonPresentingExit();
     // Independent callbacks pass the old free-running secondary admission
     // point before updates. Synchronized ticks first pass the draw throttle.
     const bool independentTick = !ctx.loop.updateSyncedToDraw;
     if (!nativeDrawGated && independentTick) ++ctx.resourceTickCount;
     const auto updatesBefore = ctx.updateCount;
-    if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
+    if (!pauseUpdates && !ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
     if (currentWindowCloseRecorded()) return nonPresentingExit();
     if (nativeDrawGated) {
         // The native gate forbids all rendering, including forced captures.
-        // Updates still run on delivered hidden ticks (#997).
-        if (ctx.loop.updateSyncedToDraw) runSyncedUpdate();
+        // Updates follow this window's hidden policy (#997, #1594).
+        if (!pauseUpdates && ctx.loop.updateSyncedToDraw) runSyncedUpdate();
         return nonPresentingExit();
     }
     const bool shouldDraw = mainLoopShouldDraw(now) || capturePending;
@@ -1985,7 +1984,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     }
     // A mode switch from an independent update applies on the next tick;
     // never add a second, synchronized update to that same tick.
-    if (ctx.updateCount == updatesBefore) runSyncedUpdate();
+    if (!pauseUpdates && ctx.updateCount == updatesBefore) runSyncedUpdate();
     if (currentWindowCloseRecorded()) {
         sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
         return nonPresentingExit();
@@ -3875,6 +3874,7 @@ WindowContext& currentWindowContext() {
 }
 
 void parkWindowPass() {
+    if (backgroundUpdateOnly()) return;
     auto& outgoing = currentWindowContext();
     if (outgoing.targetsClosed) return;
     if (outgoing.activateNative) outgoing.activateNative(outgoing.acquireSwapchainUser);
@@ -4011,6 +4011,10 @@ CapturePrefixScope::~CapturePrefixScope() noexcept {
 }
 
 void restoreWindowContext(WindowContext* previous) {
+    if (backgroundUpdateOnly()) {
+        currentWindowCtx() = previous;
+        return;
+    }
     auto* incoming = previous ? previous : &nonWindowContext();
     if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;

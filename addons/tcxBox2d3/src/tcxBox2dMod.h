@@ -6,6 +6,27 @@
 
 namespace tcx::box2d {
 
+struct ContactEvent {
+    RigidBody2D* other = nullptr;
+    b2ShapeId shape = b2_nullShapeId;
+    b2ShapeId otherShape = b2_nullShapeId;
+    tc::Vec2 point{}; // pixels; begin only (end leaves zero)
+    tc::Vec2 normal{}; // unit vector toward other; begin only
+};
+struct SensorEvent {
+    RigidBody2D* other = nullptr;
+    b2ShapeId shape = b2_nullShapeId;
+    b2ShapeId otherShape = b2_nullShapeId;
+};
+struct HitEvent {
+    RigidBody2D* other = nullptr;
+    b2ShapeId shape = b2_nullShapeId;
+    b2ShapeId otherShape = b2_nullShapeId;
+    tc::Vec2 point{}; // pixels
+    tc::Vec2 normal{}; // unit vector toward other
+    float approachSpeed = 0.0f; // pixels/second
+};
+
 // One owning v3 body per Node. Positions and linear velocities use pixels;
 // angles and angular velocities use radians. Shapes use upstream definitions.
 class RigidBody2D : public tc::Mod {
@@ -27,6 +48,12 @@ public:
                                      const b2ShapeDef& def = b2DefaultShapeDef());
     const std::vector<b2ShapeId>& shapeIds() const { return shapes_; }
 
+    tc::Event<ContactEvent> onContactBegin;
+    tc::Event<ContactEvent> onContactEnd;
+    tc::Event<SensorEvent> onSensorBegin;
+    tc::Event<SensorEvent> onSensorEnd;
+    tc::Event<HitEvent> onHit;
+
     void setPosition(tc::Vec2 position);
     tc::Vec2 getPosition() const;
     void setAngle(float radians);
@@ -42,6 +69,13 @@ protected:
     bool isExclusive() const override { return true; }
 
 private:
+    struct ShapeFlags { b2ShapeId id; bool sensor; bool hit; };
+    void rememberShape(b2ShapeId shape, const b2ShapeDef& def);
+    void updateEventFlags(bool worldSensorListeners);
+    std::vector<ShapeFlags> shapeFlags_;
+    size_t appliedShapeCount_ = 0;
+    bool appliedSensorListeners_ = false;
+    bool appliedHitListeners_ = false;
     void syncNode(b2Transform transform);
     std::weak_ptr<World::Owners> owners_;
     b2WorldId worldId_ = b2_nullWorldId;

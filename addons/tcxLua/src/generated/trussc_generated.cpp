@@ -544,10 +544,14 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::string & title) { return trussc::loadDialog(title); },
         [](const std::string & title, const std::string & message) { return trussc::loadDialog(title, message); },
         [](const std::string & title, const std::string & message, const fs::path & defaultPath) { return trussc::loadDialog(title, message, defaultPath); },
-        [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection) { return trussc::loadDialog(title, message, defaultPath, folderSelection); }
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection) { return trussc::loadDialog(title, message, defaultPath, folderSelection); },
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, const std::vector<std::string> & extensions) { return trussc::loadDialog(title, message, defaultPath, folderSelection, extensions); }
     ));
 #endif
-    lua->set_function("loadDialogAsync", [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); });
+    lua->set_function("loadDialogAsync", sol::overload(
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); },
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, const std::vector<std::string> & extensions, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, extensions, callback); }
+    ));
     lua->set_function("loadErrorName", [](trussc::LoadError e) { return trussc::loadErrorName(e); });
     lua->set_function("loadJson", [](const fs::path & path) { return trussc::loadJson(path); });
     lua->set_function("loadMatrix", [](const trussc::Mat4 & mat) { return trussc::loadMatrix(mat); });
@@ -687,10 +691,14 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::string & title) { return trussc::saveDialog(title); },
         [](const std::string & title, const std::string & message) { return trussc::saveDialog(title, message); },
         [](const std::string & title, const std::string & message, const fs::path & defaultPath) { return trussc::saveDialog(title, message, defaultPath); },
-        [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName) { return trussc::saveDialog(title, message, defaultPath, defaultName); }
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName) { return trussc::saveDialog(title, message, defaultPath, defaultName); },
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, const std::vector<std::string> & extensions) { return trussc::saveDialog(title, message, defaultPath, defaultName, extensions); }
     ));
 #endif
-    lua->set_function("saveDialogAsync", [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); });
+    lua->set_function("saveDialogAsync", sol::overload(
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); },
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, const std::vector<std::string> & extensions, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, extensions, callback); }
+    ));
     lua->set_function("saveJson", sol::overload(
         [](const trussc::Json & j, const fs::path & path) { return trussc::saveJson(j, path); },
         [](const trussc::Json & j, const fs::path & path, int indent) { return trussc::saveJson(j, path, indent); }
@@ -708,6 +716,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const trussc::Vec2 & screenPos, float worldZ) { return trussc::screenToWorld(screenPos, worldZ); }
     ));
     lua->set_function("sendErrorName", [](trussc::SendError e) { return trussc::sendErrorName(e); });
+    lua->set_function("setAndroidForegroundService", [](bool enabled) { return trussc::setAndroidForegroundService(enabled); });
     lua->set_function("setBeepVolume", [](float vol) { return trussc::setBeepVolume(vol); });
     lua->set_function("setBitmapLineHeight", [](float h) { return trussc::setBitmapLineHeight(h); });
     lua->set_function("setBlendMode", [](trussc::BlendMode mode) { return trussc::setBlendMode(mode); });
@@ -783,6 +792,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setSystemVolume", [](float volume) { return trussc::setSystemVolume(volume); });
     lua->set_function("setTextAlign", [](trussc::Direction h, trussc::Direction v) { return trussc::setTextAlign(h, v); });
     lua->set_function("setTouchAsMouse", [](bool enabled) { return trussc::setTouchAsMouse(enabled); });
+    lua->set_function("setUpdateWhileHidden", [](bool allow) { return trussc::setUpdateWhileHidden(allow); });
     lua->set_function("setUserDataPathRoot", [](const fs::path & path) { return trussc::setUserDataPathRoot(path); });
     lua->set_function("setWindowDecorated", [](bool decorated) { return trussc::setWindowDecorated(decorated); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))

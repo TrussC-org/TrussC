@@ -1,0 +1,5 @@
+/bin
+/build-*
+/CMakePresets.json
+/.trussc
+__pycache__/
