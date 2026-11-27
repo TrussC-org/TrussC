@@ -2506,6 +2506,10 @@ namespace internal {
     // Host launcher state; survives cleanup so runApp can report a failed start.
     bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
 
+    #ifdef __ANDROID__
+    void copyAndroidDataAssets();
+    #endif
+
     inline void _setup_cb_impl() {
         installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
@@ -2515,6 +2519,9 @@ namespace internal {
 
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
+        #ifdef __ANDROID__
+        copyAndroidDataAssets();
+        #endif
         refreshSelectedWindowMetadata();
         setup();
         appSetupCalled() = true;

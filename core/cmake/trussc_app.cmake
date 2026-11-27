@@ -1021,9 +1021,27 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                 message(STATUS "[${PROJECT_NAME}] Android res dir enabled (${_TC_RD})")
             endforeach()
 
+            # Data changes must also trigger packaging when no C++ source changed.
+            file(GLOB_RECURSE _TC_ANDROID_DATA FOLLOW_SYMLINKS CONFIGURE_DEPENDS LIST_DIRECTORIES false
+                "${CMAKE_CURRENT_SOURCE_DIR}/bin/data/*")
+            set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS ${_TC_ANDROID_DATA})
+            # A changed file list (including deletion of the last file) forces a relink.
+            file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/android-data-files.txt"
+                CONTENT "${_TC_ANDROID_DATA}")
+            set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+                "${CMAKE_CURRENT_BINARY_DIR}/android-data-files.txt"
+                "${_TC_HR_TRUSSC_DIR}/cmake/tc_android_assets.cmake")
+            set(_TC_ASSETS_DIR "${CMAKE_CURRENT_BINARY_DIR}/apk_assets")
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 ${_TC_PRE_CMDS}
+                COMMAND ${CMAKE_COMMAND}
+                    "-DDATA_DIR=${CMAKE_CURRENT_SOURCE_DIR}/bin/data"
+                    "-DASSETS_DIR=${_TC_ASSETS_DIR}"
+                    -P "${_TC_HR_TRUSSC_DIR}/cmake/tc_android_assets.cmake"
                 COMMAND ${_TC_AAPT} package -f
+                    -A "${_TC_ASSETS_DIR}"
+                    --ignore-assets ".*:!*~"
+                    -0 png -0 jpg -0 jpeg -0 ogg -0 mp3 -0 wav -0 mp4 -0 ttf -0 otf
                     -M "${_TC_MANIFEST_OUT}"
                     -I "${_TC_ANDROID_JAR}"
                     ${_TC_AAPT_EXTRA_ARGS}

@@ -421,7 +421,24 @@ Notes:
 - trusscli detects the NDK from `ANDROID_NDK_HOME` or `$ANDROID_HOME/ndk/`.
 - APK signing uses `~/.android/debug.keystore`. If missing, APK packaging is skipped and only the .so is built.
 - Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. Touch-as-mouse is ON by default: the first finger down also drives the mouse (one `mousePressed`, then `mouseDragged`, then one `mouseReleased` when it lifts); other fingers only produce touch events. Call `setTouchAsMouse(false)` in `setup()` to receive touch events only.
-- Data files: Use `adb push` to transfer assets to the app's internal storage.
+- Files and folders whose name starts with `.` are not packaged.
+- Data files: `bin/data` is packaged into the APK and copied to `<internalDataPath>/data` before app setup on first launch and after an APK update with changed data. Load files normally:
+
+```cpp
+void tcApp::setup() {
+    Image image;
+    image.load("foo.png");
+}
+```
+
+Large data folders slow those launches and use storage twice (APK assets and copied files). Keep packaged data read-only; save user files with `getUserDataPath()` because updates replace the entire data folder:
+
+```cpp
+void tcApp::setup() {
+    saveTextFile(getUserDataPath("settings.txt"), "ready");
+}
+```
+
 - **If `cmake --preset android` fails after trusscli update**, try running the command manually from the terminal.
 
 **Custom AndroidManifest.xml:**
