@@ -88,6 +88,11 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
         return child;
     }
     if (session == "x11") {
+        if (access("/tmp/.X11-unix/X0", F_OK) == 0 || access("/tmp/.X0-lock", F_OK) == 0) {
+            emit("Error: display :0 is already in use (is a desktop running?). "
+                 "--session x11 is for a machine without a desktop session.\n", MessageKind::ErrorOutput);
+            return {-1, false};
+        }
         // On Pi 5 (modesetting + V3D), running the binary directly as
         // xinit's client races with driver init and the app renders
         // invisibly. A window manager must be running before our GL

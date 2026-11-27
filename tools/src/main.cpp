@@ -3618,6 +3618,7 @@ static void printRunHelp() {
          << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
          << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
          << "                             Backends: labwc, x11. Example: --session labwc\n"
+         << "                             x11 errors if the display :0 socket or lock file already exists.\n"
          << "      --debug                Build type: Debug (-O0 -g)\n"
          << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g)\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
