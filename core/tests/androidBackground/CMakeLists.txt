@@ -1,7 +1,0 @@
-cmake_minimum_required(VERSION 3.20)
-project(androidBackground LANGUAGES C CXX)
-if(NOT DEFINED TRUSSC_DIR)
-    get_filename_component(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
-endif()
-include("${TRUSSC_DIR}/cmake/trussc_app.cmake")
-trussc_app()
