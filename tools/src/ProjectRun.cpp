@@ -6,6 +6,9 @@
 #include <iostream>
 #include <sstream>
 #ifdef __linux__
+#include <cerrno>
+#include <chrono>
+#include <thread>
 #include <signal.h>
 #include <spawn.h>
 #include <sys/stat.h>
@@ -19,12 +22,25 @@ namespace fs = std::filesystem;
 namespace projectOps {
 
 #ifdef __linux__
+static void stopXinit(pid_t pid) {
+    kill(pid, SIGTERM);
+    // Bound (xinit may ignore SIGTERM): wait 3 s, then SIGKILL and reap.
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(3);
+    while (chrono::steady_clock::now() < deadline) {
+        const pid_t waited = waitpid(pid, nullptr, WNOHANG);
+        if (waited == pid || (waited == -1 && errno != EINTR)) return;
+        this_thread::sleep_for(chrono::milliseconds(50));
+    }
+    kill(pid, SIGKILL);
+    while (waitpid(pid, nullptr, 0) == -1 && errno == EINTR) {}
+}
+
 // Keep the existing X11/labwc lifecycle together, including its CLI messages.
 static ProcessResult launchDisplaySession(const string& session, const string& binPath,
     const function<ProcessResult(const vector<string>&)>& launch, const LogCallback& emit, CancelHandle* cancel) {
     if (session == "labwc") {
         emit("Launching via labwc Wayland session ...\n", MessageKind::Output);
-        return launch({"labwc", "-s", binPath});
+        return launch({"labwc", "-S", binPath});
     }
     if (session == "x11") {
         // On Pi 5 (modesetting + V3D), running the binary directly as
@@ -94,8 +110,7 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
         }
         if (!xReady) {
             emit("Error: X server did not start within 6 seconds\n", MessageKind::ErrorOutput);
-            kill(xinitPid, SIGTERM);
-            waitpid(xinitPid, nullptr, 0);
+            stopXinit(xinitPid);
             std::remove(xinitrcPath.c_str());
             return {-1, false};
         }
@@ -114,8 +129,7 @@ static ProcessResult launchDisplaySession(const string& session, const string& b
         const auto rc = launch({binPath});
 
         // 5. Tear down the X session.
-        kill(xinitPid, SIGTERM);
-        waitpid(xinitPid, nullptr, 0);
+        stopXinit(xinitPid);
         std::remove(xinitrcPath.c_str());
         return rc;
     }
