@@ -6,6 +6,7 @@
 #include "GeneratedFile.h"
 #include "TrussCVersion.h"
 #include "TrussC.h"
+#include <algorithm>
 #include <deque>
 #include <fstream>
 #include <sstream>
@@ -134,6 +135,27 @@ private:
     function<void(const string&)> callback_;
 };
 
+// Resolve the concrete preset core without changing project metadata.
+static string presetAddonRoot(const string& projectPath, const string& targetPreset,
+                              string root, const Json& data) {
+    if (root.empty() && data.is_object() && data.contains("configurePresets")) {
+        for (const auto& preset : data["configurePresets"]) {
+            if (preset.value("name", "") != targetPreset || !preset.contains("cacheVariables")) continue;
+            auto core = preset["cacheVariables"].value("TRUSSC_DIR", Json());
+            if (core.is_object()) core = core.value("value", Json());
+            if (!core.is_string()) continue;
+            string path = core.get<string>();
+            const string macro = "${sourceDir}";
+            if (path.compare(0, macro.size(), macro) == 0) path.replace(0, macro.size(), fs::absolute(projectPath).generic_string());
+            if (path.find('$') != string::npos) continue;
+            fs::path corePath(path);
+            if (corePath.is_relative()) corePath = fs::path(projectPath) / corePath;
+            root = fs::absolute(corePath).lexically_normal().parent_path().string();
+        }
+    }
+    return root;
+}
+
 static int executeBuild(const BuildInput& input, Result& result, const LogCallback& log,
                         ostream& out, ostream& err) {
     ProcessOptions processOptions;
@@ -179,8 +201,58 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         return 1;
     }
 
-    if (!explicitTcRoot.empty()) {
-        if (dryRun) { err << "Error: save --tc-root with use-local before --dry-run\n"; return 1; }
+    if (!explicitTcRoot.empty() && dryRun) {
+        err << "Error: save --tc-root with use-local before --dry-run\n";
+        return 1;
+    }
+    bool updatedForFetch = false;
+    if (input.confirmFetch && (!explicitTcRoot.empty() ||
+        fs::exists(fs::path(projectPath) / ".trussc-version") ||
+        !trusscVersion::localPath(projectPath).empty())) {
+        vector<string> missing;
+        auto probeRoot = explicitTcRoot.empty()
+            ? trusscVersion::resolve(projectPath, false, &missing) : explicitTcRoot;
+        const bool missingFramework = !missing.empty();
+        auto presetPath = fs::path(projectPath) / "CMakePresets.json";
+        if (fs::exists(presetPath)) {
+            auto data = Json::parse(trusscVersion::readBounded(presetPath, 16 * 1024 * 1024), nullptr, false);
+            probeRoot = presetAddonRoot(projectPath, targetPreset.empty() ? string(kNativePreset ? kNativePreset : "") : targetPreset, probeRoot, data);
+        }
+        if (probeRoot.empty() && !input.update.executablePath.empty()) probeRoot = detectTcRoot(input.update.executablePath);
+        auto selection = readProjectAddons(projectPath);
+        if (missingFramework) {
+            // Bundled addons and remote manifests become known only after update
+            // acquires the selected framework. List explicit external selections now.
+            selection.erase(remove_if(selection.begin(), selection.end(), [](const string& line) {
+                const auto spec = addonVersions::parse(line);
+                return spec.owner.empty() && spec.ref.empty();
+            }), selection.end());
+        }
+        if (!selection.empty() && !probeRoot.empty()) {
+            ScopedDiagnostics quiet({}); // The ordinary build emits resolver warnings once.
+            projectOps::resolveAddons(projectPath, probeRoot, false, input.update.addonLookup, &selection, &missing);
+        }
+        if (!missing.empty() && dryRun) {
+            out << "Not in cache:\n";
+            for (const auto& item : missing) out << "  " << item << "\n";
+            err << "Error: dry run: sources unavailable; run `trusscli update` to download them.\n";
+            return 1;
+        }
+        if (!missing.empty() && input.confirmFetch(missing)) {
+            auto regeneration = input.update;
+            regeneration.projectPath = projectPath;
+            regeneration.fetchVersion = true;
+            if (targetPreset == "web") regeneration.flags.web = true;
+            if (targetPreset == "android") regeneration.flags.android = true;
+            if (targetPreset == "ios") regeneration.flags.ios = true;
+            auto updated = update(regeneration, log);
+            if (result.stopped) return -1;
+            if (!updated.success) { err << "Error: " << updated.failureReason << "\n"; return 1; }
+            updatedForFetch = true;
+        }
+    }
+
+    if (!explicitTcRoot.empty() && !updatedForFetch) {
         auto regeneration = input.update;
         regeneration.projectPath = projectPath;
         regeneration.fetchVersion = false;
@@ -188,7 +260,7 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         if (result.stopped) return -1;
         if (!updated.success) { err << "Error: " << updated.failureReason << "\n"; return 1; }
     }
-    // Validate before the automatic update: build must never fetch a missing version.
+    // Validate offline after any caller-approved update.
     string selectedRoot = trusscVersion::resolve(projectPath, false);
     if (!selectedRoot.empty()) {
         selectedRoot = fs::absolute(selectedRoot).generic_string();
@@ -242,21 +314,7 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
     // Bound (project presets): cap addon-selection metadata at 16 MiB.
     const auto presetData = Json::parse(trusscVersion::readBounded(presetsFile, 16 * 1024 * 1024), nullptr, false);
     string addonRoot = selectedRoot;
-    if (addonRoot.empty() && presetData.is_object() && presetData.contains("configurePresets")) {
-        for (const auto& preset : presetData["configurePresets"]) {
-            if (preset.value("name", "") != targetPreset || !preset.contains("cacheVariables")) continue;
-            auto core = preset["cacheVariables"].value("TRUSSC_DIR", Json());
-            if (core.is_object()) core = core.value("value", Json());
-            if (!core.is_string()) continue;
-            string path = core.get<string>();
-            const string macro = "${sourceDir}";
-            if (path.compare(0, macro.size(), macro) == 0) path.replace(0, macro.size(), fs::absolute(projectPath).generic_string());
-            if (path.find('$') != string::npos) continue;
-            fs::path corePath(path);
-            if (corePath.is_relative()) corePath = fs::path(projectPath) / corePath;
-            addonRoot = fs::absolute(corePath).lexically_normal().parent_path().string();
-        }
-    }
+    addonRoot = presetAddonRoot(projectPath, targetPreset, addonRoot, presetData);
     // Legacy projects leave lookup to CMake, including its preset's core.
     bool resolveAddons = !selectedRoot.empty();
     Json addonVendor = Json::object();
