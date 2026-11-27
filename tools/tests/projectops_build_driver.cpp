@@ -23,13 +23,17 @@ void removeBuildDirectory(const fs::path& path) { fs::remove_all(path); }
 int main(int argc, char** argv) {
     if (argc < 3) return 2;
     std::string mode = argv[1];
+    const bool distOperation = mode == "dist" || mode.starts_with("dist-");
+    if (mode.starts_with("dist-")) mode.erase(0, 5);
     const bool runOperation = mode == "run" || mode.starts_with("run-");
     if (mode.starts_with("run-")) mode.erase(0, 4);
 #if defined(__linux__)
-    if (mode == "force" || mode == "force-orphan") prctl(PR_SET_CHILD_SUBREAPER, 1);
+    if (mode == "force" || mode == "force-orphan" || mode == "installer-force") prctl(PR_SET_CHILD_SUBREAPER, 1);
 #endif
     projectOps::CancelHandle cancel;
+    if (mode == "pre-stopped" || mode == "pre-stopped-archive") cancel.requestStop();
     std::atomic<bool> ready{false};
+    bool fetchAsked = false;
     std::string output;
     tc::Json events = tc::Json::array();
     const auto originalDirectory = fs::current_path();
@@ -41,10 +45,25 @@ int main(int argc, char** argv) {
         input.verbose = true;
         if (argc > 3) input.buildType = argv[3];
         auto log = [&](const std::string& text, projectOps::MessageKind kind) {
+            if (mode == "packaging-stop" && text.find("Packaging the existing build") != std::string::npos)
+                cancel.requestStop();
             output += text;
             events.push_back({{"message", text}, {"kind", static_cast<int>(kind)}});
             if (output.find("READY") != std::string::npos) ready = true;
         };
+        if (distOperation) {
+            projectOps::DistInput distInput;
+            distInput.build = input;
+            distInput.build.update.executablePath = fs::path(std::getenv("TRUSSC_DIR")) / "tools/bin/trusscli";
+            distInput.noBuild = mode != "build-stop" && mode != "fetch";
+            if (mode == "fetch") distInput.build.confirmFetch = [&](const std::vector<std::string>&) {
+                fetchAsked = true;
+                return false;
+            };
+            distInput.archive = mode == "stop" || mode == "force" || mode == "pre-stopped-archive";
+            distInput.installer = mode == "installer-stop" || mode == "installer-force";
+            return projectOps::dist(distInput, log);
+        }
         if (runOperation) {
             projectOps::RunInput runInput;
             runInput.build = input;
@@ -57,7 +76,8 @@ int main(int argc, char** argv) {
     bool stillRunning = false, cwdUnchangedDuringProcess = true;
     bool parentExitedAfterStop = false, survivorBeforeForce = false, appAliveBeforeForce = false;
     pid_t parent = 0, orphan = 0;
-    if (mode == "stop" || mode == "force" || mode == "force-orphan") {
+    if (mode == "stop" || mode == "force" || mode == "force-orphan" ||
+        mode == "build-stop" || mode == "installer-stop" || mode == "installer-force") {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         const char* readyMarker = std::getenv("CHILD_READY");
         auto childReady = [&]() { return ready || (readyMarker && fs::exists(readyMarker)); };
@@ -65,7 +85,7 @@ int main(int argc, char** argv) {
                std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(5));
         cwdUnchangedDuringProcess = fs::current_path() == originalDirectory;
         cancel.requestStop();
-        if (mode == "force" || mode == "force-orphan") {
+        if (mode == "force" || mode == "force-orphan" || mode == "installer-force") {
             while (cancel.state() != projectOps::ProcessState::StillRunning &&
                    operation.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready &&
                    std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -95,7 +115,7 @@ int main(int argc, char** argv) {
     const auto result = operation.get();
     std::cout << tc::Json{{"success", result.success}, {"stopped", result.stopped},
         {"exitCode", result.exitCode}, {"error", result.failureReason}, {"logs", result.logLines},
-        {"events", events}, {"output", output}, {"stillRunning", stillRunning},
+        {"fetchAsked", fetchAsked}, {"events", events}, {"output", output}, {"stillRunning", stillRunning},
         {"appAliveBeforeForce", appAliveBeforeForce}, {"parentExitedAfterStop", parentExitedAfterStop}, {"survivorBeforeForce", survivorBeforeForce},
         {"cwdUnchangedDuringProcess", cwdUnchangedDuringProcess},
         {"cwdRestored", fs::current_path() == originalDirectory}};
