@@ -15,38 +15,46 @@
 
 using namespace tc;
 namespace {
-bool workerExit = false;
+// Worker-thread std::exit is deliberately not tested; see EXIT_PROTOCOL.md.
+bool thunkExit = false;
+int requestedCode = 0;
+bool endedNormally = false;
 struct ExitApp : App {
+    std::thread client;
     void setup() override {
         mcp::setToolLevel(mcp::ToolLevel::Control);
         mcp::startHttpServer(0);
         if (mcp::getHttpPort() <= 0) std::_Exit(2);
-        if (workerExit) {
-            mcp::tool("exit_worker", "test process exit from HTTP reply construction").bind([]() -> json {
+        if (thunkExit) {
+            mcp::tool("exit_app", "request normal app exit from HTTP reply construction").bind([]() -> json {
                 mcp::deferToolResultTwoStage([] {
-                    return []() -> json { std::exit(0); };
+                    return []() -> json {
+                        exitApp(requestedCode);
+                        return {{"requested", true}};
+                    };
                 }, internal::currentAppOwner()->context); // explicit virtual presentation seam
                 return nullptr;
             });
             const int port = mcp::getHttpPort();
-            std::thread([port] {
+            client = std::thread([port] {
                 httplib::Client client("127.0.0.1", port);
                 client.set_read_timeout(20);
-                auto res = client.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exit_worker"}})", "application/json");
-                // The reply thunk exits before any reply is sent, so getting
-                // here means the tool did not run its exit: say why.
-                if (res) std::fprintf(stderr, "worker request answered without exit: HTTP %d %s\n", res->status, res->body.c_str());
-                else std::fprintf(stderr, "worker request failed: %s\n", httplib::to_string(res.error()).c_str());
-            }).detach();
+                auto res = client.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exit_app"}})", "application/json");
+                if (!res) std::fprintf(stderr, "exitApp request failed: %s\n", httplib::to_string(res.error()).c_str());
+            });
         }
     }
     void update() override {
-        if (!workerExit) std::exit(0);
+        if (!thunkExit) std::exit(0);
         // Simulate an addressed frame on this virtual test context so the
         // real HTTP worker executes its reply thunk; maintenance has no frame.
         mcp::internal::drainDeferredResponses(internal::currentAppOwner()->context, true,
                                             std::chrono::steady_clock::now(), false);
         mcp::internal::drainDeferredResponses(nullptr, false);
+    }
+    void exit() override {
+        if (client.joinable()) client.join();
+        endedNormally = true;
     }
 };
 // The test re-launches its own executable per case (as mcpHttpGuard does), so
@@ -76,17 +84,23 @@ int exitCode(int status) {
 #endif
 }
 #endif
-int child(bool fromWorker) {
+int child(bool fromThunk, int code) {
     // Deadlock watchdog, not a success-time assertion.
     // Its own exit code, so a failure tells a hang from an abort (3 on Windows).
     std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(30)); std::_Exit(kWatchdogExit); }).detach();
-    workerExit = fromWorker;
-    runHeadlessApp<ExitApp>();
-    return 4; // neither exit path should return
+    thunkExit = fromThunk;
+    requestedCode = code;
+    const int result = runHeadlessApp<ExitApp>();
+    if (!endedNormally || result != code) return 4;
+    std::printf("MCP exit completed: %d\n", code);
+    return result;
 }
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-    if (argc == 3 && std::string(argv[1]) == "--child") return child(std::string(argv[2]) == "worker");
+    if (argc == 3 && std::string(argv[1]) == "--child") {
+        const std::string mode = argv[2];
+        return child(mode != "update", mode == "thunk-error" ? 7 : 0);
+    }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     std::printf("SKIP MCP process exit checks: system() unavailable on iOS\n");
     return 0;
@@ -99,10 +113,32 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     const int appCode = exitCode(std::system((command + " --child update").c_str()));
     const bool appExit = appCode == 0;
     std::printf("std::exit from update with in-process MCP listener: %s (exit code %d)\n", appExit ? "PASS" : "FAIL", appCode);
-    const int handlerCode = exitCode(std::system((command + " --child worker").c_str()));
-    const bool handlerExit = handlerCode == 0;
-    std::printf("std::exit from HTTP request worker: %s (exit code %d%s)\n", handlerExit ? "PASS" : "FAIL",
-                handlerCode, handlerCode == kWatchdogExit ? ", watchdog: hung" : "");
-    return appExit && handlerExit ? 0 : 1;
+    bool thunksExit = true;
+    for (const auto& mode : {"thunk", "thunk-error"}) {
+        const int expected = std::string(mode) == "thunk-error" ? 7 : 0;
+        const std::string childCommand = command + " --child " + mode + " 2>&1";
+#ifdef _WIN32
+        FILE* pipe = _popen(childCommand.c_str(), "r");
+#else
+        FILE* pipe = popen(childCommand.c_str(), "r");
+#endif
+        if (!pipe) return 1;
+        std::string output;
+        char buffer[512];
+        while (std::fgets(buffer, sizeof(buffer), pipe)) output += buffer;
+#ifdef _WIN32
+        const int code = exitCode(_pclose(pipe));
+#else
+        const int code = exitCode(pclose(pipe));
+#endif
+        std::printf("%s", output.c_str());
+        const std::string marker = "MCP exit completed: " + std::to_string(expected) + "\n";
+        const bool passed = code == expected && output.find(marker) != std::string::npos;
+        std::printf("exitApp(%d) from HTTP reply thunk: %s (exit code %d%s)\n",
+                    expected, passed ? "PASS" : "FAIL", code,
+                    code == kWatchdogExit ? ", watchdog: hung" : "");
+        thunksExit = thunksExit && passed;
+    }
+    return appExit && thunksExit ? 0 : 1;
 #endif
 }

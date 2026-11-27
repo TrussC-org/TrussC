@@ -586,10 +586,6 @@ class McpSocketServer final : public httplib::Server {
     }
 };
 
-// HTTP ownership survives static destruction: std::exit may start on any
-// thread while the listener and its request workers are still using it.
-// A request worker cannot join the listener, which joins that worker in turn.
-static thread_local bool handlingHttpRequest = false;
 // The queue hook runs on the accept thread, before httplib reads any bytes.
 class AdmittedQueue final : public httplib::TaskQueue {
 public:
@@ -611,11 +607,6 @@ public:
         try {
             credit = std::make_shared<Credit>();
             return pool_.enqueue([fn = std::move(fn), credit] {
-                struct WorkerScope {
-                    bool previous = handlingHttpRequest;
-                    WorkerScope() { handlingHttpRequest = true; }
-                    ~WorkerScope() { handlingHttpRequest = previous; }
-                } workerScope;
                 fn();
             });
         } catch (...) {
@@ -862,11 +853,6 @@ void startHttpServerImpl(int port, const std::string& host,
             res.set_header("Connection", "close");
             return;
         }
-        struct RequestScope {
-            bool previous = handlingHttpRequest;
-            RequestScope() { handlingHttpRequest = true; }
-            ~RequestScope() { handlingHttpRequest = previous; }
-        } requestScope;
         if (!internal::checkRequest(req, res, true)) return;
 
         // Bearer auth when a token is configured (always so for non-loopback).
@@ -1002,8 +988,8 @@ void stopHttpServer() {
     // will be presented, so their producers would never run (and a blocked
     // worker would stall the server shutdown below).
     {
-        // Take them out under the lock: on an HTTP worker's std::exit the main
-        // thread may be draining the same list (see deferredResponsesMutex()).
+        // Take them out under the lock: another thread may be draining
+        // the same list (see deferredResponsesMutex()).
         std::vector<internal::DeferredResponse> list;
         {
             std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
@@ -1051,16 +1037,9 @@ void stopHttpServer() {
     internal::getHttpChannel().close();
 
     auto& t = internal::getHttpThread();
-    const bool onHttpThread = t && t->joinable() &&
-        (t->get_id() == std::this_thread::get_id() || internal::handlingHttpRequest);
-    if (t && t->joinable()) {
-        if (onHttpThread) t->detach();
-        else t->join();
-    }
+    if (t && t->joinable()) t->join();
     t.reset();
-    // A detached listener/handler still needs its server until process exit.
-    if (onHttpThread) (void)svr.release();
-    else svr.reset();
+    svr.reset();
     internal::getHttpPort().store(0);
     internal::explicitlyOpened() = false;
     internal::healthOnlyEndpoint() = false;

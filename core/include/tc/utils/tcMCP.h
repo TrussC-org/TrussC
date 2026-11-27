@@ -312,9 +312,9 @@ void retireDeferredTarget(const void* targetWindow) noexcept;
 inline void setDeferralOwner(const void* owner) { deferralState().owner = owner; }
 
 // Pending replies. Guard every access with deferredResponsesMutex(): the main
-// thread drains them, but std::exit on an HTTP worker answers them from
-// stopHttpServer() on that worker. Whoever takes an entry out of the list
-// answers it, outside the lock, so each promise is set exactly once.
+// thread drains them, and stopHttpServer() may answer them concurrently.
+// Whoever takes an entry out of the list answers it outside the lock,
+// so each promise is set exactly once.
 std::vector<DeferredResponse>& deferredResponses();
 std::mutex& deferredResponsesMutex();
 
@@ -407,8 +407,7 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr,
         }
         list.swap(keep);
     }
-    // Answer outside the lock: a worker woken here may call std::exit, whose
-    // stopHttpServer() takes the lock to answer what is still pending.
+    // Answer outside the lock so response construction does not hold it.
     for (auto& d : ready) {
         if (d.ownerRetired) {
             completeRetiredResponse(d);
@@ -1067,7 +1066,7 @@ void startHttpServerImpl(int port, const std::string& host,
 TC_PLATFORMS("macos,windows,linux,ios,android") void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
                      const std::string& token = "");
 
-// Stop HTTP server
+// Stop HTTP server. Call from the main thread.
 TC_PLATFORMS("macos,windows,linux,ios,android") void stopHttpServer();
 
 // Process HTTP request queue (call every frame from main thread)

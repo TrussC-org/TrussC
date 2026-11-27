@@ -1314,9 +1314,9 @@ class Font {
             return candidate && !cached ? candidate->preparedResourceBytes() : 0;
         }
         void discardPayload() noexcept override {
-            // std::exit can run on a worker. Cached atlases may own GPU
-            // handles, so leave their uncharged references in the mailbox
-            // for main-thread retirement (or process termination).
+            // Cancellation can discard payloads on a worker. Cached atlases may
+            // own GPU handles, so leave their uncharged references in the
+            // mailbox for main-thread retirement.
             if (!cached || isMainThread()) candidate.reset();
         }
 #ifdef __EMSCRIPTEN__
