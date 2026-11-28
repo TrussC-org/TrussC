@@ -117,6 +117,9 @@ class BuildOperationTests(unittest.TestCase):
         self.assertTrue(report["success"], report)
         self.assertIn("Built target sample", report["output"])
         self.assertTrue(self.app.is_file())
+        self.assertEqual(report["phases"], [0, 1])
+        self.assertTrue(report["progress"])
+        self.assertEqual(report["progress"][-1]["compiled"], 1)
         report = self.operate("build", "Debug")
         self.assertTrue(report["success"], report)
         self.assertIn("CMAKE_BUILD_TYPE:STRING=Debug", (self.build_dir / "CMakeCache.txt").read_text(encoding="utf-8"))
@@ -129,6 +132,21 @@ class BuildOperationTests(unittest.TestCase):
         self.assertFalse(report["stopped"])
         self.assertNotEqual(report["exitCode"], 0)
         self.assertIn("error:", (self.build_dir / "build.log").read_text(encoding="utf-8"))
+        diagnostic = report["progress"][-1]
+        self.assertIn("error:", diagnostic["firstError"])
+        self.assertIn("main.cpp:1", diagnostic["location"])
+        self.assertIn(diagnostic["firstError"], report["output"])
+
+    def test_configure_fatal_error_keeps_original_strip_diagnostic(self):
+        with (self.project / "CMakeLists.txt").open("a", encoding="utf-8") as stream:
+            stream.write('message(FATAL_ERROR "WORKSHOP_CONFIGURE_FAILURE: missing WorkshopSDK")\n')
+        report = self.operate()
+        self.assertFalse(report["success"])
+        self.assertEqual(report["phases"], [0])
+        diagnostic = report["progress"][-1]["firstError"]
+        self.assertIn("CMake Error at CMakeLists.txt:", diagnostic)
+        self.assertIn("WORKSHOP_CONFIGURE_FAILURE: missing WorkshopSDK", diagnostic)
+        self.assertIn(diagnostic, report["output"])
 
     @unittest.skipUnless(sys.platform == "linux", "fake tools on PATH")
     def test_update_build_and_run_in_ampersand_path(self):
@@ -461,6 +479,7 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
                 self.assertEqual(report["success"], code == 0, report)
                 self.assertEqual(report["exitCode"], code)
                 self.assertFalse(report["stopped"])
+                self.assertEqual(report["phases"][-2:], [2, 3])
                 self.assertIn("Launching sample ...\nAPP_STDOUT\nAPP_STDERR\n", report["output"])
         (self.project / "src/main.cpp").write_text("compile_error\n", encoding="utf-8")
         modified = time.time() + 2
@@ -468,6 +487,8 @@ sys.stdout.write("FIRST_OUTPUT\\n" + ("x" * {width} + "\\n") * {lines} + "LAST_O
         report = self.operate("run")
         self.assertFalse(report["success"])
         self.assertNotIn("Launching sample", report["output"])
+        self.assertNotIn(2, report["phases"])
+        self.assertNotIn(3, report["phases"])
 
     def test_run_retained_output_is_bounded_but_callback_is_complete(self):
         self.run_fixture()

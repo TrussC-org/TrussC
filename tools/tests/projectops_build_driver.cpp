@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
     bool fetchAsked = false;
     std::string output;
     tc::Json events = tc::Json::array();
+    tc::Json phases = tc::Json::array(), progress = tc::Json::array();
     const auto originalDirectory = fs::current_path();
     auto execute = [&]() {
         projectOps::BuildInput input;
@@ -58,6 +59,11 @@ int main(int argc, char** argv) {
         input.cancel = &cancel;
         input.jobs = 1;
         input.verbose = true;
+        input.phase = [&](projectOps::OperationPhase phase) { phases.push_back(static_cast<int>(phase)); };
+        input.progress = [&](const BuildOutputFilter::Progress& value) {
+            progress.push_back({{"compiled", value.compiledFiles}, {"total", value.totalFiles},
+                {"firstError", value.firstError}, {"location", value.firstErrorLocation}});
+        };
         if (argc > 3) input.buildType = argv[3];
         auto log = [&](const std::string& text, projectOps::MessageKind kind) {
             if (mode == "packaging-stop" && text.find("Packaging the existing build") != std::string::npos)
@@ -131,7 +137,7 @@ int main(int argc, char** argv) {
     const auto result = operation.get();
     std::cout << tc::Json{{"success", result.success}, {"stopped", result.stopped},
         {"exitCode", result.exitCode}, {"error", result.failureReason}, {"logs", result.logLines},
-        {"fetchAsked", fetchAsked}, {"events", events}, {"output", output}, {"stillRunning", stillRunning},
+        {"phases", phases}, {"progress", progress}, {"fetchAsked", fetchAsked}, {"events", events}, {"output", output}, {"stillRunning", stillRunning},
         {"appAliveBeforeForce", appAliveBeforeForce}, {"parentExitedAfterStop", parentExitedAfterStop}, {"survivorBeforeForce", survivorBeforeForce},
         {"cwdUnchangedDuringProcess", cwdUnchangedDuringProcess},
         {"cwdRestored", fs::current_path() == originalDirectory}};

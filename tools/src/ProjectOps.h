@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BuildOutputFilter.h"
 #include "AddonVersions.h"
 #include "ProjectState.h"
 #include "OperationLog.h"
@@ -45,6 +46,9 @@ struct UseLocalInput {
     bool clear = false;
 };
 
+enum class OperationPhase { Configuring, Building, Starting, Running };
+using PhaseCallback = std::function<void(OperationPhase)>;
+
 struct BuildInput {
     UpdateInput update; // Root detection, regeneration and addon lookup.
     std::string targetPreset; // Empty selects the native desktop preset.
@@ -59,6 +63,8 @@ struct BuildInput {
     // Empty keeps builds offline; approval runs the ordinary update operation.
     std::function<bool(const std::vector<std::string>&)> confirmFetch;
     CancelHandle* cancel = nullptr;
+    PhaseCallback phase; // Worker-thread notifications; callers marshal UI state.
+    BuildOutputFilter::ProgressCallback progress;
 };
 
 struct RunInput {

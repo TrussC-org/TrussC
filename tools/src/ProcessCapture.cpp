@@ -230,6 +230,7 @@ ProcessResult runProcess(const vector<string>& argv,
     CloseHandle(process.hThread);
 #endif
     ProcessRunner::state(handle, ProcessState::Running);
+    if (options.started) options.started();
     bool stopSent = false, forceSent = false;
     chrono::steady_clock::time_point requestedAt;
     auto checkStop = [&]() {
