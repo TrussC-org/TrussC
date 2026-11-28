@@ -164,7 +164,8 @@ trusscli run --web --host 127.0.0.1
 ```
 
 The server uses emrun when available, otherwise Python's HTTP server. A `Network:`
-URL is printed for a non-loopback host when an address can be determined.
+URL is printed for each up, non-loopback, non-link-local address the server listens
+on, so with `--host` there is one line per network adapter.
 
 emrun listens on IPv4 only, so with emrun installed an IPv6 `--host` value such as
 `::1` fails to start. Pass an IPv4 address instead:

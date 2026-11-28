@@ -70,6 +70,12 @@ class WebHostTests(unittest.TestCase):
                     self.assertEqual(actual, expected)
                     if host in ('127.0.0.1', '::1'):
                         self.assertNotIn('Network:', result.stdout)
+                    if host == '0.0.0.0':
+                        # One line per usable adapter; loopback and link-local are skipped.
+                        for line in result.stdout.splitlines():
+                            if line.startswith('Network: http://'):
+                                address = line[len('Network: http://'):].split(':')[0]
+                                self.assertFalse(address.startswith(('127.', '169.254.')), line)
                     if host == '192.0.2.10':
                         port = 6931 if emrun else 8000
                         self.assertIn(f'Network: http://{host}:{port}/sampleApp.html', result.stdout)

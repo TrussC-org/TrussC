@@ -3757,20 +3757,24 @@ static int cmdRun(const vector<string>& args) {
         cout << "Launching web server for " << htmlPath << " ...\n";
         auto printNetworkUrl = [&](int port) {
             if (host == "localhost" || isLoopback(host)) return;
-            string address = host;
+            vector<string> addresses;
             if (host == "0.0.0.0" || host == "::") {
-                address.clear();
+                // One line per usable address, like Vite; no guessing which adapter is the LAN.
                 for (const auto& entry : listNetworkInterfaces()) {
-                    if (entry.isUp && !entry.isLoopback && entry.isIPv4 == (host == "0.0.0.0")) {
-                        address = entry.address;
-                        break;
+                    if (entry.isUp && !entry.isLoopback && !isLinkLocal(entry.address)
+                        && entry.isIPv4 == (host == "0.0.0.0")) {
+                        addresses.push_back(entry.address);
                     }
                 }
+            } else {
+                addresses.push_back(host);
             }
-            if (address.empty()) return;
-            if (address.find(':') != string::npos) address = "[" + address + "]";
-            cout << "Network: http://" << address << ":" << port << "/"
-                 << projectName << ".html\n" << flush;
+            for (auto address : addresses) {
+                if (address.find(':') != string::npos) address = "[" + address + "]";
+                cout << "Network: http://" << address << ":" << port << "/"
+                     << projectName << ".html\n";
+            }
+            cout << flush;
         };
         // Try emrun first (Emscripten's built-in server)
         auto [emrunCode, emrunOut] = captureCommand(TC_WHICH " emrun 2>" TC_DEV_NULL);
