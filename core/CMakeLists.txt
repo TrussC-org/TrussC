@@ -841,7 +841,7 @@ function(_trussc_apply_windows_icon TARGET_NAME ICON_FILE)
     get_filename_component(ICON_FILENAME "${ICON_FILE}" NAME)
     set(RC_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.rc")
 
-    file(WRITE "${RC_FILE}" "IDI_ICON1 ICON \"${ICON_FILE}\"\n")
+    file(WRITE "${RC_FILE}" "#pragma code_page(65001)\nIDI_ICON1 ICON \"${ICON_FILE}\"\n")
 
     target_sources(${TARGET_NAME} PRIVATE "${RC_FILE}")
 endfunction()
