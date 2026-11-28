@@ -151,6 +151,21 @@ per hour without authentication), use a full ID or install Git:
 trusscli use <40-character-commit-id>
 ```
 
+### Run a Web build locally or on the LAN
+
+`trusscli run --web` builds the Web project and starts a server on localhost.
+Use `--host` to listen on all interfaces, or `--host <addr>` to listen on a
+specific address. For a native run, `--host` prints a warning and is ignored.
+
+```bash
+trusscli run --web
+trusscli run --web --host
+trusscli run --web --host 127.0.0.1
+```
+
+The server uses emrun when available, otherwise Python's HTTP server. A `Network:`
+URL is printed for a non-loopback host when an address can be determined.
+
 ### Build a cloned project and download missing sources
 
 `trusscli build` checks the selected TrussC version and external addon refs before

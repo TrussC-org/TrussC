@@ -149,6 +149,8 @@ TrussC は **WebGPU**（WebGL ではない）によるブラウザデプロイ�
 2. `build-web.command` (macOS) または `build-web.bat` (Windows) スクリプトが生成される
 3. スクリプトを実行してビルドし、WebGPU 対応ブラウザで `bin/<プロジェクト名>.html` を開く
 
+`trusscli run --web` は localhost で配信し、LAN から開くには `--host`、特定のアドレスだけで待ち受けるには `--host <addr>` を指定します。
+
 **VSCode/Cursor:** "Build Web" タスクも追加されます。`Cmd+Shift+B` / `Ctrl+Shift+B` → "Build Web" で実行できます。
 
 > **注意:** WebGPU には最新のブラウザ（Chrome 113+、Edge 113+、Safari 18+）が必要です。
