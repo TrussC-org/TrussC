@@ -17,35 +17,45 @@ namespace fs = std::filesystem;
 using gui2::text;
 
 namespace {
-// Prefer separators when wrapping paths; fall back to complete UTF-8
-// characters so every character remains visible at narrow widths.
+// Wrap at words; split a UTF-8 token only when it exceeds the width.
 int wrapped(const std::string& value, bool measureOnly = false, float availableWidth = 0) {
     const float width = (std::max)(1.0f, availableWidth > 0 ? availableWidth : ImGui::GetContentRegionAvail().x);
     int lines = 0;
     const char* start = value.data();
     const char* end = start + value.size();
     while (start < end) {
-        const char* cursor = start;
-        const char* separator = nullptr;
-        while (cursor < end && *cursor != '\n') {
-            const char* next = cursor + 1;
-            while (next < end && (static_cast<unsigned char>(*next) & 0xc0) == 0x80) ++next;
-            if (cursor > start && ImGui::CalcTextSize(start, next).x > width) break;
-            cursor = next;
-            if (cursor[-1] == '/' || cursor[-1] == '\\') separator = cursor;
+        const char* lineEnd = ImGui::GetFont()->CalcWordWrapPosition(ImGui::GetFontSize(), start, end, width);
+        if (lineEnd == start && *start != '\n') {
+            ++lineEnd;
+            while (lineEnd < end && (static_cast<unsigned char>(*lineEnd) & 0xc0) == 0x80) ++lineEnd;
         }
-        if (cursor < end && *cursor != '\n' && separator) cursor = separator;
         ++lines;
-        if (!measureOnly) {
-            ImGui::TextUnformatted(start, cursor);
-            if (ImGui::IsItemClicked()) ImGui::SetClipboardText(value.c_str());
-        }
-        start = cursor < end && *cursor == '\n' ? cursor + 1 : cursor;
+        if (!measureOnly) ImGui::TextUnformatted(start, lineEnd);
+        start = lineEnd;
+        while (start < end && (*start == ' ' || *start == '\t')) ++start;
+        if (start < end && *start == '\n') ++start;
     }
     return lines;
 }
 bool button(const char* id) { return ImGui::Button(text(id)); }
 void label(const char* id) { ImGui::TextUnformatted(text(id)); }
+bool primaryButton(const char* id) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(24, 12));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.40f, 0.60f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.20f, 0.49f, 0.71f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.32f, 0.49f, 1));
+    bool clicked = button(id);
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    return clicked;
+}
+void caption(const char* id) {
+    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.88f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    wrapped(text(id));
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
 
 class HubApp : public App {
     projectHub::Snapshot project;
@@ -196,36 +206,49 @@ class HubApp : public App {
         ImGui::SameLine();
         label(home ? "nav.home" : "nav.hub");
         if (!project.path.empty()) {
-            ImGui::SameLine();
+            const float changeWidth = ImGui::CalcTextSize(text("project.change")).x + ImGui::GetStyle().FramePadding.x * 2;
+            ImGui::SameLine((std::max)(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - changeWidth));
             ImGui::BeginDisabled(busy());
             if (button("project.change")) home = true;
             ImGui::EndDisabled();
         }
         if (busy()) label("project.busy");
+        if (!home) caption("project.drop");
         ImGui::Separator();
-        label("project.current");
+        caption("project.current");
         if (project.path.empty()) { label("project.none"); return; }
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
         wrapped(project.name);
-        if (button("project.copy_path")) ImGui::SetClipboardText(project.path.c_str());
+        ImGui::PopFont();
         // Header has its own scrolling region; the copy action never scrolls out.
-        const int lines = wrapped(project.path, true, ImGui::GetContentRegionAvail().x - 48);
-        const float pathHeight = std::clamp(lines * ImGui::GetTextLineHeightWithSpacing() + 36, 48.0f, 130.0f);
+        const int lines = wrapped(project.path, true, ImGui::GetContentRegionAvail().x - 24);
+        const float pathHeight = (std::min)(lines * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetStyle().ItemSpacing.y + 14, 130.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 7));
         ImGui::BeginChild("##project-path", ImVec2(0, pathHeight), ImGuiChildFlags_Borders);
         const auto pathOrigin = ImGui::GetCursorScreenPos();
-        const float textHeight = wrapped(project.path, true) * ImGui::GetTextLineHeightWithSpacing();
+        const float textHeight = wrapped(project.path, true) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetStyle().ItemSpacing.y;
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered()) pathSelected = false;
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.3f, 0.6f, 0.8f, 0.15f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.3f, 0.6f, 0.8f, 0.10f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.3f, 0.6f, 0.8f, 0.20f));
         if (ImGui::Selectable("##select-path", pathSelected, 0, ImVec2(0, textHeight))) {
             pathSelected = true;
             ImGui::SetClipboardText(project.path.c_str());
         }
+        ImGui::PopStyleColor(3);
         ImGui::SetCursorScreenPos(pathOrigin);
         wrapped(project.path);
         ImGui::EndChild();
+        ImGui::PopStyleVar();
+        if (button("project.copy_path")) ImGui::SetClipboardText(project.path.c_str());
         std::string summary = text("project.summary");
         auto replace = [&](const std::string& key, const std::string& value) { summary.replace(summary.find(key), key.size(), value); };
-        replace("{version}", !project.pin.empty() && project.localRoot.empty() ? project.pin : project.commit.empty() ? text("monitor.no_sample") : project.commit);
+        replace("{version}", project.commit.empty() ? text("project.local") : std::string(text("app.title")) + " " + project.commit.substr(0, 7));
         replace("{source}", text(!project.localRoot.empty() ? "advanced.override" : !project.pin.empty() ? "source.pinned" : "advanced.fallback"));
         replace("{count}", std::to_string(project.addons.size()));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         wrapped(summary);
+        ImGui::PopStyleColor();
         if (!project.missing.empty()) {
             label("advanced.cache");
             ImGui::SameLine();
@@ -234,11 +257,29 @@ class HubApp : public App {
     }
     void homeView() {
         ImGui::Spacing();
-        label("project.drop");
         ImGui::BeginDisabled(busy());
-        if (button("home.open")) pick(false);
+        ImGui::BeginChild("##drop", ImVec2(0, 140));
+        const auto origin = ImGui::GetWindowPos();
+        const auto size = ImGui::GetWindowSize();
+        auto* draw = ImGui::GetWindowDrawList();
+        const ImU32 border = ImGui::GetColorU32(ImGuiCol_Border);
+        for (float x = 0; x < size.x; x += 12) {
+            draw->AddLine(ImVec2(origin.x + x, origin.y), ImVec2(origin.x + (std::min)(x + 6, size.x), origin.y), border);
+            draw->AddLine(ImVec2(origin.x + x, origin.y + size.y - 1), ImVec2(origin.x + (std::min)(x + 6, size.x), origin.y + size.y - 1), border);
+        }
+        for (float y = 0; y < size.y; y += 12) {
+            draw->AddLine(ImVec2(origin.x, origin.y + y), ImVec2(origin.x, origin.y + (std::min)(y + 6, size.y)), border);
+            draw->AddLine(ImVec2(origin.x + size.x - 1, origin.y + y), ImVec2(origin.x + size.x - 1, origin.y + (std::min)(y + 6, size.y)), border);
+        }
+        ImGui::SetCursorPosY(25);
+        ImGui::SetCursorPosX((std::max)(0.0f, (size.x - ImGui::CalcTextSize(text("project.drop")).x) / 2));
+        label("project.drop");
+        const float actionsWidth = ImGui::CalcTextSize(text("home.open")).x + ImGui::CalcTextSize(text("home.new")).x + 96 + ImGui::GetStyle().ItemSpacing.x;
+        ImGui::SetCursorPosX((std::max)(0.0f, (size.x - actionsWidth) / 2));
+        if (primaryButton("home.open")) pick(false);
         ImGui::SameLine();
-        if (button("home.new")) newProject();
+        if (primaryButton("home.new")) newProject();
+        ImGui::EndChild();
         if (!projectHub::usableFramework(utf8ToPath(root))) {
             wrapped(text("home.root_missing"));
             if (button("home.choose_root")) pick(true);
@@ -250,25 +291,34 @@ class HubApp : public App {
         auto rows = recents;
         for (const auto& path : rows) {
             ImGui::PushID(path.c_str());
-            if (ImGui::Selectable(pathToUtf8(utf8ToPath(path).filename()).c_str())) select(utf8ToPath(path));
+            ImGui::BeginChild("##recent", ImVec2(0, 105), ImGuiChildFlags_Borders);
+            ImGui::TextUnformatted(pathToUtf8(utf8ToPath(path).filename()).c_str());
+            ImGui::SameLine();
+            if (button("home.open")) select(utf8ToPath(path));
             wrapped(path);
             if (!fs::is_directory(utf8ToPath(path))) label("home.missing");
+            ImGui::EndChild();
             ImGui::Spacing();
             ImGui::PopID();
         }
         ImGui::EndDisabled();
     }
     void hubView() {
-        label("project.drop");
         ImGui::BeginDisabled(busy());
-        if (button(ImGui::GetIO().KeyShift ? "hub.build" : "hub.run")) run(ImGui::GetIO().KeyShift);
+        if (primaryButton(ImGui::GetIO().KeyShift ? "hub.build" : "hub.run")) run(ImGui::GetIO().KeyShift);
         ImGui::SameLine();
-        label("hub.shift");
+        caption("hub.shift");
         ImGui::SameLine();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 3));
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.88f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         if (ImGui::Checkbox(text("hub.mcp"), &mcp)) {
             preferences["monitor"][project.path] = mcp;
             savePreferences();
         }
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        ImGui::PopStyleVar();
         if (button("hub.edit")) {
             const auto& preset = project.presets;
             std::string problem;
@@ -285,7 +335,7 @@ class HubApp : public App {
             if (!problem.empty()) error(problem);
         }
         ImGui::EndDisabled();
-        wrapped(text("hub.app_hint"));
+        caption("hub.app_hint");
         if (operation.valid() && !cancel) label("update.no_cancel");
         if (operation.valid() && cancel) {
             if (button("monitor.stop")) { cancel->requestStop(); status = text("monitor.stopping"); }
@@ -309,6 +359,11 @@ public:
         style.ItemSpacing = ImVec2(12, 10);
         style.FramePadding = ImVec2(12, 7);
         style.FrameRounding = 4;
+        style.FrameBorderSize = 1;
+        style.Colors[ImGuiCol_Button] = ImVec4(0.20f, 0.21f, 0.23f, 1);
+        style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.29f, 0.31f, 1);
+        style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.16f, 0.17f, 0.19f, 1);
+        style.Colors[ImGuiCol_Border] = ImVec4(0.50f, 0.52f, 0.55f, 0.35f);
         try {
             std::ifstream file(projectHub::preferencesPath());
             if (file) {
@@ -352,7 +407,7 @@ public:
         ImGui::Begin("##hub", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
         card();
         ImGui::Separator();
-        ImGui::BeginChild("##content", ImVec2(0, -65));
+        ImGui::BeginChild("##content", ImVec2(0, home ? 0 : -90));
         if (home) homeView(); else hubView();
         if (failed) {
             wrapped(text("common.recovery"));
@@ -375,11 +430,13 @@ public:
             ImGui::EndChild();
         }
         ImGui::EndChild();
-        ImGui::Separator();
-        wrapped(status);
-        if (button("common.details")) showDetails = !showDetails;
-        ImGui::SameLine();
-        if (button("common.copy_details")) ImGui::SetClipboardText(logText().c_str());
+        if (!home) {
+            ImGui::Separator();
+            wrapped(status);
+            if (button("common.details")) showDetails = !showDetails;
+            ImGui::SameLine();
+            if (button("common.copy_details")) ImGui::SetClipboardText(logText().c_str());
+        }
         ImGui::End();
         imguiEnd();
     }
