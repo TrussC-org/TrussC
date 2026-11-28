@@ -17,14 +17,15 @@ using namespace std;
 int main(int argc, char** argv) {
     BuildOutputFilter::Options options;
     options.project = "myApp";
-    string logFile;
+    string logFile, eventsFile;
     int exitCode = 0;
     double seconds = 0;
     size_t chunk = 0;
     for (int i = 1; i < argc; ++i) {
         const string a = argv[i];
         auto next = [&]() { return i + 1 < argc ? string(argv[++i]) : string(); };
-        if (a == "--project") options.project = next();
+        if (a == "--events") eventsFile = next();
+        else if (a == "--project") options.project = next();
         else if (a == "--total") options.totalFiles = atol(next().c_str());
         else if (a == "--verbose") options.verbose = true;
         else if (a == "--configure") options.phase = BuildOutputFilter::Phase::Configure;
@@ -38,6 +39,14 @@ int main(int argc, char** argv) {
     if (!logFile.empty()) log.open(logFile, ios::binary | ios::trunc);
     const string input((istreambuf_iterator<char>(cin)), istreambuf_iterator<char>());
 
+    ofstream events;
+    if (!eventsFile.empty()) {
+        events.open(eventsFile);
+        options.progress = [&](const BuildOutputFilter::Progress& progress) {
+            events << progress.compiledFiles << "/" << progress.totalFiles << "|"
+                   << progress.firstErrorLocation << "|" << progress.firstError << '\n';
+        };
+    }
     BuildOutputFilter filter(cout, logFile.empty() ? nullptr : &log, options);
     filter.begin();
     // chunk > 0 feeds small pieces, so lines arrive split across writes

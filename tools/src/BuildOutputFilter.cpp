@@ -267,7 +267,12 @@ string filesText(long n) { return to_string(n) + (n == 1 ? " file" : " files"); 
 BuildOutputFilter::BuildOutputFilter(ostream& screen, ostream* log, const Options& options)
     : screen_(screen), log_(log), options_(options) {}
 
+void BuildOutputFilter::notifyProgress() {
+    if (options_.progress) options_.progress({compiled_, options_.totalFiles, firstError_, firstErrorLocation_});
+}
+
 void BuildOutputFilter::begin() {
+    notifyProgress();
     if (options_.verbose || options_.phase != Phase::Build) return;
     screen_ << "Building " << options_.project;
     if (options_.totalFiles >= 0) screen_ << " (" << filesText(options_.totalFiles) << ")";
@@ -305,7 +310,7 @@ void BuildOutputFilter::handleLine(string line) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (options_.verbose) {
         screen_ << line << '\n';
-        return;
+        if (!options_.progress) return;
     }
     const string plain = stripAnsi(line);
 
@@ -359,6 +364,7 @@ void BuildOutputFilter::handleLine(string line) {
         }
         if (prefixed && isBuildingObject(rest)) {
             ++compiled_;
+            notifyProgress();
             hidden = true;
         } else if (prefixed && ninja) {
             // Every Ninja status line ("[3/56] <step>", "[0/2] Re-checking
@@ -374,6 +380,7 @@ void BuildOutputFilter::handleLine(string line) {
         } else if (!prefixed && isXcodeCompileStep(plain)) {
             // Another format: no percent, so one dot per compile step.
             ++compiled_;
+            notifyProgress();
             hidden = true;
             if (!sawPercent_) dot();
         }
@@ -384,16 +391,26 @@ void BuildOutputFilter::handleLine(string line) {
          startsWith(rest, "Adding CFBundleIconName to Info.plist") ||
          startsWith(rest, "Removing quarantine attribute from "))) hidden = true;
 
-    if (options_.phase == Phase::Build) classifyDiagnostic(plain);
-    if (!hidden) printLine(line);
+    if (options_.phase == Phase::Build) classifyDiagnostic(plain, line);
+    if (!hidden && options_.progress && (!line.empty() || !failureOutput_.empty())) {
+        // Bound (failure-strip fallback): retain at most one existing line budget.
+        if (failureOutput_.size() < kMaxLine)
+            failureOutput_.append((line + "\n").substr(0, kMaxLine - failureOutput_.size()));
+    }
+    if (!hidden && !options_.verbose) printLine(line);
 }
 
-void BuildOutputFilter::classifyDiagnostic(const string& line) {
+void BuildOutputFilter::classifyDiagnostic(const string& line, const string& original) {
     // Cheap test first; most lines are not diagnostics.
     if (line.find("error") == string::npos && line.find("warning") == string::npos) return;
     const DiagHit hit = findDiagnostic(line);
     if (!hit.found) return;
 
+    if (hit.error && firstError_.empty()) {
+        firstError_ = original;
+        firstErrorLocation_ = hit.prefix;
+        notifyProgress();
+    }
     string tool;
     string file;
     if (hit.msvc) {
@@ -428,6 +445,7 @@ void BuildOutputFilter::classifyDiagnostic(const string& line) {
 }
 
 void BuildOutputFilter::advanceProgressTo(int percent) {
+    if (options_.verbose) return;
     const int target = max(0, min(percent, 100)) / 5;
     while (dotsPrinted_ < target) {
         ++dotsPrinted_;
@@ -439,6 +457,7 @@ void BuildOutputFilter::advanceProgressTo(int percent) {
 }
 
 void BuildOutputFilter::dot() {
+    if (options_.verbose) return;
     screen_ << ".";
     open_ = true;
 }
@@ -480,6 +499,10 @@ void BuildOutputFilter::end(int exitCode, double seconds) {
         string line;
         line.swap(partial_);
         handleLine(std::move(line));
+    }
+    if (exitCode != 0 && firstError_.empty() && !failureOutput_.empty()) {
+        firstError_ = failureOutput_;
+        notifyProgress();
     }
     if (options_.verbose) {
         screen_.flush();

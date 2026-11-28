@@ -473,10 +473,13 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
     };
     BuildOutputFilter::Options filterOptions;
     filterOptions.verbose = verbose;
+    filterOptions.progress = input.progress;
     filterOptions.project = projectName;
     filterOptions.logDisplayPath = haveLog ? logDisplay : "";
     auto runFiltered = [&](const vector<string>& argv, BuildOutputFilter::Phase phase) {
         filterOptions.phase = phase;
+        if (input.phase) input.phase(phase == BuildOutputFilter::Phase::Build ?
+            OperationPhase::Building : OperationPhase::Configuring);
         if (phase == BuildOutputFilter::Phase::Build) {
             // Written by the configure above (or an earlier one)
             filterOptions.totalFiles = countCompileCommands((buildFolder / "compile_commands.json").string());

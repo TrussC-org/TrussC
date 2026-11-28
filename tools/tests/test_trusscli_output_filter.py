@@ -55,6 +55,35 @@ class FilterTests(unittest.TestCase):
     def screen(self, text, *args, **kwargs):
         return self.run_filter(text, *args, **kwargs)[0]
 
+    def test_structured_progress_and_first_error_preserve_output(self):
+        diagnostic = "/project/src/main.cpp:12:4: error: expected ';'"
+        source = ("[1/3] Building CXX object a.cpp.o\n" + diagnostic + "\n"
+                  "[2/3] Building CXX object b.cpp.o\n"
+                  "/project/src/other.cpp:9: error: second error\n")
+        events = Path(self.scratch) / "events.txt"
+        for verbose in (False, True):
+            with self.subTest(verbose=verbose):
+                args = ["--total", "3"] + (["--verbose"] if verbose else [])
+                expected = self.screen(source, *args)
+                actual = self.screen(source, *args, "--events", str(events), chunk=1)
+                self.assertEqual(actual, expected)
+                rows = events.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(rows[0], "0/3||")
+                self.assertEqual(rows[1], "1/3||")
+                self.assertEqual(rows[2], "1/3|/project/src/main.cpp:12:4|" + diagnostic)
+                self.assertEqual(rows[-1], "2/3|/project/src/main.cpp:12:4|" + diagnostic)
+                self.assertEqual(len(rows), 4)
+
+    def test_structured_xcode_unknown_total_and_msvc_location(self):
+        events = Path(self.scratch) / "events.txt"
+        source = ("CompileC /b/a.o /s/a.cpp normal arm64 c++ com.apple.compilers.llvm.clang.1_0.compiler\n"
+                  "C:\\project\\main.cpp(23,7): error C2143: missing ';'\n")
+        self.screen(source, "--events", str(events))
+        rows = events.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(rows[0], "0/-1||")
+        self.assertEqual(rows[1], "1/-1||")
+        self.assertIn("1/-1|C:\\project\\main.cpp(23,7)|", rows[2])
+
     # --- progress ----------------------------------------------------------
 
     def test_make_progress_is_a_dot_per_5_percent(self):

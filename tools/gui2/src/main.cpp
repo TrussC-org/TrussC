@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <fstream>
 #include <future>
+#include <chrono>
+#include <optional>
 #include <mutex>
 #include <memory>
 #include <cstdlib>
@@ -63,10 +65,18 @@ class HubApp : public App {
     std::vector<std::string> recents;
     std::string root, details, status = text("hub.ready");
     bool home = true, mcp = true, showDetails = false, failed = false, dialogOpen = false;
-    bool pathSelected = false;
+    bool pathSelected = false, monitor = false, followLatest = true, closing = false;
+    EventListener exitListener;
+    BuildOutputFilter::Progress buildProgress;
+    projectOps::OperationPhase phase = projectOps::OperationPhase::Building;
+    std::optional<std::chrono::steady_clock::time_point> runStarted;
+    double runSeconds = 0;
+    bool ranApp = false;
+    size_t consoleBytes = 0;
+    float consoleScrollY = 0;
     std::mutex logMutex;
-    std::future<projectOps::Result> operation;
     std::unique_ptr<projectOps::CancelHandle> cancel;
+    std::future<projectOps::Result> operation; // Join before releasing its handle/log state.
     std::string createdPath;
 
     bool busy() const { return operation.valid() || dialogOpen; }
@@ -111,6 +121,7 @@ class HubApp : public App {
         recents.erase(std::remove(recents.begin(), recents.end(), project.path), recents.end());
         recents.insert(recents.begin(), project.path);
         home = false;
+        monitor = false;
         failed = false;
         status = text("hub.ready");
         savePreferences();
@@ -156,6 +167,20 @@ class HubApp : public App {
     void start(std::function<projectOps::Result()> action) {
         failed = false;
         showDetails = true;
+        monitor = true;
+        home = false;
+        followLatest = true;
+        consoleBytes = 0;
+        consoleScrollY = 0;
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            details.clear();
+            buildProgress = {};
+            phase = projectOps::OperationPhase::Building;
+            runStarted.reset();
+            runSeconds = 0;
+            ranApp = false;
+        }
         operation = std::async(std::launch::async, [action] {
             try { return action(); }
             catch (const std::exception& e) {
@@ -186,6 +211,18 @@ class HubApp : public App {
         projectOps::RunInput input;
         input.build.update = updateInput();
         input.build.mcp = mcp;
+        input.build.progress = [this](const BuildOutputFilter::Progress& progress) {
+            std::lock_guard<std::mutex> lock(logMutex);
+            buildProgress = progress;
+        };
+        input.build.phase = [this](projectOps::OperationPhase next) {
+            std::lock_guard<std::mutex> lock(logMutex);
+            phase = next;
+            if (next == projectOps::OperationPhase::Running) {
+                runStarted = std::chrono::steady_clock::now();
+                ranApp = true;
+            }
+        };
         input.build.confirmFetch = [this](const std::vector<std::string>& missing) {
             for (const auto& spec : missing) log(spec);
             return false; // Source-acquisition approval UI comes in a later slice.
@@ -204,16 +241,17 @@ class HubApp : public App {
     void card() {
         label("app.title");
         ImGui::SameLine();
-        label(home ? "nav.home" : "nav.hub");
+        label(home ? "nav.home" : monitor ? "nav.monitor" : "nav.hub");
         if (!project.path.empty()) {
             const float changeWidth = ImGui::CalcTextSize(text("project.change")).x + ImGui::GetStyle().FramePadding.x * 2;
-            ImGui::SameLine((std::max)(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - changeWidth));
+            if (ImGui::GetWindowWidth() >= 600)
+                ImGui::SameLine((std::max)(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - changeWidth));
             ImGui::BeginDisabled(busy());
             if (button("project.change")) home = true;
             ImGui::EndDisabled();
         }
-        if (busy()) label("project.busy");
-        if (!home) caption("project.drop");
+        if (busy()) wrapped(text("project.busy"));
+        if (!home && !monitor) caption("project.drop");
         ImGui::Separator();
         caption("project.current");
         if (project.path.empty()) { label("project.none"); return; }
@@ -264,7 +302,7 @@ class HubApp : public App {
     void homeView() {
         ImGui::Spacing();
         ImGui::BeginDisabled(busy());
-        ImGui::BeginChild("##drop", ImVec2(0, 140));
+        ImGui::BeginChild("##drop", ImVec2(0, ImGui::GetContentRegionAvail().x < 550 ? 200 : 140));
         const auto origin = ImGui::GetWindowPos();
         const auto size = ImGui::GetWindowSize();
         auto* draw = ImGui::GetWindowDrawList();
@@ -281,9 +319,10 @@ class HubApp : public App {
         ImGui::SetCursorPosX((std::max)(0.0f, (size.x - ImGui::CalcTextSize(text("project.drop")).x) / 2));
         label("project.drop");
         const float actionsWidth = ImGui::CalcTextSize(text("home.open")).x + ImGui::CalcTextSize(text("home.new")).x + 96 + ImGui::GetStyle().ItemSpacing.x;
-        ImGui::SetCursorPosX((std::max)(0.0f, (size.x - actionsWidth) / 2));
+        ImGui::SetCursorPosX((std::max)(0.0f, (size.x - (size.x >= 550 ? actionsWidth : ImGui::CalcTextSize(text("home.open")).x + 48)) / 2));
         if (primaryButton("home.open")) pick(false);
-        ImGui::SameLine();
+        if (size.x >= 550) ImGui::SameLine();
+        else ImGui::SetCursorPosX((std::max)(0.0f, (size.x - ImGui::CalcTextSize(text("home.new")).x - 48) / 2));
         if (primaryButton("home.new")) newProject();
         ImGui::EndChild();
         if (!projectHub::usableFramework(utf8ToPath(root))) {
@@ -314,13 +353,17 @@ class HubApp : public App {
     }
     void hubView() {
         ImGui::BeginDisabled(busy());
+        const float runY = ImGui::GetCursorPosY();
         if (primaryButton(ImGui::GetIO().KeyShift ? "hub.build" : "hub.run")) run(ImGui::GetIO().KeyShift);
-        ImGui::SameLine();
+        const float runHeight = ImGui::GetItemRectSize().y;
+        const bool wide = ImGui::GetWindowWidth() >= 650;
+        if (wide) ImGui::SameLine(0, 12);
         caption("hub.shift");
-        ImGui::SameLine();
+        if (wide) ImGui::SameLine(0, 12);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 3));
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.88f);
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        if (wide) ImGui::SetCursorPosY(runY + (runHeight - ImGui::GetFrameHeight()) * 0.5f);
         if (ImGui::Checkbox(text("hub.mcp"), &mcp)) {
             preferences["monitor"][project.path] = mcp;
             savePreferences();
@@ -345,18 +388,109 @@ class HubApp : public App {
         }
         ImGui::EndDisabled();
         caption("hub.app_hint");
-        if (operation.valid() && !cancel) label("update.no_cancel");
-        if (operation.valid() && cancel) {
-            if (button("monitor.stop")) { cancel->requestStop(); status = text("monitor.stopping"); }
-            if (cancel->state() == projectOps::ProcessState::StillRunning) {
-                label("monitor.force_prompt");
-                if (button("monitor.force")) cancel->forceStop();
-            }
+    }
+    void stop() {
+        if (cancel) {
+            cancel->requestStop();
+            status = text("monitor.stopping");
         }
     }
+    void console() {
+        ImGui::SeparatorText(text("monitor.console"));
+        const bool resumed = ImGui::Checkbox(text("monitor.follow"), &followLatest) && followLatest;
+        ImGui::SameLine();
+        if (button("common.copy_details")) ImGui::SetClipboardText(logText().c_str());
+        ImGui::BeginChild("##console", ImVec2(0, 0), ImGuiChildFlags_Borders);
+        auto output = logText();
+        if (output.empty()) label("common.no_operations"); else wrapped(output);
+        const float scrollY = ImGui::GetScrollY();
+        // Position changes cover wheel, scrollbar and keyboard navigation. New
+        // output can increase the bottom without moving the current position.
+        if (!resumed && scrollY < consoleScrollY - 0.5f) followLatest = false;
+        if (followLatest && (output.size() != consoleBytes || ImGui::GetScrollY() < ImGui::GetScrollMaxY()))
+            ImGui::SetScrollHereY(1.0f);
+        consoleBytes = output.size();
+        consoleScrollY = scrollY;
+        ImGui::EndChild();
+    }
+    void recovery() {
+        wrapped(text("common.recovery"));
+        ImGui::BeginDisabled(busy() || project.path.empty());
+        if (button("common.update")) {
+            useFallback();
+            auto input = updateInput();
+            input.fetchVersion = true;
+            status = text("update.status");
+            start([this, input] { return projectOps::update(input, callback()); });
+        }
+        ImGui::EndDisabled();
+        caption("advanced.update_hint");
+    }
+    void monitorView() {
+        wrapped(status);
+        if (operation.valid()) {
+            ImGui::BeginDisabled(!cancel || cancel->stopRequested());
+            if (button("monitor.stop")) stop();
+            ImGui::EndDisabled();
+            if (!cancel) wrapped(text("update.no_cancel"));
+            if (cancel && cancel->state() == projectOps::ProcessState::StillRunning) {
+                wrapped(text("monitor.force_prompt"));
+                if (button("monitor.force")) cancel->forceStop();
+                ImGui::SameLine();
+                if (button("monitor.wait")) status = text("monitor.waiting");
+            }
+        } else {
+            if (ranApp) {
+                std::string summary = text("monitor.run_time");
+                summary += formatElapsed(runSeconds);
+                wrapped(summary);
+            }
+            if (button("monitor.back")) {
+                monitor = false;
+                home = project.path.empty();
+            }
+        }
+        BuildOutputFilter::Progress progress;
+        projectOps::OperationPhase current;
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            progress = buildProgress;
+            current = phase;
+        }
+        if (operation.valid() && cancel && current == projectOps::OperationPhase::Building && !cancel->stopRequested()) {
+            if (progress.totalFiles > 0) {
+                const auto counts = std::to_string(progress.compiledFiles) + " / " + std::to_string(progress.totalFiles);
+                ImGui::ProgressBar((std::min)(1.0f, float(progress.compiledFiles) / float(progress.totalFiles)), ImVec2(-1, 0), counts.c_str());
+            } else {
+                // Unknown totals stay indeterminate; never infer counts from screen dots.
+                const char* frames[] = {"|", "/", "-", "\\"};
+                ImGui::TextUnformatted(frames[int(ImGui::GetTime() * 5) % 4]);
+            }
+        }
+        if (failed) {
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.45f, 0.08f, 0.08f, 1));
+            ImGui::BeginChild("##failure", ImVec2(0, 90), ImGuiChildFlags_Borders);
+            wrapped(progress.firstError.empty() ? failureMessage : progress.firstError);
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            recovery();
+        }
+        console();
+    }
+    std::string failureMessage;
+
 public:
     void setup() override {
         imguiSetup();
+        exitListener = events().exitRequested.listen([this](ExitRequestEventArgs& args) {
+            if (!busy()) return;
+            args.cancel = true;
+            closing = true;
+            monitor = true;
+            home = false;
+            stop();
+            if (!cancel) log(text("update.no_cancel"));
+        });
         setFps(30);
         ImGui::GetIO().IniFilename = nullptr;
         auto font = projectHub::japaneseFont();
@@ -387,8 +521,25 @@ public:
         ProjectGenerator::runChildrenHidden = true;
     }
     void update() override {
+        if (auto* window = getWindow(); window && window->getWidth() < 360)
+            window->setSize(360, window->getHeight());
+        if (operation.valid() && cancel && !cancel->stopRequested()) {
+            std::lock_guard<std::mutex> lock(logMutex);
+            switch (phase) {
+                case projectOps::OperationPhase::Configuring: status = text("monitor.configuring"); break;
+                case projectOps::OperationPhase::Building: status = text("monitor.building"); break;
+                case projectOps::OperationPhase::Starting: status = text("monitor.starting"); break;
+                case projectOps::OperationPhase::Running: status = text("monitor.running"); break;
+            }
+        }
         if (operation.valid() && operation.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             auto result = operation.get();
+            {
+                std::lock_guard<std::mutex> lock(logMutex);
+                if (runStarted) runSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - *runStarted).count();
+            }
+            log(std::string(text("monitor.exit_code")) + std::to_string(result.exitCode));
+            failureMessage = result.failureReason;
             if (result.stopped) status = text("monitor.stopped");
             else if (!result.success) error(result.failureReason);
             else status = text(buildOnlyResult ? "hub.built" : "monitor.finished");
@@ -404,6 +555,7 @@ public:
             }
             buildOnlyResult = false;
         }
+        if (closing && !busy()) exitApp();
     }
     void filesDropped(const std::vector<std::string>& paths) override {
         if (!paths.empty()) select(utf8ToPath(paths.front()));
@@ -416,30 +568,14 @@ public:
         ImGui::Begin("##hub", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
         card();
         ImGui::Separator();
-        ImGui::BeginChild("##content", ImVec2(0, home ? 0 : -90));
-        if (home) homeView(); else hubView();
-        if (failed) {
-            wrapped(text("common.recovery"));
-            wrapped(text("advanced.update_hint"));
-            ImGui::BeginDisabled(busy() || project.path.empty());
-            if (button("common.update")) {
-                useFallback();
-                auto input = updateInput();
-                input.fetchVersion = true; // Explicit Update may acquire the selected sources.
-                status = text("update.status");
-                start([this, input] { return projectOps::update(input, callback()); });
-            }
-            ImGui::EndDisabled();
-        }
-        if (showDetails) {
-            ImGui::SeparatorText(text("monitor.console"));
-            ImGui::BeginChild("##console", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            auto output = logText();
-            if (output.empty()) label("common.no_operations"); else wrapped(output);
-            ImGui::EndChild();
-        }
+        ImGui::BeginChild("##content", ImVec2(0, home || monitor ? 0 : -90));
+        if (home) homeView();
+        else if (monitor) monitorView();
+        else hubView();
+        if (!monitor && failed) recovery();
+        if (!monitor && showDetails) console();
         ImGui::EndChild();
-        if (!home) {
+        if (!home && !monitor) {
             ImGui::Separator();
             wrapped(status);
             if (button("common.details")) showDetails = !showDetails;
@@ -450,8 +586,8 @@ public:
         imguiEnd();
     }
     void cleanup() override {
-        if (cancel) cancel->requestStop();
-        if (operation.valid()) operation.wait();
+        // Normal close is vetoed until update() consumes the completed future.
+        exitListener.disconnect();
         imguiShutdown();
     }
 };
@@ -459,7 +595,7 @@ public:
 int main() {
     WindowSettings settings;
     settings.title = text("app.title");
-    settings.width = 960;
+    settings.width = 400;
     settings.height = 720;
     return runApp<HubApp>(settings);
 }

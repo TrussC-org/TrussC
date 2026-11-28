@@ -21,6 +21,7 @@
 //     vcvars banner and the vswhere "not recognized" probe line (update)
 //   - the compiler command line right after Ninja's "FAILED: <target>"
 
+#include <functional>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -32,12 +33,21 @@ class BuildOutputFilter {
 public:
     enum class Phase { Build, Configure };
 
+    struct Progress {
+        long compiledFiles = 0;
+        long totalFiles = -1;
+        std::string firstError; // Original diagnostic, including its full location.
+        std::string firstErrorLocation;
+    };
+    using ProgressCallback = std::function<void(const Progress&)>;
+
     struct Options {
         Phase phase = Phase::Build;
         bool verbose = false;           // pass every line through, no progress or summary
         std::string project;            // name shown in "Building <project> ..."
         long totalFiles = -1;           // compile steps in a full build; -1 if unknown
         std::string logDisplayPath;     // shown in "Full log: ..." ("" = not shown)
+        ProgressCallback progress;      // Optional structured GUI output (G7).
     };
 
     // screen: where the short output goes. log: receives the raw bytes (may be null).
@@ -65,7 +75,8 @@ private:
     };
 
     void handleLine(std::string line);
-    void classifyDiagnostic(const std::string& line);
+    void classifyDiagnostic(const std::string& line, const std::string& original);
+    void notifyProgress();
     void advanceProgressTo(int percent);
     void dot();
     void closeProgressLine();
@@ -84,6 +95,8 @@ private:
     bool sawPercent_ = false;       // progress is read from the build tool, not counted
     long compiled_ = 0;
     Diagnostics diag_;
+    std::string firstError_, firstErrorLocation_;
+    std::string failureOutput_; // Original visible output when no compiler diagnostic exists.
 };
 
 // Number of entries in a compile_commands.json (the compile steps of a full

@@ -36,6 +36,7 @@ private:
 struct ProcessOptions {
     CancelHandle* cancel = nullptr; // Isolates the child group/job only when supplied.
     std::string workingDirectory;
+    std::function<void()> started; // Called after a successful spawn, on the worker.
     bool inheritOutput = false;
     bool hideConsole = false; // Known console tools only: SW_HIDE also hides an app's first window, so Stop would send CTRL_BREAK instead of WM_CLOSE.
 #ifdef _WIN32

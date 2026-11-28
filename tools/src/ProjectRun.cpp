@@ -244,8 +244,12 @@ Result run(const RunInput& input, const LogCallback& callback, CancelHandle* can
                 } else {
                     ProcessOptions options;
                     options.cancel = cancel;
+                    options.started = [&] {
+                        if (buildInput.phase) buildInput.phase(OperationPhase::Running);
+                    };
                     options.inheritOutput = input.inheritOutput;
                     auto launch = [&](const vector<string>& argv) {
+                        if (buildInput.phase) buildInput.phase(OperationPhase::Starting);
                         return runProcess(argv, [&](const char* data, size_t size) {
                             emit(string(data, size), MessageKind::Output);
                         }, options);
