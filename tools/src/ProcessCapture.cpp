@@ -12,6 +12,7 @@
 #include "BuildSetup.h"   // quoteWindowsArgument
 #include <windows.h>
 #include <cwchar>
+#include <filesystem>
 #include <io.h>
 #else
 #include <fcntl.h>
@@ -193,10 +194,10 @@ ProcessResult runProcess(const vector<string>& argv,
         SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
     }
     HANDLE job = ownGroup ? CreateJobObjectW(nullptr, nullptr) : nullptr;
-    STARTUPINFOA startup = {};
+    STARTUPINFOW startup = {};
     startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    if (ownGroup && options.hideConsole && GetConsoleCP() == 0) {
+    startup.dwFlags = options.newConsole ? 0 : STARTF_USESTDHANDLES;
+    if (options.hideConsole && GetConsoleCP() == 0) {
         startup.dwFlags |= STARTF_USESHOWWINDOW;
         startup.wShowWindow = SW_HIDE;
     }
@@ -213,11 +214,16 @@ ProcessResult runProcess(const vector<string>& argv,
     // CLI children retain the console group so Ctrl-C reaches their own
     // handlers exactly as before; GUI/layer children get an isolated group.
     if (ownGroup) flags |= CREATE_NEW_PROCESS_GROUP;
-    if (GetConsoleCP() == 0) flags |= ownGroup ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW;
+    if (options.newConsole) flags |= CREATE_NEW_CONSOLE;
+    else if (options.noConsole || (!options.waitForExit && options.hideConsole)) flags |= CREATE_NO_WINDOW;
+    else if (GetConsoleCP() == 0) flags |= ownGroup ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW;
     PROCESS_INFORMATION process = {};
-    const BOOL started = (!ownGroup || job) && CreateProcessA(application.empty() ? nullptr : application.c_str(),
-        commandLine.data(), nullptr, nullptr, TRUE, flags, nullptr,
-        options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str(), &startup, &process);
+    const auto wideApplication = filesystem::path(application).wstring();
+    auto wideCommandLine = filesystem::path(commandLine).wstring();
+    const auto wideDirectory = filesystem::path(options.workingDirectory).wstring();
+    const BOOL started = (!ownGroup || job) && CreateProcessW(wideApplication.empty() ? nullptr : wideApplication.c_str(),
+        wideCommandLine.data(), nullptr, nullptr, TRUE, flags, nullptr,
+        wideDirectory.empty() ? nullptr : wideDirectory.c_str(), &startup, &process);
     if (writeEnd) CloseHandle(writeEnd);
     if (!started || (job && !AssignProcessToJobObject(job, process.hProcess))) {
         if (started) { TerminateProcess(process.hProcess, 1); CloseHandle(process.hProcess); CloseHandle(process.hThread); }
@@ -228,6 +234,12 @@ ProcessResult runProcess(const vector<string>& argv,
     }
     ResumeThread(process.hThread);
     CloseHandle(process.hThread);
+    if (!options.waitForExit && !ownGroup) {
+        if (readEnd) CloseHandle(readEnd);
+        CloseHandle(process.hProcess);
+        result.exitCode = 0;
+        return result;
+    }
 #endif
     ProcessRunner::state(handle, ProcessState::Running);
     bool stopSent = false, forceSent = false;

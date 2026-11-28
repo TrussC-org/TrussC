@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IdeHelper.h"
+#include "ProcessCapture.h"
 #include "VsDetector.h"
 #include <string>
 #include <vector>
@@ -80,7 +81,8 @@ public:
 
     // A build operation routes nested regeneration commands through its owned
     // launcher. Other update callers retain their existing execution policy.
-    using CommandRunner = std::function<std::pair<int, std::string>(const std::string&)>;
+    using CommandRunner = std::function<std::pair<int, std::string>(
+        const std::vector<std::string>&, const projectOps::ProcessOptions&)>;
     static inline thread_local CommandRunner commandRunner;
 
     // Set log callback for progress messages

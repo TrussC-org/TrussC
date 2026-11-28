@@ -1,4 +1,5 @@
 #include "VsDetector.h"
+#include "ProcessCapture.h"
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -45,20 +46,11 @@ vector<VsVersionInfo> VsDetector::detectInstalledVersions() {
         vswherePath = "vswhere.exe";
     }
 
-    // -products * so standalone "Build Tools for Visual Studio" (no IDE) is
-    // enumerated too, not just Community/Professional/Enterprise. cmd.exe does
-    // not glob-expand the '*', so it reaches vswhere literally ("all products").
-    string vswhereCmd = "\"" + vswherePath + "\" -all -products * -format json";
-
-    FILE* pipe = _popen(vswhereCmd.c_str(), "r");
-    if (pipe) {
-        string jsonOutput;
-        char buffer[1024];
-        while (fgets(buffer, sizeof(buffer), pipe)) {
-            jsonOutput += buffer;
-        }
-        _pclose(pipe);
-
+    // Include standalone Build Tools installations as well as IDE editions.
+    string jsonOutput;
+    const int status = runCaptured({vswherePath, "-all", "-products", "*", "-format", "json"},
+        [&](const char* data, size_t size) { jsonOutput.append(data, size); }, stderr);
+    if (status != -1) {
         // Simple JSON parsing for installationPath and installationVersion
         size_t pos = 0;
         while ((pos = jsonOutput.find("\"installationPath\"", pos)) != string::npos) {

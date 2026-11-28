@@ -46,84 +46,37 @@ static string getCmakePath() {
 #endif
 }
 
-// Execute command and capture output
-static pair<int, string> executeCommand(const string& cmd) {
-    if (ProjectGenerator::commandRunner) return ProjectGenerator::commandRunner(cmd);
-    string output;
+// Execute argv and capture the child's ordered output.
+static pair<int, string> executeCommand(const vector<string>& argv,
+                                       const projectOps::ProcessOptions& options = {}) {
+    auto childOptions = options;
+    childOptions.hideConsole = ProjectGenerator::runChildrenHidden;
 #ifdef _WIN32
-    // CLI: configure runs on the caller's console, so it records cl's
-    // /showIncludes prefix in the same code page as the later build (#417).
-    // GUI: run hidden with the default (OEM) code page, like a plain cmd or
-    // PowerShell. The GUI's own console mixes code pages (UTF-8 output for
-    // the window app, OEM input), which would garble the recorded prefix,
-    // and the GUI never builds.
-    const bool hasConsole = !ProjectGenerator::runChildrenHidden && GetConsoleCP() != 0;
-    string fullCmd = windowsShellCommandLine(cmd);
-
-    SECURITY_ATTRIBUTES sa = {};
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-
-    HANDLE hReadPipe, hWritePipe;
-    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        return {-1, "Failed to create pipe"};
-    }
-    // 読み取り側は子プロセスに継承させない
-    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
-
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = hWritePipe;
-    si.hStdError = hWritePipe;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    if (!hasConsole) {
-        si.dwFlags |= STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-    }
-
-    PROCESS_INFORMATION pi = {};
-    BOOL ok = CreateProcessA(
-        nullptr, const_cast<char*>(fullCmd.c_str()),
-        nullptr, nullptr, TRUE,
-        hasConsole ? 0 : CREATE_NO_WINDOW,
-        nullptr, nullptr, &si, &pi);
-
-    // 書き込み側を閉じる（子プロセスが使うので親では不要）
-    CloseHandle(hWritePipe);
-
-    if (!ok) {
-        CloseHandle(hReadPipe);
-        return {-1, "Failed to execute command"};
-    }
-
-    // パイプから出力を読み取る
-    char buffer[256];
-    DWORD bytesRead;
-    while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0) {
-        buffer[bytesRead] = '\0';
-        output += buffer;
-    }
-    CloseHandle(hReadPipe);
-
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    return {(int)exitCode, output};
-#else
-    string fullCmd = cmd + " 2>&1";
-    FILE* pipe = popen(fullCmd.c_str(), "r");
-    if (!pipe) return {-1, "Failed to execute command"};
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-    int result = pclose(pipe);
-    return {result, output};
+    childOptions.noConsole = ProjectGenerator::runChildrenHidden;
 #endif
+    if (ProjectGenerator::commandRunner) return ProjectGenerator::commandRunner(argv, childOptions);
+    string output;
+    const auto result = projectOps::runProcess(argv, [&](const char* data, size_t size) {
+        output.append(data, size);
+    }, childOptions);
+    return {result.exitCode, std::move(output)};
+}
+
+// These fixed tool probes have no project paths.
+static pair<int, string> executeCommand(const string& command) {
+#ifdef _WIN32
+    projectOps::ProcessOptions options;
+    options.windowsCommandLine = windowsShellCommandLine(command);
+    return executeCommand(vector<string>{"cmd.exe"}, options);
+#else
+    return executeCommand(vector<string>{"/bin/sh", "-c", command});
+#endif
+}
+
+static pair<int, string> executeInProject(const vector<string>& argv, const string& path) {
+    projectOps::ProcessOptions options;
+    options.workingDirectory = path;
+    return executeCommand(argv, options);
 }
 
 // Toolchain files CMake resolves from the environment at configure time,
@@ -1068,19 +1021,15 @@ void ProjectGenerator::generateXcodeProject(const string& path) {
     // TrussC repo tree (the CMakeLists.txt fallback is relative). Mirrors the
     // VS generator path — same reasoning, same code shape.
     string trusscDir = getTrusscDirValue(path);
-    string trusscDirArg;
-    if (!trusscDir.empty()) {
-        trusscDirArg = " -DTRUSSC_DIR=\"" + trusscDir + "\"";
-    }
 
     // Direct -G Xcode invocation (no preset). See writeCMakePresets() for why
     // we don't emit an "xcode" preset on macOS.
-    string cmd = "cd \"" + path + "\" && " + getCmakePath()
-        + " -G Xcode -B xcode -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0"
-        + trusscDirArg;
+    vector<string> argv = {getCmakePath(), "-G", "Xcode", "-B", "xcode",
+                           "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0"};
+    if (!trusscDir.empty()) argv.push_back("-DTRUSSC_DIR=" + trusscDir);
     log("Running: cmake -G Xcode -B xcode");
 
-    auto [result, output] = executeCommand(cmd);
+    auto [result, output] = executeInProject(argv, path);
     if (!output.empty()) {
         log(output);
     }
@@ -1115,32 +1064,31 @@ void ProjectGenerator::generateVisualStudioProject(const string& path) {
     // Get generator name and cmake path from selected VS version
     string generator = "Visual Studio 17 2022";  // Default
     string cmakeBin = "cmake";  // Default to PATH
+    string cmakeLabel = cmakeBin;
     if (!settings_.installedVsVersions.empty() &&
         settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
         generator = settings_.installedVsVersions[settings_.selectedVsIndex].generator;
         // Use VS-bundled cmake if available
         const string& vsCmake = settings_.installedVsVersions[settings_.selectedVsIndex].cmakePath;
         if (!vsCmake.empty()) {
-            cmakeBin = "\"" + vsCmake + "\"";
+            cmakeBin = vsCmake;
+            cmakeLabel = "\"" + vsCmake + "\"";
         }
     }
 
     // Pass TRUSSC_DIR so cmake finds core/ even when the project lives
     // outside the TrussC repo tree (the CMakeLists.txt fallback is relative)
     string trusscDir = getTrusscDirValue(path);
-    string trusscDirArg;
-    if (!trusscDir.empty()) {
-        trusscDirArg = " -DTRUSSC_DIR=\"" + trusscDir + "\"";
-    }
 
-#ifdef _WIN32
-    string cmd = "cd /d \"" + vsPath + "\" && " + cmakeBin + " -G \"" + generator + "\"" + trusscDirArg + " ..";
-#else
-    string cmd = "cd \"" + vsPath + "\" && " + getCmakePath() + " -G \"" + generator + "\"" + trusscDirArg + " ..";
+#ifndef _WIN32
+    cmakeBin = getCmakePath();
 #endif
-    log("Running: " + cmakeBin + " -G \"" + generator + "\"");
+    vector<string> argv = {cmakeBin, "-G", generator};
+    if (!trusscDir.empty()) argv.push_back("-DTRUSSC_DIR=" + trusscDir);
+    argv.push_back("..");
+    log("Running: " + cmakeLabel + " -G \"" + generator + "\"");
 
-    auto [result, output] = executeCommand(cmd);
+    auto [result, output] = executeInProject(argv, vsPath);
     if (!output.empty()) {
         log(output);
     }
@@ -1264,8 +1212,7 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
         }
 
         log("Running CMake configure (preset: " + preset + ")...");
-        string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
-        auto [result, output] = executeCommand(cmd);
+        auto [result, output] = executeInProject({getCmakePath(), "--preset", preset}, path);
         logConfigureOutput(buildDirForPreset(preset), output, result);
         if (result != 0) {
             const bool kept = (preset == "web" && settings_.webKept) ||
@@ -1317,9 +1264,11 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     const string vswhereDir = VsDetector::findVswhereDir();
     const string pathPrefix = vswhereDir.empty() ? ""
         : "set \"PATH=" + vswhereDir + ";%PATH%\" && ";
-    string cmd = pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset;
-
-    auto [result, output] = executeCommand(cmd);
+    projectOps::ProcessOptions options;
+    options.workingDirectory = path;
+    options.windowsCommandLine = windowsShellCommandLine(
+        pathPrefix + quoteWindowsArgument(vcvarsallPath) + " x64 && cmake --preset " + preset);
+    auto [result, output] = executeCommand(vector<string>{"cmd.exe"}, options);
     logConfigureOutput(buildDirForPreset(preset), output, result);
 
     if (result != 0) {
@@ -1337,9 +1286,7 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
 
     log("Running CMake configure (preset: " + preset + ")...");
 
-    string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
-
-    auto [result, output] = executeCommand(cmd);
+    auto [result, output] = executeInProject({getCmakePath(), "--preset", preset}, path);
     logConfigureOutput(buildDirForPreset(preset), output, result);
 
     if (result != 0) {
