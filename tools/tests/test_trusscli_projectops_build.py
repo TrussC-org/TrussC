@@ -19,6 +19,18 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli")).resolve()
 
 
+def host_uses_deb():
+    if sys.platform != "linux":
+        return False
+    release = Path("/etc/os-release").read_text(encoding="utf-8")
+    fields = dict(line.split("=", 1) for line in release.splitlines() if "=" in line)
+    ids = (fields.get("ID", "").strip('"') + " " + fields.get("ID_LIKE", "").strip('"')).split()
+    for value in ids:
+        if value in ("arch", "debian", "ubuntu"):
+            return value != "arch"
+    return False
+
+
 def wait_for(condition, timeout=20):
     deadline = time.monotonic() + timeout
     while not condition():
@@ -40,10 +52,11 @@ class BuildOperationTests(unittest.TestCase):
             '#pragma GCC diagnostic ignored "-Wdangling-reference"\n#endif\n'
             'namespace tc { using Json = nlohmann::json; }\n', encoding="utf-8")
         cls.driver = scratch / "driver"
-        sources = ["ProjectRun", "ProjectBuild", "ProjectOps", "ProjectGenerator", "ProjectState",
+        sources = ["ProjectDist", "Dist", "ProjectRun", "ProjectBuild", "ProjectOps", "ProjectGenerator", "ProjectState",
                    "BuildSetup", "BuildOutputFilter", "IdeHelper", "VsDetector",
                    "AddonVersions", "TrussCVersion", "ProcessCapture"]
         subprocess.run([os.environ.get("CXX", "c++"), "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
+                        "-Wno-missing-field-initializers",  # Dist.cpp uses defaulted CopyItem fields.
                         "-include", str(scratch / "TrussC.h"), "-I", str(scratch),
                         "-I", str(ROOT / "tools/src"), "-I", str(ROOT / "core/include"),
                         str(ROOT / "tools/tests/projectops_build_driver.cpp"),
@@ -638,6 +651,113 @@ while True:
                 finally:
                     child_info.unlink(missing_ok=True)
                     term_marker.unlink(missing_ok=True)
+
+    def dist_fixture(self, ignore=False, step="cmake"):
+        self.child_fixture(ignore=ignore)
+        self.env["TRUSSC_DIR"] = str(ROOT)
+        self.app.parent.mkdir(parents=True)
+        shutil.copy2(sys.executable, self.app)
+        # Packaging and build-stop commands use fake tools found through PATH.
+        self.env["PATH"] = str(self.base / "fake-bin") + os.pathsep + self.env["PATH"]
+        self.env["DIST_STEP"] = step
+        for tool in ("cmake", "strip", "dpkg-shlibdeps", "dpkg-deb"):
+            script = (self.base / "fake-bin/build-tool").read_text(encoding="utf-8")
+            script = script.replace('if sys.argv[1:] and "-f" not in sys.argv[1:]:', 'if False:')
+            first, rest = script.split("\n", 1)
+            (self.base / "fake-bin" / tool).write_text(first + "\n" +
+                'import os, sys\nfrom pathlib import Path\n'
+                'if Path(sys.argv[0]).name != os.environ["DIST_STEP"]:\n'
+                '    sys.exit(0)\n'
+                'if Path(sys.argv[0]).name == "cmake" and "-E" in sys.argv[1:]:\n'
+                '    (Path(sys.argv[3]) / sys.argv[-2]).write_text("partial archive")\n'
+                + rest, encoding="utf-8")
+            (self.base / "fake-bin" / tool).chmod(0o755)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux packaging fixtures")
+    def test_dist_archive_and_installer_stop_cooperatively(self):
+        for step in ("cmake", "strip", "dpkg-shlibdeps", "dpkg-deb"):
+            mode = "dist-stop" if step == "cmake" else "dist-installer-stop"
+            with self.subTest(step=step):
+                if step != "cmake" and not host_uses_deb():
+                    self.skipTest("installer cancellation requires Debian packaging")
+                # Each subcase gets a new project and child marker set.
+                self.dist_fixture(step=step)
+                report = self.operate(mode)
+                self.assertFalse(report["success"], report)
+                self.assertTrue(report["stopped"], report)
+                self.assert_children_exited()
+                self.assertFalse(list((self.project / "dist").glob("*.tar.gz")))
+                shutil.rmtree(self.build_dir)
+                shutil.rmtree(self.base / "fake-bin")
+                shutil.rmtree(self.app.parent)
+                self.pids.unlink()
+                self.ready.unlink()
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux packaging fixtures")
+    def test_dist_stopped_preserves_previous_package_and_archive(self):
+        self.dist_fixture()
+        report = self.operate("dist")
+        self.assertTrue(report["success"], report)
+        package = next((self.project / "dist").glob("*/sample")).parent
+        sentinel = package / "previous-package"
+        sentinel.write_text("previous complete package", encoding="utf-8")
+        archive = package.with_name(package.name + ".tar.gz")
+        archive.write_text("previous complete archive", encoding="utf-8")
+        before = {str(path.relative_to(self.project / "dist")): path.read_bytes()
+                  for path in (self.project / "dist").rglob("*") if path.is_file()}
+        for mode in ("dist-pre-stopped", "dist-pre-stopped-archive", "dist-packaging-stop"):
+            with self.subTest(mode=mode):
+                report = self.operate(mode)
+                self.assertTrue(report["stopped"], report)
+                self.assertFalse(report["success"], report)
+                self.assertEqual(before, {
+                    str(path.relative_to(self.project / "dist")): path.read_bytes()
+                    for path in (self.project / "dist").rglob("*") if path.is_file()})
+        self.assertFalse(self.ready.exists())
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux packaging fixtures")
+    def test_dist_still_running_requires_force(self):
+        self.dist_fixture(ignore=True)
+        report = self.operate("dist-force")
+        self.assertTrue(report["stillRunning"], report)
+        self.assertTrue(report["appAliveBeforeForce"], report)
+        self.assertTrue(report["stopped"], report)
+        self.assertFalse(report["success"], report)
+        self.assert_children_exited()
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux packaging fixtures")
+    def test_dist_no_build_preserves_streaming_addons_and_warnings(self):
+        self.dist_fixture()
+        # Existing-build packaging keeps the original streaming addon reader.
+        (self.project / "addons.make").write_text(
+            "#" + "x" * (17 * 1024 * 1024) + "\n", encoding="utf-8")
+        (self.project / "dist.json").write_text('{"unknownOption":true}', encoding="utf-8")
+        report = self.operate("dist")
+        self.assertTrue(report["success"], report)
+        self.assertEqual(report["error"], "")
+        self.assertTrue(any(event["kind"] == 1 and "unknownOption" in event["message"]
+                            for event in report["events"]), report)
+        self.assertIn("Packaged sample 0.1.0", report["output"])
+        self.assertTrue(list((self.project / "dist").glob("*/sample")))
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux packaging fixtures")
+    def test_dist_declined_fetch_stays_offline(self):
+        self.env["TRUSSC_DIR"] = str(ROOT)
+        self.env["TRUSSC_CACHE_DIR"] = str(self.base / "empty-cache")
+        (self.project / ".trussc-version").write_text("vMissing\n", encoding="utf-8")
+        report = self.operate("dist-fetch")
+        self.assertTrue(report["fetchAsked"], report)
+        self.assertFalse(report["success"], report)
+        self.assertIn("version is unavailable", report["error"])
+        self.assertFalse((self.base / "empty-cache/versions/TrussC-org/TrussC/vMissing").exists())
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux packaging fixtures")
+    def test_dist_build_uses_cancel_handle(self):
+        self.dist_fixture()
+        report = self.operate("dist-build-stop")
+        self.assertTrue(report["stopped"], report)
+        self.assertFalse(report["success"], report)
+        self.assert_children_exited()
 
     def test_run_request_stop_ends_cooperative_app(self):
         self.run_fixture()
