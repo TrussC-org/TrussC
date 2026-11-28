@@ -109,7 +109,7 @@ static string addonOwnerFromURL(const string& url) {
 }
 
 addonVersions::Paths resolveAddons(const string& project, const string& root,
-    bool fetch, const addonVersions::Lookup& lookup, const vector<string>* selection) {
+    bool fetch, const addonVersions::Lookup& lookup, const vector<string>* selection, vector<string>* missing) {
     return addonVersions::resolve(project, root, fetch, [&](const addonVersions::Spec& spec, bool mayFetch) {
         addonVersions::Source source;
         // Installed metadata identifies external sources even without a registry.
@@ -125,7 +125,7 @@ addonVersions::Paths resolveAddons(const string& project, const string& root,
         if (lookup) source = lookup(spec, mayFetch);
         if (source.owner.empty()) source.owner = addonOwnerFromURL(source.url);
         return source;
-    }, selection);
+    }, selection, missing);
 }
 
 string detectTcRoot(const fs::path& executablePath) {
@@ -169,11 +169,12 @@ string detectProjectRoot(const string& startPath) {
     return "";
 }
 
-static vector<string> readProjectAddons(const string& projectPath) {
+vector<string> readProjectAddons(const string& projectPath) {
     vector<string> out;
     string path = projectPath + "/addons.make";
     if (!fs::exists(path)) return out;
-    ifstream f(path);
+    // Bound (project addon selection): cap addons.make at 16 MiB before materializing it.
+    istringstream f(trusscVersion::readBounded(path, 16 * 1024 * 1024));
     string line;
     while (getline(f, line)) {
         size_t start = line.find_first_not_of(" \t");
@@ -294,6 +295,7 @@ static Result selectVersion(UpdateInput input, string value, bool local, bool cl
         }
         auto regenerated = update(input, log);
         result.success = regenerated.success;
+        result.exitCode = regenerated.exitCode;
         result.failureReason = regenerated.failureReason;
     } catch (const exception& error) {
         result.failureReason = error.what();
@@ -390,6 +392,7 @@ Result update(const UpdateInput& input, const LogCallback& callback) {
         if (!result.failureReason.empty()) return result;
         if (!input.settings) log("Project updated: " + projectPath);
         result.success = true;
+        result.exitCode = 0;
     } catch (const exception& error) {
         result.failureReason = error.what();
     }

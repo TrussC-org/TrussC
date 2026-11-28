@@ -1,0 +1,135 @@
+name: Weekly ASan + LSan
+
+on:
+  schedule:
+    - cron: '23 6 * * 0' # Sunday 06:23 UTC; daily.yml starts at 18:00 UTC.
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-asan-lsan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer:
+    runs-on: ubuntu-latest
+    # The first sweep took 162 minutes, mostly compiling instrumented binaries.
+    timeout-minutes: 240
+    env:
+      # Bound compiler memory on the standard Linux runner. No build caches:
+      # each checkout configures fresh trees with the sanitizer flags below.
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux dependencies
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+
+      - name: Install software display and symbolizer
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+        with:
+          packages: gcc g++ llvm xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+
+      - name: Build trusscli
+        run: ./tools/build_linux.sh --non-interactive --no-launch --jobs 2
+
+      - name: Run AddressSanitizer and LeakSanitizer sweep
+        # Stop the sweep before the job timeout so a stalled run still fails
+        # normally and uploads its logs instead of being canceled.
+        timeout-minutes: 220
+        shell: bash
+        env:
+          CC: gcc
+          CXX: g++
+          CFLAGS: -fsanitize=address -fno-omit-frame-pointer -g
+          CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer -g
+          LDFLAGS: -fsanitize=address
+        run: |
+          set -euo pipefail
+          ASAN_SYMBOLIZER_PATH=$(command -v llvm-symbolizer)
+          export ASAN_SYMBOLIZER_PATH
+          # Retain external libraries for LSan; workspace modules still unload.
+          # This shim exists only in the runner's temporary directory.
+          cat > "$RUNNER_TEMP/keep-modules.c" <<'EOF'
+          #define _GNU_SOURCE
+          #include <dlfcn.h>
+          #include <link.h>
+          #include <limits.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+
+          int dlclose(void *handle) {
+              int (*close_real)(void *) = dlsym(RTLD_NEXT, "dlclose");
+              struct link_map *map = NULL;
+              char path[PATH_MAX], root[PATH_MAX], resolved[PATH_MAX];
+              const char *roots = getenv("TC_DLCLOSE_ROOTS");
+              int skip = 0;
+              const char *name = "<unresolved>";
+              if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == 0 && map &&
+                  map->l_name[0] && realpath(map->l_name, path)) {
+                  name = path;
+                  if (roots && *roots) {
+                      for (const char *p = roots; *p;) {
+                          const char *end = strchr(p, ':');
+                          size_t n = end ? (size_t)(end - p) : strlen(p);
+                          if (n && n < sizeof(root)) {
+                              memcpy(root, p, n);
+                              root[n] = '\0';
+                              if (realpath(root, resolved)) {
+                                  skip = 1;
+                                  size_t len = strlen(resolved);
+                                  if (strncmp(path, resolved, len) == 0 &&
+                                      (resolved[len - 1] == '/' || path[len] == '/' || path[len] == '\0')) {
+                                      skip = 0;
+                                      break;
+                                  }
+                              }
+                          }
+                          if (!end) break;
+                          p = end + 1;
+                      }
+                  }
+              }
+              if (getenv("TC_DLCLOSE_DEBUG"))
+                  fprintf(stderr, "tc-dlclose: %s %s\n", skip ? "skip" : "pass", name);
+              return skip ? 0 : close_real(handle);
+          }
+          EOF
+          gcc -shared -fPIC "$RUNNER_TEMP/keep-modules.c" -ldl -o "$RUNNER_TEMP/keep-modules.so"
+          export TC_DLCLOSE_ROOTS="$GITHUB_WORKSPACE"
+          export LD_PRELOAD="$RUNNER_TEMP/keep-modules.so"
+          # Only the dlclose shim precedes libasan; do not preload libasan into
+          # Python, CMake, Xvfb, or other uninstrumented sweep tools.
+          export ASAN_OPTIONS=detect_leaks=1:symbolize=1:verify_asan_link_order=0
+          export LSAN_OPTIONS="suppressions=$GITHUB_WORKSPACE/core/tests/lsan.supp"
+          mkdir -p build-logs
+          xvfb-run -a -s '-screen 0 1280x1024x24' \
+            python3 examples/build_all.py --core-tests-only --include-daily --verbose \
+            2>&1 | tee build-logs/asan-lsan-sweep.log
+
+      - name: Reject sanitizer errors in test logs
+        if: always()
+        shell: bash
+        run: |
+          # A child can die during its report while its parent test passes.
+          # Include per-test filenames so the failing tests are easy to find.
+          if grep -rEn --include='*.log' 'ERROR: (AddressSanitizer|LeakSanitizer)' build-logs/; then
+            echo '::error::Sanitizer errors found in the test logs'
+            exit 1
+          fi
+
+      - name: Upload sanitizer logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: weekly-asan-lsan-logs
+          path: build-logs/
+          if-no-files-found: warn
+          retention-days: 14

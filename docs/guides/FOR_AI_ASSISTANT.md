@@ -2174,6 +2174,13 @@ TrussC has no dedicated HTTP-server class, but **cpp-httplib (`httplib.h`) is bu
 
 ## Pitfalls & troubleshooting
 
+End the app with `exitApp()`; don't use `std::exit`, which is unsupported from a non-main thread.
+
+```cpp
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+exitApp(0);
+```
+
 ### My 2D drawing disappears behind 3D? (default is 3D space)
 
 TrussC is "2D-looking but actually 3D space" by default (same philosophy as oF). The screen is a perspective 3D projection, and 2D drawing also sits on the z=0 plane under depth testing. So **drawing 2D after 3D can put the 2D behind a 3D object** (depending on its z) and make it disappear. It often happens when you draw 3D with `EasyCam` and then draw 2D (HUD, text) after `cam.end()`. If your HUD vanishes, suspect this. The default FOV is set by **`setupScreenPerspective(fovRadians)` (default `TAU/8`, or 45° via `setupScreenPerspectiveDeg`)**, and for fully-2D situations use **`setupScreenOrtho()`**.
@@ -2705,10 +2712,10 @@ bool isOverlayFocused()  // Report whether an overlay claims keyboard input.
 bool isOverlayHovered()  // Report whether an overlay claims mouse input.
 bool isShiftPressed()  // Returns whether either Shift key is recorded as pressed.
 bool isSuperPressed()  // Returns whether either Super, Command, or Windows key is recorded as pressed.
-FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Shows a file or folder selection dialog.
-void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Shows a file or folder picker with a result callback.
-FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Shows a file save dialog.
-void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Shows a save destination picker with a result callback.
+FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [+1] [macos,windows,linux,android]  // Selects a file or folder, with an extension-list overload for case-insensitive file filtering.
+void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) [+1]  // Selects a file or folder, with an extension-list overload for case-insensitive file filtering.
+FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [+1] [macos,windows,linux,android]  // Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation.
+void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback) [+1]  // Selects a save destination, with an extension-list overload that appends a missing allowed extension before overwrite confirmation.
 void setCursor(Cursor cursor)  // Sets the mouse cursor shape.
 void setTouchAsMouse(bool enabled)  // Controls whether touch input also generates mouse events.
 void showCursor()  // Shows the mouse cursor.
@@ -3212,7 +3219,7 @@ void mcp::startHttpServer(int port = 0, const std::string & host = std::string("
 void mcp::status(const std::string & name, std::function<double ()> getter) [+1]  // Publishes a named numeric or string status getter.
 void mcp::statusGraph(const std::string & name, std::function<double ()> getter)  // Publishes a numeric status getter with a time-series plotting hint.
 void mcp::statusImage(const std::string & name, std::function<trussc::Pixels ()> getter)  // Publishes a named image getter for MCP monitoring.
-void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stops the MCP HTTP listener.
+void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stops the MCP HTTP listener from the main thread and waits for it to finish.
 ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Creates a builder for registering an MCP tool.
 ```
 
@@ -3255,7 +3262,7 @@ const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // R
 EnumLabelSpan enumReflectedSpan()  // Returns an enum label table built from reflection.
 const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the automatically discovered values of an enum's enumerators.
 EVENT_DRIVEN  // Selects rendering on demand.
-void exitApp(int code = 0)  // Asks the process to quit, with an exit code.
+void exitApp(int code = 0)  // Requests orderly app shutdown with an exit code; use exitApp() instead of std::exit.
 float exp2(float x) [std]  // Returns two raised to the given power.
 std::vector<std::string> getCommandLineArgs()  // Returns the process command-line arguments as UTF-8 strings, including the executable.
 int getResourceLoadConcurrency()  // Returns how many resource loads can prepare at once.

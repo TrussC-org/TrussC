@@ -129,7 +129,8 @@ sudo usermod -aG video,render $USER
 # Log out and back in for changes to take effect
 ```
 
-**Run:**
+**Run:** `--session x11` exits with an error if the display :0 socket or
+lock file already exists; stop the desktop session before running it.
 ```bash
 trusscli run --session x11
 ```
@@ -248,15 +249,18 @@ not recreated. Other graphics backends do not gain device-loss detection.
 
 ## 6. Troubleshooting
 
-### `trusscli run --session x11` fails with "Server is already active"
+### `trusscli run --session x11` fails with "display :0 is already in use"
 
-An X server is already running (desktop session or previous crashed session):
+The display :0 socket or lock file already exists (desktop session or previous
+crashed session). Stop the desktop session before retrying. This check does not
+reserve the display: another X server starting between the check and xinit can
+still race with startup.
 ```bash
 # Check for existing X processes
 ps aux | grep -i xorg
 
-# Remove stale lock if X is not actually running
-sudo rm /tmp/.X0-lock
+# Remove a stale lock and socket if X is not actually running
+sudo rm /tmp/.X0-lock /tmp/.X11-unix/X0
 ```
 
 ### `trusscli run --session labwc` fails with "Could not take control of session"

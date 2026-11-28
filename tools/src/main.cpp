@@ -13,6 +13,7 @@
 #include "Dist.h"
 #include "TrussCVersion.h"
 #include "AddonVersions.h"
+#include "PromptInput.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -53,6 +54,8 @@ using trusscliBuild::parallelBuildArg;
 namespace fs = std::filesystem;
 
 static void printProjectMessage(const string& message, projectOps::MessageKind kind) {
+    if (kind == projectOps::MessageKind::Output) { cout << message << flush; return; }
+    if (kind == projectOps::MessageKind::ErrorOutput) { cerr << message << flush; return; }
     if (kind == projectOps::MessageKind::Warning) cerr << "Warning: " << message << "\n";
     else if (kind == projectOps::MessageKind::Diagnostic) cerr << message << "\n";
     else cout << message << endl;
@@ -183,71 +186,6 @@ static bool parseAddonValue(const string& value,
     }
     if (!current.empty()) out.push_back(current);
     return true;
-}
-
-// =============================================================================
-// Subprocess: run an external command with inherited stdout/stderr
-// =============================================================================
-
-// Run a command with argv passed as an array (no shell involvement). Output
-// streams through to this process's stdout/stderr (builds that need filtered
-// output use runCaptured() instead).
-// Returns the child's exit code, or -1 on spawn failure.
-static int runInherited(const vector<string>& argv) {
-    if (argv.empty()) return -1;
-    // Text printed so far must come before the child's output, also through a pipe.
-    cout.flush();
-    cerr.flush();
-#ifdef _WIN32
-    if (GetConsoleCP() != 0) {
-        // CLI builds inherit the same console used by configure.
-        // _spawnvp joins argv into one command line without quoting, so an
-        // argument with a space ("C:\Program Files\...") would be split.
-        vector<string> quoted;
-        for (const auto& a : argv) quoted.push_back(quoteWindowsArgument(a));
-        vector<const char*> cargv;
-        for (const auto& a : quoted) cargv.push_back(a.c_str());
-        cargv.push_back(nullptr);
-        return (int)_spawnvp(_P_WAIT, argv[0].c_str(), cargv.data());
-    }
-    // Without a console, keep children hidden just as configure does.
-    string commandLine;
-    for (const auto& a : argv) {
-        if (!commandLine.empty()) commandLine += ' ';
-        commandLine += quoteWindowsArgument(a);
-    }
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    PROCESS_INFORMATION pi = {};
-    if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return -1;
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 0;
-    const BOOL gotExitCode = GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return gotExitCode ? static_cast<int>(exitCode) : -1;
-#else
-    // POSIX: posix_spawnp + waitpid
-    vector<char*> cargv;
-    for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
-    cargv.push_back(nullptr);
-
-    extern char** environ;
-    pid_t pid = 0;
-    int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr, cargv.data(), environ);
-    if (err != 0) {
-        cerr << "Error: failed to spawn '" << argv[0] << "': " << strerror(err) << "\n";
-        return -1;
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-#endif
 }
 
 // =============================================================================
@@ -1529,7 +1467,7 @@ static int cmdUpgrade(const vector<string>& args) {
     if (!ec) {
         // The batch script handles VS setup. Avoid launching a second GUI.
         _putenv_s("TC_NO_LAUNCH", "1");
-        rc = runInherited({"cmd", "/c", "tools\\build_win.bat"});
+        rc = runInherited({"tools\\build_win.bat"});
         fs::current_path(previousDir, ec);
     }
     if (rc == 0) {
@@ -1614,34 +1552,8 @@ static void printAddHelp() {
 // objects with a "name" key). Only names are gathered here — the caller checks
 // availability and selects them. `seen` guards against cycles and duplicates;
 // pre-seed it with the already-requested addons so they are not re-listed.
-static void collectAddonDependencies(const string& tcRoot,
-                                     const string& addonName,
-                                     set<string>& seen,
-                                     vector<string>& out) {
-    string jsonPath = tcRoot + "/addons/" + addonName + "/addon.json";
-    if (!fs::exists(jsonPath)) return;
-    Json meta;
-    try {
-        // Bound (installed addon dependencies): cap each manifest at 16 MiB.
-        meta = Json::parse(trusscVersion::readBounded(jsonPath, 16 * 1024 * 1024));
-    } catch (...) {
-        return;
-    }
-    if (!meta.contains("dependencies") || !meta["dependencies"].is_array()) return;
-    for (const auto& d : meta["dependencies"]) {
-        string dep;
-        if (d.is_string()) dep = d.get<string>();
-        else if (d.is_object()) {
-            // Version pins remain dependency selections, not project overrides.
-            if (d.contains("commit") || d.contains("tag") || d.contains("branch")) continue;
-            dep = d.value("name", "");
-        }
-        if (dep.empty() || dep.find('@') != string::npos || seen.count(dep) ||
-            !fs::is_directory(fs::path(tcRoot) / "addons" / dep)) continue;
-        seen.insert(dep);
-        out.push_back(dep);
-        collectAddonDependencies(tcRoot, dep, seen, out);  // transitive
-    }
+static void collectAddonDependencies(const string& root, const string& name, set<string>& seen, vector<string>& out) {
+    projectOps::collectAddonDependencies(root, name, seen, out);
 }
 
 static int cmdAdd(const vector<string>& args) {
@@ -2289,7 +2201,7 @@ static int cmdAddonAddLocal(const vector<string>& args) {
 static bool promptYesNo(const string& msg, bool defaultYes) {
     cout << msg << (defaultYes ? " [Y/n] " : " [y/N] ") << flush;
     string line;
-    if (!getline(cin, line)) return defaultYes;
+    if (!trusscli::readPromptLine(line)) return defaultYes;
     if (line.empty()) return defaultYes;
     char c = static_cast<char>(tolower(static_cast<unsigned char>(line[0])));
     return c == 'y';
@@ -2298,7 +2210,7 @@ static bool promptYesNo(const string& msg, bool defaultYes) {
 static string promptString(const string& msg) {
     cout << msg << flush;
     string line;
-    getline(cin, line);
+    trusscli::readPromptLine(line);
     return line;
 }
 
@@ -3347,19 +3259,7 @@ static constexpr const char* kNativePreset = nullptr;
 
 // Find the cmake binary. On macOS, PATH may not contain cmake when launched
 // from Finder, so check common Homebrew paths as well.
-static string findCMake() {
-#ifdef __APPLE__
-    const char* paths[] = {
-        "/opt/homebrew/bin/cmake",
-        "/usr/local/bin/cmake",
-        "/Applications/CMake.app/Contents/bin/cmake",
-    };
-    for (const char* p : paths) {
-        if (fs::exists(p)) return p;
-    }
-#endif
-    return "cmake";
-}
+static string findCMake() { return projectOps::findCMake(); }
 
 // Ensure a `cmake` executable is resolvable on this process's PATH.
 //
@@ -3393,6 +3293,9 @@ static void printBuildHelp() {
          << "Build the TrussC project in the current directory. By default builds\n"
          << "for the native platform; use --web / --android / --ios to cross-compile.\n"
          << "\n"
+         << "Missing cached sources: list downloads and ask [Y/n], then run update.\n"
+         << "Without a terminal on stdin, use --yes or run trusscli update first.\n"
+         << "\n"
          << "Options:\n"
          << "      --web                  Build for WebAssembly\n"
          << "      --android              Build for Android\n"
@@ -3404,6 +3307,7 @@ static void printBuildHelp() {
          << "      --clean                Clean before building (--clean-first)\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
+         << "  -y, --yes                  Download missing versions/addons without asking\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
          << "      --verbose              Show the full build output on screen\n"
          << "      --tc-root <path>       Save a local TrussC path, then update\n"
@@ -3570,83 +3474,28 @@ static int parseJobsFlag(const vector<string>& args, size_t& i, int& jobs) {
     return 1;
 }
 
-// Re-pin the Visual Studio toolchain in CMakePresets.json after Visual Studio
-// changed (#357): detect VS again and replace only the "windows" preset's
-// CMAKE_MAKE_PROGRAM and INCLUDE / LIB / PATH. The targets, web backend, IDE
-// (#350), TRUSSC_DIR, the other presets and hand edits stay. build-windows is
-// removed so the next configure starts clean. Nothing is changed when no
-// usable Visual Studio is found, or when its paths are missing too, so the
-// next build tries again. Always prints what it did.
-static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck& toolchain) {
-    const fs::path presetsPath = fs::path(projectPath) / "CMakePresets.json";
-    string presetsText;
-    {
-        ifstream file(presetsPath, ios::binary);
-        stringstream ss;
-        ss << file.rdbuf();
-        presetsText = ss.str();
-    }
-    const string missing = toolchain.missing.empty() ? string() : toolchain.missing[0];
-    const string changed = "Visual Studio changed since this project was generated (" +
-                           missing + " is missing)";
+static bool stdinIsTty();
 
-    // The newest install, as `trusscli new` / `update` pick it. Without a VS
-    // the detector returns a fallback entry with no MSVC / SDK version.
-    vector<VsVersionInfo> installed = VsDetector::detectInstalledVersions();
-    if (installed.empty() || !canPinToolchain(installed[0])) {
-        cerr << "Error: " << changed << ", and no Visual Studio with the C++ tools "
-                "was found.\n"
-             << "Install Visual Studio (Desktop development with C++) and run "
-                "'trusscli build' again. CMakePresets.json and "
-             << ProjectGenerator::buildDirForPreset(kNativePreset) << " were left as they are.\n";
-        return 1;
-    }
-    const VsVersionInfo& vs = installed[0];
-
-    string repinned = repinWindowsToolchain(presetsText, windowsToolchainPins(vs));
-    if (repinned.empty()) {
-        cerr << "Error: " << changed << ", and CMakePresets.json has no readable "
-                "\"windows\" preset. Run 'trusscli update' to rewrite it.\n";
-        return 1;
-    }
-    // The detected install's paths must exist, or every build would repeat this
-    ToolchainCheck fresh = checkPresetToolchain(repinned, [](const string& path) {
-        error_code e;
-        return fs::exists(fs::path(path), e);
-    });
-    if (fresh.stale()) {
-        cerr << "Error: " << changed << ", and the paths of the detected "
-             << vs.displayName << " are missing too: " << fresh.missing[0] << "\n"
-             << "That Windows SDK / MSVC folder is incomplete: remove the leftover folder or "
-                "repair the SDK / Visual Studio install (or drop the \"environment\" block "
-                "from the \"windows\" preset). CMakePresets.json was left as it is.\n";
-        return 1;
-    }
-
-    // Remove the old build folder first: if that fails, the presets stay
-    // stale and the next build tries again.
-    const string buildDir = ProjectGenerator::buildDirForPreset(kNativePreset);
-    error_code ec;
-    try {
-        removeBuildDirectory(fs::path(projectPath) / buildDir);
-    } catch (const fs::filesystem_error& e) {
-        ec = e.code();
-    }
-    if (ec) {
-        cerr << "Error: " << changed << ", and " << buildDir << " could not be removed ("
-             << ec.message() << ").\n"
-             << "Close programs that use files in it and run 'trusscli build' again.\n";
-        return 1;
-    }
-    writeGeneratedFile(presetsPath, repinned);
-
-    cout << "[build] " << changed << ": pinned " << vs.displayName
-         << " in CMakePresets.json and removed " << buildDir << "\n";
-    cout.flush();
-    return 0;
+static auto confirmBuildFetch(bool yes) {
+    return [yes](const vector<string>& missing) {
+        cout << "Not in cache:\n";
+        for (const auto& identity : missing) cout << "  " << identity << "\n";
+        if (yes) return true;
+        if (!stdinIsTty()) {
+            cerr << "Re-run with --yes, or run `trusscli update`.\n";
+            return false;
+        }
+        for (;;) {
+            cout << "Download now? [Y/n] " << flush;
+            string answer;
+            if (!trusscli::readPromptLine(answer)) return false;
+            if (answer.empty() || answer == "y" || answer == "Y") return true;
+            if (answer == "n" || answer == "N") return false;
+        }
+    };
 }
 
-static int cmdBuild(const vector<string>& args, bool rememberType = true) {
+static int cmdBuild(const vector<string>& args, bool rememberType = true, bool offerFetch = true) {
     string explicitPath;
     string explicitTcRoot;
     string targetPreset;
@@ -3656,6 +3505,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
     bool warnings = false;
     bool dryRun = false;
     bool verbose = false;   // full build output on screen (the log file is written either way)
+    bool yes = false;
     int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3677,6 +3527,7 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
             if (!needValue(i, a, explicitTcRoot)) return 1;
         }
         else if (a == "--dry-run") dryRun = true;
+        else if (a == "-y" || a == "--yes") yes = true;
         else if (a == "--verbose") verbose = true;
         else if (a == "--web")     targetPreset = "web";
         else if (a == "--android") targetPreset = "android";
@@ -3702,313 +3553,24 @@ static int cmdBuild(const vector<string>& args, bool rememberType = true) {
         }
     }
 
-    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
-    if (projectPath.empty()) {
-        cerr << "Error: not inside a TrussC project.\n"
-             << "Use 'trusscli build -p <path>' or run from inside a project.\n";
-        return 1;
-    }
-
-    if (!explicitTcRoot.empty()) {
-        if (dryRun) { cerr << "Error: save --tc-root with use-local before --dry-run\n"; return 1; }
-        if (int rc = cmdUpdate({"-p", projectPath, "--tc-root", explicitTcRoot}, false)) return rc;
-    }
-    // Validate before the automatic update: build must never fetch a missing version.
-    string selectedRoot = trusscVersion::resolve(projectPath, false);
-    if (!selectedRoot.empty()) {
-        selectedRoot = fs::absolute(selectedRoot).generic_string();
-        cout << "TrussC: " << selectedRoot;
-        if (fs::exists(fs::path(selectedRoot) / ".git") ||
-            fs::exists(fs::path(selectedRoot) / ".git_archival.txt")) cout << " (" << trusscVersion::commitAt(selectedRoot) << ")";
-        cout << "\n";
-    }
-
-
-    if (targetPreset.empty()) {
-        if (!kNativePreset) {
-            cerr << "Error: cannot detect native platform. Use --web, --android, or --ios.\n";
-            return 1;
-        }
-        targetPreset = kNativePreset;
-    }
-
-    // Auto-run update if build files are missing (first-time setup after a
-    // minimal git clone that only ships src/). Flags are forwarded so that
-    // e.g. `trusscli build --web` implies `trusscli update --web`.
-    string cmakeListsPath = projectPath + "/CMakeLists.txt";
-    string presetsFile = projectPath + "/CMakePresets.json";
-    if ((!fs::exists(cmakeListsPath) || !fs::exists(presetsFile)) && dryRun) {
-        cerr << "Error: --dry-run needs the project's build files; run 'trusscli update' first.\n";
-        return 1;
-    }
-    if (!fs::exists(cmakeListsPath) || !fs::exists(presetsFile)) {
-        cout << "[update] Build files not found, running 'trusscli update' first...\n";
-        vector<string> updateArgs;
-        if (targetPreset == string("web"))     updateArgs.push_back("--web");
-        if (targetPreset == string("android")) updateArgs.push_back("--android");
-        if (targetPreset == string("ios"))     updateArgs.push_back("--ios");
-        if (verbose) updateArgs.push_back("--verbose");
-        updateArgs.push_back("-p");
-        updateArgs.push_back(projectPath);
-        if (int urc = cmdUpdate(updateArgs, false)) return urc;
-        cout << "\n";
-    }
-
-    // Safety check (should be generated by update above, but keep this as a
-    // belt-and-suspenders guard for edge cases).
-    if (!fs::exists(presetsFile)) {
-        cerr << "Error: no CMakePresets.json in " << projectPath << "\n"
-             << "Run 'trusscli update' first to generate build files.\n";
-        return 1;
-    }
-
-    addonVersions::Paths resolvedAddonPaths;
-    // Bound (project presets): cap addon-selection metadata at 16 MiB.
-    const auto presetData = Json::parse(trusscVersion::readBounded(presetsFile, 16 * 1024 * 1024), nullptr, false);
-    string addonRoot = selectedRoot;
-    if (addonRoot.empty() && presetData.is_object() && presetData.contains("configurePresets")) {
-        for (const auto& preset : presetData["configurePresets"]) {
-            if (preset.value("name", "") != targetPreset || !preset.contains("cacheVariables")) continue;
-            auto core = preset["cacheVariables"].value("TRUSSC_DIR", Json());
-            if (core.is_object()) core = core.value("value", Json());
-            if (!core.is_string()) continue;
-            string path = core.get<string>();
-            const string macro = "${sourceDir}";
-            if (path.compare(0, macro.size(), macro) == 0) path.replace(0, macro.size(), fs::absolute(projectPath).generic_string());
-            if (path.find('$') != string::npos) continue;
-            fs::path corePath(path);
-            if (corePath.is_relative()) corePath = fs::path(projectPath) / corePath;
-            addonRoot = fs::absolute(corePath).lexically_normal().parent_path().string();
-        }
-    }
-    // Legacy projects leave lookup to CMake, including its preset's core.
-    bool resolveAddons = !selectedRoot.empty();
-    Json addonVendor = Json::object();
-    if (presetData.is_object() && presetData.contains("vendor")) {
-        const auto& vendors = presetData["vendor"];
-        if (vendors.is_object() && vendors.contains("trussc") && vendors["trussc"].is_object()) addonVendor = vendors["trussc"];
-    }
-    string effectiveType = buildType.empty() ? "RelWithDebInfo" : buildType;
-    const bool nativeBuild = kNativePreset && targetPreset == kNativePreset;
-    bool remembered = false;
-    if (nativeBuild) {
-        if (rememberType && buildType.empty()) {
-            effectiveType = trusscliBuild::rememberedNativeBuildType(addonVendor);
-            remembered = addonVendor.value("buildType", Json()) == effectiveType;
-        }
-        cout << "Build type: " << effectiveType << (remembered ? " (remembered)" : "") << "\n";
-        if (rememberType && !buildType.empty() && !dryRun && presetData.is_object()) {
-            auto updated = presetData;
-            if (!updated["vendor"].is_object()) updated["vendor"] = Json::object();
-            if (!updated["vendor"]["trussc"].is_object()) updated["vendor"]["trussc"] = Json::object();
-            updated["vendor"]["trussc"]["buildType"] = buildType;
-            writeGeneratedFile(presetsFile, updated.dump(2));
-        }
-    } else if (targetPreset == "web") {
-        effectiveType = "MinSizeRel";
-    } else if (targetPreset == "android") {
-        effectiveType = "Release";
-    }
-    const auto localAddons = addonVendor.value("addonLocalPaths", Json::object());
-    const auto savedAddons = addonVendor.value("addonPaths", Json::object());
-    for (const auto& line : readProjectAddons(projectPath)) {
-        auto spec = addonVersions::parse(line);
-        resolveAddons |= !spec.owner.empty() || !spec.ref.empty() || localAddons.contains(spec.name);
-        // An unqualified external addon acquired by add/update still uses HEAD.
-        resolveAddons |= savedAddons.contains(spec.name) &&
-            !fs::is_directory(fs::path(addonRoot) / "addons" / spec.name);
-    }
-    if (resolveAddons) {
-        if (addonRoot.empty()) throw runtime_error("addon resolution needs a concrete preset TRUSSC_DIR");
-        resolvedAddonPaths = resolveAddonVersions(projectPath, addonRoot, false);
-    }
-
-    trusscVersion::markCachedUsed(addonRoot);
-    for (const auto& addon : resolvedAddonPaths) trusscVersion::markCachedUsed(addon.second);
-
-    // Windows: the presets pin the Visual Studio toolchain found when they were
-    // written. If Visual Studio changed since, rewrite them (same targets and
-    // IDE) and drop the native build folder; the configure below then runs on
-    // the fresh presets. Same check as `trusscli doctor`.
-    if (kNativePreset && targetPreset == kNativePreset) {
-        ToolchainCheck toolchain;
-        checkWindowsPresetToolchain(projectPath, &toolchain);
-        if (shouldRefreshPresets(kNativePreset, targetPreset, toolchain)) {
-            if (dryRun) {
-                cout << "[dry-run] would re-pin the Visual Studio paths in CMakePresets.json "
-                        "and remove the native build folder\n";
-            } else if (int rrc = refreshWindowsPresets(projectPath, toolchain)) {
-                return rrc;
-            }
-        }
-    }
-
-    string cmake = findCMake();
-
-    string parallelArg = parallelBuildArg(jobs);
-
-    // cmake --build --preset <target> --parallel[=N] --config <type> [--clean-first]
-    vector<string> cmd = {cmake, "--build", "--preset", targetPreset, parallelArg};
-    // --config only affects multi-config generators (Xcode, Visual Studio). The
-    // native presets are single-config (Unix Makefiles / Ninja), where --config
-    // is silently ignored; there the build type is fixed at configure time by
-    // CMAKE_BUILD_TYPE, which we pin below. Kept here so the build type also
-    // applies on any future multi-config native preset.
-    cmd.push_back("--config"); cmd.push_back(effectiveType);
-    if (clean) cmd.push_back("--clean-first");
-
-    // Name shown in the progress line ("Building <project> ...")
-    error_code nameEc;
-    fs::path projectDir = fs::weakly_canonical(projectPath, nameEc);
-    string projectName = projectDir.filename().string();
-    if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
-    projectName = sanitizeProjectName(projectName);
-
-    // Run from the project directory
-    string savedCwd = fs::current_path().string();
-    fs::current_path(projectPath);
-
-    // `cmake --build` cannot pass -D and does not configure a build folder
-    // that has no cache (or only the cache of a failed configure), so those
-    // cases need a configure pass
-    // (`cmake --preset`) first. MCP flag changes also require configure;
-    // every configure explicitly sets the requested MCP dev option.
-    // (the cwd is the project now; projectPath may be relative)
-    ConfigureInputs cfgIn = inspectBuildFolder(".", targetPreset,
-                                               kNativePreset ? kNativePreset : "");
-    cfgIn.requestedBuildType = nativeBuild ? effectiveType : buildType;
-    cfgIn.mcp = mcp;
-    cfgIn.warnings = warnings;
-    ConfigurePlan plan = planConfigure(cfgIn);
-    // Reuse CMake's configured scan (including explicit SOURCES and the
-    // platform gate) rather than maintaining a second marker parser here.
-    // A changed state makes the check fail and requests reconfiguration;
-    // plain cmake --build keeps that same fast-fail behavior. Dry-run must
-    // not execute the check, which can touch CMakeLists.txt on a toggle.
-    const fs::path hotReloadCheck = fs::path(cfgIn.buildDir) / "_tc_check_hot_reload.cmake";
-    bool hotReloadChanged = false;
-    if (!dryRun && !plan.configure && cfgIn.isNative &&
-        fs::exists(hotReloadCheck)) {
-        const fs::path projectCwd = fs::current_path();
-        fs::current_path(cfgIn.buildDir); // same working directory as the build target
-        // findCMake() returns fixed executable names/paths, and the script
-        // name is fixed; no project path is interpolated into this shell command.
-#ifdef _WIN32
-        const string checkExe = cmake;
-#else
-        const string checkExe = "'" + cmake + "'";
-#endif
-        // The check's expected fast-fail is replaced by the configure below.
-        hotReloadChanged = captureCommand(checkExe + " -P _tc_check_hot_reload.cmake 2>&1").exitCode != 0;
-        fs::current_path(projectCwd);
-    }
-    if (hotReloadChanged) {
-        cout << "[HotReload] Reconfiguring before build...\n";
-        plan.defines.push_back(mcp ? "-DTRUSSC_MCP_DEV=ON" : "-DTRUSSC_MCP_DEV=OFF");
-        plan.configure = true;
-    }
-    for (const string& line : plan.messages) cout << line << "\n";
-    cout.flush();   // print before cmake's own output, also through a pipe
-    vector<string> cfg = {cmake, "--preset", targetPreset};
-    cfg.insert(cfg.end(), plan.defines.begin(), plan.defines.end());
-    bool needConfigure = plan.configure;
-    const string addonPathsJson = Json(resolvedAddonPaths).dump();
-    const string cachedAddonPaths = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_PATHS");
-    bool presetAddonPaths = false;
-    if (presetData.is_object() && presetData.contains("configurePresets")) {
-        for (const auto& preset : presetData["configurePresets"]) {
-            if (preset.contains("cacheVariables") && preset["cacheVariables"].contains("TRUSSC_ADDON_PATHS")) presetAddonPaths = true;
-        }
-    }
-    if ((resolveAddons && !resolvedAddonPaths.empty()) || !cachedAddonPaths.empty() || presetAddonPaths) {
-        cfg.push_back("-DTRUSSC_ADDON_PATHS=" + addonPathsJson);
-        cfg.push_back("-DTRUSSC_ADDON_ORDER=" + resolvedAddonPaths.order);
-        const string cachedOrder = readCMakeCacheValue((fs::path(cfgIn.buildDir) / "CMakeCache.txt").string(), "TRUSSC_ADDON_ORDER");
-        needConfigure = needConfigure || cachedOrder != resolvedAddonPaths.order;
-        needConfigure = needConfigure || cachedAddonPaths != addonPathsJson;
-    }
-    if (!selectedRoot.empty()) {
-        string coreDir = selectedRoot + "/core";
-        cfg.push_back("-DTRUSSC_DIR=" + coreDir);
-        ifstream cache(fs::path(cfgIn.buildDir) / "CMakeCache.txt");
-        string line;
-        bool sameRoot = false;
-        while (getline(cache, line)) {
-            if (line.rfind("TRUSSC_DIR:", 0) == 0) {
-                auto equals = line.find('=');
-                if (equals != string::npos) sameRoot = fs::path(line.substr(equals + 1)) == fs::path(coreDir);
-            }
-        }
-        needConfigure = needConfigure || !sameRoot;
-    }
-
-    if (dryRun) {
-        // Print the commands instead of running them (one line each).
-        auto printCommand = [](const vector<string>& argv) {
-            cout << "[dry-run]";
-            for (const string& a : argv) {
-                if (a.find_first_of(" \t\"") == string::npos && !a.empty()) cout << ' ' << a;
-                else cout << " \"" << a << '"';
-            }
-            cout << "\n";
-        };
-        if (needConfigure) printCommand(cfg);
-        printCommand(cmd);
-        fs::current_path(savedCwd);
-        return 0;
-    }
-
-    // The full output of configure and build always goes to <build folder>/build.log
-    // (overwritten on each build). The screen gets the short form unless --verbose.
-    // Both streams of the child arrive as one ordered stream (runCaptured).
-    error_code logEc;
-    fs::create_directories(cfgIn.buildDir, logEc);
-    const string logDisplay = cfgIn.buildDir + "/build.log";
-    ofstream logFile(logDisplay, ios::binary | ios::trunc);
-    const bool haveLog = logFile.is_open();
-    if (!haveLog) cerr << "Warning: cannot write " << logDisplay << " (the full output is not saved).\n";
-    const auto startedAt = chrono::steady_clock::now();
-    auto elapsedSeconds = [&]() {
-        return chrono::duration<double>(chrono::steady_clock::now() - startedAt).count();
-    };
-    BuildOutputFilter::Options filterOptions;
-    filterOptions.verbose = verbose;
-    filterOptions.project = projectName;
-    filterOptions.logDisplayPath = haveLog ? logDisplay : "";
-    auto runFiltered = [&](const vector<string>& argv, BuildOutputFilter::Phase phase) {
-        filterOptions.phase = phase;
-        if (phase == BuildOutputFilter::Phase::Build) {
-            // Written by the configure above (or an earlier one)
-            filterOptions.totalFiles = countCompileCommands(cfgIn.buildDir + "/compile_commands.json");
-        }
-        BuildOutputFilter filter(cout, haveLog ? &logFile : nullptr, filterOptions);
-        filter.begin();
-        const int code = runCaptured(argv, [&](const char* data, size_t size) { filter.write(data, size); });
-        filter.end(code, elapsedSeconds());
-        return code;
-    };
-
-    int rc = 0;
-    if (needConfigure) rc = runFiltered(cfg, BuildOutputFilter::Phase::Configure);
-    if (rc == 0) rc = runFiltered(cmd, BuildOutputFilter::Phase::Build);
-#ifdef _WIN32
-    // CMake owns this decision and may update it during an automatic reconfigure.
-    string hotReloadState;
-    ifstream(fs::path(cfgIn.buildDir) / ".tc_hot_reload_state") >> hotReloadState;
-#endif
-    fs::current_path(savedCwd);
-
-    if (rc != 0) {
-        // The short summary already says Failed; --verbose keeps the old line.
-        if (verbose) cerr << "Build failed (exit code " << rc << ").\n";
-#ifdef _WIN32
-        if (hotReloadState == "ON") {
-            cerr << "Warning: the guest can use only TrussC and code linked into the guest; "
-                 << "main.cpp functions and host-only libraries are not visible.\n";
-        }
-#endif
-    }
-    return rc;
+    projectOps::BuildInput input;
+    input.update.projectPath = explicitPath;
+    input.update.tcRoot = explicitTcRoot;
+    input.update.executablePath = getExecutablePath();
+    input.update.addonLookup = registryAddonLookup();
+    if (!verbose || !explicitTcRoot.empty()) input.update.configureOutput = projectConfigureOutput();
+    input.targetPreset = targetPreset;
+    input.buildType = buildType;
+    input.clean = clean;
+    input.mcp = mcp;
+    input.warnings = warnings;
+    input.dryRun = dryRun;
+    input.verbose = verbose;
+    input.rememberType = rememberType;
+    input.jobs = jobs;
+    if (offerFetch) input.confirmFetch = confirmBuildFetch(yes);
+    auto result = projectOps::build(input, printProjectMessage);
+    return result.exitCode;
 }
 
 // =============================================================================
@@ -4022,18 +3584,23 @@ static void printRunHelp() {
          << "Default: native build + launch. Use --web / --android / --ios to\n"
          << "cross-compile and launch on the appropriate target.\n"
          << "\n"
+         << "Missing cached sources: list downloads and ask [Y/n], then run update.\n"
+         << "Without a terminal on stdin, use --yes or run trusscli update first.\n"
+         << "\n"
          << "Options:\n"
          << "      --web                  Build WASM and start a local HTTP server\n"
          << "      --android              Build, adb install, and launch    [not yet implemented]\n"
          << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
          << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
          << "                             Backends: labwc, x11. Example: --session labwc\n"
+         << "                             x11 errors if the display :0 socket or lock file already exists.\n"
          << "      --debug                Build type: Debug (-O0 -g)\n"
          << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g)\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
          << "                            Native: remember type flags; otherwise reuse the saved type (default RelWithDebInfo).\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
+         << "  -y, --yes                  Download missing versions/addons without asking\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
          << "      --verbose              Show the full build output on screen\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -4051,6 +3618,7 @@ static int cmdRun(const vector<string>& args) {
     bool mcp = false;
     bool warnings = false;
     bool verbose = false;   // full build output on screen
+    bool yes = false;
     int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -4068,6 +3636,7 @@ static int cmdRun(const vector<string>& args) {
         if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printRunHelp(); return 0; }
+        else if (a == "-y" || a == "--yes") yes = true;
         else if (a == "--verbose")  verbose = true;
         else if (a == "--web")      target = "web";
         else if (a == "--android")  target = "android";
@@ -4098,6 +3667,23 @@ static int cmdRun(const vector<string>& args) {
                  << "Run 'trusscli run --help' for usage.\n";
             return 1;
         }
+    }
+
+    if (target.empty()) {
+        projectOps::RunInput input;
+        input.build.update.projectPath = explicitPath;
+        input.build.update.executablePath = getExecutablePath();
+        input.build.update.addonLookup = registryAddonLookup();
+        if (!verbose) input.build.update.configureOutput = projectConfigureOutput();
+        input.build.buildType = buildType;
+        input.build.mcp = mcp;
+        input.build.warnings = warnings;
+        input.build.verbose = verbose;
+        input.build.jobs = jobs;
+        input.build.confirmFetch = confirmBuildFetch(yes);
+        input.session = session;
+        input.inheritOutput = true;
+        return projectOps::run(input, printProjectMessage).exitCode;
     }
 
     string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
@@ -4135,6 +3721,7 @@ static int cmdRun(const vector<string>& args) {
     if (mcp) buildArgs.push_back("--mcp");
     if (warnings) buildArgs.push_back("--warnings");
     if (verbose) buildArgs.push_back("--verbose");
+    if (yes) buildArgs.push_back("--yes");
     if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
@@ -4164,127 +3751,6 @@ static int cmdRun(const vector<string>& args) {
         cout << "Open http://localhost:8000/" << projectName << ".html in your browser.\n";
         return runInherited({"python3", "-m", "http.server", "8000", "-d", binDir});
     }
-
-    // Native: find and launch the binary
-#ifdef __APPLE__
-    string appPath = projectPath + "/bin/" + projectName + ".app";
-    if (fs::exists(appPath)) {
-        string binPath = appPath + "/Contents/MacOS/" + projectName;
-        if (!session.empty()) {
-            cerr << "Warning: --session is a Linux-only option (ignored on macOS).\n";
-        }
-        cout << "Launching " << projectName << " ...\n";
-        return runInherited({binPath});
-    }
-#elif defined(__linux__)
-    string binPath = projectPath + "/bin/" + projectName;
-    if (fs::exists(binPath)) {
-        if (session == "labwc") {
-            cout << "Launching via labwc Wayland session ...\n";
-            return runInherited({"labwc", "-s", binPath});
-        }
-        if (session == "x11") {
-            // On Pi 5 (modesetting + V3D), running the binary directly as
-            // xinit's client races with driver init and the app renders
-            // invisibly. A window manager must be running before our GL
-            // client connects, but the default xinitrc also spawns xterm
-            // and friends which flash on screen. Use a minimal custom
-            // xinitrc that only runs twm, then run the binary as a
-            // separate X client with DISPLAY=:0:
-            //   1. Write a temp xinitrc: `exec twm`
-            //   2. Spawn xinit on vt7 with that script as the client
-            //   3. Wait for the X socket
-            //   4. Authorize the local user via xhost
-            //   5. Run the binary
-            //   6. Tear xinit down when the app exits
-            cout << "Launching via xinit (X11 session) on vt7 ...\n";
-
-            // 1. Write minimal xinitrc. Single-window apps work fine with
-            // no WM (verified on Pi 5), so we don't make a WM a hard dep.
-            // If twm or openbox happens to be installed though, prefer it
-            // — it helps with multi-window scenarios such as file dialogs,
-            // popups, or apps that open additional windows. Otherwise just
-            // keep the X session alive with sleep infinity.
-            string xinitrcPath = "/tmp/trusscli-x11-" + to_string(getpid()) + ".sh";
-            {
-                ostringstream f;
-                f << "#!/bin/sh\n"
-                  << "if command -v twm >/dev/null 2>&1; then\n"
-                  << "    exec twm\n"
-                  << "elif command -v openbox >/dev/null 2>&1; then\n"
-                  << "    exec openbox\n"
-                  << "else\n"
-                  << "    exec sleep infinity\n"
-                  << "fi\n";
-                writeGeneratedFile(xinitrcPath, f.str());
-            }
-            chmod(xinitrcPath.c_str(), 0755);
-
-            extern char** environ;
-            vector<char*> xinitArgv = {
-                (char*)"xinit",
-                (char*)xinitrcPath.c_str(),
-                (char*)"--", (char*)":0", (char*)"vt7", nullptr
-            };
-            cout.flush();
-            cerr.flush();
-            pid_t xinitPid = 0;
-            if (posix_spawnp(&xinitPid, "xinit", nullptr, nullptr,
-                             xinitArgv.data(), environ) != 0) {
-                cerr << "Error: failed to spawn xinit (is xserver-xorg installed?)\n";
-                std::remove(xinitrcPath.c_str());
-                return -1;
-            }
-
-            // 2. Poll for the X socket (<=6s).
-            bool xReady = false;
-            for (int i = 0; i < 30; ++i) {
-                if (access("/tmp/.X11-unix/X0", F_OK) == 0) { xReady = true; break; }
-                usleep(200000);
-            }
-            if (!xReady) {
-                cerr << "Error: X server did not start within 6 seconds\n";
-                kill(xinitPid, SIGTERM);
-                waitpid(xinitPid, nullptr, 0);
-                std::remove(xinitrcPath.c_str());
-                return -1;
-            }
-            sleep(1);  // let twm settle
-
-            setenv("DISPLAY", ":0", 1);
-
-            // 3. Authorize this user so DISPLAY=:0 connects without needing
-            // the server's XAUTHORITY file (which xinit keeps private).
-            const char* user = getenv("USER");
-            if (user && *user) {
-                runInherited({"xhost", string("+SI:localuser:") + user});
-            }
-
-            // 4. Run the app (blocks until it exits).
-            int rc = runInherited({binPath});
-
-            // 5. Tear down the X session.
-            kill(xinitPid, SIGTERM);
-            waitpid(xinitPid, nullptr, 0);
-            std::remove(xinitrcPath.c_str());
-            return rc;
-        }
-        cout << "Launching " << projectName << " ...\n";
-        return runInherited({binPath});
-    }
-#elif defined(_WIN32)
-    string exePath = projectPath + "/bin/" + projectName + ".exe";
-    if (fs::exists(exePath)) {
-        if (!session.empty()) {
-            cerr << "Warning: --session is a Linux-only option (ignored on Windows).\n";
-        }
-        cout << "Launching " << projectName << " ...\n";
-        return runInherited({exePath});
-    }
-#endif
-
-    cerr << "Error: built binary not found in " << projectPath << "/bin/\n"
-         << "Make sure the build succeeded.\n";
     return 1;
 }
 
@@ -4346,432 +3812,9 @@ static bool stdinIsTty() {
 }
 
 // The project's addons (addons.make) with their dependencies, and their folders.
-static vector<pair<string, fs::path>> projectAddonDirs(const string& projectPath, const string& tcRoot) {
-    vector<string> names = readProjectAddons(projectPath);
-    set<string> seen(names.begin(), names.end());
-    const vector<string> direct = names;
-    for (const string& name : direct) collectAddonDependencies(tcRoot, name, seen, names);
-    vector<pair<string, fs::path>> out;
-    for (const string& name : names) out.emplace_back(name, fs::path(tcRoot) / "addons" / name);
-    return out;
+static vector<pair<string, fs::path>> projectAddonDirs(const string& project, const string& root) {
+    return projectOps::projectAddonDirs(project, root);
 }
-
-static string readCacheValue(const fs::path& cache, const string& key) {
-    ifstream file(cache);
-    string line;
-    const string prefix = key + ":";
-    while (getline(file, line)) {
-        if (line.rfind(prefix, 0) != 0) continue;
-        const size_t eq = line.find('=');
-        if (eq != string::npos) return line.substr(eq + 1);
-    }
-    return "";
-}
-
-static int distInit(const string& projectPath, const string& projectName,
-                    string appName, string appVersion, string author, bool authorGiven) {
-    const fs::path configPath = fs::path(projectPath) / "dist.json";
-    if (fs::exists(configPath)) {
-        cerr << "Error: " << configPath.string() << " already exists (not overwritten).\n";
-        return 1;
-    }
-    const bool ask = stdinIsTty() && stdoutIsTty();
-    if (appName.empty()) {
-        appName = projectName;
-        if (ask) {
-            string answer = promptString("Name [" + projectName + "]: ");
-            if (!answer.empty()) appName = answer;
-        }
-    }
-    string version;
-    if (!appVersion.empty()) {
-        if (!dist::normalizeVersion(appVersion, version)) {
-            cerr << "Error: --app-version must be three numbers like 1.2.0 (got \"" << appVersion << "\").\n";
-            return 1;
-        }
-    } else {
-        version = dist::kDefaultVersion;
-        while (ask) {
-            string answer = promptString(string("Version [") + dist::kDefaultVersion + "]: ");
-            if (answer.empty()) break;
-            if (dist::normalizeVersion(answer, version)) break;
-            cout << "  A version is three numbers, like 1.2.0.\n";
-            version = dist::kDefaultVersion;
-        }
-    }
-    if (ask && !authorGiven) author = promptString("Author (person, studio or company) []: ");
-    ofstream file(configPath, ios::binary);
-    file << dist::configTemplate(appName, version, author);
-    if (!file) {
-        cerr << "Error: cannot write " << configPath.string() << "\n";
-        return 1;
-    }
-    cout << "Wrote dist.json. Edit it for include / exclude / licenses, then run 'trusscli dist'.\n"
-         << "  eulaFile  your license terms, shipped as EULA.txt; \"\" = EULA.txt in the project\n"
-         << "            folder if there is one (a file named here must exist)\n"
-         << "  include   [{\"from\": \"../tools/node\", \"to\": \"data/tools/node\"}]  files from outside bin/data\n"
-         << "  exclude   [\"data/**/*.psd\"]                                    left out of the package\n"
-         << "  licenses  [{\"name\": \"Node.js\", \"file\": \"...\"}]                  your own third-party notices\n";
-    return 0;
-}
-
-// NSIS's compiler: on PATH, or where the NSIS installer puts it. Empty if none.
-static fs::path findMakensis() {
-#ifdef _WIN32
-    if (const char* path = std::getenv("PATH")) {
-        stringstream dirs(path);
-        string dir;
-        while (getline(dirs, dir, ';')) {
-            if (dir.empty()) continue;
-            const fs::path candidate = fs::path(dir) / "makensis.exe";
-            error_code ec;
-            if (fs::is_regular_file(candidate, ec)) return candidate;
-        }
-    }
-    for (const char* variable : {"ProgramFiles(x86)", "ProgramFiles"}) {
-        if (const char* root = std::getenv(variable)) {
-            const fs::path candidate = fs::path(root) / "NSIS" / "makensis.exe";
-            error_code ec;
-            if (fs::is_regular_file(candidate, ec)) return candidate;
-        }
-    }
-#endif
-    return {};
-}
-
-// Windows' own bsdtar (%SystemRoot%\System32\tar.exe, Windows 10 1803 and
-// later). Not looked up on PATH, where another tar (Git's GNU tar) may come
-// first. Empty elsewhere or when it is missing.
-static fs::path findSystemTar() {
-#ifdef _WIN32
-    if (const char* root = std::getenv("SystemRoot")) {
-        const fs::path candidate = fs::path(root) / "System32" / "tar.exe";
-        error_code ec;
-        if (fs::is_regular_file(candidate, ec)) return candidate;
-    }
-#endif
-    return {};
-}
-
-#ifdef _WIN32
-static bool isAscii(const string& text) {
-    for (unsigned char c : text) if (c >= 0x80) return false;
-    return true;
-}
-#endif
-
-// Builds <folder>-setup.exe with NSIS next to the package. The script and the
-// page texts go to a <folder>-installer/ work folder, removed on success and
-// kept on failure. Returns the installer path, or empty with `error`.
-static fs::path buildWindowsInstaller(const fs::path& makensis, const dist::PlanInput& input,
-                                      const dist::Plan& plan, string& error) {
-    error_code ec;
-    const fs::path work = input.outputDir / (plan.folderName + "-installer");
-    const fs::path setup = input.outputDir / (plan.folderName + "-setup.exe");
-    fs::remove_all(work, ec);
-    fs::create_directories(work, ec);
-    fs::remove(setup, ec);
-
-    dist::NsisInput nsis;
-    nsis.name = input.config.name;
-    nsis.version = input.config.version;
-    nsis.author = input.config.author;
-    nsis.arch = plan.arch;
-    nsis.executable = plan.executableName;
-    nsis.packageDir = plan.packageDir;
-    nsis.files = dist::listPackageFiles(plan.packageDir);
-    nsis.setupExe = setup;
-    nsis.options = input.config.installer;
-    if (input.config.installer.showEula) {
-        nsis.eulaPage = work / "EULA.txt";
-        if (!dist::writeWithBom(plan.packageDir / "EULA.txt", nsis.eulaPage)) {
-            error = "cannot prepare the EULA page";
-            return {};
-        }
-    }
-    if (input.config.installer.showNotices) {
-        nsis.noticesPage = work / "THIRD_PARTY_NOTICES.txt";
-        if (!dist::writeWithBom(plan.packageDir / "THIRD_PARTY_NOTICES.txt", nsis.noticesPage)) {
-            error = "cannot prepare the notices page";
-            return {};
-        }
-    }
-    const fs::path script = work / "setup.nsi";
-    {
-        ofstream file(script, ios::binary);
-        file << "\xEF\xBB\xBF" << dist::nsisScript(nsis);
-        if (!file) {
-            error = "cannot write " + script.string();
-            return {};
-        }
-    }
-    cout << "Building the installer with NSIS ...\n";
-    if (runInherited({makensis.string(), "/V2", "/INPUTCHARSET", "UTF8", script.string()}) != 0 ||
-        !fs::is_regular_file(setup, ec)) {
-        error = "makensis failed; the script is kept in " + work.string();
-        return {};
-    }
-    fs::remove_all(work, ec);
-    return setup;
-}
-
-#ifdef __linux__
-// A program on PATH, or empty.
-static fs::path findOnPath(const string& name) {
-    if (const char* path = std::getenv("PATH")) {
-        stringstream dirs(path);
-        string dir;
-        while (getline(dirs, dir, ':')) {
-            if (dir.empty()) continue;
-            const fs::path candidate = fs::path(dir) / name;
-            if (access(candidate.c_str(), X_OK) == 0) return candidate;
-        }
-    }
-    return {};
-}
-
-// The output of a command (stdout and stderr together), or nullopt when it
-// fails.
-static optional<string> captureCommand(const vector<string>& argv) {
-    string output;
-    const int code = runCaptured(argv, [&](const char* data, size_t size) { output.append(data, size); });
-    if (code != 0) return nullopt;
-    return output;
-}
-
-// The distribution packages the app depends on: the owners of the shared
-// libraries that the ELF files in the package load directly. Libraries
-// shipped inside the package are not dependencies. False with `error` when a
-// library cannot be found or has no owning package.
-static bool pacmanDepends(const fs::path& packageDir, vector<string>& depends, string& error) {
-    error_code ec;
-    vector<fs::path> elfFiles;
-    set<string> shipped;
-    for (const auto& entry : fs::recursive_directory_iterator(packageDir, ec)) {
-        if (!entry.is_regular_file(ec)) continue;
-        shipped.insert(entry.path().filename().string());
-        if (dist::readBinaryInfo(entry.path()).format == "elf") elfFiles.push_back(entry.path());
-    }
-    set<string> needed;
-    map<string, string> resolved;
-    for (const fs::path& file : elfFiles) {
-        const auto objdump = captureCommand({"objdump", "-p", file.string()});
-        if (!objdump) { error = "objdump failed on " + file.string(); return false; }
-        for (const string& name : dist::parseNeeded(*objdump)) {
-            if (!shipped.count(name)) needed.insert(name);
-        }
-        // ldd exits non-zero for a library that is not an executable's; the
-        // libraries it did resolve are still in the output.
-        string lddOut;
-        runCaptured({"ldd", file.string()}, [&](const char* data, size_t size) { lddOut.append(data, size); });
-        for (const auto& [name, path] : dist::parseLdd(lddOut)) resolved.emplace(name, path);
-    }
-    vector<string> paths;
-    for (const string& name : needed) {
-        auto it = resolved.find(name);
-        if (it == resolved.end()) {
-            error = name + " is not found on this system";
-            return false;
-        }
-        paths.push_back(fs::canonical(it->second, ec).string());
-    }
-    if (paths.empty()) return true;
-    vector<string> argv = {"pacman", "-Qqo"};
-    argv.insert(argv.end(), paths.begin(), paths.end());
-    const auto owners = captureCommand(argv);
-    if (!owners) {
-        error = "pacman could not name the package of every library (one is not installed by pacman?)";
-        return false;
-    }
-    set<string> unique;
-    stringstream lines(*owners);
-    string line;
-    while (getline(lines, line)) {
-        if (!line.empty()) unique.insert(line);
-    }
-    depends.assign(unique.begin(), unique.end());
-    return true;
-}
-
-// The menu icon: the first PNG in the project's icon/ folder, else TrussC's.
-// Empty if neither exists.
-static fs::path linuxAppIcon(const dist::PlanInput& input, const fs::path& tcRoot) {
-    error_code ec;
-    vector<fs::path> pngs;
-    for (const auto& entry : fs::directory_iterator(input.projectDir / "icon", ec)) {
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".png") pngs.push_back(entry.path());
-    }
-    sort(pngs.begin(), pngs.end());
-    fs::path icon = !pngs.empty() ? pngs.front() : tcRoot / "core" / "resources" / "default.png";
-    return fs::is_regular_file(icon, ec) ? icon : fs::path();
-}
-
-// The Start menu entry of an app installed to /opt/<package>/.
-static string linuxDesktopEntry(const dist::PlanInput& input, const dist::Plan& plan, const string& package) {
-    dist::DesktopEntryInput desktop;
-    desktop.name = input.config.name;
-    desktop.exec = "/opt/" + package + "/" + plan.launcherName;
-    desktop.icon = package;
-    desktop.wmClass = plan.executableName;  // TrussC sets WM_CLASS to it
-    return dist::desktopEntry(desktop);
-}
-
-static string linuxPackageDescription(const dist::Config& config) {
-    return config.name + (config.author.empty() ? "" : " by " + config.author);
-}
-
-// Builds a pacman package (<pkgname>-<version>-1-<arch>.pkg.tar.zst) of the
-// dist folder with makepkg, next to it. The PKGBUILD and makepkg's work go to
-// a <folder>-pacman/ folder, removed on success and kept on failure. Returns
-// the package path, or empty with `error`.
-static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Plan& plan,
-                                   const fs::path& tcRoot, string& error) {
-    error_code ec;
-    const fs::path work = input.outputDir / (plan.folderName + "-pacman");
-    fs::remove_all(work, ec);
-    fs::create_directories(work, ec);
-
-    dist::PacmanInput pkg;
-    pkg.pkgname = dist::linuxPackageName(input.config.name);
-    pkg.version = input.config.version;
-    pkg.description = linuxPackageDescription(input.config);
-    pkg.arch = dist::pacmanArch(plan.arch);
-    pkg.packageDir = plan.packageDir;
-    pkg.launcher = plan.launcherName;
-
-    cout << "Finding the packages " << input.config.name << " depends on ...\n";
-    if (!pacmanDepends(plan.packageDir, pkg.depends, error)) return {};
-    cout << "  depends:";
-    for (const string& d : pkg.depends) cout << " " << d;
-    cout << "\n";
-
-    pkg.icon = linuxAppIcon(input, tcRoot);
-    pkg.desktopFile = work / (pkg.pkgname + ".desktop");
-    {
-        ofstream(pkg.desktopFile, ios::binary) << linuxDesktopEntry(input, plan, pkg.pkgname);
-        ofstream(work / "PKGBUILD", ios::binary) << dist::pkgbuild(pkg);
-        if (!fs::is_regular_file(work / "PKGBUILD", ec)) {
-            error = "cannot write " + (work / "PKGBUILD").string();
-            return {};
-        }
-    }
-
-    // makepkg writes the package to PKGDEST.
-    const string pkgdest = input.outputDir.string();
-    for (const auto& entry : fs::directory_iterator(input.outputDir, ec)) {
-        const string file = entry.path().filename().string();
-        if (file.rfind(pkg.pkgname + "-" + pkg.version + "-1-" + pkg.arch + ".pkg.tar", 0) == 0)
-            fs::remove(entry.path(), ec);
-    }
-    cout << "Building the pacman package with makepkg ...\n";
-    setenv("PKGDEST", pkgdest.c_str(), 1);
-    const int rc = runInherited({"makepkg", "--force", "--nodeps", "--noconfirm", "-D", work.string()});
-    unsetenv("PKGDEST");
-    fs::path built;
-    for (const auto& entry : fs::directory_iterator(input.outputDir, ec)) {
-        const string file = entry.path().filename().string();
-        if (file.rfind(pkg.pkgname + "-" + pkg.version + "-1-" + pkg.arch + ".pkg.tar", 0) == 0) built = entry.path();
-    }
-    if (rc != 0 || built.empty()) {
-        error = "makepkg failed; the PKGBUILD is kept in " + work.string();
-        return {};
-    }
-    fs::remove_all(work, ec);
-    return built;
-}
-
-// Builds <package>_<version>_<arch>.deb of the dist folder with dpkg-deb, next
-// to it. The package tree is staged in a <folder>-deb/ folder (removed on
-// success, kept on failure); its ELF files are stripped of debug info, and
-// dpkg-shlibdeps names the packages (with minimum versions) that provide the
-// libraries they load. Returns the .deb path, or empty with `error`.
-static fs::path buildDebPackage(const dist::PlanInput& input, const dist::Plan& plan,
-                                const fs::path& tcRoot, string& error) {
-    error_code ec;
-    const fs::path work = input.outputDir / (plan.folderName + "-deb");
-    const fs::path root = work / "root";
-    fs::remove_all(work, ec);
-
-    dist::DebInput deb;
-    deb.package = dist::linuxPackageName(input.config.name);
-    deb.version = input.config.version;
-    deb.arch = dist::debArch(plan.arch);
-    deb.maintainer = input.config.author.empty() ? input.config.name : input.config.author;
-    deb.description = linuxPackageDescription(input.config);
-
-    // --- The tree: /opt/<package>, /usr/bin link, menu entry and icon ---
-    const fs::path opt = root / "opt" / deb.package;
-    fs::create_directories(opt.parent_path(), ec);
-    fs::copy(plan.packageDir, opt, fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
-    if (ec) {
-        error = "cannot stage the package in " + work.string() + ": " + ec.message();
-        return {};
-    }
-    fs::create_directories(root / "usr" / "bin", ec);
-    fs::create_symlink("/opt/" + deb.package + "/" + plan.launcherName, root / "usr" / "bin" / deb.package, ec);
-    fs::create_directories(root / "usr" / "share" / "applications", ec);
-    ofstream(root / "usr" / "share" / "applications" / (deb.package + ".desktop"), ios::binary)
-        << linuxDesktopEntry(input, plan, deb.package);
-    if (const fs::path icon = linuxAppIcon(input, tcRoot); !icon.empty()) {
-        fs::create_directories(root / "usr" / "share" / "pixmaps", ec);
-        fs::copy_file(icon, root / "usr" / "share" / "pixmaps" / (deb.package + ".png"),
-                      fs::copy_options::overwrite_existing, ec);
-    }
-
-    // --- ELF files: strip debug info, then find what they depend on ---
-    vector<string> elfFiles;
-    for (const auto& entry : fs::recursive_directory_iterator(opt, ec)) {
-        if (entry.is_regular_file(ec) && !entry.is_symlink(ec) &&
-            dist::readBinaryInfo(entry.path()).format == "elf")
-            elfFiles.push_back(entry.path().string());
-    }
-    for (const string& file : elfFiles) {
-        if (runInherited({"strip", "--strip-debug", file}) != 0) {
-            error = "strip failed on " + file;
-            return {};
-        }
-    }
-    cout << "Finding the packages " << input.config.name << " depends on ...\n";
-    {
-        // dpkg-shlibdeps reads debian/control in its working folder.
-        fs::create_directories(work / "debian", ec);
-        ofstream(work / "debian" / "control", ios::binary)
-            << "Source: " << deb.package << "\n\nPackage: " << deb.package << "\nArchitecture: any\n";
-        // -l: libraries shipped in the package are found there, not reported missing.
-        vector<string> argv = {"sh", "-c", "cd \"$1\" && shift && exec dpkg-shlibdeps \"$@\"", "sh",
-                               work.string(), "-O", "--ignore-missing-info", "-l" + opt.string()};
-        argv.insert(argv.end(), elfFiles.begin(), elfFiles.end());
-        const auto output = captureCommand(argv);
-        if (!output) {
-            error = "dpkg-shlibdeps failed; the staged package is kept in " + work.string();
-            return {};
-        }
-        deb.depends = dist::parseShlibdeps(*output);
-        cout << "  depends: " << (deb.depends.empty() ? string("(none)") : deb.depends) << "\n";
-        fs::remove_all(work / "debian", ec);
-    }
-
-    // --- DEBIAN/control ---
-    uintmax_t bytes = 0;
-    for (const auto& entry : fs::recursive_directory_iterator(root, ec)) {
-        if (entry.is_regular_file(ec) && !entry.is_symlink(ec)) bytes += entry.file_size(ec);
-    }
-    deb.installedSizeKiB = (bytes + 1023) / 1024;
-    fs::create_directories(root / "DEBIAN", ec);
-    ofstream(root / "DEBIAN" / "control", ios::binary) << dist::debControl(deb);
-
-    const fs::path out = input.outputDir / (deb.package + "_" + deb.version + "_" + deb.arch + ".deb");
-    fs::remove(out, ec);
-    cout << "Building the .deb with dpkg-deb ...\n";
-    if (runInherited({"dpkg-deb", "--build", "--root-owner-group", root.string(), out.string()}) != 0 ||
-        !fs::is_regular_file(out, ec)) {
-        error = "dpkg-deb failed; the staged package is kept in " + work.string();
-        return {};
-    }
-    fs::remove_all(work, ec);
-    return out;
-}
-#endif
 
 static int cmdDist(const vector<string>& args) {
     string explicitPath, outputDir, appName, appVersion, appAuthor;
@@ -4828,340 +3871,27 @@ static int cmdDist(const vector<string>& args) {
         }
     }
 
-    const string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
-    if (projectPath.empty() || !fs::is_directory(projectPath)) {
-        cerr << "Error: not inside a TrussC project.\n"
-             << "Use 'trusscli dist -p <path>' or run from inside a project.\n";
-        return 1;
-    }
-    error_code ec;
-    const fs::path projectDir = fs::weakly_canonical(fs::absolute(projectPath), ec);
-    if (ec || projectDir.empty()) {
-        cerr << "Error: cannot resolve the project folder " << projectPath << ": "
-             << (ec ? ec.message() : string("empty path")) << "\n";
-        return 1;
-    }
-    // The folder name is what people see (the app name by default); the
-    // executable / bundle is named after the CMake target (see targetName below).
-    string projectName = projectDir.filename().string();
-    if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
-
-    if (init) return distInit(projectDir.string(), projectName, appName, appVersion, appAuthor, appAuthorGiven);
-
-    if (!kNativePreset) {
-        cerr << "Error: cannot detect the native platform.\n";
-        return 1;
-    }
-    const string tcRoot = projectTcRoot(projectPath);
-    if (tcRoot.empty()) {
-        cerr << "Error: could not detect the TrussC root.\n";
-        return 1;
-    }
-
-    // --- Settings: dist.json, then the command line ---
-    dist::Config config;
-    const fs::path configPath = projectDir / "dist.json";
-    const bool haveConfig = fs::exists(configPath);
-    if (haveConfig) {
-        ifstream file(configPath, ios::binary);
-        stringstream text;
-        text << file.rdbuf();
-        vector<string> warnings;
-        string error;
-        if (!dist::parseConfig(text.str(), config, warnings, error)) {
-            cerr << "Error: " << error << "\n";
-            return 1;
-        }
-        for (const string& w : warnings) cerr << "Warning: " << w << "\n";
-    }
-    if (!appName.empty()) config.name = appName;
-    if (!appVersion.empty()) config.version = appVersion;
-    if (appAuthorGiven) config.author = appAuthor;
-    if (config.name.empty()) config.name = projectName;
-    if (config.version.empty()) config.version = dist::kDefaultVersion;
-    {
-        string version;
-        if (!dist::normalizeVersion(config.version, version)) {
-            cerr << "Error: the version must be three numbers like 1.2.0 (got \"" << config.version << "\").\n"
-                 << "Set it in dist.json \"version\" or with --app-version.\n";
-            return 1;
-        }
-        config.version = version;
-    }
-
-    // --- Build, or check the existing one ---
-    const fs::path buildDir = projectDir / (string("build-") + kNativePreset);
-    if (!noBuild && !dryRun) {
-        vector<string> buildArgs = {release ? "--release" : "--relwithdebinfo", "-p", projectDir.string()};
-        if (verbose) buildArgs.push_back("--verbose");
-        if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
-        if (int rc = cmdBuild(buildArgs, false)) return rc;
-        cout << "\n";
-    } else {
-        const string type = readCacheValue(buildDir / "CMakeCache.txt", "CMAKE_BUILD_TYPE");
-        if (type == "Debug") {
-            cerr << "Error: the existing build is a Debug build; it cannot be shipped.\n"
-                 << "Run 'trusscli dist' without --no-build, or build with --relwithdebinfo / --release.\n";
-            return 1;
-        }
-        if (release && !type.empty() && type != "Release") {
-            cerr << "Error: --release asks for a Release build, but the existing build is " << type << ".\n";
-            return 1;
-        }
-        if (noBuild) {
-            cout << "Packaging the existing build (--no-build): "
-                 << (type.empty() ? string("build type unknown") : type) << "\n";
-        }
-    }
-    {
-        string hotReload;
-        ifstream(buildDir / ".tc_hot_reload_state") >> hotReload;
-        if (hotReload == "ON") {
-            cerr << "Error: this build uses hot reload; its code lives in a library in "
-                 << buildDir.filename().string() << "/, which does not travel with the app.\n"
-                 << "Turn hot reload off and build again to package it.\n";
-            return 1;
-        }
-    }
-
-    // The executable / bundle name: the project name the build used, from its
-    // CMake cache. Generated projects name it sanitizeProjectName(<folder>)
-    // ("sample project" -> sample_project); reading it back instead of
-    // computing it again also holds for projects made before that, and on
-    // Windows, where the folder name reaches here in the ANSI code page.
-    string targetName = readCacheValue(buildDir / "CMakeCache.txt", "CMAKE_PROJECT_NAME");
-    if (targetName.empty()) targetName = sanitizeProjectName(projectName);  // not configured yet
-
-    // --- Plan ---
-    dist::PlanInput input;
-#ifdef _WIN32
-    input.platform = dist::Platform::Windows;
-#elif defined(__APPLE__)
-    input.platform = dist::Platform::MacOS;
-#else
-    input.platform = dist::Platform::Linux;
-    dist::LinuxPackageFormat linuxFormat = dist::LinuxPackageFormat::None;
-    {
-        // The package runs on the distribution it was built on; say which one.
-        std::stringstream osRelease;
-        osRelease << ifstream("/etc/os-release").rdbuf();
-        const dist::LinuxDistro distro = dist::parseOsRelease(osRelease.str());
-        input.platformTag = dist::distroTag(distro);
-        linuxFormat = dist::packageFormatFor(distro);
-    }
-    if (installer) {
-        if (linuxFormat == dist::LinuxPackageFormat::None) {
-            cerr << "Error: --installer makes a pacman package (Arch and derivatives) or a .deb (Debian,\n"
-                    "Ubuntu and derivatives); this distribution (" << input.platformTag
-                 << ") is neither. Use --archive.\n";
-            return 1;
-        }
-        const bool pacman = linuxFormat == dist::LinuxPackageFormat::Pacman;
-        const vector<const char*> tools = pacman ? vector<const char*>{"makepkg", "objdump", "ldd"}
-                                                 : vector<const char*>{"dpkg-deb", "dpkg-shlibdeps", "strip"};
-        for (const char* tool : tools) {
-            if (findOnPath(tool).empty()) {
-                cerr << "Error: --installer needs " << tool << " (install it with '"
-                     << (pacman ? "sudo pacman -S --needed base-devel" : "sudo apt install dpkg-dev binutils")
-                     << "').\n";
-                return 1;
-            }
-        }
-    }
-#endif
-    input.projectDir = projectDir;
-    input.binDir = projectDir / "bin";
-    {
-        // An error here would leave an empty path, and the package folder would
-        // then be replaced relative to the current directory: stop instead.
-        const fs::path requested = fs::absolute(outputDir.empty() ? (projectDir / "dist") : fs::path(outputDir), ec);
-        if (!ec) input.outputDir = fs::weakly_canonical(requested, ec);
-        if (ec || input.outputDir.empty() || !input.outputDir.is_absolute()) {
-            cerr << "Error: cannot resolve the output folder "
-                 << (outputDir.empty() ? (projectDir / "dist").string() : outputDir) << ": "
-                 << (ec ? ec.message() : string("not an absolute path")) << "\n";
-            return 1;
-        }
-    }
-    input.projectName = targetName;
-    input.config = config;
-    input.licenses = dist::collectLicenses(tcRoot, projectAddonDirs(projectDir.string(), tcRoot),
-                                           config.licenses, projectDir);
-#ifdef _WIN32
-    {
-        const auto installs = VsDetector::detectInstalledVersions();
-        const dist::BinaryInfo exe = dist::readBinaryInfo(input.binDir / (targetName + ".exe"));
-        const string arch = exe.arch.empty() ? "x64" : exe.arch;
-        for (const auto& vs : installs) {  // newest first
-            input.vcRuntimeDir = dist::findVcRuntimeDir(vs.installPath, arch);
-            if (!input.vcRuntimeDir.empty()) break;
-        }
-    }
-#endif
-
-    dist::Plan plan;
-    string error;
-    if (!dist::makePlan(input, plan, error)) {
-        cerr << "Error: " << error << "\n";
-        return 1;
-    }
-    for (const string& w : plan.warnings) cerr << "Warning: " << w << "\n";
-
-    fs::path makensis;
-    if (installer && input.platform == dist::Platform::Windows) {
-        if (config.installer.showEula && plan.eulaSource.empty()) {
-            cerr << "Error: dist.json \"installer.showEula\" needs an EULA: create EULA.txt in the "
-                    "project folder with your license terms (or set \"eulaFile\").\n";
-            return 1;
-        }
-        makensis = findMakensis();
-    }
-
-    if (dryRun) {
-        if (installer && input.platform == dist::Platform::Windows) {
-            cout << "Would also build " << plan.folderName << "-setup.exe"
-                 << (makensis.empty() ? " (NSIS not found: install it with 'winget install NSIS.NSIS')" : "")
-                 << "\n";
-        }
-#ifdef __linux__
-        if (installer && linuxFormat == dist::LinuxPackageFormat::Pacman) {
-            cout << "Would also build a pacman package " << dist::linuxPackageName(config.name) << "-"
-                 << config.version << "-1-" << dist::pacmanArch(plan.arch) << ".pkg.tar.zst\n";
-        } else if (installer) {
-            cout << "Would also build " << dist::linuxPackageName(config.name) << "_" << config.version << "_"
-                 << dist::debArch(plan.arch) << ".deb\n";
-        }
-#endif
-        cout << "Would write to " << input.outputDir.string() << ":\n" << dist::formatPlan(plan) << "\n"
-             << dist::formatLicenseReport(input.licenses);
-        return 0;
-    }
-
-    fs::create_directories(input.outputDir, ec);
-    if (ec) {
-        cerr << "Error: cannot create the output folder " << input.outputDir.string() << ": " << ec.message() << "\n";
-        return 1;
-    }
-    if (!dist::writePackage(input, plan, error)) {
-        cerr << "Error: " << error << "\n";
-        return 1;
-    }
-
-#ifdef __APPLE__
-    // Adding data to the bundle invalidates the linker's ad-hoc signature.
-    const string bundlePath = (plan.packageDir / plan.bundleName).string();
-    if (runInherited({"codesign", "--force", "--deep", "--sign", "-", bundlePath}) != 0)
-        cerr << "Warning: ad-hoc signing failed; macOS may refuse to start the app.\n";
-#endif
-
-    string archiveName, archiveError;
-    if (archive) {
-        const string cmake = findCMake();
-        const bool tarball = input.platform == dist::Platform::Linux;
-        archiveName = plan.folderName + (tarball ? ".tar.gz" : ".zip");
-        fs::remove(input.outputDir / archiveName, ec);
-        vector<string> tarArgs;
-#ifdef _WIN32
-        // cmake -E tar stores zip entry names in the system code page without
-        // the UTF-8 flag, so non-ASCII names come out garbled when the zip is
-        // extracted on a machine with another code page, or on macOS / Linux.
-        // Windows' bsdtar writes them as UTF-8 with the flag set.
-        if (const fs::path systemTar = findSystemTar(); !systemTar.empty()) {
-            tarArgs = {systemTar.string(), "--format=zip", "--options", "hdrcharset=UTF-8",
-                       "-c", "-f", (input.outputDir / archiveName).string(),
-                       "-C", input.outputDir.string(), plan.folderName};
-        } else {
-            bool ascii = isAscii(plan.folderName);
-            for (const string& file : dist::listPackageFiles(plan.packageDir)) {
-                if (!ascii) break;
-                ascii = isAscii(file);
-            }
-            if (!ascii) {
-                cerr << "Warning: %SystemRoot%\\System32\\tar.exe not found; the zip's "
-                        "non-ASCII file names may be garbled when it is extracted on another "
-                        "system.\n";
-            }
-        }
-#endif
-        if (tarArgs.empty()) {
-            tarArgs = {cmake, "-E", "chdir", input.outputDir.string(), cmake, "-E", "tar",
-                       tarball ? "czf" : "cf", archiveName};
-            if (!tarball) tarArgs.push_back("--format=zip");
-            tarArgs.push_back(plan.folderName);
-        }
-        // On failure keep going: the folder is written, and the installer does
-        // not need the archive. The error is reported at the end.
-        if (runInherited(tarArgs) != 0) {
-            archiveError = "could not write " + archiveName;
-            fs::remove(input.outputDir / archiveName, ec);
-            archiveName.clear();
-        }
-    }
-
-    fs::path setupPath;
-    string installerError;
-#ifdef __linux__
-    if (installer) {
-        setupPath = linuxFormat == dist::LinuxPackageFormat::Pacman
-                        ? buildPacmanPackage(input, plan, fs::path(tcRoot), installerError)
-                        : buildDebPackage(input, plan, fs::path(tcRoot), installerError);
-    }
-#else
-    if (installer) {
-        if (makensis.empty()) {
-            installerError = "NSIS (makensis.exe) was not found, so no installer was built. Install it "
-                             "with 'winget install NSIS.NSIS' (free, zlib/libpng license) and run again.";
-        } else {
-            setupPath = buildWindowsInstaller(makensis, input, plan, installerError);
-        }
-    }
-#endif
-
-    cout << dist::formatLicenseReport(input.licenses) << "\n"
-         << "Packaged " << config.name << " " << config.version
-         << (config.author.empty() ? string() : " by " + config.author) << ":\n"
-         << "  " << plan.packageDir.string() << "\n";
-    if (!plan.eulaSource.empty()) cout << "  EULA.txt from " << plan.eulaSource.filename().string() << "\n";
-    if (!plan.runtimeDlls.empty()) {
-        cout << "  VC++ runtime:";
-        for (const string& dll : plan.runtimeDlls) cout << " " << dll;
-        cout << "\n";
-    }
-    if (!plan.symbolsDir.empty()) cout << "  symbols (keep, do not ship): " << plan.symbolsDir.string() << "\n";
-    if (!archiveName.empty()) cout << "  " << (input.outputDir / archiveName).string() << "\n";
-    if (!setupPath.empty()) cout << "  " << setupPath.string() << "\n";
-    if (!plan.excluded.empty()) cout << "  " << plan.excluded.size() << " file(s) left out by exclude\n";
-    if (!haveConfig) {
-        cout << "No dist.json: used name \"" << config.name << "\", version " << config.version
-             << ". Run 'trusscli dist --init' to set them.\n";
-    }
-#ifdef __linux__
-    if (!setupPath.empty() && linuxFormat == dist::LinuxPackageFormat::Pacman) {
-        cout << "Install with:  sudo pacman -U " << setupPath.filename().string() << "\n"
-             << "(installs the dependencies too; remove with: sudo pacman -R "
-             << dist::linuxPackageName(config.name) << ")\n";
-    } else if (!setupPath.empty()) {
-        // "./": apt installs a local file only when it is given as a path.
-        cout << "Install with:  sudo apt install ./" << setupPath.filename().string() << "\n"
-             << "(installs the dependencies too; remove with: sudo apt remove "
-             << dist::linuxPackageName(config.name) << ")\n";
-    } else if (!installer) {
-        cout << "Note: the folder runs on " << input.platformTag
-             << " with the same libraries installed. For other people, prefer\n"
-             << "'trusscli dist --installer': the package manager then installs what it needs.\n";
-    }
-#endif
-#ifdef __APPLE__
-    cout << "Note: an app signed ad hoc is blocked by Gatekeeper when downloaded from the internet\n"
-         << "(open it with right-click > Open). Copying it by USB or network share is fine.\n";
-#endif
-    if (!archiveError.empty()) cerr << "Error: " << archiveError << "\n";
-    if (!installerError.empty()) cerr << "Error: " << installerError << "\n";
-    if (!archiveError.empty() || !installerError.empty()) {
-        cerr << "What is listed above was written.\n";
-        return 1;
-    }
-    return 0;
+    projectOps::DistInput input;
+    input.build.update.projectPath = explicitPath;
+    input.build.update.executablePath = getExecutablePath();
+    input.build.update.addonLookup = registryAddonLookup();
+    if (!verbose) input.build.update.configureOutput = projectConfigureOutput();
+    input.build.jobs = jobs;
+    input.build.verbose = verbose;
+    input.outputDir = outputDir;
+    input.appName = appName;
+    input.appVersion = appVersion;
+    input.appAuthor = appAuthor;
+    input.appAuthorGiven = appAuthorGiven;
+    input.release = release;
+    input.archive = archive;
+    input.noBuild = noBuild;
+    input.dryRun = dryRun;
+    input.installer = installer;
+    input.inheritOutput = true;
+    input.init = init;
+    if (stdinIsTty() && stdoutIsTty()) input.prompt = promptString;
+    return projectOps::dist(input, printProjectMessage).exitCode;
 }
 
 // =============================================================================
@@ -5454,7 +4184,16 @@ static void printTopHelp() {
 // main: subcommand dispatch
 // =============================================================================
 
+#ifdef _WIN32
+// Private helper entry point; not part of the CLI help or project-ops API.
+int trusscliInternalCtrlBreak(const char* argument);
+#endif
+
 int main(int argc, char* argv[]) try {
+#ifdef _WIN32
+    if (argc >= 2 && strcmp(argv[1], "--internal-ctrl-break") == 0)
+        return argc == 3 ? trusscliInternalCtrlBreak(argv[2]) : 1;
+#endif
     projectOps::ScopedDiagnostics consoleDiagnostics(printProjectMessage);
 #ifdef _WIN32
     // Best effort: an earlier process may still have the old image locked.

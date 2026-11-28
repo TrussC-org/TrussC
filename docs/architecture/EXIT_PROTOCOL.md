@@ -1,4 +1,22 @@
-# Windowed app exit protocol
+# App exit protocol
+
+## Request app shutdown with exitApp
+
+End a TrussC app with `exitApp()`. Don't use `std::exit`; from a non-main
+thread it is unsupported.
+
+```cpp
+// End the app from anywhere (update, a worker thread, an MCP reply thunk):
+exitApp(0);
+```
+
+A non-main-thread `std::exit` runs teardown concurrently with the main loop.
+This is unsupported by design; an exit-time crash from that usage is not a
+framework bug. Main-thread `std::exit` remains supported for third-party
+libraries that call it, but app code should request normal shutdown with
+`exitApp()` so the main thread handles ending.
+
+## Window and process exit requests
 
 OS close asks the addressed Window's closeRequested. If accepted, quitOnClose
 or the last open Window asks process exitRequested before any Window closes.

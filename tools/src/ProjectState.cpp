@@ -24,9 +24,11 @@ static const char* ideHostOnly(IdeType ide) {
 
 // The warning for an ios target off macOS, where writeCMakePresets() writes
 // no ios preset. `source` names where it came from.
+#ifndef __APPLE__
 static string iosMacOnlyWarning(const string& source) {
     return "the ios target " + source + " is macOS only; dropped on this OS";
 }
+#endif
 
 // TC_WEB_BACKEND of the web preset (a cacheVariables entry: a string, a
 // boolean, null, or {"type": ..., "value": ...}), mapped the way CMake builds

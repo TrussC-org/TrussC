@@ -5,6 +5,7 @@
 #include "AddonVersions.h"
 #include "BuildPreferences.h"
 #include "TrussCVersion.h"
+#include "WindowsCommand.h"
 #include "TrussC.h"
 #include <algorithm>
 #include <fstream>
@@ -47,6 +48,7 @@ static string getCmakePath() {
 
 // Execute command and capture output
 static pair<int, string> executeCommand(const string& cmd) {
+    if (ProjectGenerator::commandRunner) return ProjectGenerator::commandRunner(cmd);
     string output;
 #ifdef _WIN32
     // CLI: configure runs on the caller's console, so it records cl's
@@ -56,7 +58,7 @@ static pair<int, string> executeCommand(const string& cmd) {
     // the window app, OEM input), which would garble the recorded prefix,
     // and the GUI never builds.
     const bool hasConsole = !ProjectGenerator::runChildrenHidden && GetConsoleCP() != 0;
-    string fullCmd = "cmd.exe /c " + cmd + " 2>&1";
+    string fullCmd = windowsShellCommandLine(cmd);
 
     SECURITY_ATTRIBUTES sa = {};
     sa.nLength = sizeof(sa);
@@ -1315,7 +1317,7 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     const string vswhereDir = VsDetector::findVswhereDir();
     const string pathPrefix = vswhereDir.empty() ? ""
         : "set \"PATH=" + vswhereDir + ";%PATH%\" && ";
-    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
+    string cmd = pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset;
 
     auto [result, output] = executeCommand(cmd);
     logConfigureOutput(buildDirForPreset(preset), output, result);

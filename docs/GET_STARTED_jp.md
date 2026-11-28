@@ -3,7 +3,7 @@
 TrussC は openFrameworks にインスパイアされた軽量なクリエイティブコーディングフレームワークです。
 C++20 + sokol で構築されており、シンプルに書けてクロスプラットフォームで動作します。
 
-`.trussc-version` または `trusscli use` で、プロジェクトの TrussC バージョンを固定できます。詳しくは [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](guides/BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version) をご覧ください。
+`.trussc-version` または `trusscli use` で、プロジェクトの TrussC バージョンを固定できます。詳しくは [BUILD_SYSTEM.md › Build with a project’s pinned TrussC version](guides/BUILD_SYSTEM.md#build-with-a-projects-pinned-trussc-version) をご覧ください。プロジェクトをクローンしたあとの `trusscli build` は、キャッシュにない TrussC や addon をダウンロードする前に確認します。スクリプトや CI では `trusscli build --yes` を使います。詳しくは [BUILD_SYSTEM.md › Build a cloned project and download missing sources](guides/BUILD_SYSTEM.md#build-a-cloned-project-and-download-missing-sources) をご覧ください。
 
 ---
 

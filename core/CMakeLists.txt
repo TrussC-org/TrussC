@@ -254,6 +254,7 @@ elseif(TC_PLATFORM_MACOS)
         "-framework Metal"
         "-framework MetalKit"
         "-framework Cocoa"
+        "-framework UniformTypeIdentifiers"
         "-framework ImageIO"
         "-framework QuartzCore"
         "-framework AudioToolbox"

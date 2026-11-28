@@ -204,7 +204,7 @@ private:
         auto weak = std::weak_ptr<Toolbar>(std::static_pointer_cast<Toolbar>(shared_from_this()));
         const auto source = pendingSave_;
         const bool staged = source == stagingFile_;
-        tc::saveDialogAsync("Save input recording", "", {}, "session.jsonl", [weak, source, staged](const tc::FileDialogResult& choice) {
+        tc::saveDialogAsync("Save input recording", "", {}, "session.jsonl", {"jsonl"}, [weak, source, staged](const tc::FileDialogResult& choice) {
             auto self = weak.lock();
             if (!self) return;
             std::error_code error;
@@ -212,15 +212,6 @@ private:
                 if (staged) std::filesystem::remove(source, error);
             } else {
                 auto target = choice.filePath;
-                if (!target.has_extension()) {
-                    target += ".jsonl";
-                    // The OS confirmed only the typed name, not this appended path.
-                    if (std::filesystem::exists(target, error)) {
-                        tc::logWarning("tcxInputReplay") << "File already exists: " << target;
-                        self->retrySave_ = true;
-                        return;
-                    }
-                }
                 if (!error && source != target) {
                     // Explicit recording paths belong to the caller; only move staging files.
                     if (staged) std::filesystem::rename(source, target, error);

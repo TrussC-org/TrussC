@@ -3,6 +3,7 @@
 #include "AddonVersions.h"
 #include "ProcessCapture.h"
 #include "GeneratedFile.h"
+#include "PromptInput.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
@@ -768,7 +769,7 @@ static bool confirmCacheRemoval() {
     }
     std::cout << "Remove these cached files? [y/N] " << std::flush;
     std::string answer;
-    std::getline(std::cin, answer);
+    trusscli::readPromptLine(answer);
     return answer == "y" || answer == "Y";
 }
 
@@ -874,12 +875,17 @@ int cacheCommand(const std::vector<std::string>& args) {
     return 0;
 }
 
-std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string& sourceUrl) {
+std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string& sourceUrl, std::vector<std::string>* missing) {
     // Validate at the shared boundary, including specs assembled from registry metadata.
     parse(spec.owner + "/" + spec.repo + "@" + spec.ref);
     if (!sourceUrl.empty() && sourceUrl.front() == '-') throw std::runtime_error("invalid addon repository URL");
     auto root = cacheRoot() / (addon ? "addons" : "versions") / spec.owner / spec.repo / spec.ref;
     checkCachePath(root);
+    if (!fetch && missing && !fs::exists(root)) {
+        const auto identity = spec.owner + "/" + spec.repo + "@" + spec.ref;
+        if (std::find(missing->begin(), missing->end(), identity) == missing->end()) missing->push_back(identity);
+        return root.string();
+    }
     if (fetch) {
         root = fetchVersion(spec, root, addon, sourceUrl);
     }
@@ -906,7 +912,7 @@ std::string acquire(const Spec& spec, bool fetch, bool addon, const std::string&
     return root.string();
 }
 
-std::string resolve(const fs::path& project, bool fetch) {
+std::string resolve(const fs::path& project, bool fetch, std::vector<std::string>* missing) {
     auto local = localPath(project);
     if (!local.empty()) {
         auto root = fs::path(local);
@@ -926,7 +932,7 @@ std::string resolve(const fs::path& project, bool fetch) {
     auto begin = text.find_first_not_of(" \t\r\n");
     auto end = text.find_last_not_of(" \t\r\n");
     auto spec = parse(begin == std::string::npos ? "" : text.substr(begin, end - begin + 1));
-    auto root = acquire(spec, fetch, false, "");
+    auto root = acquire(spec, fetch, false, "", missing);
     auto ref = fs::path(root).filename().string();
     if (fetch && spec.shortCommit && ref != spec.ref) {
         auto pin = text.substr(begin, end - begin + 1);

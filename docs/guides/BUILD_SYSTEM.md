@@ -151,13 +151,39 @@ per hour without authentication), use a full ID or install Git:
 trusscli use <40-character-commit-id>
 ```
 
-`build` uses the prepared sources; if the cache
-is missing, prepare it explicitly:
+### Build a cloned project and download missing sources
+
+`trusscli build` checks the selected TrussC version and external addon refs before
+configuring. When sources are missing from the cache, it lists their
+`owner/repository@ref` identities and asks `Download now? [Y/n]`. Return or `y`/`Y`
+runs `trusscli update`, including expansion of short commit pins, then builds.
+`n`/`N` stops with the existing unavailable-version error. Cached projects build
+without a question. `trusscli run` uses the same confirmation before building and launching.
+
+After cloning a project, build interactively:
+
+```bash
+trusscli build
+trusscli run
+```
+
+Without a terminal on stdin, downloads require `-y` / `--yes`. Use this in scripts
+and CI; CI environment variables do not affect confirmation:
+
+```bash
+trusscli build --yes
+trusscli run -y
+```
+
+`trusscli update` and `trusscli use` remain explicit downloads without a question.
+To prepare sources separately:
 
 ```bash
 trusscli update
 trusscli build --release
 ```
+
+### Supported TrussC layouts
 
 TrussC versions with the old `trussc/` layout (v0.1.0–v0.4.4) stop with
 “TrussC v0.4.4 predates the core/ layout; trusscli supports v0.5.0 and later.

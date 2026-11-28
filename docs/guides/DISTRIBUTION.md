@@ -150,6 +150,23 @@ Optional. `trusscli dist --init` writes it with every key, so turning something 
 
 Unknown keys give a warning and are ignored.
 
+### Saving settings and other user files
+
+The installed `data/` folder under Windows Program Files or Linux `/opt/<package>/` is not writable by normal users; on macOS it is inside the signed `.app` bundle. Use `getDataPath()` for bundled files the app reads, `getUserDataPath()` for files it writes and keeps, and `getTempPath()` for temporary files. For example, with a `Json settings;` member in `tcApp.h`, load and save settings in `tcApp.cpp`:
+
+```cpp
+void tcApp::setup() {
+    auto path = getUserDataPath("settings.json");
+    if (fs::exists(path)) settings = loadJson(path);
+}
+
+void tcApp::exit() {
+    saveJson(settings, getUserDataPath("settings.json"));
+}
+```
+
+The user-data folder is created on first use: `%LOCALAPPDATA%\<app>\` on Windows, `$XDG_DATA_HOME/<app>/` (default `~/.local/share/<app>/`) on Linux, and `~/Library/Application Support/<id>/` on macOS. Here `<app>` is the executable name and `<id>` is the bundle ID.
+
 ## 3. Windows
 
 `--installer` builds `<name>-<version>-windows-<arch>-setup.exe` with NSIS (free, zlib/libpng license). Install NSIS once:

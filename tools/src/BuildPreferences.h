@@ -31,9 +31,9 @@ inline string rememberedNativeBuildType(const nlohmann::json& vendor) {
 // limited by RAM (~1.5 GB per compile job) to prevent memory exhaustion on
 // small machines (SBCs, 8 GB Macs), capped at CPU count + 2. Linux uses
 // available RAM, macOS total RAM; elsewhere use CPU count + 2.
-inline int parallelBuildJobs(int jobs = 0, bool quiet = true) {
+inline int parallelBuildJobs(int jobs = 0, bool quiet = true, ostream& output = cout) {
     if (jobs > 0) {
-        if (!quiet) cout << "  * Parallel jobs: " << jobs << " (-j)\n";
+        if (!quiet) output << "  * Parallel jobs: " << jobs << " (-j)\n";
         return jobs;
     }
 #if defined(__linux__) || defined(__APPLE__)
@@ -65,7 +65,7 @@ inline int parallelBuildJobs(int jobs = 0, bool quiet = true) {
             ramJobs = (int)cpus + 2;
         } else {
             // RAM is the limiting factor
-            if (!quiet) cout << "  * Parallel jobs limited to " << ramJobs
+            if (!quiet) output << "  * Parallel jobs limited to " << ramJobs
                  << " (" << fixed << setprecision(1) << ramBytes / (1024.0 * 1024 * 1024)
                  << " GB RAM, ~1.5 GB per job)\n";
         }
@@ -76,8 +76,8 @@ inline int parallelBuildJobs(int jobs = 0, bool quiet = true) {
     return max(1u, std::thread::hardware_concurrency()) + 2;
 }
 
-inline string parallelBuildArg(int jobs) {
-    return "--parallel=" + to_string(parallelBuildJobs(jobs, false));
+inline string parallelBuildArg(int jobs, ostream& output = cout) {
+    return "--parallel=" + to_string(parallelBuildJobs(jobs, false, output));
 }
 
 } // namespace trusscliBuild

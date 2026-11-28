@@ -35,7 +35,7 @@ void tcApp::mousePressed(const MouseEventArgs& e) {
 
 The toolbar is placed once at its parent's top center. Move it with the normal Node API. Record becomes a red Stop button while recording; Play becomes a blue Stop button while playing. Open or dropping a `.jsonl` file selects a recording, and hovering over its filename shows the full path. Toolbar Stop (including a ring flush) immediately opens the OS save dialog. Saving moves the staging file from the data directory's `input-replay` folder to the chosen path; across volumes, it copies then deletes the staging file. Cancel deletes the staging file. Save appears only after a failed save so you can retry. Code calls to `stopRecording()` and `flush()` never open a dialog.
 
-Names without an extension gain `.jsonl`. If that appended path already exists, a Warning names the path and Save lets you choose another name; the pending recording stays intact.
+The save dialog adds `.jsonl` when the name has no matching extension, before asking to overwrite an existing file. Extension matching ignores case.
 
 ## Record input to a file or ring
 
