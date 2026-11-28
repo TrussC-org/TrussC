@@ -73,7 +73,8 @@ class HubApp : public App {
     double runSeconds = 0;
     bool ranApp = false, forceDeclined = false;
     size_t consoleBytes = 0;
-    float consoleScrollY = 0;
+    float consoleScrollY = 0, consoleScrollMaxY = 0;
+    ImVec2 consoleSize;
     std::mutex logMutex;
     std::unique_ptr<projectOps::CancelHandle> cancel;
     std::future<projectOps::Result> operation; // Join before releasing its handle/log state.
@@ -173,6 +174,7 @@ class HubApp : public App {
         followLatest = true;
         consoleBytes = 0;
         consoleScrollY = 0;
+        consoleScrollMaxY = 0;
         {
             std::lock_guard<std::mutex> lock(logMutex);
             details.clear();
@@ -404,13 +406,20 @@ class HubApp : public App {
         auto output = logText();
         if (output.empty()) label("common.no_operations"); else wrapped(output);
         const float scrollY = ImGui::GetScrollY();
+        const float scrollMaxY = ImGui::GetScrollMaxY();
+        const ImVec2 size = ImGui::GetWindowSize();
         // Position changes cover wheel, scrollbar and keyboard navigation. New
         // output can increase the bottom without moving the current position.
-        if (!resumed && scrollY < consoleScrollY - 0.5f) followLatest = false;
+        // A resize rewraps the text and clamps the position, which is not a user scroll.
+        const bool resized = size.x != consoleSize.x || size.y != consoleSize.y
+            || scrollMaxY < consoleScrollMaxY - 0.5f;
+        if (!resumed && !resized && scrollY < consoleScrollY - 0.5f) followLatest = false;
         if (followLatest && (output.size() != consoleBytes || ImGui::GetScrollY() < ImGui::GetScrollMaxY()))
             ImGui::SetScrollHereY(1.0f);
         consoleBytes = output.size();
         consoleScrollY = scrollY;
+        consoleScrollMaxY = scrollMaxY;
+        consoleSize = size;
         ImGui::EndChild();
     }
     void recovery() {
