@@ -86,8 +86,8 @@ public:
     }
 
     void mousePressed(const MouseEventArgs& e) override {
-        if (e.button == MOUSE_BUTTON_LEFT)  spawnCircle(e.pos.x, e.pos.y);
-        if (e.button == MOUSE_BUTTON_RIGHT) spawnBox(e.pos.x, e.pos.y);
+        if (e.button == MouseButton::Left)  spawnCircle(e.pos.x, e.pos.y);
+        if (e.button == MouseButton::Right) spawnBox(e.pos.x, e.pos.y);
     }
 
 private:

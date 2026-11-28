@@ -269,10 +269,14 @@ elseif(TC_PLATFORM_MACOS)
     target_compile_options(TrussC PRIVATE -fobjc-arc)
 
 elseif(TC_PLATFORM_WINDOWS)
+    if(TC_GFX_BACKEND STREQUAL "vulkan")
+        find_package(Vulkan REQUIRED)
+        target_link_libraries(TrussC PUBLIC Vulkan::Vulkan)
+    endif()
     # WIN32_LEAN_AND_MEAN: reduce the weight of including windows.h
     # NOMINMAX: avoid conflicts with std::min / std::max
     target_compile_definitions(TrussC PUBLIC
-        SOKOL_D3D11
+        SOKOL_${TC_GRAPHICS_BACKEND}
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _USE_MATH_DEFINES
@@ -310,9 +314,15 @@ elseif(TC_PLATFORM_WINDOWS)
 
 elseif(TC_PLATFORM_LINUX)
     target_link_libraries(TrussC PUBLIC PkgConfig::TC_JPEG)
-    target_compile_definitions(TrussC PUBLIC SOKOL_GLCORE)
+    target_compile_definitions(TrussC PUBLIC SOKOL_${TC_GRAPHICS_BACKEND})
     find_package(X11 REQUIRED)
-    find_package(OpenGL REQUIRED)
+    if(TC_GFX_BACKEND STREQUAL "vulkan")
+        find_package(Vulkan REQUIRED)
+        set(_TC_LINUX_GFX_LIBRARIES Vulkan::Vulkan)
+    else()
+        find_package(OpenGL REQUIRED)
+        set(_TC_LINUX_GFX_LIBRARIES ${OPENGL_LIBRARIES})
+    endif()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
     # FFmpeg for VideoPlayer and audio decoding
@@ -331,7 +341,7 @@ elseif(TC_PLATFORM_LINUX)
         ${X11_LIBRARIES}
         ${X11_Xi_LIB}
         ${X11_Xcursor_LIB}
-        ${OPENGL_LIBRARIES}
+        ${_TC_LINUX_GFX_LIBRARIES}
         ${GTK3_LIBRARIES}
         ${FFMPEG_LIBRARIES}
         ${GSTREAMER_LIBRARIES}

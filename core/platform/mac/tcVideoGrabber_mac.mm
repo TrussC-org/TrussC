@@ -125,9 +125,9 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             // リサイズされてない場合のみコピー（リサイズはメインスレッドで処理）
             // Convert unlocked above; lock only for the copy the main thread reads.
             std::lock_guard<std::mutex> stateLock(state->mtx);
-            if (state->pixels && !data->needsResize.load() && state->width == (int)width &&
+            if (state->pixels.isAllocated() && !data->needsResize.load() && state->width == (int)width &&
                 state->height == (int)height) {
-                std::memcpy(state->pixels.get(), data->backBuffer, width * height * 4);
+                std::memcpy(state->pixels.getData(), data->backBuffer, width * height * 4);
             }
         }
 

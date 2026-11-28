@@ -93,7 +93,7 @@ Runtime queue and maintenance work selects process context and progresses at saf
 
 `getWindowTitle()` returns the resolved Window's stored title (`Window::getTitle()`); `isWindowOccluded()` returns its native visibility snapshot (`Window::isOccluded()`). They use the same App-owner / sole-open-Window resolution as other Window helpers. Unowned callers with zero or multiple open Windows get an Error and an empty string or `false`, respectively. An App without a live Window gets those fallback values too.
 
-File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<string>&)` callback receive the paths.
+File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<fs::path>&)` callback receive the paths.
 
 `Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal, unavailable to public C++ and Lua callers. The framework drives the tree; App code overrides callbacks or listens through `events()`.
 
@@ -566,7 +566,7 @@ setScale(s)
 Z-order is the child list order — `moveToFront/Back` reorder siblings
 in place. Typical use: bring a clicked card to the top of a stack:
 ```cpp
-bool onMousePress(Vec2 local, int button) override {
+bool onMousePress(const MouseEventArgs&) override {
     moveToFront();   // this node now draws above its siblings
     return true;
 }
@@ -600,9 +600,9 @@ nodes.clear();
 ### Node Events
 Override in Node subclass (return `true` to consume):
 ```cpp
-bool onMousePress(Vec2 local, int button) override;
-bool onMouseRelease(Vec2 local, int button) override;
-bool onMouseDrag(Vec2 local, int button) override;
+bool onMousePress(const MouseEventArgs& e) override;
+bool onMouseRelease(const MouseEventArgs& e) override;
+bool onMouseDrag(const MouseDragEventArgs& e) override;
 bool onMouseMove(Vec2 local) override;
 bool onMouseScroll(Vec2 local, Vec2 scroll) override;
 bool onMouseEnter() override;
@@ -614,8 +614,8 @@ App-level input events on the receiving Window:
 void keyPressed(int key) override;
 void charInput(const CharEventArgs& e) override;
 void filesDropped(const DragDropEventArgs& e) override;
-void mousePressed(Vec2 pos, int button) override;
-void mouseDragged(Vec2 pos, int button) override;
+void mousePressed(const MouseEventArgs& e) override;
+void mouseDragged(const MouseDragEventArgs& e) override;
 ```
 
 `keyPressed()` receives sokol key codes: letters are uppercase ASCII (`'S'`,
@@ -626,18 +626,16 @@ regardless of Shift). The defined `KEY_*` constants are `KEY_SPACE`, `KEY_ESCAPE
 `KEY_RIGHT_SUPER`, and `KEY_F1` through `KEY_F12`.
 
 #### Rich mouse input arguments
-Rich mouse input callbacks in App and Node receive a per-kind args struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
-the default) **or** the rich form — the rich default just forwards to the
-simple one, so existing simple overrides keep working.
+Rich mouse input callbacks in App and Node receive a per-kind args struct with a typed `MouseButton`. The short `(Vec2, int)` press/release/drag forms are deprecated and will be removed in v1.0. Their overrides still receive 0/1/2 through the rich default, and log once per callback kind per process. Use the rich form:
 ```cpp
-void mousePressed(const MouseEventArgs& e) override {
-    logNotice("input") << e.injected << " " << e.sourceTag;
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
 }
 ```
 There is one struct per event kind so no field is ever meaningless. Fields:
 - `pos` — local position (in the receiving node's space). `globalPos` — window content coordinates.
 - `delta` / `globalDelta` — movement since the last event (move/drag only).
-- `button` — `int`, compare with `MOUSE_BUTTON_LEFT/RIGHT/MIDDLE` (press/drag).
+- `button` — `MouseButton`, compare with `MouseButton::Left`, `Right`, or `Middle` (press/release/drag). `getMouseButton()` returns the last pressed button, or `MouseButton::None` after release or without a context.
 - `scroll` — `Vec2` scroll amount (ScrollEventArgs).
 - `shift` / `ctrl` / `alt` / `super` — modifier keys, on every kind.
 - `injected` — true for `Window::injectInput` and MCP input, false for input from a device. Key and touch args also carry this field.
@@ -884,10 +882,10 @@ On the clip-control path, pass logical pixel Y unchanged and
 `origin_top_left=false` to raw viewport/scissor calls; elsewhere keep the usual
 mapping.
 Inside a public Fbo, `gl_FragCoord.y` increases downward from the top on Metal,
-D3D11, WebGPU and clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA
-Linux or GLES/WebGL2 with `EXT_clip_control`), and upward from the bottom on Mesa
-flip_y and native GL; `dFdy(v)` for a value increasing toward the logical bottom
-is positive on the former paths and negative on the latter. Use texture
+D3D11, WebGPU, experimental Vulkan (`TC_GFX_BACKEND=vulkan`, Linux), and
+clip-control GL/GLES (such as non-Mesa desktop GL on NVIDIA Linux or GLES/WebGL2
+with `EXT_clip_control`), and upward from the bottom on Mesa flip_y and native
+GL; `dFdy(v)` for a value increasing toward the logical bottom is positive on the former paths and negative on the latter. Use texture
 coordinates rather than `gl_FragCoord`/`dFdy` when a shader must behave the same
 everywhere. With `uv` passed from the vertex shader's texture coordinates,
 build a gradient in the fragment shader:
@@ -1347,7 +1345,13 @@ Mostly "drop `of`, lowercase the first letter." Common ones:
 
 ### Are setup / update / draw the same as oF?
 
-The lifecycle is **the same** — `setup()` / `update()` / `draw()` (all `void`, no args, override). Input callbacks come in two forms: an **oF-compatible simple form `mousePressed(Vec2 pos, int button)`** and a **rich form `mousePressed(const MouseEventArgs& e)`** with modifiers — override either (the rich default forwards to the simple one). Mind only the 0–1 colors and radians, and drawing code ports over almost directly.
+The App lifecycle uses `setup()` / `update()` / `draw()` (all `void`, no args, override). For mouse input, use rich event arguments and compare `e.button` with `MouseButton`. The short `(Vec2, int)` press/release/drag overrides are deprecated until removal in v1.0:
+```cpp
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    if (e.button == MouseButton::Left) redraw();
+}
+```
+Drawing code uses 0–1 colors and radians.
 
 ### Equivalents of ofParameter / ofxGui?
 
@@ -1607,10 +1611,17 @@ void tcApp::update() {
 
 Watch process memory alongside resource caches to distinguish first-use allocation from steady growth. Reuse font sizes, upload only changed pixels, and close videos when a scene ends to keep retained memory down.
 
-`size_t getMemoryUsage()` reports process resident bytes (0 on unsupported platforms); `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
+`size_t getMemoryUsage()` reports private memory for leak watching; `size_t getResidentMemoryUsage()` reports RSS, which also counts memory-mapped files and shared libraries. Both return 0 when unavailable; `int getSokolMemoryBytes()` and `int getSokolMemoryAllocs()` count allocations through sokol's tracking allocator, not the driver's whole VRAM. Log them from a tcApp callback:
 ```cpp
 void tcApp::keyPressed(int key) {
-    logNotice("Memory") << getMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+    logNotice("Memory") << getMemoryUsage() << " private bytes, " << getResidentMemoryUsage() << " RSS bytes; sokol: " << getSokolMemoryBytes() << " bytes, " << getSokolMemoryAllocs() << " allocations";
+}
+```
+
+In v0.8, `getMemoryUsage()` returned RSS. To keep that measurement in v0.9:
+```cpp
+void tcApp::keyPressed(int key) {
+    size_t rss = getResidentMemoryUsage();
 }
 ```
 
@@ -1647,10 +1658,13 @@ void tcApp::keyPressed(int key) {
 }
 ```
 
-Poll the MCP tool `tc_get_health` over time and graph `rssBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample process memory periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
+Poll the MCP tool `tc_get_health` over time and graph `privateBytes` against `uptimeSec` (`memoryBytes` is sokol-tracked bytes); specify its `window` argument when multiple windows are open. `privateBytes` is the number to graph for leaks; `rssBytes` also counts memory-mapped files and shared libraries. OS terms: Windows Private Bytes (Task Manager "Commit size"), Linux/Android RssAnon, macOS/iOS footprint (Activity Monitor "Memory"). On macOS and iOS it also includes GPU memory the app owns, so it can be larger than `rssBytes`, and GPU leaks show up there too. `privateBytes` is omitted when `getMemoryUsage()` returns 0 (Web, read failure, or a zero measurement). Check for 0 before graphing a C++ sample; no private-memory measurement API is available on Web. Repeat the same scene after warm-up: a repeatedly rising baseline deserves investigation. Alternatively sample both counters periodically from tcApp (with a `OnceGate memorySample{5.0}` member):
 ```cpp
 void tcApp::update() {
-    if (memorySample.isFirstTime()) logNotice("Memory") << getElapsedTime() << " " << getMemoryUsage();
+    if (memorySample.isFirstTime()) {
+        const auto bytes = getMemoryUsage();
+        if (bytes != 0) logNotice("Memory") << bytes << " private bytes, " << getResidentMemoryUsage() << " RSS bytes";
+    }
 }
 ```
 
@@ -2681,7 +2695,7 @@ float getGlobalMouseX()  // Returns the current mouse X coordinate in the active
 float getGlobalMouseY()  // Returns the current mouse Y coordinate in the active window.
 float getGlobalPMouseX()  // Returns the saved previous mouse X coordinate.
 float getGlobalPMouseY()  // Returns the saved previous mouse Y coordinate.
-int getMouseButton()  // Returns the recorded mouse button.
+MouseButton getMouseButton()  // Returns the recorded mouse button.
 Vec2 getMousePos()  // Returns the mouse position in the current window.
 float getMouseX()  // Return the mouse X coordinate in window space.
 float getMouseY()  // Return the mouse Y coordinate in window space.
@@ -2726,8 +2740,9 @@ void sleepMillis(int millis)  // Pauses the calling thread for a duration in mil
 
 ```cpp
 size_t getFboCount()  // Returns the number of living Fbo objects.
-size_t getMemoryUsage()  // Returns the process memory usage.
+size_t getMemoryUsage()  // Returns private process memory in bytes for watching leaks; returns 0 when unavailable.
 size_t getNodeCount()  // Returns the number of living Node objects.
+size_t getResidentMemoryUsage()  // Returns process RSS in bytes, including memory-mapped files and shared libraries; returns 0 when unavailable.
 int getSokolMemoryAllocs()  // Returns the number of active tracked sokol allocations.
 int getSokolMemoryBytes()  // Returns the current tracked sokol memory usage.
 size_t getTextureCount()  // Returns the Texture object counter.
@@ -3287,9 +3302,9 @@ KEY_UP  // Identifies the Up Arrow key.
 Left  // Provides shorthand for `Direction::Left`.
 float log10(float x) [std]  // Returns the base-ten logarithm.
 float log2(float x) [std]  // Returns the base-two logarithm.
-MOUSE_BUTTON_LEFT  // Identifies the left mouse button.
-MOUSE_BUTTON_MIDDLE  // Identifies the middle mouse button.
-MOUSE_BUTTON_RIGHT  // Identifies the right mouse button.
+MOUSE_BUTTON_LEFT ⚠️deprecated  // Identifies the left mouse button.
+MOUSE_BUTTON_MIDDLE ⚠️deprecated  // Identifies the middle mouse button.
+MOUSE_BUTTON_RIGHT ⚠️deprecated  // Identifies the right mouse button.
 Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Returns the asynchronous screenshot completion event.
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to their operand types.
 PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
@@ -3319,7 +3334,7 @@ void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native cap
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
 void App::charInput(const CharEventArgs & e)  // Called for one typed character in this Window.
 void App::exit()  // Called once when the App ends, right before cleanup().
-void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped paths and position in this Window, while preserving path-only overrides.
+void App::filesDropped(const DragDropEventArgs & e) [+1]  // Receives dropped filesystem paths and position in this Window; Web supplies file names.
 Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const ⚠️deprecated  // Returns whether the deprecated requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
@@ -3586,7 +3601,7 @@ void ComputeShader::setUniform(int slot, float value) [+9]  // Copies an entire 
 ```cpp
 ```
 
-### DragDropEventArgs — Carries information about dropped files.
+### DragDropEventArgs — Stores copied filesystem paths for dropped files; Web supplies browser file names.
 
 ```cpp
 ```
@@ -3606,10 +3621,12 @@ float EasyCam::getDistance() const  // Returns the camera's distance from its ta
 Modifier EasyCam::getDragModifier() const  // Returns the modifier selected for camera mouse input.
 float EasyCam::getElevation() const  // Returns the camera's orbit elevation.
 float EasyCam::getFov() const  // Returns the camera's field of view.
-int EasyCam::getOrbitButton() const  // Returns the mouse button assigned to orbit rotation.
+int EasyCam::getOrbitButton() const ⚠️deprecated  // Returns the mouse button assigned to orbit rotation.
+MouseButton EasyCam::getOrbitMouseButton() const  // Returns the orbit binding as MouseButton.
 Quaternion EasyCam::getOrientation() const  // Returns the camera's orientation quaternion.
 bool EasyCam::getOrtho() const  // Returns whether orthographic projection is selected.
-int EasyCam::getPanButton() const  // Returns the mouse button assigned to panning.
+int EasyCam::getPanButton() const ⚠️deprecated  // Returns the mouse button assigned to panning.
+MouseButton EasyCam::getPanMouseButton() const  // Returns the pan binding as MouseButton.
 Vec3 EasyCam::getPosition() const  // Returns the camera's position.
 Vec3 EasyCam::getTarget() const  // Returns the camera's look-at target.
 Vec3 EasyCam::getUpAxis() const  // Returns the camera's configured up axis.
@@ -3628,10 +3645,12 @@ void EasyCam::setFarClip(float farClip)  // Sets the camera's far clipping dista
 void EasyCam::setFov(float fov)  // Sets the camera's vertical field of view.
 void EasyCam::setFovDeg(float degrees)  // Sets the camera's vertical field of view in degrees.
 void EasyCam::setNearClip(float nearClip)  // Sets the camera's near clipping distance.
-EasyCam & EasyCam::setOrbitButton(int button)  // Sets the mouse button used to orbit the camera.
+EasyCam & EasyCam::setOrbitButton(int button) ⚠️deprecated  // Deprecated int setter for the orbit mouse button; use setOrbitMouseButton(MouseButton).
+EasyCam & EasyCam::setOrbitMouseButton(MouseButton button)  // Sets the mouse button used to orbit the camera.
 void EasyCam::setOrientation(const Quaternion & q)  // Sets the camera's orientation quaternion.
 void EasyCam::setOrtho(bool ortho)  // Selects orthographic or perspective projection.
-EasyCam & EasyCam::setPanButton(int button)  // Sets the mouse button used to pan the camera.
+EasyCam & EasyCam::setPanButton(int button) ⚠️deprecated  // Deprecated int setter for the pan mouse button; use setPanMouseButton(MouseButton).
+EasyCam & EasyCam::setPanMouseButton(MouseButton button)  // Sets the mouse button used to pan the camera.
 void EasyCam::setPanSensitivity(float s)  // Sets the sensitivity of mouse panning.
 void EasyCam::setSensitivity(float s)  // Sets the sensitivity of mouse orbit rotation.
 void EasyCam::setTarget(float x, float y, float z) [+1]  // Sets the camera's look-at target.
@@ -3977,7 +3996,7 @@ void Image::update()  // Uploads pending CPU pixel changes to the texture.
 
 ```cpp
 InputEvent InputEvent::charInput(uint32_t codepoint, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds one character input from a Unicode scalar or received CharEventArgs.
-InputEvent InputEvent::filesDropped(std::vector<std::string> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
+InputEvent InputEvent::filesDropped(std::vector<std::filesystem::path> paths, Vec2 pos) [+1]  // Builds an owned file-path drop at a destination App position.
 InputEvent InputEvent::keyPressed(int key, InputModifiers mods = {}, bool repeat = false) [+1]  // Builds a keyPressed input from values or received arguments.
 InputEvent InputEvent::keyReleased(int key, InputModifiers mods = {}) [+1]  // Builds a keyReleased input from values or received arguments.
 InputEvent InputEvent::mouseMoved(Vec2 pos, InputModifiers mods = {}) [+1]  // Builds a mouseMoved input from values or received arguments.
@@ -5004,7 +5023,7 @@ size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
 bool StorageBuffer::read(void * destination, size_t bytes) [+2] [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
-void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
+void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on supported backends, including WebGPU, with a callback in a later main-thread update (C++ only).
 bool StorageBuffer::update(const void * data, size_t size) [+2]  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
@@ -5209,7 +5228,7 @@ size_t ThreadChannel::size() const  // Returns the number of queued values.
 bool ThreadChannel::tryReceive(T & value) [+1]  // Attempts to receive one value, optionally with a timeout.
 ```
 
-### TouchEventArgs — Carries multitouch event data.
+### TouchEventArgs — Carries active multitouch points in backend order for range-for iteration.
 
 ```cpp
 int TouchEventArgs::id() const  // Returns the first touch point's identifier.
@@ -5412,7 +5431,7 @@ int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return t
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the stored capture device name.
 size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux,ios]  // Return the configured frame queue capacity.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the current capture frame height.
-unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current camera pixel buffer.
+const Pixels & VideoGrabber::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the grabber; empty when no CPU frame storage exists.
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux,ios]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
@@ -5451,17 +5470,22 @@ float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Return
 float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Returns the gamma correction setting.
 std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Returns the reported video decoding backend name.
 fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Returns the loaded video's source path.
-unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // Returns a pointer to the RGBA pixel buffer.
+const Pixels & VideoPlayer::getPixels() const [macos,windows,linux,ios,web]  // Return read-only RGBA Pixels owned by the player; may be empty on any platform during hardware decode.
 unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
 unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
 float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
 float VideoPlayer::getRotation() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in radians.
 int VideoPlayer::getRotationDeg() const [macos,windows,linux,ios,web]  // Returns the stream display rotation in degrees.
+Texture & VideoPlayer::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the display texture; may be empty on any platform during hardware decode.
+const Texture & VideoPlayer::getTextureUV() const [macos,windows,linux,ios,web]  // Return the UV plane texture as const Texture& (protected).
+const Texture & VideoPlayer::getTextureY() const [macos,windows,linux,ios,web]  // Return the Y plane texture as const Texture& (protected).
 int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.
+bool VideoPlayer::hasTexture() const [macos,windows,linux,ios,web]  // Returns whether the active video texture is allocated, without the NV12 warning.
 bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Returns the audio streaming preference.
 bool VideoPlayer::isLoading() const [macos,windows,linux,ios,web]  // Reports whether a video load is pending for the current App run.
+bool VideoPlayer::isNV12Mode() const [macos,windows,linux,ios,web]  // Report whether the player uses hardware NV12 planes (protected).
 bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Returns the reported hardware decoding state.
 LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source synchronously, blocking the caller.
 void VideoPlayer::loadAsync(const fs::path & path) [macos,windows,linux,ios,web]  // Starts a video load with completion on a later main-loop pass.
@@ -5507,7 +5531,7 @@ float VideoPlayerBase::getFrameRate() const  // Return the video frame rate.
 float VideoPlayerBase::getHeight() const  // Returns the video height.
 std::string VideoPlayerBase::getHwAccelName() const  // Return the reported decode backend name.
 float VideoPlayerBase::getPan() const  // Returns the stored stereo pan.
-unsigned char * VideoPlayerBase::getPixels() [+1]  // Return a pointer to the player's RGBA pixel buffer.
+const Pixels & VideoPlayerBase::getPixels() const  // Return read-only RGBA Pixels owned by the player; may be empty on any platform during hardware decode.
 float VideoPlayerBase::getPosition() const  // Return the normalized playback position.
 float VideoPlayerBase::getResyncThreshold() const  // Returns the playback catch-up threshold in seconds.
 float VideoPlayerBase::getSpeed() const  // Returns the stored playback speed.
@@ -5592,9 +5616,10 @@ void Window::close()  // Requests closure of this window.
 void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
 CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
-float Window::getFps() const  // Returns this window's target frame rate.
+float Window::getFps() const  // Returns this window's measured update rate.
 int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // Reads this window’s position in OS screen coordinates; use it on desktop when you need the decorated frame location. Returns (-1, -1) when unavailable.
+float Window::getTargetFps() const  // Returns this window's target drawing rate.
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::injectInput(const InputEvent & event, const std::string & tag = std::string())  // Sends an input event to this Window as if it came from a device. Returns false when the Window can't take it (closed, or invalid values).
@@ -5636,6 +5661,7 @@ WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial wind
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
 WindowSettings & WindowSettings::setTitle(const std::string & t)  // Sets the initial window title.
 WindowSettings & WindowSettings::setVisible(bool enabled)  // Sets whether a window starts visible.
+WindowSettings & WindowSettings::setVulkanUploadSize(size_t bytes)  // Sets Vulkan's startup per-frame CPU-to-GPU upload limit; default 64 MiB, ignored by other backends.
 ```
 
 ### Xml — Wraps a pugixml document for loading, saving, and querying XML.
@@ -6183,7 +6209,12 @@ Sound sfx = bundle.build();
     }
     ```
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
-19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
+19. **EasyCam button bindings use `MouseButton`.** Select the orbit button with `setOrbitMouseButton()` and read its binding with `getOrbitMouseButton()`.
+    ```cpp
+    void tcApp::setup() {
+        cam.setOrbitMouseButton(MouseButton::Right);
+    }
+    ```
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth testing (LESS_EQUAL) for all subsequent draws. `Add`, `Screen`, `Multiply` and `Subtract` test without writing depth; `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing it. Translucent `Alpha` also writes depth, so draw opaque objects first and translucent ones back to front; TrussC does not sort draws. The setting persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
@@ -6202,7 +6233,7 @@ class tcApp : public App {
     Tween<Color> colorTween;
     void setup() override;
     void draw() override;
-    void mousePressed(Vec2 pos, int button) override;
+    void mousePressed(const MouseEventArgs& e) override;
 };
 
 // tcApp.cpp
@@ -6223,7 +6254,7 @@ void tcApp::draw() {
     drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, s);
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs&) {
     sizeTween.from(50.0f).to(200.0f).start();   // Restart on click
 }
 ```
@@ -6242,7 +6273,7 @@ class tcApp : public App {
     void setup() override;
     void draw() override;
     void mouseMoved(Vec2 pos) override;
-    void mousePressed(Vec2 pos, int button) override;
+    void mousePressed(const MouseEventArgs& e) override;
     void keyPressed(int key) override;
 
     vector<Vec2> history;
@@ -6279,7 +6310,7 @@ void tcApp::mouseMoved(Vec2 pos) {
     if (history.size() > maxHistory) history.erase(history.begin());
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) { useStroke = !useStroke; }
+void tcApp::mousePressed(const MouseEventArgs&) { useStroke = !useStroke; }
 void tcApp::keyPressed(int key) { if (key == ' ') styleIndex = (styleIndex + 1) % 3; }
 ```
 
@@ -6321,8 +6352,8 @@ void tcApp::draw() {
     drawBitmapString("Click to shoot", 10, 20);
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
-    auto bullet = make_shared<Bullet>(pos.x, pos.y, Vec2(300, -400));
+void tcApp::mousePressed(const MouseEventArgs& e) {
+    auto bullet = make_shared<Bullet>(e.pos.x, e.pos.y, Vec2(300, -400));
     addChild(bullet);   // Add to scene graph — update/draw are automatic
 }
 ```
@@ -6377,7 +6408,7 @@ public:
     }
 
 protected:
-    bool onMousePress(Vec2 local, int button) override {
+    bool onMousePress(const MouseEventArgs&) override {
         count++;
         return true;   // Consume event
     }

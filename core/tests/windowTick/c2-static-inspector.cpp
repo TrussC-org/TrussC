@@ -19,7 +19,7 @@ int main() {
         auto& inspector = tcx::nodeinspector::NodeInspector::instance();
         inspector.select(node.get());
         inspector.enableGizmoInput();
-        MouseEventArgs e; e.pos = Vec2(20,0); e.button = 0;
+        MouseEventArgs e; e.pos = Vec2(20,0); e.button = MouseButton::Left;
         events().mousePressed.notify(e);
         std::fprintf(stderr, "STATIC_INSPECTOR dragging=%d consumed=%d\n", inspector.isGizmoDragging(), e.consumed);
         if (!inspector.isGizmoDragging()) return 22;

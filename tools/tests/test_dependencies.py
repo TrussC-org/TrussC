@@ -54,7 +54,7 @@ class DependencyTests(unittest.TestCase):
         return rows
 
     def test_real_tree_and_selftest(self):
-        self.assertEqual(len(self.rows), 36)
+        self.assertEqual(len(self.rows), 35)
         self.assertEqual(deps.check(str(ROOT), self.rows), [])
         self.assertEqual(deps.selftest(str(ROOT), self.rows), [])
 
@@ -284,7 +284,7 @@ fetchcontent_declare(real
 
             good = run()
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
-            self.assertIn("36 third-party entries", good.stdout)
+            self.assertIn("35 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
             inventory = license_path.read_text(encoding="utf-8")
             version_prefix = "| **miniaudio** | 0.11.26"

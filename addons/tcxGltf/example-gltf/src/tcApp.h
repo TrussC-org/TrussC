@@ -10,10 +10,10 @@ class tcApp : public App {
 public:
     void setup() override;
     void draw() override;
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 
 private:
-    void loadModel(const string& path);
+    void loadModel(const fs::path& path);
 
     EasyCam cam;
     Environment env;

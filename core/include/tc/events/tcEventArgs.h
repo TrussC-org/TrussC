@@ -71,20 +71,19 @@ struct KeyEventArgs {
 //   - `delta`/`globalDelta` follow the same local/screen split (movement since
 //   the previous event).
 //
-// Legacy scalar fields (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY` and the
-// int `button`) mirror the Vec2 fields and are kept for source compatibility
+// Legacy scalar fields (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY`) mirror
+// the Vec2 fields and are kept for source compatibility
 // with pre-rich code. They are synced from the canonical Vec2 fields via
 // syncLegacy(). These mirrors are scheduled to be removed at v1.0 (a migration
 // guide will accompany the cut); new code should prefer the Vec2 forms.
-// `button` stays an int (compare with MOUSE_BUTTON_*, consistent with KEY_*);
-// the MouseButton enum is the type-safe source of those constants.
+// `button` uses MouseButton; compare with MouseButton::Left, Right or Middle.
 
 // Mouse pressed / released
 struct MouseEventArgs {
     // Legacy mirrors (source-compat; removed at v1.0)
     float x = 0.0f;           // == pos.x
     float y = 0.0f;           // == pos.y
-    int button = 0;           // MOUSE_BUTTON_* (left/right/middle)
+    MouseButton button = MouseButton::Left;
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
@@ -133,7 +132,7 @@ struct MouseDragEventArgs {
     float y = 0.0f;           // == pos.y
     float deltaX = 0.0f;      // == delta.x
     float deltaY = 0.0f;      // == delta.y
-    int button = 0;           // MOUSE_BUTTON_* being dragged
+    MouseButton button = MouseButton::Left;
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
@@ -186,7 +185,7 @@ struct MouseEventRaw {
     Vec2 globalPos;           // Screen position
     Vec2 delta;               // Movement since last event, local space
     Vec2 globalDelta;         // Movement since last event, screen space
-    int button = 0;           // MOUSE_BUTTON_* held during a drag (0 on a move)
+    int button = 0;           // Integer button held during a drag (0 on a move)
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
@@ -215,7 +214,7 @@ inline MouseDragEventArgs toDragArgs(const MouseEventRaw& m) {
     MouseDragEventArgs a;
     a.pos = m.pos; a.globalPos = m.globalPos;
     a.delta = m.delta; a.globalDelta = m.globalDelta;
-    a.button = m.button;
+    a.button = static_cast<MouseButton>(m.button);
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
     a.consumed = m.consumed;
     a.injected = m.injected;
@@ -230,7 +229,7 @@ inline MouseEventRaw toRaw(const T& a) {
     MouseEventRaw m;
     m.pos = a.pos; m.globalPos = a.globalPos;
     m.delta = a.delta; m.globalDelta = a.globalDelta;
-    if constexpr (requires { a.button; }) m.button = a.button;
+    if constexpr (requires { a.button; }) m.button = static_cast<int>(a.button);
     m.shift = a.shift; m.ctrl = a.ctrl; m.alt = a.alt; m.super = a.super;
     m.consumed = a.consumed;
     m.injected = a.injected;
@@ -259,10 +258,10 @@ struct FocusEventArgs {
 };
 
 // ---------------------------------------------------------------------------
-// Drag & drop event arguments (for future use)
+// Drag & drop event arguments
 // ---------------------------------------------------------------------------
 struct DragDropEventArgs {
-    std::vector<std::string> files;  // Dropped file paths
+    std::vector<std::filesystem::path> files;  // Desktop paths; browser file names on Web
     float x = 0.0f;
     float y = 0.0f;
 };
@@ -294,18 +293,17 @@ struct TouchPoint {
 // Touch event arguments (multi-touch)
 // ---------------------------------------------------------------------------
 struct TouchEventArgs {
-    // Bound (platform): the OS input backend exposes at most SAPP_MAX_TOUCHPOINTS touches per event. Overflow omits additional touches.
+    // Backend bound, not the vector size: at most SAPP_MAX_TOUCHPOINTS points per event.
     static constexpr int MAX_TOUCHES = 32;  // Matches SAPP_MAX_TOUCHPOINTS
-    TouchPoint touches[MAX_TOUCHES];
-    int numTouches = 0;
+    std::vector<TouchPoint> touches;
     bool cancelled = false;   // true when touchReleased is due to system cancellation
                               // (e.g. incoming call, system gesture). Released is still
                               // fired — check this flag for cancellation-specific handling.
 
     // Convenience: first touch
-    float x() const { return numTouches > 0 ? touches[0].x : 0.0f; }
-    float y() const { return numTouches > 0 ? touches[0].y : 0.0f; }
-    int id() const { return numTouches > 0 ? touches[0].id : 0; }
+    float x() const { return !touches.empty() ? touches.front().x : 0.0f; }
+    float y() const { return !touches.empty() ? touches.front().y : 0.0f; }
+    int id() const { return !touches.empty() ? touches.front().id : 0; }
     bool injected = false;
     std::string sourceTag;
 };

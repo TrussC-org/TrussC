@@ -23,13 +23,13 @@ void tcApp::mouseMoved(Vec2 pos) {
     trail.push_back({pos, getElapsedTimef()});
 }
 
-void tcApp::mouseDragged(Vec2 pos, int button) {
-    trail.push_back({pos, getElapsedTimef()});
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    trail.push_back({e.pos, getElapsedTimef()});
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs& e) {
     if (replay->isPointerOver()) return;   // the click is for the toolbar
-    clicks.push_back({pos, getElapsedTimef()});
+    clicks.push_back({e.pos, getElapsedTimef()});
 }
 
 void tcApp::draw() {

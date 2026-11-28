@@ -7473,7 +7473,7 @@ uint32_t sapp_tc_window_gl_framebuffer(sapp_tc_window win) { _SOKOL_UNUSED(win);
 #endif
 
 #elif defined(_WIN32)
-/*== Windows (D3D11) ========================================================
+/*== Windows (D3D11 or single-window Vulkan) ================================
     Implements the public sokol_app.h API on Windows plus the multi-window
     API. Structure mirrors sokol_app.h's win32/D3D11 backend (quit dance in
     WM_CLOSE, resize coalesced outside WM_SIZE, scancode-indexed keytable,
@@ -7492,6 +7492,11 @@ uint32_t sapp_tc_window_gl_framebuffer(sapp_tc_window win) { _SOKOL_UNUSED(win);
 #include <windows.h>
 #include <windowsx.h>   /* GET_X_LPARAM / GET_Y_LPARAM */
 #include <shellapi.h>   /* DragAcceptFiles / DragQueryFileW */
+#if defined(SOKOL_VULKAN)
+#define VK_USE_PLATFORM_WIN32_KHR
+#include <vulkan/vulkan.h>
+#include "util/sokol_app_vulkan.h"
+#endif
 #include <d3d11.h>
 #include <dxgi1_3.h>    /* IDXGIFactory2 / IDXGISwapChain2 (frame latency waitable) */
 #include "util/sokol_d3d11_device_loss.h"
@@ -7560,6 +7565,9 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
 
 // [TrussC] Native fork record (retains upstream lineage where applicable).
 static struct {
+#if defined(SOKOL_VULKAN)
+    _sapp_tc_vk_t vk; // [TrussC] One Vulkan device/surface/swapchain for the launch window.
+#endif
     bool keytable_valid;
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
     uint32_t next_id;
@@ -8041,6 +8049,11 @@ static void _sapp_tc_win32_restore_console(void) {
     }
 }
 
+#if defined(SOKOL_VULKAN)
+#define _SAPP_TC_VK_IMPL
+#include "util/sokol_app_vulkan.h"
+#undef _SAPP_TC_VK_IMPL
+#else
 /* Device loss belongs to Runtime, including after every Window has closed. */
 static void _sapp_tc_d3d11_dispatch_pending_device_loss(void) {
     if (!_sapp_tc_d3d11_take_pending_device_loss(_sapp_tc.app.init_called,
@@ -8240,6 +8253,8 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
     _SAPP_TC_RELEASE(dxgi_device);
     return ok;
 }
+
+#endif // SOKOL_VULKAN
 
 /* re-sample client size + per-monitor DPI; true when the framebuffer size
    changed (drives ResizeBuffers). A 0x0 client area means minimized: report
@@ -8488,7 +8503,11 @@ static void _sapp_tc_win32_pace(_sapp_tc_window_t* w, double seconds) {
 }
 
 static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
+#if defined(SOKOL_VULKAN)
+    if (!w || !_sapp_tc.vk.device || w->constructing || w->in_tick) return false;
+#else
     if (!w || !w->swap_chain || w->constructing || w->in_tick) return false;
+#endif
     if (w->earliest_next > _sapp_tc_now()) return false;
     /* Waitable pacing: the frame latency waitable is an auto-reset object that
        the run-loop's MsgWaitForMultipleObjectsEx already waits on. That wait
@@ -8518,7 +8537,9 @@ static void _sapp_tc_win32_init_client(void) {
         if (_sapp_tc.app.desc.init_cb) _sapp_tc.app.desc.init_cb();
         else if (_sapp_tc.app.desc.init_userdata_cb)
             _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+#if !defined(SOKOL_VULKAN)
         _sapp_tc_d3d11_dispatch_pending_device_loss();
+#endif
         if (_sapp_tc.app.quit_ordered && _sapp_tc.app.main)
             _sapp_tc.app.main->cancel_tick = true;
     }
@@ -8539,6 +8560,12 @@ static void _sapp_tc_win32_observe_occlusion(_sapp_tc_window_t* w, bool occluded
 }
 
 static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
+#if defined(SOKOL_VULKAN)
+    _sapp_tc_vk_present();
+    if (_sapp_tc.vk.swapchain_valid)
+        _sapp_tc.vk.sync_slot = (_sapp_tc.vk.sync_slot + 1) % _sapp_tc.vk.num_swapchain_images;
+    _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+#else
     const sapp_tc_window handle{w->win_id};
     const UINT flags = w->from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
     const HRESULT hr = w->swap_chain->Present((UINT)w->swap_interval, flags);
@@ -8552,10 +8579,15 @@ static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
     }
     if (presented && w->frame_wait) w->earliest_next = 0.0;
     else _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+#endif // SOKOL_VULKAN
 }
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
+#if defined(SOKOL_VULKAN)
+    if (!w || !w->ready || w->constructing || _sapp_tc.app.quit_ordered || w->in_tick || !_sapp_tc.vk.device) return;
+#else
     if (!w || !w->ready || w->constructing || _sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
+#endif
     w->in_tick = true;
     w->cancel_tick = false;
     const sapp_tc_window tick_handle{w->win_id};
@@ -8571,12 +8603,14 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
 
     // Probe, dimensions, drawable admission: RESUMED precedes RESIZED.
+#if !defined(SOKOL_VULKAN)
     if (_sapp_tc_native_occluded(w) && !_sapp_tc.app.device_lost_notified) {
         const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
         if (_sapp_tc_d3d11_check_device_loss(hr)) return;
         _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
         if (!(w = _sapp_tc_lookup(tick_handle))) return;
     }
+#endif
     const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
     // Sampling must progress while covered, without touching GPU resources.
     // Retain the resize until drawing is admitted, even if later polls agree.
@@ -8584,7 +8618,11 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
         _sapp_tc_win32_update_dimensions(w);
     if (dimensions_changed) w->resize_pending = true;
     if (admitted && !_sapp_tc.app.device_lost_notified && w->resize_pending) {
+#if defined(SOKOL_VULKAN)
+        _sapp_tc_vk_recreate_swapchain();
+#else
         if (!_sapp_tc_d3d11_resize(w)) return;
+#endif
         w->resize_pending = false;
     }
     if (dimensions_changed) _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
@@ -8604,6 +8642,12 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     const bool skip = w->skip_present;
     w->skip_present = false; // one-shot is consumed at the completed tick boundary, even on loss
     // Callbacks may explicitly hide a window after draw admission.
+#if defined(SOKOL_VULKAN)
+    // [TrussC] A submitted acquisition must be presented even if draw hid the window.
+    if (_sapp_tc.vk.swapchain_acquired) _sapp_tc_win32_swap(w);
+    else _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+    (void)skip;
+#else
     if (admitted && !skip && !_sapp_tc.app.device_lost_notified
         && (w->draw_while_hidden || !w->desc.hidden)) {
         _sapp_tc_win32_swap(w);
@@ -8612,6 +8656,7 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
         // Win32 fallback deadlines follow completed callback/presentation work.
         _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
     }
+#endif
     if (_sapp_tc_native_iconified(w) && w->draw_while_hidden) {
         // Preserve the legacy drawing-while-minimized fallback interval.
         _sapp_tc_win32_pace(w, 0.0166 * (double)w->swap_interval);
@@ -9000,7 +9045,9 @@ static void _sapp_tc_win32_unwind(_sapp_tc_window_t* w) {
         KillTimer(w->hwnd, _SAPP_TC_MODAL_TIMER);
         SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);
     }
+#if !defined(SOKOL_VULKAN)
     _sapp_tc_d3d11_destroy_render_targets(w);
+#endif
     if (w->frame_wait) CloseHandle(w->frame_wait);
     _SAPP_TC_RELEASE(w->swap_chain);
     if (w->hwnd) {
@@ -9039,6 +9086,13 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
     if (!w) return 0;
     w->win_id = id;
     w->desc = d->window;
+#if defined(SOKOL_VULKAN)
+    if (w->desc.no_high_dpi) {
+        w->desc.no_high_dpi = false;
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 2, (uint32_t)SAPP_LOGITEM_OK, __LINE__, "",
+            "Vulkan on Windows uses highDpi(true): the surface extent is the client size in pixels; highDpi(false) is ignored");
+    }
+#endif
     w->events_enabled = d->events_enabled;
     w->draw_while_hidden = d->draw_while_hidden;
     w->trust_hidden_signals = _sapp_tc_win32_trust_hidden_signals();
@@ -9080,11 +9134,18 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
     // Stage startup geometry while unpublished, retaining the covered first
     // launch and sizing the initial drawable before any event can escape.
     if (d->fullscreen) _sapp_tc_win32_set_fullscreen(w, true, SWP_HIDEWINDOW);
-    if (!_sapp_tc_win32_initialize_dimensions(w) || !_sapp_tc_d3d11_create_swapchain(w)) {
+#if defined(SOKOL_VULKAN)
+    if (!_sapp_tc_win32_initialize_dimensions(w))
+#else
+    if (!_sapp_tc_win32_initialize_dimensions(w) || !_sapp_tc_d3d11_create_swapchain(w))
+#endif
+    {
         _sapp_tc_win32_unwind(w);
         return 0;
     }
+#if !defined(SOKOL_VULKAN)
     if (d->clear_on_create) _sapp_tc.app.device_context->ClearRenderTargetView(w->rtv, d->clear_color);
+#endif
     _sapp_tc_creation_transaction creation(w, [](_sapp_tc_window_t* record) {
         // A nested creation may grow the registry; resolve the slot again.
         for (auto& slot : _sapp_tc.windows) if (slot == record) { slot = nullptr; break; }
@@ -9122,6 +9183,10 @@ static bool _sapp_tc_win32_create_main_window(void) {
     w->is_main = true;
     _sapp_tc.app.main = w;
     _sapp_tc.app.desc.window_title = w->title;
+#if defined(SOKOL_VULKAN)
+    // [TrussC] Surface creation needs the published main HWND.
+    _sapp_tc_vk_init();
+#endif
     _sapp_tc.app.valid = true;
     return true;
 }
@@ -9159,7 +9224,11 @@ static void _sapp_tc_win32_run_loop(void) {
         double wake_at = wake_cap;
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
+#if defined(SOKOL_VULKAN)
+            if (!w || !_sapp_tc.vk.device || w->constructing || w->in_tick) continue;
+#else
             if (!w || !w->swap_chain || w->constructing || w->in_tick) continue;
+#endif
             if (w->earliest_next > now) {
                 if (w->earliest_next < wake_at) wake_at = w->earliest_next;
             } else if (w->frame_wait && !w->credit_held && !w->waitable_ready) {
@@ -9256,7 +9325,11 @@ extern "C" {
 
 sapp_tc_window sapp_tc_create_window(const sapp_tc_window_desc* desc) {
     sapp_tc_window invalid = { 0 };
+#if defined(SOKOL_VULKAN)
+    return invalid; // [TrussC] Match X11: Vulkan owns exactly the launch window.
+#else
     if (!desc || !_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
+#endif
     _sapp_tc_native_desc native = {};
     native.window = _sapp_tc_normalize_window(desc);
     native.fullscreen = desc->fullscreen;
@@ -9273,6 +9346,12 @@ void sapp_tc_destroy_window(sapp_tc_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
     if (w->constructing) { w->close_requested = true; return; }
+#if defined(SOKOL_VULKAN)
+    // [TrussC] The only Vulkan window ends the Runtime. Keep its HWND alive
+    // through gfx cleanup and Vulkan surface teardown in sapp_run(), with
+    // client callbacks detached once Runtime releases its Window.
+    if (_sapp_tc.vk.device) { w->desc = {}; return; }
+#endif
     _sapp_tc_win32_unwind(w);
 }
 
@@ -9420,7 +9499,12 @@ void sapp_run(const sapp_desc* desc) {
     _sapp_tc_win32_init_dpi();
     _sapp_tc_win32_init_cursors();
 
-    if (_sapp_tc_d3d11_create_device()) {
+#if defined(SOKOL_VULKAN)
+    memset(&_sapp_tc.vk, 0, sizeof(_sapp_tc.vk));
+#else
+    if (_sapp_tc_d3d11_create_device())
+#endif
+    {
         if (_sapp_tc_win32_create_main_window()) {
             _sapp_tc_win32_run_loop();
         }
@@ -9429,6 +9513,9 @@ void sapp_run(const sapp_desc* desc) {
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
     _sapp_tc_win32_cleanup();
+#if defined(SOKOL_VULKAN)
+    if (_sapp_tc.vk.device) _sapp_tc_vk_discard();
+#endif
     for (int i = _SAPP_TC_MAX_WINDOWS - 1; i >= 0; --i)
         _sapp_tc_win32_unwind(_sapp_tc.windows[i]);
     _sapp_tc.app.desc.window_title = 0;
@@ -9706,24 +9793,58 @@ sapp_environment sapp_get_environment(void) {
     env.defaults.color_format = sapp_color_format();
     env.defaults.depth_format = sapp_depth_format();
     env.defaults.sample_count = sapp_sample_count();
+#if defined(SOKOL_VULKAN)
+    env.vulkan.instance = (const void*)_sapp_tc.vk.instance;
+    env.vulkan.physical_device = (const void*)_sapp_tc.vk.physical_device;
+    env.vulkan.device = (const void*)_sapp_tc.vk.device;
+    env.vulkan.queue = (const void*)_sapp_tc.vk.queue;
+    env.vulkan.queue_family_index = _sapp_tc.vk.queue_family_index;
+#else
     env.d3d11.device = (const void*)_sapp_tc.app.device;
     env.d3d11.device_context = (const void*)_sapp_tc.app.device_context;
+#endif
     return env;
 }
 
 sapp_swapchain sapp_acquire_swapchain(void) {
-    /* unlike Metal there is no per-frame acquire: the flip-model swapchain
-       rotates internally, the views are created once and reused (resize
-       recreates them) -- calling this any number of times per frame is safe */
+    /* D3D11 rotates internally and reuses views until resize. Vulkan caches
+       the acquired image until presentation. Repeated queries in a frame
+       return the same native render target on either backend. */
     sapp_swapchain sc;
     memset(&sc, 0, sizeof(sc));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) { sc.invalid = true; return sc; }
+#if !defined(SOKOL_VULKAN)
     sc.width = sapp_width();
     sc.height = sapp_height();
     sc.sample_count = sapp_sample_count();
     sc.color_format = sapp_color_format();
     sc.depth_format = sapp_depth_format();
+#endif
+#if defined(SOKOL_VULKAN)
+        _sapp_tc_vk_swapchain_next();
+        sc.invalid = !_sapp_tc.vk.swapchain_acquired;
+        if (sc.invalid) {
+            return sc;
+        }
+        uint32_t img_idx = _sapp_tc.vk.cur_swapchain_image_index;
+        if (_sapp_tc.app.desc.sample_count > 1) {
+            SOKOL_ASSERT(_sapp_tc.vk.msaa.img && _sapp_tc.vk.msaa.view);
+            sc.vulkan.render_image = (const void*) _sapp_tc.vk.msaa.img;
+            sc.vulkan.render_view = (const void*) _sapp_tc.vk.msaa.view;
+            sc.vulkan.resolve_image = (const void*) _sapp_tc.vk.swapchain_images[img_idx];
+            sc.vulkan.resolve_view = (const void*) _sapp_tc.vk.swapchain_views[img_idx];
+        } else {
+            sc.vulkan.render_image = (const void*) _sapp_tc.vk.swapchain_images[img_idx];
+            sc.vulkan.render_view = (const void*) _sapp_tc.vk.swapchain_views[img_idx];
+        }
+        sc.vulkan.depth_stencil_image = (const void*) _sapp_tc.vk.depth.img;
+        sc.vulkan.depth_stencil_view = (const void*) _sapp_tc.vk.depth.view;
+        // NOTE: using the current swapchain image index here is *NOT* a bug! The render_finished_semaphore *must*
+        // be associated with its swapchain image in case the swapchain implementation doesn't return swapchain images in order
+        sc.vulkan.render_finished_semaphore = (const void*) _sapp_tc.vk.sync[img_idx].render_finished_sem;
+        sc.vulkan.present_complete_semaphore = (const void*) _sapp_tc.vk.sync[_sapp_tc.vk.sync_slot].present_complete_sem;
+#else
     if (w->desc.sample_count > 1) {
         sc.d3d11.render_view = (const void*)w->msaa_rtv;
         sc.d3d11.resolve_view = (const void*)w->rtv;
@@ -9732,13 +9853,21 @@ sapp_swapchain sapp_acquire_swapchain(void) {
         sc.d3d11.resolve_view = 0;
     }
     sc.d3d11.depth_stencil_view = (const void*)w->dsv;
+#endif
+#if defined(SOKOL_VULKAN)
+    sc.width = sapp_width();
+    sc.height = sapp_height();
+    sc.sample_count = sapp_sample_count();
+    sc.color_format = sapp_color_format();
+    sc.depth_format = sapp_depth_format();
+#endif
     return sc;
 }
 
 } /* extern "C" */
 
 #elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN)
 /*== Linux (X11 + GLX or EGL) =====================================
     Implements the public sokol_app.h API on Linux plus the multi-window API.
     X11 events, native windows and the due-window loop are shared. Only visual/
@@ -9783,6 +9912,9 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include <X11/extensions/XInput2.h>
+#elif defined(SOKOL_VULKAN)
+#define VK_USE_PLATFORM_XLIB_KHR
+#include <vulkan/vulkan.h>
 #else
 #include <GL/gl.h>
 #include <GL/glx.h>
@@ -9828,6 +9960,10 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 #endif
 
 
+#if defined(SOKOL_VULKAN)
+#include "util/sokol_app_vulkan.h"
+#endif
+
 // Bound (platform): X11 keycodes use the protocol eight-bit range. Overflow maps out-of-range keycodes to invalid or zero.
 #define _SAPP_X11_MAX_X11_KEYCODES (256)
 #define _SAPP_TC_XDND_VERSION (5)
@@ -9860,6 +9996,8 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
+#elif defined(SOKOL_VULKAN)
+    Window drawable; // X11 readiness token; Vulkan owns the swapchain separately.
 #else
     GLXDrawable drawable;
 #endif
@@ -9924,6 +10062,8 @@ static struct {
     bool mouse_locked;
     _sapp_tc_window_t* lock_owner;
     int xi_event_base, xi_error_base;
+#elif defined(SOKOL_VULKAN)
+    _sapp_tc_vk_t vk;
 #else
     /* ---- GLX (one shared context; per-window GLXWindow drawables) -------- */
     GLXFBConfig fbconfig;
@@ -10035,7 +10175,7 @@ static size_t _sapp_tc_x11_reserve_slot(void) {
     for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
         if (!_sapp_tc.windows[i]) return i;
     }
-#if defined(SOKOL_GLCORE)
+#if defined(SOKOL_GLCORE) || defined(SOKOL_VULKAN)
     return SIZE_MAX;
 #else
     // Bound (representation): the slot array must fit size_t bytes; allocation failure rejects creation.
@@ -12335,7 +12475,7 @@ static void _sapp_tc_glx_set_swapinterval(_sapp_tc_window_t* w, int interval) {
     }
 }
 
-#else
+#elif defined(SOKOL_GLES3)
 static bool _sapp_tc_egl_init(void) {
     _sapp_tc.egl_display = eglGetDisplay((EGLNativeDisplayType)_sapp_tc.display);
     if (_sapp_tc.egl_display == EGL_NO_DISPLAY ||
@@ -12378,6 +12518,7 @@ static bool _sapp_tc_egl_init(void) {
 }
 #endif
 
+#if !defined(SOKOL_VULKAN)
 static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
     // Host services have no Window; use the existing idle drawable.
     if (!w) return sapp_tc_gl_activate_idle();
@@ -12529,6 +12670,33 @@ static bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t* w) {
     return true;
 }
 
+#else // SOKOL_VULKAN
+#define _SAPP_TC_VK_IMPL
+#include "util/sokol_app_vulkan.h"
+#undef _SAPP_TC_VK_IMPL
+
+
+static bool _sapp_tc_x11_make_current(_sapp_tc_window_t*) { return true; }
+static void _sapp_tc_x11_swap(_sapp_tc_window_t*) {
+    _sapp_tc_vk_present();
+    if (_sapp_tc.vk.swapchain_valid)
+        _sapp_tc.vk.sync_slot = (_sapp_tc.vk.sync_slot + 1) % _sapp_tc.vk.num_swapchain_images;
+}
+struct _sapp_tc_x11_surface_scope {};
+extern "C" sapp_tc_gl_state sapp_tc_gl_save(void) { return {}; }
+extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
+static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
+static void _sapp_tc_x11_destroy_surface(_sapp_tc_window_t* w) { w->drawable = 0; }
+static bool _sapp_tc_x11_create_surface(_sapp_tc_window_t* w) {
+    w->drawable = w->xwin;
+    return w->drawable != 0;
+}
+static bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t*) {
+    _sapp_tc_vk_recreate_swapchain();
+    return true; // a zero-sized surface is retried at the next acquisition
+}
+#endif // GL or Vulkan native surface operations
+
 /*-- window creation / destruction ---------------------------------------------*/
 static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* title,
         int width_pt, int height_pt, bool borderless) {
@@ -12540,6 +12708,11 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     if (!eglGetConfigAttrib(_sapp_tc.egl_display, _sapp_tc.fbconfig, EGL_NATIVE_VISUAL_ID, &visual_id)) return false;
     XVisualInfo pattern = {};
     pattern.visualid = (VisualID)visual_id;
+    int count = 0;
+    XVisualInfo* vi = XGetVisualInfo(_sapp_tc.display, VisualIDMask, &pattern, &count);
+#elif defined(SOKOL_VULKAN)
+    XVisualInfo pattern = {};
+    pattern.visualid = XVisualIDFromVisual(DefaultVisual(_sapp_tc.display, _sapp_tc.screen));
     int count = 0;
     XVisualInfo* vi = XGetVisualInfo(_sapp_tc.display, VisualIDMask, &pattern, &count);
 #else
@@ -12669,6 +12842,10 @@ static void _sapp_tc_x11_destroy_window_resources(_sapp_tc_window_t* w) {
     XFlush(_sapp_tc.display);
 }
 
+#if defined(SOKOL_VULKAN)
+extern "C" bool sapp_tc_gl_activate_idle(void) { return _sapp_tc.vk.device != 0; }
+extern "C" bool sapp_tc_gl_ensure_context(void) { return _sapp_tc.vk.device != 0; }
+#else
 extern "C" bool sapp_tc_gl_activate_idle(void) {
     if (!_sapp_tc.display || !_sapp_tc.ctx) return false;
     auto* idle = &_sapp_tc.idle;
@@ -12692,6 +12869,8 @@ extern "C" bool sapp_tc_gl_ensure_context(void) {
 #endif
     return _sapp_tc_x11_make_current(nullptr);
 }
+
+#endif // GL context operations
 
 #if defined(SOKOL_GLES3)
 static void _sapp_tc_x11_lock_mouse(bool lock) {
@@ -13132,6 +13311,10 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         if (w->desc.tick_cb) w->desc.tick_cb(handle, w->desc.user_data);
         if (_sapp_tc_lookup(handle) != w) return;
         ++w->frame_count;
+#if defined(SOKOL_VULKAN)
+        // An update may show the window and submit a frame during this hidden tick.
+        if (_sapp_tc.vk.swapchain_acquired) _sapp_tc_x11_swap(w);
+#endif
         w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.
         _sapp_tc_x11_update_pacer();
         _sapp_tc_x11_pace_periodic(w, _sapp_tc_native_hidden(w) ? _sapp_tc.hidden_refresh_period : _sapp_tc.refresh_period);
@@ -13157,6 +13340,13 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         _sapp_tc_x11_swap(w);
         presented = true;
     }
+#if defined(SOKOL_VULKAN)
+    else if (_sapp_tc.vk.swapchain_acquired) {
+        // Complete every acquired frame, including a frame hidden from inside draw.
+        _sapp_tc_x11_swap(w);
+        presented = true;
+    }
+#endif
     w->skip_present = false;
     w->last_tick_presented = presented;
     if (w->swap_interval == 0) {
@@ -13453,9 +13643,13 @@ static bool _sapp_tc_x11_create_main_window(void) {
     _sapp_tc.app.main = w;
     _sapp_tc.app.desc.window_title = w->title;
     if (!_sapp_tc_x11_make_current(w)) return false;
+#if defined(SOKOL_VULKAN)
+    _sapp_tc_vk_init();
+#else
     GLint fb = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
     _sapp_tc.gl_framebuffer = (uint32_t)fb;
+#endif
     _sapp_tc.app.valid = true;
 #if defined(SOKOL_GLES3)
     sapp_set_icon(&d->icon);
@@ -13471,8 +13665,10 @@ void sapp_tc_gl_make_current(sapp_tc_window win) {
     // A hidden window that doesn't draw while hidden never needs its surface;
     // touching an iconified surface can block on a back buffer (Xwayland).
     if (w && _sapp_tc_native_hidden(w) && !w->draw_while_hidden) { sapp_tc_gl_activate_idle(); return; }
+    #if !defined(SOKOL_VULKAN)
     if (w && w->drawable && _sapp_tc.ctx)
         _sapp_tc_x11_make_current(w);
+    #endif
 }
 
 sapp_tc_window sapp_tc_create_window(const sapp_tc_window_desc* desc) {
@@ -13483,7 +13679,11 @@ sapp_tc_window sapp_tc_create_window(const sapp_tc_window_desc* desc) {
             "", "secondary windows require X11 (unsupported on KMS or without an X11 display)");
         return invalid;
     }
+#if defined(SOKOL_VULKAN)
+    return invalid; // [TrussC] Vulkan step 2a owns exactly the launch window.
+#else
     if (!_sapp_tc.app.valid || !_sapp_tc.ctx) return invalid;
+#endif
 
     _sapp_tc_native_desc native = {};
     native.color_format = SAPP_PIXELFORMAT_RGBA8;
@@ -13626,7 +13826,7 @@ void sapp_run(const sapp_desc* desc) {
         (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
 #endif
     _sapp_tc.app.desc = *desc;
-#if defined(SOKOL_GLCORE)
+#if defined(SOKOL_GLCORE) || defined(SOKOL_VULKAN)
     _sapp_tc.window_slots = sizeof(_sapp_tc.windows) / sizeof(_sapp_tc.windows[0]);
 #endif
     sapp_desc* d = &_sapp_tc.app.desc;
@@ -13674,6 +13874,8 @@ void sapp_run(const sapp_desc* desc) {
 
 #if defined(SOKOL_GLES3)
     const bool graphics_ready = _sapp_tc_egl_init();
+#elif defined(SOKOL_VULKAN)
+    const bool graphics_ready = true; // device creation follows the shared X11 window
 #else
     const bool graphics_ready = _sapp_tc_glx_init() && _sapp_tc_glx_choose_fbconfig() && _sapp_tc_glx_create_context();
 #endif
@@ -13701,6 +13903,9 @@ void sapp_run(const sapp_desc* desc) {
             _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
         }
     }
+#if defined(SOKOL_VULKAN)
+    if (_sapp_tc.vk.device) _sapp_tc_vk_discard();
+#endif
     /* Reverse publication-slot order keeps the first drawable until last. */
     for (size_t i = _sapp_tc.window_slots; i-- > 0;) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
@@ -13711,6 +13916,7 @@ void sapp_run(const sapp_desc* desc) {
     _sapp_tc.app.main = NULL;
     _sapp_tc_x11_destroy_window_resources(&_sapp_tc.idle);
     _sapp_tc.app.desc.window_title = NULL;
+#if !defined(SOKOL_VULKAN)
     if (_sapp_tc.ctx) {
 #if defined(SOKOL_GLES3)
         eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -13721,6 +13927,7 @@ void sapp_run(const sapp_desc* desc) {
 #endif
         _sapp_tc.ctx = 0;
     }
+#endif
 #if defined(SOKOL_GLES3)
     if (_sapp_tc.egl_display != EGL_NO_DISPLAY) eglTerminate(_sapp_tc.egl_display);
     _sapp_tc.egl_display = EGL_NO_DISPLAY;
@@ -13990,6 +14197,13 @@ sapp_environment sapp_get_environment(void) {
     env.defaults.color_format = sapp_color_format();
     env.defaults.depth_format = sapp_depth_format();
     env.defaults.sample_count = sapp_sample_count();
+#if defined(SOKOL_VULKAN)
+    env.vulkan.instance = (const void*)_sapp_tc.vk.instance;
+    env.vulkan.physical_device = (const void*)_sapp_tc.vk.physical_device;
+    env.vulkan.device = (const void*)_sapp_tc.vk.device;
+    env.vulkan.queue = (const void*)_sapp_tc.vk.queue;
+    env.vulkan.queue_family_index = _sapp_tc.vk.queue_family_index;
+#endif
     /* GL has no device handle: the shared context is current on this thread */
     return env;
 }
@@ -14002,6 +14216,30 @@ sapp_swapchain sapp_acquire_swapchain(void) {
     memset(&sc, 0, sizeof(sc));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) { sc.invalid = true; return sc; }
+#if defined(SOKOL_VULKAN)
+        _sapp_tc_vk_swapchain_next();
+        sc.invalid = !_sapp_tc.vk.swapchain_acquired;
+        if (sc.invalid) {
+            return sc;
+        }
+        uint32_t img_idx = _sapp_tc.vk.cur_swapchain_image_index;
+        if (_sapp_tc.app.desc.sample_count > 1) {
+            SOKOL_ASSERT(_sapp_tc.vk.msaa.img && _sapp_tc.vk.msaa.view);
+            sc.vulkan.render_image = (const void*) _sapp_tc.vk.msaa.img;
+            sc.vulkan.render_view = (const void*) _sapp_tc.vk.msaa.view;
+            sc.vulkan.resolve_image = (const void*) _sapp_tc.vk.swapchain_images[img_idx];
+            sc.vulkan.resolve_view = (const void*) _sapp_tc.vk.swapchain_views[img_idx];
+        } else {
+            sc.vulkan.render_image = (const void*) _sapp_tc.vk.swapchain_images[img_idx];
+            sc.vulkan.render_view = (const void*) _sapp_tc.vk.swapchain_views[img_idx];
+        }
+        sc.vulkan.depth_stencil_image = (const void*) _sapp_tc.vk.depth.img;
+        sc.vulkan.depth_stencil_view = (const void*) _sapp_tc.vk.depth.view;
+        // NOTE: using the current swapchain image index here is *NOT* a bug! The render_finished_semaphore *must*
+        // be associated with its swapchain image in case the swapchain implementation doesn't return swapchain images in order
+        sc.vulkan.render_finished_semaphore = (const void*) _sapp_tc.vk.sync[img_idx].render_finished_sem;
+        sc.vulkan.present_complete_semaphore = (const void*) _sapp_tc.vk.sync[_sapp_tc.vk.sync_slot].present_complete_sem;
+#endif
     sc.width = sapp_width();
     sc.height = sapp_height();
     sc.sample_count = sapp_sample_count();
@@ -14072,7 +14310,7 @@ void* sapp_userdata(void) { return _sapp_tc.app.desc.user_data; }
 
 } /* extern "C" */
 #else
-#error "sokol_app_tc.h: unknown 3D API selected for Linux, must be SOKOL_GLCORE or SOKOL_GLES3"
+#error "sokol_app_tc.h: unknown 3D API selected for Linux, must be SOKOL_GLCORE, SOKOL_GLES3 or SOKOL_VULKAN"
 #endif /* linux backend select */
 #elif defined(__ANDROID__)
 

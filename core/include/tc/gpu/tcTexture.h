@@ -270,7 +270,7 @@ public:
             std::memcpy(cubemapStaging_.get() + face * faceSize, faces[face], faceSize);
         }
         const sg_range data = {cubemapStaging_.get(), total};
-        internal::uploadImageData(image_, data);
+        internal::uploadImageData(image_, data, 0, &uploadState_);
     }
 
     // Get (and lazily create) an attachment view targeting one (face, mip) of
@@ -385,7 +385,7 @@ public:
             for (int level = 0; level < numMipLevels_; ++level) {
                 if (level) current.halve();
                 const sg_range mip = {current.getDataVoid(), current.getTotalBytes()};
-                internal::uploadImageData(image_, mip, level);
+                internal::uploadImageData(image_, mip, level, &uploadState_);
             }
             if (resume) internal::ensureCurrentPass();
             return;
@@ -401,7 +401,7 @@ public:
 
         const size_t dataSize = (size_t)width * height * computeBytesPerPixel();
         const sg_range pixels = {data, dataSize};
-        internal::uploadImageData(image_, pixels);
+        internal::uploadImageData(image_, pixels, 0, &uploadState_);
     }
 
     // Backward-compatible U8 overload
@@ -549,6 +549,7 @@ private:
 
     // Only Fbo may immediately discard textures it has never published.
     void clearResources_(bool deferred) noexcept {
+        uploadState_ = {};
         cubemapStaging_.reset();
         cubemapStagingSize_ = 0;
         if (retirement_) {
@@ -585,6 +586,7 @@ private:
         if (!retirement_) retirement_.reset(new (std::nothrow) internal::TextureRetirement);
         return bool(retirement_);
     }
+    internal::TransientUploadState uploadState_;
     sg_image image_ = {};
     sg_view view_ = {};              // Texture view (for sampling)
     sg_view attachmentView_ = {};    // Attachment view (for RenderTarget)
@@ -812,6 +814,8 @@ private:
     // used to live here has been folded into that single implementation.
 
     void moveFrom(Texture&& other) {
+        uploadState_ = other.uploadState_;
+        other.uploadState_ = {};
         retirement_ = std::move(other.retirement_);
         image_ = other.image_;
         view_ = other.view_;

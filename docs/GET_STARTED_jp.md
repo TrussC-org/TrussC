@@ -240,7 +240,7 @@ public:
     void windowResized(int width, int height) override;
 
     // ファイルドロップ
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 };
 ```
 

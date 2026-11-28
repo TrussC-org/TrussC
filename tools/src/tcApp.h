@@ -24,10 +24,10 @@ public:
     void cleanup() override;
 
     // Mouse events (for redraw)
-    void mousePressed(Vec2 pos, int button) override;
-    void mouseReleased(Vec2 pos, int button) override;
+    void mousePressed(const MouseEventArgs& e) override;
+    void mouseReleased(const MouseEventArgs& e) override;
     void mouseMoved(Vec2 pos) override;
-    void mouseDragged(Vec2 pos, int button) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
     void mouseScrolled(Vec2 delta) override;
 
     // Key events (for redraw)
@@ -35,7 +35,7 @@ public:
     void keyReleased(int key) override;
 
     // Drag & drop
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 
 private:
     // Settings
@@ -94,7 +94,7 @@ private:
     void scanAddons();
     // Select an addon (by index) and auto-select its transitive dependencies.
     void selectAddonWithDeps(size_t index);
-    void importProject(const string& path);
+    void importProject(const fs::path& path);
     string getTemplatePath();
     void setStatus(const string& msg, bool isError = false);
     void resetToNewProject();

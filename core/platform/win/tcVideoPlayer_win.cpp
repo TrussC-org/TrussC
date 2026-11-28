@@ -810,7 +810,7 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
 
         // Copy pixels to VideoPlayer's buffer
         if (player && !state_->pixels_.empty()) {
-            unsigned char* playerPixels = player->getPixels();
+            unsigned char* playerPixels = internal::VideoPlayerPlatformAccess::getPixelBuffer(*player);
             if (playerPixels) {
                 memcpy(playerPixels, state_->pixels_.data(), size_t(state_->width_) * state_->height_ * 4);
             }
@@ -974,9 +974,9 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 
     // Allocate pixel buffer
     if (width_ > 0 && height_ > 0) {
-        pixels_ = new (std::nothrow) unsigned char[size_t(width_) * height_ * 4];
-        if (!pixels_) { closePlatform(); return false; }
-        std::memset(pixels_, 0, size_t(width_) * height_ * 4);
+        try { pixels_.allocate(width_, height_, 4); }
+        catch (const std::bad_alloc&) { pixels_.clear(); }
+        if (!pixels_.isAllocated()) { closePlatform(); return false; }
     }
 
     return true;

@@ -35,13 +35,15 @@ public:
         return lut[i] * (1.0f - frac) + lut[i + 1] * frac;
     }
 
-    bool onMousePress(tc::Vec2 local, int button) override {
+    bool onMousePress(const tc::MouseEventArgs& e) override {
+        const tc::Vec2 local = e.pos;
         lastLocal_ = local;
         paint(local, local);
         return true;
     }
 
-    bool onMouseDrag(tc::Vec2 local, int button) override {
+    bool onMouseDrag(const tc::MouseDragEventArgs& e) override {
+        const tc::Vec2 local = e.pos;
         paint(lastLocal_, local);
         lastLocal_ = local;
         return true;

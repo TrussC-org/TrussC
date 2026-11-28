@@ -761,6 +761,173 @@ Generated shader headers reach consumers through the `<name>_shaders` INTERFACE 
 
 Shader files using compute features (dispatch or storage buffers) use the suffix `*.compute.glsl` under `src/`, whether they contain `@cs`, `@vs`/`@fs`, or both. CMake rejects storage-buffer declarations in plain `.glsl` files and reports the required `.compute.glsl` filename. They have a separate sokol-shdc target set with `glsl310es` for GLES compute; ordinary `.glsl` graphics sources keep `glsl300es` for WebGL2. Include the resulting `*.compute.glsl.h` and pass its descriptor function to `ComputeShader::load()` or `Shader::load()` for its program. Both 300ES graphics and 310ES compute require a GLES 3.1 or later context when used together.
 
+### Experimental Vulkan build (Linux and Windows)
+
+The experimental Vulkan backend presents one X11 or Win32 window with depth
+and MSAA. Select it explicitly with `TC_GFX_BACKEND=vulkan`; Windows still
+uses D3D11 by default, and Linux keeps its GL/GLES default. Linux validation
+runs on lavapipe/Xvfb; Windows Intel/NVIDIA device verification is required.
+The installed Windows Vulkan SDK must provide headers, the loader library and
+the Khronos validation layer; there is no TrussC API to install these tools.
+The pinned sokol-shdc generates SPIR-V for both platforms.
+
+Configure an existing Linux CMake project:
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND=vulkan
+cmake --build --preset linux
+```
+
+Configure an existing Windows CMake project in Developer PowerShell:
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=vulkan
+cmake --build --preset windows --config Debug
+```
+
+Vulkan ships as beta in v0.9 and does not support GPU-to-CPU readback in this
+version. The following paths intentionally fail with a warning:
+
+- Window capture: `grabScreen`, `saveScreenshot`, and `saveScreenshotAsync`.
+- Fbo readback: `Fbo::readPixels`, `readPixelsFloat`, `copyTo` (Image output),
+  and `readStencil`. There is no `Fbo::toImage` API; use `copyTo` on a supported backend.
+- `StorageBuffer::read` with a nonzero byte count and `readAsync` on allocated
+  storage. Synchronous reads return `false`; asynchronous reads deliver deferred failure.
+- MCP screenshot tools and `tc_analyze_image` with window or Fbo sources.
+  Analysis of CPU-resident Images or files does not require GPU readback.
+- `ScreenRecorder` and `VideoWriter` fed from a window or an Fbo. CPU-supplied
+  `Pixels` do not require GPU readback. `ScreenRecorder` stops at the first
+  readback failure; `VideoWriter` retains the Fbo readback failure.
+
+For capture work, rebuild with the platform's default backend (GL on Linux,
+D3D11 on Windows). There is no runtime backend switch; clear the Vulkan CMake
+override in the existing project:
+
+```bash
+cmake --preset linux -DTC_GFX_BACKEND=
+cmake --build --preset linux
+```
+
+```powershell
+cmake --preset windows -DTC_GFX_BACKEND=
+cmake --build --preset windows --config Debug
+```
+
+Windows Vulkan always uses the client size in pixels. `highDpi(false)` behaves
+as `highDpi(true)` and logs one Warning at window creation; request high DPI
+explicitly when launching your tcApp. Mouse positions and window sizes stay in
+logical points, as with any high-DPI window. X11 already uses window pixels for its framebuffer.
+
+```cpp
+int main() {
+    return tc::runApp<tcApp>(tc::WindowSettings{}.setHighDpi(true));
+}
+```
+
+The Vulkan backend allows one native window. Every additional `createWindow()`
+request returns `nullptr` and logs a Warning. Use the launch window in your tcApp:
+
+```cpp
+void tcApp::setup() {
+    getWindow()->setTitle("Vulkan single window");
+}
+```
+
+Debug Vulkan builds enable the debug-utils extension required by sokol-gfx.
+Enable the installed validation layer when running an app:
+
+```bash
+VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ./bin/emptyExample
+```
+
+The `vulkanSingleWindow` test exercises 24 resizes, WM_DELETE/WM_CLOSE and
+`exitApp()` close, stable sokol resource counts, 4x MSAA and hidden drawing.
+On Windows, enable validation in PowerShell before launching the smoke:
+
+```powershell
+$env:VK_INSTANCE_LAYERS = "VK_LAYER_KHRONOS_validation"
+$env:VK_LOADER_DEBUG = "layer"
+```
+
+For controlled validation, the live runner clears inherited layer settings and
+uses an empty settings file; the Windows device sheet applies the same setup.
+Run the smoke through the validator (add `--probe /path/to/libvulkanHostProbe.so` on Linux):
+
+```bash
+python core/tests/vulkanSingleWindow/validate.py --binary core/tests/vulkanSingleWindow/bin/vulkanSingleWindow --log smoke.log
+```
+
+`core/tests/vulkanSingleWindow/validate.py` checks Linux live runs with its
+LD_PRELOAD probe, or Windows app/host logs with `--windows --check-log
+--exit-code N`. Windows checks recreation logs and validation-clean stencil
+draws; native object counts, injected WSI results and native stencil-reference
+observation are Linux-only. There is no Vulkan pixel readback API yet.
+Real GPUs and display sessions still need verification; multiple Vulkan
+windows have no supported API yet.
+
+### Vulkan per-frame upload budget
+
+On Vulkan, one frame can upload at most **64 MiB** of texture/buffer data from
+CPU to GPU by default, shared with transient draw uploads. Past that limit,
+an edge-triggered warning is logged, the upload is skipped, and the texture keeps
+its previous content. Each target warns once per overflow episode and reports
+"recovered after N skipped uploads" on its next successful upload. Earlier
+successful uploads in that frame remain applied.
+
+One 4K RGBA frame (4096 × 2160, about 32 MiB) fits; two in the same frame exceed
+64 MiB. For larger uploads, raise the limit before `runApp<tcApp>()`:
+
+```cpp
+WindowSettings settings;
+settings.setVulkanUploadSize(128 * 1024 * 1024);
+runApp<tcApp>(settings);
+```
+
+Graphics startup reads this setting once. With two frames in flight, the default
+reserves 128 MiB plus sokol's 4 MiB copy staging in host-visible memory for the
+app's lifetime. Increasing the limit increases that reservation proportionally.
+GL, Metal, and D3D11 have no such per-frame upload limit; the setter has no effect
+on other backends.
+
+ShaderStream, sgl, and ImGui vertex/index draws still use their existing transient
+write path: overflow drops those writes, so drawing can use old or uninitialized
+buffer contents. ImGui font and image texture updates sent in a frame that exceeds
+the limit can stay garbled until ImGui rebuilds its atlas, because ImGui treats
+them as uploaded. Raise `setVulkanUploadSize()` before startup as shown here:
+
+```cpp
+WindowSettings settings;
+settings.setVulkanUploadSize(128 * 1024 * 1024);
+runApp<tcApp>(settings);
+```
+
+### Vulkan per-frame uniform draw budget
+
+Vulkan reserves **64 MiB per frame** for shader uniforms by default, separately
+from its upload staging budget. Each uniform block per draw takes a
+256-byte-aligned slice. For blocks of at most 256 bytes, 64 × 1024 × 1024 / 256
+= **262,144 single-block draws**; a draw with two blocks uses two slices, allowing
+about **131,072 draws**. Larger blocks consume more space, and other rendering
+in the same frame shares this budget.
+
+Vulkan does not grow this buffer. Overflow drops affected draws for that frame
+and logs one Warning when an overflow episode starts. Consecutive overflowing
+frames stay quiet; the first clean frame logs one recovery Notice with the
+number of overflowing frames. Raise the reservation before startup for heavier
+scenes:
+
+```cpp
+RuntimeSettings runtime;
+runtime.reserveUniformBuffer(128 * 1024 * 1024);
+runApp<tcApp>(WindowSettings{}, runtime);
+```
+
+With two frames in flight, the default reserves **128 MiB of host-visible
+memory for the app's lifetime**; the example reserves 256 MiB. This is in
+addition to staging memory. `reserveUniformBuffer()` overrides the default;
+zero or less selects the default. GL and D3D11 have no such uniform ring limit.
+Metal and WebGPU start at 1 MiB per frame and grow on demand.
+
 ### macOS Deployment Target
 
 TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.

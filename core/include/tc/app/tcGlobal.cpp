@@ -125,6 +125,11 @@ thread_local bool shaderStreamBufferAllocation = false;
 
 // Constructed with the graphics device and emptied before sg_shutdown.
 std::unique_ptr<TextureUploadStaging> textureUploadStaging;
+#if defined(SOKOL_VULKAN)
+// Render-thread state, completed at the same boundary as sokol's uniform ring.
+bool uniformFrameOverflow = false;
+uint64_t uniformOverflowFrames = 0;
+#endif
 }
 
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
@@ -372,6 +377,8 @@ struct GraphicsPoolSizes {
 };
 GraphicsPoolSizes requestedGraphicsPools;
 GraphicsPoolSizes activeGraphicsPools;
+constexpr size_t defaultVulkanUploadSize = 64 * 1024 * 1024;
+size_t vulkanUploadSize = defaultVulkanUploadSize;
 // Non-pipeline pools keep their process-lifetime exhaustion gates.
 std::atomic<bool> poolExhaustionReported[5]{};
 internal::PipelinePoolLog pipelinePoolLog;
@@ -411,6 +418,7 @@ uint64_t pipelinePoolExhaustionEvents() noexcept {
 }
 void configureGraphicsPools(const WindowSettings& settings) {
     requestedGraphicsPools = {settings.resourcePoolSize, settings.shaderPoolSize, settings.pipelinePoolSize};
+    vulkanUploadSize = settings.vulkanUploadSize ? settings.vulkanUploadSize : defaultVulkanUploadSize;
 }
 sgl_desc_t sglSetupDescriptor() {
     sgl_desc_t desc = {};
@@ -444,6 +452,17 @@ void setup() {
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
+#if defined(SOKOL_VULKAN)
+    // Bound (representation): sokol stores this byte count in a signed int.
+    if (vulkanUploadSize > static_cast<size_t>(INT_MAX)) {
+        logError("WindowSettings") << "setVulkanUploadSize exceeds INT_MAX; using " << INT_MAX << " bytes";
+        vulkanUploadSize = INT_MAX;
+    }
+    // Bound (Vulkan per-frame uploads): default 64 MiB per frame; with 2 frames in flight
+    // that reserves 128 MiB plus sokol's 4 MiB copy staging in host-visible memory for
+    // the app's lifetime (Vulkan only). setVulkanUploadSize changes the per-frame reserve.
+    sgdesc.vulkan.transient_staging_buffer_size = static_cast<int>(vulkanUploadSize);
+#endif
     // Fixed at sg_setup: slots hold CPU tables (~3.4 KB/shader, ~1.2 KB/pipeline).
     // Resolve the requested counts once for context setup and diagnostics.
     activeGraphicsPools = {
@@ -459,11 +478,20 @@ void setup() {
     sgdesc.sampler_pool_size = activeGraphicsPools.resources;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
     // Metal and WebGPU grow on demand; the reserve skips initial growth.
-    // Start with 1 MiB of app-produced uniforms. Vulkan keeps its fixed reserve.
+    // Start with 1 MiB on Metal/WebGPU. Vulkan keeps its fixed reserve.
     if (internal::gpuUniformBufferReserve > 0) {
         sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
     }
-    #if defined(SOKOL_METAL) || defined(SOKOL_WGPU)
+    #if defined(SOKOL_VULKAN)
+    else {
+        // Bound (Vulkan per-frame uniforms): 64 MiB per frame; with 2 frames in flight
+        // that reserves 128 MiB of host-visible memory for the app's lifetime.
+        // Vulkan does not grow it (Metal/WebGPU do).
+        sgdesc.uniform_buffer_size = 64 * 1024 * 1024;
+    }
+    internal::uniformFrameOverflow = false;
+    internal::uniformOverflowFrames = 0;
+    #elif defined(SOKOL_METAL) || defined(SOKOL_WGPU)
     else {
         sgdesc.uniform_buffer_size = 1024 * 1024;
     }
@@ -559,6 +587,7 @@ void cleanup() {
             sg_destroy_view(fontAtlas.view);
             sg_destroy_image(fontAtlas.texture);
             fontAtlas.atlasInitialized = false;
+            fontAtlas.uploadState = {};
             fontAtlas.rows = 0;
         }
         fontAtlas.initialized = false;
@@ -1300,6 +1329,15 @@ void internal::endGpuFrame() {
         window.sglOverflowReported = false;
     }
 
+#if defined(SOKOL_VULKAN)
+    if (uniformFrameOverflow) {
+        ++uniformOverflowFrames;
+    } else if (uniformOverflowFrames) {
+        logNotice("Vulkan") << "uniform buffer recovered after " << uniformOverflowFrames << " overflowing frames";
+        uniformOverflowFrames = 0;
+    }
+    uniformFrameOverflow = false;
+#endif
     sg_commit();
     if (internal::textureUploadStaging)
         internal::textureUploadStaging->retireIdle(internal::deviceFrameCount());
@@ -2426,9 +2464,47 @@ bool logPoolExhaustion(const char* tag, uint32_t logItem) {
 }
 }
 
+#if defined(SOKOL_VULKAN)
+// Sokol logs synchronously during a transient write on the rendering thread.
+static thread_local bool checkingTransientUpload = false;
+static thread_local bool transientUploadOverflow = false;
+
+bool TransientUploadState::write(const sg_write_buffer_desc& desc, const char* target, int width, int height) {
+    transientUploadOverflow = false;
+    checkingTransientUpload = true;
+    sg_write_buffer_transient(&desc);
+    checkingTransientUpload = false;
+    if (transientUploadOverflow) {
+        if (skipped++ == 0) {
+            auto warning = logWarning(target);
+            warning << "Vulkan per-frame staging limit hit (" << vulkanUploadSize / (1024.0 * 1024.0)
+                    << " MiB per frame, " << vulkanUploadSize
+                    << " bytes); raise it with WindowSettings::setVulkanUploadSize() before runApp(); skipped upload (";
+            if (width > 0) warning << width << " x " << height << ", ";
+            warning << (desc.size ? desc.size : desc.src.data.size) << " bytes)";
+        }
+        return false;
+    }
+    if (skipped) {
+        const auto count = skipped;
+        skipped = 0;
+        logNotice(target) << "recovered after " << count << " skipped uploads";
+    }
+    return true;
+}
+
+#endif
+
 void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
               const char* message, uint32_t lineNr, const char* filename,
               void* userData) {
+#if defined(SOKOL_VULKAN)
+    if (checkingTransientUpload && tag && std::strcmp(tag, "sg") == 0 &&
+        logItem == SG_LOGITEM_VULKAN_STAGING_TRANSIENT_BUFFER_OVERFLOW) {
+        transientUploadOverflow = true;
+        return; // The target emits an edge-triggered warning after the write.
+    }
+#endif
     // A failed stream replacement gets one actionable Shader Error after the
     // allocation returns. Avoid duplicating its immediate backend errors. Fatal
     // errors, warnings and asynchronous errors on other threads keep their path.
@@ -2438,6 +2514,20 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
     const bool noLogger = loggerDestroyed.load();
     if (!noLogger) {
         try {
+#if defined(SOKOL_VULKAN)
+            if (tag && std::strcmp(tag, "sg") == 0 &&
+                logItem == SG_LOGITEM_VULKAN_UNIFORM_BUFFER_OVERFLOW) {
+                const bool first = !uniformFrameOverflow && uniformOverflowFrames == 0;
+                uniformFrameOverflow = true;
+                if (first) {
+                    const int bytes = sg_query_desc().uniform_buffer_size;
+                    logWarning("Vulkan") << "Vulkan per-frame uniform limit hit (" << bytes / (1024.0 * 1024.0)
+                        << " MiB per frame, " << bytes
+                        << " bytes); raise it with RuntimeSettings::reserveUniformBuffer() before runApp(); draws dropped";
+                }
+                return; // Like staging overflow, replace the repeated raw error.
+            }
+#endif
             // [TrussC] This item is emitted only after the V3D pre-resolve flush.
             // Match the tag too: other sokol modules have independent item IDs.
             if (tag && std::strcmp(tag, "sg") == 0 &&
@@ -3920,12 +4010,12 @@ bool suspendForImageUpload() {
 // Persistent image upload through a transient staging buffer. Copies must run
 // outside a pass; suspension flushes recorded prefixes and the existing
 // continuation policy reloads its color/depth contents on resumption.
-void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
+bool uploadImageData(sg_image image, const sg_range& data, int mipLevel, TransientUploadState* state) {
     // Bound (representation): sokol stores buffer sizes and image row/slice
     // pitches in signed int. Reject an unrepresentable staging allocation.
     if (data.size > static_cast<size_t>(INT_MAX - 3)) {
         logError("Texture") << "upload exceeds sokol buffer size representation";
-        return;
+        return false;
     }
     const auto features = sg_query_features();
     // WebGPU's CPU staging path uses QueueWriteTexture, which precedes all
@@ -3948,7 +4038,7 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
         const size_t rows = data.size / static_cast<size_t>(rowBytes);
         if (height > INT_MAX / rowPitch || rows > static_cast<size_t>((INT_MAX - 3) / rowPitch)) {
             logError("Texture") << "padded upload exceeds sokol row/slice representation";
-            return;
+            return false;
         }
         slicePitch = rowPitch * height;
         padded.assign(rows * static_cast<size_t>(rowPitch), 0);
@@ -3962,11 +4052,18 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
     // before sokol finishes the commit, so its write validation frame can differ.
     const auto stagingUpload = pool.acquire(upload.size, gpuStaging, deviceFrameCount());
     const sg_buffer staging = stagingUpload.buffer;
+    bool copied = false;
     if (sg_query_buffer_state(staging) == SG_RESOURCESTATE_VALID) {
         sg_write_buffer_desc write = {};
         write.src.data = upload;
         write.dst.buffer = staging;
-        sg_write_buffer_transient(&write);
+        TransientUploadState standaloneState;
+        const auto imageDesc = sg_query_image_desc(image);
+        if (!(state ? *state : standaloneState).write(write, "Texture", imageDesc.width, imageDesc.height)) {
+            TextureUploadStaging::release(stagingUpload);
+            if (resume) ensureCurrentPass();
+            return false;
+        }
         sg_copy_buffer_to_image_desc copy = {};
         copy.src.buffer = staging;
         copy.src.bytes_per_row = rowPitch;
@@ -3974,9 +4071,11 @@ void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
         copy.dst.image = image;
         copy.dst.mip_level = mipLevel;
         sg_copy_buffer_to_image(&copy);
+        copied = true;
     }
     TextureUploadStaging::release(stagingUpload);
     if (resume) ensureCurrentPass();
+    return copied;
 }
 
 void submitCapturePrefix() {
@@ -4275,6 +4374,9 @@ void ScreenRecorder::State::onAfterFrame() {
     if (source_ == Source::Fbo && fbo_) {
         if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
             writer_.addFrameAt(*fbo_, t);
+#if defined(SOKOL_VULKAN)
+        if (!writer_.result_) stop();
+#endif
         return;
     }
 #if TC_ASYNC_SCREEN_CAPTURE
@@ -4312,6 +4414,9 @@ void ScreenRecorder::State::onAfterFrame() {
     Pixels px;
     if (!captureWindow(px) || !px.isAllocated()) {
         writer_.rejectFrameLayout();
+#if defined(SOKOL_VULKAN)
+        stop();
+#endif
     } else if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight())) {
         writer_.addFrameAt(px, t);
     }

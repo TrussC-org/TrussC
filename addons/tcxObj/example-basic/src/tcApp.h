@@ -13,7 +13,7 @@ public:
     void draw() override;
 
     void keyPressed(int key) override;
-    void filesDropped(const vector<string>& files) override;
+    void filesDropped(const vector<fs::path>& files) override;
 
 private:
     EasyCam cam_;

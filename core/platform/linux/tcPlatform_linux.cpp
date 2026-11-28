@@ -16,6 +16,7 @@
 #include "tcWindowGeometryX11.h"
 #include "sokol_app_tc.h"
 
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
 // OpenGL for screen capture. GL_GLEXT_PROTOTYPES makes glext.h declare the
 // GL 3.0 function prototypes (glBindFramebuffer); without it only the enum
 // tokens are visible. Mesa's libGL exports the symbols, so linking is fine.
@@ -24,6 +25,7 @@
 #include <GL/glext.h>   // glBindFramebuffer / GL_READ_FRAMEBUFFER (per-window capture)
 
 #include "../gl/tcGLReadbackState.h"
+#endif
 
 namespace trussc {
 
@@ -191,6 +193,7 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
     return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
 bool captureWindow(Pixels& outPixels) {
     if (!sg_isvalid()) return false;
     if (internal::hasPublicFboActivation()) return false;
@@ -245,6 +248,14 @@ bool captureWindow(Pixels& outPixels) {
 
     return true;
 }
+
+#else
+bool captureWindow(Pixels&) {
+    if (internal::currentWindowContext().captureWarning.isFirstTime())
+        logWarning("Screenshot") << "captureWindow is not supported on the Vulkan backend yet";
+    return false;
+}
+#endif
 
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);

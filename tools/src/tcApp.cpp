@@ -101,7 +101,7 @@ void tcApp::setup() {
 
     // Auto-import if previous imported path exists
     if (!importedProjectPath.empty() && fs::is_directory(importedProjectPath)) {
-        importProject(importedProjectPath);
+        importProject(utf8ToPath(importedProjectPath));
     }
 
     // プラットフォーム固有のビルド環境を検出（ProjectSettings::detectBuildEnvironment と同じ処理）
@@ -134,11 +134,11 @@ void tcApp::update() {
 }
 
 // Redraw on mouse events
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs& e) {
     redraw();
 }
 
-void tcApp::mouseReleased(Vec2 pos, int button) {
+void tcApp::mouseReleased(const MouseEventArgs& e) {
     redraw();
 }
 
@@ -149,7 +149,7 @@ void tcApp::mouseMoved(Vec2 pos) {
     }
 }
 
-void tcApp::mouseDragged(Vec2 pos, int button) {
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
     redraw();
 }
 
@@ -166,17 +166,17 @@ void tcApp::keyReleased(int key) {
     redraw();
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     if (files.empty()) return;
 
     // Only process the first file/folder
-    const string& path = files[0];
+    const auto& path = files[0];
 
     // Check if it's a directory
     if (fs::is_directory(path)) {
         if (showSetupDialog) {
             // In setup dialog: set as TC_ROOT
-            strncpy(tcRootBuf, path.c_str(), sizeof(tcRootBuf) - 1);
+            strncpy(tcRootBuf, pathToUtf8(path).c_str(), sizeof(tcRootBuf) - 1);
         } else {
             // In main window: import as project
             importProject(path);
@@ -196,7 +196,7 @@ void tcApp::draw() {
     if (!pendingImportPath.empty()) {
         string pathToImport = pendingImportPath;
         pendingImportPath.clear();
-        importProject(pathToImport);
+        importProject(utf8ToPath(pathToImport));
     }
 
     // TC_ROOT setup dialog
@@ -324,7 +324,7 @@ void tcApp::draw() {
         if (ImGui::Button("Browse##import")) {
             auto result = loadDialog("Select existing project", "", "", true);
             if (result.success) {
-                importProject(result.filePath.string());
+                importProject(result.filePath);
             }
             redraw(2);
         }
@@ -760,17 +760,17 @@ void tcApp::setStatus(const string& msg, bool isError) {
     statusIsError = isError;
 }
 
-void tcApp::importProject(const string& path) {
+void tcApp::importProject(const fs::path& path) {
     // Get project name (folder name)
-    projectName = fs::path(path).filename().string();
+    projectName = pathToUtf8(path.filename());
     strncpy(projectNameBuf, projectName.c_str(), sizeof(projectNameBuf) - 1);
 
     // Set save location
-    projectDir = fs::path(path).parent_path().string();
+    projectDir = pathToUtf8(path.parent_path());
     strncpy(projectDirBuf, projectDir.c_str(), sizeof(projectDirBuf) - 1);
 
     // Try to parse TRUSSC_DIR from existing CMakeLists.txt (if it exists)
-    string cmakePath = path + "/CMakeLists.txt";
+    const auto cmakePath = path / "CMakeLists.txt";
     if (fs::exists(cmakePath)) {
         ifstream inFile(cmakePath);
         stringstream buffer;
@@ -794,8 +794,8 @@ void tcApp::importProject(const string& path) {
                 if (trusscDir.find(cmakePrefix) == 0) {
                     // Relative path: resolve against project path
                     string relativePath = trusscDir.substr(cmakePrefix.length());
-                    fs::path trusscPath = fs::weakly_canonical(fs::path(path) / relativePath);
-                    importedTcRoot = trusscPath.parent_path().string();
+                    fs::path trusscPath = fs::weakly_canonical(path / utf8ToPath(relativePath));
+                    importedTcRoot = pathToUtf8(trusscPath.parent_path());
                 } else {
                     // Absolute path: remove /core suffix to get TC_ROOT
                     importedTcRoot = trusscDir;
@@ -805,7 +805,7 @@ void tcApp::importProject(const string& path) {
                 }
 
                 // Update tcRoot if valid path
-                if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/core/cmake/trussc_app.cmake")) {
+                if (!importedTcRoot.empty() && fs::exists(utf8ToPath(importedTcRoot) / "core/cmake/trussc_app.cmake")) {
                     tcRoot = importedTcRoot;
                     strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
                     saveConfig();
@@ -820,7 +820,7 @@ void tcApp::importProject(const string& path) {
         addonSelected[i] = 0;
     }
 
-    string addonsMakePath = path + "/addons.make";
+    const auto addonsMakePath = path / "addons.make";
     if (fs::exists(addonsMakePath)) {
         ifstream addonsFile(addonsMakePath);
         string line;
@@ -865,7 +865,7 @@ void tcApp::importProject(const string& path) {
     // Set import state
     mode = ProjectMode::Import;
     hasImportedProject = true;
-    importedProjectPath = path;
+    importedProjectPath = pathToUtf8(path);
     setStatus("Project imported: " + projectName);
 }
 

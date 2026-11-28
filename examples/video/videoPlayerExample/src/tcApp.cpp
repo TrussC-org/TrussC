@@ -174,7 +174,7 @@ void tcApp::keyPressed(int key) {
 #endif
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     if (!files.empty()) {
         loadVideo(files[0]);
     }

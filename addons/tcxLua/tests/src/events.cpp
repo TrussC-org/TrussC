@@ -33,6 +33,65 @@ int runLuaEventTests(const std::filesystem::path& temp) {
     tcxLua binding;
     auto state = binding.getLuaState();
     auto& lua = *state;
+    MouseEventArgs mousePress;
+    MouseDragEventArgs mouseDrag;
+    mousePress.button = MouseButton::Left;
+    mouseDrag.button = MouseButton::Right;
+    lua["typedMousePress"] = &mousePress;
+    lua["typedMouseDrag"] = &mouseDrag;
+    check("typed mouse fields and getter", script(lua, R"(
+        assert(typedMousePress.button == MouseButton.Left)
+        assert(typedMousePress.button == MOUSE_BUTTON_LEFT)
+        assert(MouseButton.Right == MOUSE_BUTTON_RIGHT)
+        assert(MouseButton.Middle == MOUSE_BUTTON_MIDDLE)
+        assert(typedMouseDrag.button == MouseButton.Right)
+        assert(getMouseButton() == MouseButton.None)
+        typedMousePress.button = MouseButton.Middle
+        assert(typedMousePress.button == MouseButton.Middle)
+    )"));
+    check("Lua writes the typed field", mousePress.button == MouseButton::Middle);
+    Event<TouchEventArgs> touchSignal;
+    lua["touchSignal"] = &touchSignal;
+    check("active touch vector listener", script(lua, R"(
+        touchHandle = touchSignal:listen(function(e)
+            assert(#e.touches == expectedTouchCount)
+            local count = 0
+            for i, point in ipairs(e.touches) do
+                count = count + 1
+                assert(point.id == 100 - i)
+                assert(point.x == 9 + i and point.y == 19 + i)
+            end
+            assert(count == expectedTouchCount)
+            assert(e:x() == (count == 0 and 0 or 10))
+            assert(e:y() == (count == 0 and 0 or 20))
+            assert(e:id() == (count == 0 and 0 or 99))
+            retainedTouch = e
+        end)
+    )"));
+    for (int count : {0, 1, 3, TouchEventArgs::MAX_TOUCHES}) {
+        TouchEventArgs event;
+        for (int i = 0; i < count; ++i)
+            event.touches.push_back({99 - i, 10.0f + i, 20.0f + i});
+        lua["expectedTouchCount"] = count;
+        touchSignal.notify(event);
+        event.touches.clear();
+        check("Lua retains only active touch points", script(lua, R"(
+            assert(#retainedTouch.touches == expectedTouchCount)
+        )"));
+    }
+    check("active touch listener disconnects", script(lua, "touchHandle:disconnect()"));
+    DragDropEventArgs dropped;
+    FilesOpenedEventArgs opened;
+    dropped.files = {std::filesystem::path(u8"日本語😀.png")};
+    opened.files = dropped.files;
+    lua["dropped"] = &dropped;
+    lua["opened"] = &opened;
+    lua["expectedPath"] = pathToUtf8(dropped.files[0]);
+    check("dropped and opened paths remain UTF-8 Lua strings", script(lua, R"(
+        assert(type(dropped.files[1]) == 'string')
+        assert(dropped.files[1] == expectedPath)
+        assert(opened.files[1] == expectedPath)
+    )"));
     Event<void> signal;
     lua["signal"] = &signal;
     lua.set_function("emit", [&] { signal.notify(); });

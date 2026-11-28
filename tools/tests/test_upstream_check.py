@@ -158,8 +158,10 @@ class UpstreamTests(unittest.TestCase):
             self.assertIsNone(check.commit_changes(pinned, cfg))
 
     def test_macros_and_network_failure(self):
-        with patch.object(check, "raw", return_value=b"#define BCDEC_VERSION_MAJOR 0\n#define BCDEC_VERSION_MINOR 99\n"):
-            self.assertEqual(check.check_row(row(name="bcdec", version="0.98"))[0], "newer")
+        cfg = {"file": "library.h", "macros": ["LIB_VERSION_MAJOR", "LIB_VERSION_MINOR"]}
+        with patch.dict(check.UPSTREAM, {"library": cfg}), \
+                patch.object(check, "raw", return_value=b"#define LIB_VERSION_MAJOR 1\n#define LIB_VERSION_MINOR 3\n"):
+            self.assertEqual(check.check_row(row(version="1.2"))[0], "newer")
         with patch.object(check, "ls_remote", side_effect=subprocess.TimeoutExpired("git", 60)):
             self.assertEqual(check.check_row(row())[0], "error")
         with patch.object(check, "ls_remote", return_value=[]):
@@ -207,7 +209,7 @@ class UpstreamTests(unittest.TestCase):
         fixture = ROOT / "tools/tests/fixtures/osv/hit.json"
         response = io.BytesIO(fixture.read_bytes())
         with patch.object(check.urllib.request, "urlopen", return_value=response) as call:
-            results = check.check_osv([current, row("bcdec")])
+            results = check.check_osv([current, row("dr_mp3")])
         call.assert_called_once()
         request = call.call_args.args[0]
         self.assertEqual(request.full_url, check.OSV_URL)
@@ -216,7 +218,7 @@ class UpstreamTests(unittest.TestCase):
         self.assertEqual(call.call_args.kwargs["timeout"], check.OSV_TIMEOUT)
         report = "\n".join(check.osv_report(results))
         self.assertIn("[TEST-OSV-1](https://osv.dev/vulnerability/TEST-OSV-1)", report)
-        self.assertIn("bcdec: not checkable (", report)
+        self.assertIn("dr_mp3: not checkable (", report)
         self.assertNotIn("PRIVATE_FIXTURE_TEXT", report)
 
     def test_osv_no_hit_and_unmatchable(self):

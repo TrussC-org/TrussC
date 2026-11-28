@@ -418,6 +418,7 @@ static void cover_memory() {
     (void)getFboCount();
     (void)getMemoryUsage();
     (void)getNodeCount();
+    (void)getResidentMemoryUsage();
     (void)getSokolMemoryAllocs();
     (void)getSokolMemoryBytes();
     (void)getTextureCount();
@@ -486,9 +487,6 @@ static void cover_other() {
     (void)KEY_TAB;
     (void)KEY_UP;
     (void)Left;
-    (void)MOUSE_BUTTON_LEFT;
-    (void)MOUSE_BUTTON_MIDDLE;
-    (void)MOUSE_BUTTON_RIGHT;
     (void)QUARTER_TAU;
     (void)Right;
     (void)TAU;
@@ -858,7 +856,7 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().enableEvents();
         (void)af::val<App>().exit();
         (void)af::val<App>().filesDropped(af::val<const DragDropEventArgs>());
-        (void)af::val<App>().filesDropped(af::val<const std::vector<std::string>>());
+        (void)af::val<App>().filesDropped(af::val<const std::vector<std::filesystem::path>>());
         (void)af::val<App>().findByInstanceId(af::val<uint64_t>());
         (void)af::val<App>().findHitNode(af::val<const Ray>());
         (void)af::val<App>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
@@ -923,13 +921,10 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().localMatrixChanged;
         (void)af::val<const App>().localToGlobal(af::val<const Vec3>());
         (void)af::val<App>().mouseDragged(af::val<const MouseDragEventArgs>());
-        (void)af::val<App>().mouseDragged(af::val<Vec2>(), af::val<int>());
         (void)af::val<App>().mouseMoved(af::val<const MouseMoveEventArgs>());
         (void)af::val<App>().mouseMoved(af::val<Vec2>());
         (void)af::val<App>().mousePressed(af::val<const MouseEventArgs>());
-        (void)af::val<App>().mousePressed(af::val<Vec2>(), af::val<int>());
         (void)af::val<App>().mouseReleased(af::val<const MouseEventArgs>());
-        (void)af::val<App>().mouseReleased(af::val<Vec2>(), af::val<int>());
         (void)af::val<App>().mouseScrolled(af::val<const ScrollEventArgs>());
         (void)af::val<App>().mouseScrolled(af::val<Vec2>());
         (void)af::val<App>().moveToBack();
@@ -1470,10 +1465,10 @@ struct Cover_EasyCam : af::Scope<EasyCam> {
         (void)af::val<const EasyCam>().getDragModifier();
         (void)af::val<const EasyCam>().getElevation();
         (void)af::val<const EasyCam>().getFov();
-        (void)af::val<const EasyCam>().getOrbitButton();
+        (void)af::val<const EasyCam>().getOrbitMouseButton();
         (void)af::val<const EasyCam>().getOrientation();
         (void)af::val<const EasyCam>().getOrtho();
-        (void)af::val<const EasyCam>().getPanButton();
+        (void)af::val<const EasyCam>().getPanMouseButton();
         (void)af::val<const EasyCam>().getPosition();
         (void)af::val<const EasyCam>().getTarget();
         (void)af::val<const EasyCam>().getUpAxis();
@@ -1492,10 +1487,10 @@ struct Cover_EasyCam : af::Scope<EasyCam> {
         (void)af::val<EasyCam>().setFov(af::val<float>());
         (void)af::val<EasyCam>().setFovDeg(af::val<float>());
         (void)af::val<EasyCam>().setNearClip(af::val<float>());
-        (void)af::val<EasyCam>().setOrbitButton(af::val<int>());
+        (void)af::val<EasyCam>().setOrbitMouseButton(af::val<MouseButton>());
         (void)af::val<EasyCam>().setOrientation(af::val<const Quaternion>());
         (void)af::val<EasyCam>().setOrtho(af::val<bool>());
-        (void)af::val<EasyCam>().setPanButton(af::val<int>());
+        (void)af::val<EasyCam>().setPanMouseButton(af::val<MouseButton>());
         (void)af::val<EasyCam>().setPanSensitivity(af::val<float>());
         (void)af::val<EasyCam>().setSensitivity(af::val<float>());
         (void)af::val<EasyCam>().setTarget(af::val<float>(), af::val<float>(), af::val<float>());
@@ -1975,7 +1970,7 @@ struct Cover_InputEvent : af::Scope<InputEvent> {
     static void run() {
         (void)af::val<InputEvent>().charInput(af::val<uint32_t>(), af::val<InputModifiers>(), af::val<bool>());
         (void)af::val<InputEvent>().charInput(af::val<const CharEventArgs>());
-        (void)af::val<InputEvent>().filesDropped(af::val<std::vector<std::string>>(), af::val<Vec2>());
+        (void)af::val<InputEvent>().filesDropped(af::val<std::vector<std::filesystem::path>>(), af::val<Vec2>());
         (void)af::val<InputEvent>().filesDropped(af::val<const DragDropEventArgs>());
         (void)af::val<InputEvent>().keyPressed(af::val<int>(), af::val<InputModifiers>(), af::val<bool>());
         (void)af::val<InputEvent>().keyPressed(af::val<const KeyEventArgs>());
@@ -4317,7 +4312,6 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
         (void)af::val<TouchEventArgs>().cancelled;
         (void)af::val<const TouchEventArgs>().id();
         (void)af::val<TouchEventArgs>().injected;
-        (void)af::val<TouchEventArgs>().numTouches;
         (void)af::val<TouchEventArgs>().sourceTag;
         (void)af::val<TouchEventArgs>().touches;
         (void)af::val<const TouchEventArgs>().x();
@@ -4722,7 +4716,6 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<const VideoGrabber>().getMinFilter();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
-        (void)af::val<VideoGrabber>().getPixels();
         (void)af::val<const VideoGrabber>().getPixels();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
@@ -4900,7 +4893,6 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<const VideoPlayer>().getPath();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
-        (void)af::val<VideoPlayer>().getPixels();
         (void)af::val<const VideoPlayer>().getPixels();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -5102,7 +5094,6 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<const VideoPlayerBase>().getMagFilter();
         (void)af::val<const VideoPlayerBase>().getMinFilter();
         (void)af::val<const VideoPlayerBase>().getPan();
-        (void)af::val<VideoPlayerBase>().getPixels();
         (void)af::val<const VideoPlayerBase>().getPixels();
         (void)af::val<const VideoPlayerBase>().getPosition();
         (void)af::val<const VideoPlayerBase>().getResyncThreshold();
@@ -5238,6 +5229,7 @@ struct Cover_Window : af::Scope<Window> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getPosition();
 #endif
+        (void)af::val<const Window>().getTargetFps();
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
         (void)af::val<Window>().injectInput(af::val<const InputEvent>(), af::val<const std::string>());
@@ -5293,10 +5285,12 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().setSwapInterval(af::val<int>());
         (void)af::val<WindowSettings>().setTitle(af::val<const std::string>());
         (void)af::val<WindowSettings>().setVisible(af::val<bool>());
+        (void)af::val<WindowSettings>().setVulkanUploadSize(af::val<size_t>());
         (void)af::val<WindowSettings>().shaderPoolSize;
         (void)af::val<WindowSettings>().swapInterval;
         (void)af::val<WindowSettings>().title;
         (void)af::val<WindowSettings>().visible;
+        (void)af::val<WindowSettings>().vulkanUploadSize;
         (void)af::val<WindowSettings>().width;
     }
 };

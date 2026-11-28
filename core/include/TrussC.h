@@ -28,6 +28,7 @@
 #include "sokol/sokol_glue.h"
 #include "sokol/util/sokol_gl_tc.h"
 #include "sokol/util/sokol_memtrack.h"
+#include "tc/gpu/detail/tcTransientUpload.h"
 
 // Standard libraries
 #include <cstdlib>
@@ -259,6 +260,7 @@ namespace internal {
         bool     atlasInitialized = false;
         int      rows = 0;                  // height of current atlas in cell rows
         uint64_t version = 0;               // last bitmapfont registryVersion() baked in
+        TransientUploadState uploadState;
     };
     BitmapFontAtlas& bitmapFontAtlas();
 
@@ -342,7 +344,7 @@ namespace internal {
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1 MiB on Metal/WebGPU
-    // (grows on overflow), 4 MiB on Vulkan (fixed capacity). Set this via
+    // (grows on overflow), 64 MiB on Vulkan (fixed capacity). Set this via
     // RuntimeSettings::reserveUniformBuffer to reserve capacity at startup.
     // Host-only, so a per-module copy is fine (tools/header_state_allowlist.txt):
     // the launcher sets it and setup() (tcGlobal.cpp) reads it.
@@ -1324,45 +1326,41 @@ inline void ensureFontAtlas(int rows) {
     unsigned char* pixels = bitmapfont::generateAtlasPixels(effRows);
     int dataBytes = bitmapfont::ATLAS_WIDTH * height * 4;
 
+    bool uploaded = false;
     if (sizeOk) {
-        // Same dimensions — upload via staging copies. The image identity
-        // (sg_image handle) and view stay the same, so any queued sokol_gl
-        // commands referencing them keep working.
+        // Keep the current image and version until the staging copy succeeds.
         sg_range data = {pixels, static_cast<size_t>(dataBytes)};
-        internal::uploadImageData(atlas.texture, data);
+        uploaded = internal::uploadImageData(atlas.texture, data, 0, &atlas.uploadState);
     } else {
-        // Size changed (or first allocation). Recreate the image. The old
-        // image/view are destroyed deferred — sokol_gl commands recorded
-        // earlier this frame still reference them until the end-of-frame
-        // flush (drained in present() after sg_commit).
-        if (atlas.atlasInitialized) {
-            internal::deferGpuDestroy(atlas.view);
-            internal::deferGpuDestroy(atlas.texture);
-            atlas.atlasInitialized = false;
-        }
-
         sg_image_desc img_desc = {};
         img_desc.width  = bitmapfont::ATLAS_WIDTH;
         img_desc.height = height;
         img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.usage.copy_dst = true;   // persistent staging uploads
-        // (intentionally no initial data — sg expects an update call instead
-        //  for non-immutable images)
-        atlas.texture = sg_make_image(&img_desc);
+        img_desc.usage.copy_dst = true;
+        sg_image texture = sg_make_image(&img_desc);
 
         sg_range data = {pixels, static_cast<size_t>(dataBytes)};
-        internal::uploadImageData(atlas.texture, data);
-
-        sg_view_desc view_desc = {};
-        view_desc.texture.image = atlas.texture;
-        atlas.view = sg_make_view(&view_desc);
-
-        atlas.rows = effRows;
-        atlas.atlasInitialized = true;
+        uploaded = internal::uploadImageData(texture, data, 0, &atlas.uploadState);
+        if (uploaded) {
+            // Publish only a populated image. Earlier queued draws retain
+            // the old handles until the end-of-frame flush.
+            if (atlas.atlasInitialized) {
+                internal::deferGpuDestroy(atlas.view);
+                internal::deferGpuDestroy(atlas.texture);
+            }
+            sg_view_desc view_desc = {};
+            view_desc.texture.image = texture;
+            atlas.view = sg_make_view(&view_desc);
+            atlas.texture = texture;
+            atlas.rows = effRows;
+            atlas.atlasInitialized = true;
+        } else {
+            sg_destroy_image(texture);
+        }
     }
 
     delete[] pixels;
-    atlas.version = curRegistry;
+    if (uploaded) atlas.version = curRegistry;
 }
 
 // Grow the atlas to fit every glyph used by `text`. No-op if already large
@@ -1809,10 +1807,10 @@ inline bool isMousePressed() {
     return ctx && ctx->mousePressed;
 }
 
-// Currently pressed mouse button (-1 = none)
-inline int getMouseButton() {
+// Last pressed mouse button; None when no button or context is active.
+inline MouseButton getMouseButton() {
     auto* ctx = internal::findWindowApiContext();
-    return ctx ? ctx->mouseButton : 0;
+    return ctx && ctx->mouseButton >= 0 ? static_cast<MouseButton>(ctx->mouseButton) : MouseButton::None;
 }
 
 // Is specific key currently pressed
@@ -1860,8 +1858,8 @@ inline std::string getBackendName() {
     }
 }
 
-// Get process memory usage in bytes (resident set size)
-inline size_t getMemoryUsage() {
+// Get process resident memory in bytes (the getMemoryUsage() value before v0.9).
+inline size_t getResidentMemoryUsage() {
 #if defined(__APPLE__)
     mach_task_basic_info info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
@@ -1890,6 +1888,33 @@ inline size_t getMemoryUsage() {
 #else
     return 0;
 #endif
+}
+
+// Get private process memory in bytes; zero means unavailable.
+inline size_t getMemoryUsage() {
+#if defined(__APPLE__)
+    task_vm_info_data_t info{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return info.phys_footprint;
+    }
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc))) {
+        return pmc.PrivateUsage;
+    }
+#elif (defined(__linux__) || defined(__ANDROID__)) && !defined(__EMSCRIPTEN__)
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.compare(0, 8, "RssAnon:") != 0) continue;
+        size_t kb = 0;
+        if (std::sscanf(line.c_str(), "RssAnon: %zu", &kb) == 1) return kb * 1024;
+        break;
+    }
+#endif
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2302,12 +2327,13 @@ constexpr int KEY_F10 = SAPP_KEYCODE_F10;
 constexpr int KEY_F11 = SAPP_KEYCODE_F11;
 constexpr int KEY_F12 = SAPP_KEYCODE_F12;
 
-// Mouse buttons (legacy int constants, for the simple App::mousePressed(Vec2, int)
-// form. Derived from the MouseButton enum so there is a single source of truth;
-// for the MouseEventArgs::button enum itself, use MouseButton::Left etc.)
-constexpr int MOUSE_BUTTON_LEFT = (int)MouseButton::Left;
-constexpr int MOUSE_BUTTON_RIGHT = (int)MouseButton::Right;
-constexpr int MOUSE_BUTTON_MIDDLE = (int)MouseButton::Middle;
+// Deprecated typed mouse button aliases (removed in v1.0).
+[[deprecated("Use MouseButton::Left. Will be removed in v1.0.")]]
+inline constexpr MouseButton MOUSE_BUTTON_LEFT = MouseButton::Left;
+[[deprecated("Use MouseButton::Right. Will be removed in v1.0.")]]
+inline constexpr MouseButton MOUSE_BUTTON_RIGHT = MouseButton::Right;
+[[deprecated("Use MouseButton::Middle. Will be removed in v1.0.")]]
+inline constexpr MouseButton MOUSE_BUTTON_MIDDLE = MouseButton::Middle;
 
 // ---------------------------------------------------------------------------
 // Window settings
@@ -2430,10 +2456,17 @@ struct WindowSettings {
         return *this;
     }
 
+    // Vulkan only; read once before graphics startup. 0 selects 64 MiB.
+    WindowSettings& setVulkanUploadSize(size_t bytes) {
+        vulkanUploadSize = bytes;
+        return *this;
+    }
+
     // Keep settings aggregate-initializable, like the existing public fields.
     int resourcePoolSize = 0;
     int shaderPoolSize = 0;
     int pipelinePoolSize = 0;
+    size_t vulkanUploadSize = 64 * 1024 * 1024;
 
     // Set through setParentWindow(); empty = no parent.
     TC_LUA_SKIP std::weak_ptr<Window> parentWindow = {};
@@ -2443,13 +2476,14 @@ struct WindowSettings {
 struct RuntimeSettings {
     int uniformBufferReserve = 0;  // 0 = backend default; GL/D3D11 ignore it.
 
-    // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
-    // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
+    // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1 MiB on
+    // Metal/WebGPU, 64 MiB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
     // the ring grows (with a notice log) when a frame overflows it,
     // so a sufficient reservation only skips the one-time grow hitch. Every
-    // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
-    // 8k draw calls per frame). Vulkan does NOT auto-grow: there an
-    // overflowing frame is still an error, so size this generously for very
+    // uniform block per draw takes a 256-byte-aligned slice of this ring buffer.
+    // 64 MiB fits 262,144 single-block draws, or 131,072 two-block draws
+    // when each block fits in 256 bytes. Vulkan does NOT auto-grow: overflow
+    // drops draws and logs an edge-triggered warning, so reserve more for
     // high draw-call scenes. GL/D3D11 ignore it — they have no such cap.
     // Metal/WebGPU/Vulkan allocate it x2 (in-flight frames).
     RuntimeSettings& reserveUniformBuffer(int bytes) {
@@ -2676,6 +2710,12 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
 
     // Enable clipboard
     desc.enable_clipboard = true;
+
+#ifdef __EMSCRIPTEN__
+    // An Asyncify sleep inside a frame prevents the RAF loop from being re-armed.
+    // Emscripten's main loop pauses and resumes with Asyncify (FPS 0 uses RAF).
+    desc.html5.use_emsc_set_main_loop = true;
+#endif
 
     // Windows: keep console input and output UTF-8 while the app runs.
     // Takes effect whenever the process has a console (Debug builds,

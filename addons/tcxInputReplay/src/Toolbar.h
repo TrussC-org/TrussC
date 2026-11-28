@@ -72,8 +72,7 @@ public:
         addChild(label_);
         listeners_.push_back(window.events().keyPressed.listen([this](const tc::KeyEventArgs& e) { keyPressed(e); }));
         listeners_.push_back(window.events().filesDropped.listen([this](const tc::DragDropEventArgs& e) {
-            for (const auto& file : e.files) {
-                const auto path = tc::utf8ToPath(file);
+            for (const auto& path : e.files) {
                 if (path.extension() == ".jsonl") { selectedPath_ = tc::getDataPath(path); break; }
             }
         }));

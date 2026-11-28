@@ -27,9 +27,9 @@ void tcApp::setup() {
     // replay->setRecordKey(KEY_F8);
     addChild(replay);
 }
-void tcApp::mousePressed(Vec2 pos, int button) {
+void tcApp::mousePressed(const MouseEventArgs& e) {
     if (replay->isPointerOver()) return;   // the click is for the toolbar
-    dots.push_back(pos);
+    dots.push_back(e.pos);
 }
 ```
 

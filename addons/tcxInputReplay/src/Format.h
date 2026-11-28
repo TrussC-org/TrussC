@@ -127,13 +127,16 @@ inline tc::InputEvent input(const Record& r, Size recorded, Size current, ScaleM
     if (type == "mousePressed") return tc::InputEvent::mousePressed(position(), tc::MouseButton(unsignedValue(j, "button", 2)), mods);
     if (type == "mouseReleased") return tc::InputEvent::mouseReleased(position(), tc::MouseButton(unsignedValue(j, "button", 2)), mods);
     if (type == "mouseScrolled") return tc::InputEvent::mouseScrolled({float(number(j, "scrollX")), float(number(j, "scrollY"))}, mods);
-    if (type == "filesDropped") return tc::InputEvent::filesDropped(j.at("files").get<std::vector<std::string>>(), position());
+    if (type == "filesDropped") {
+        std::vector<std::filesystem::path> paths;
+        for (const auto& path : j.at("files")) paths.push_back(tc::utf8ToPath(path.get<std::string>()));
+        return tc::InputEvent::filesDropped(std::move(paths), position());
+    }
     tc::TouchEventArgs touches;
-    touches.numTouches = int(j.at("touches").size());
+    touches.touches.reserve(j.at("touches").size());
     touches.cancelled = boolean(j, "canceled");
-    for (int i = 0; i < touches.numTouches; ++i) {
-        const auto& t = j.at("touches").at(i);
-        auto& out = touches.touches[i];
+    for (const auto& t : j.at("touches")) {
+        auto& out = touches.touches.emplace_back();
         out.id = signedInt(t, "id");
         const auto p = scalePosition({float(number(t, "x")), float(number(t, "y"))}, recorded, current, mode);
         out.x = p.x;

@@ -1,12 +1,18 @@
 // =============================================================================
 // dragDropExample - Load image files dropped into the window.
 //
-// The drop event supplies file paths; supported images are displayed in the app.
+// Native drops supply file paths for previews; web drops supply only names.
 // =============================================================================
 
 #include "TrussC.h"
 #include "tcApp.h"
 #include <sstream>
+
+#ifdef __EMSCRIPTEN__
+static constexpr bool supportsPreview = false;
+#else
+static constexpr bool supportsPreview = true;
+#endif
 
 // Check if image extension
 static bool isImageExtension(const string& ext) {
@@ -97,10 +103,11 @@ void tcApp::draw() {
 
     // Instructions
     setColor(0.47f);
-    drawBitmapString("Drag and drop files onto this window", 20, h - 25);
+    drawBitmapString(supportsPreview ? "Drag and drop files onto this window"
+                                    : "Drag and drop files (no preview on web: only the name arrives)", 20, h - 25);
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     // Clear list
     droppedFiles.clear();
     hasPreview = false;
@@ -116,7 +123,7 @@ void tcApp::filesDropped(const vector<string>& files) {
         droppedFiles.push_back(df);
 
         // Load for preview if image (last image)
-        if (df.isImage) {
+        if (supportsPreview && df.isImage) {
             if (previewImage.load(path)) {
                 hasPreview = true;
             }

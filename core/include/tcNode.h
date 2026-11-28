@@ -18,6 +18,7 @@
 #include "tc/graphics/tcCameraContext.h"      // CameraContext
 #include "tc/graphics/tcTransform.h"          // pushMatrix / translate / rotate / scale
 #include "tc/app/tcMouseGlobal.h"             // getGlobalMouseX/Y, ...
+#include "tc/utils/tcOnceGate.h"
 #include "tc/utils/tcTime.h"                  // getElapsedTime*
 #include "tc/types/tcMod.h"                   // Mod, EventArgs, Ray, reflection
 #include "tc/utils/tcAsyncScheduler.h"
@@ -764,6 +765,8 @@ public:
     }
 
 private:
+    bool shortNodeMouseBaseCalled_ = false; // Set only by the deprecated base short forms.
+
     // -------------------------------------------------------------------------
     // Mod dispatch helpers
     // -------------------------------------------------------------------------
@@ -808,17 +811,17 @@ private:
     // Fire an input event to this node's own handler AND its mods; consumed if
     // either consumes. Mouse events go to the hit/grabbed node, keys broadcast.
     bool fireMousePress(const MouseEventArgs& e) {
-        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
-        if (!dispatch.current(e.button)) return false;
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), static_cast<int>(e.button));
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
         bool consumed = onMousePress(e);
-        forEachMod([&](Mod* m) { if (dispatch.current(e.button) && m->onMousePress(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current(static_cast<int>(e.button)) && m->onMousePress(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseRelease(const MouseEventArgs& e) {
         internal::MouseDispatchScope dispatch(internal::currentWindowContext());
-        if (!dispatch.current(e.button)) return false;
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
         bool consumed = onMouseRelease(e);
-        forEachMod([&](Mod* m) { if (dispatch.current(e.button) && m->onMouseRelease(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current(static_cast<int>(e.button)) && m->onMouseRelease(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseMove(const MouseMoveEventArgs& e) {
@@ -1141,10 +1144,10 @@ private:
     // it (the same idea as destroy()).
     Ptr dispatchMousePress(const MouseEventArgs& e) {
         auto& ctx = internal::currentWindowContext();
-        internal::MouseDispatchScope dispatch(ctx, e.button);
-        if (!dispatch.current(e.button)) return nullptr;
+        internal::MouseDispatchScope dispatch(ctx, static_cast<int>(e.button));
+        if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
-        if (!dispatch.current(e.button)) return nullptr;
+        if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
 
         // Selection: clicking a node selects it; clicking empty space clears it.
         // (Selection follows the front-most hit, not the consumer — it is a
@@ -1155,11 +1158,11 @@ private:
         for (Ptr current = result.node; current; current = current->getParent()) {
             MouseEventArgs local = current->localizeMouse(e);
             const bool handled = current->fireMousePress(local);
-            if (!dispatch.current(e.button)) return nullptr;
+            if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
             if (handled) {
                 // The consumer grabs the pointer for drag tracking
                 ctx.grabbedNode = current;
-                ctx.grabbedButton = e.button;
+                ctx.grabbedButton = static_cast<int>(e.button);
                 return current;
             }
         }
@@ -1170,17 +1173,17 @@ private:
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
         auto& ctx = internal::currentWindowContext();
         internal::MouseDispatchScope dispatch(ctx);
-        if (!dispatch.current(e.button)) return nullptr;
+        if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
 
         // Send release to the grabbed node. A grab whose node is gone (freed
         // after it was removed) is dropped, and the release falls back to the
         // hit node below, as after destroy().
-        if (ctx.grabbedButton == e.button) {
+        if (ctx.grabbedButton == static_cast<int>(e.button)) {
             Ptr grabbed = ctx.grabbedNode.lock();
             if (grabbed) {
                 MouseEventArgs local = grabbed->localizeMouse(e);
                 const bool handled = grabbed->fireMouseRelease(local);
-                if (!dispatch.current(e.button)) return nullptr;
+                if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
                 ctx.grabbedNode.reset();
                 ctx.grabbedButton = -1;
                 return handled ? grabbed : nullptr;
@@ -1193,12 +1196,12 @@ private:
 
         // Fallback (no grab): bubble from the hit node like press
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
-        if (!dispatch.current(e.button)) return nullptr;
+        if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
 
         for (Ptr current = result.node; current; current = current->getParent()) {
             MouseEventArgs local = current->localizeMouse(e);
             const bool handled = current->fireMouseRelease(local);
-            if (!dispatch.current(e.button)) return nullptr;
+            if (!dispatch.current(static_cast<int>(e.button))) return nullptr;
             if (handled) return current;
         }
 
@@ -1449,18 +1452,93 @@ protected:
     //
     // Each has a rich form (canonical, carries globalPos / delta / modifiers)
     // and a simple form (convenience, oF-style local pos + int button). The
-    // default rich impl forwards to the simple one — override either.
-    virtual bool onMousePress(const MouseEventArgs& e) { return onMousePress(e.pos, e.button); }
-    virtual bool onMousePress(Vec2 local, int button) { (void)local; (void)button; return false; }
+    // default rich impl forwards to the deprecated simple one until v1.0.
+    virtual bool onMousePress(const MouseEventArgs& e) {
+        shortNodeMouseBaseCalled_ = false;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        const bool handled = onMousePress(e.pos, static_cast<int>(e.button));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+        if (!shortNodeMouseBaseCalled_) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("Node") << "onMousePress(Vec2, int) is deprecated and will be removed in v1.0. Use onMousePress(const MouseEventArgs& e) and e.button (MouseButton).";
+        }
+        return handled;
+    }
+    [[deprecated("onMousePress(Vec2, int) is deprecated and will be removed in v1.0. Use onMousePress(const MouseEventArgs& e) and e.button (MouseButton).")]]
+    virtual bool onMousePress(Vec2 local, int button) {
+        (void)local; (void)button;
+        shortNodeMouseBaseCalled_ = true;
+        return false;
+    }
 
-    virtual bool onMouseRelease(const MouseEventArgs& e) { return onMouseRelease(e.pos, e.button); }
-    virtual bool onMouseRelease(Vec2 local, int button) { (void)local; (void)button; return false; }
+    virtual bool onMouseRelease(const MouseEventArgs& e) {
+        shortNodeMouseBaseCalled_ = false;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        const bool handled = onMouseRelease(e.pos, static_cast<int>(e.button));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+        if (!shortNodeMouseBaseCalled_) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("Node") << "onMouseRelease(Vec2, int) is deprecated and will be removed in v1.0. Use onMouseRelease(const MouseEventArgs& e) and e.button (MouseButton).";
+        }
+        return handled;
+    }
+    [[deprecated("onMouseRelease(Vec2, int) is deprecated and will be removed in v1.0. Use onMouseRelease(const MouseEventArgs& e) and e.button (MouseButton).")]]
+    virtual bool onMouseRelease(Vec2 local, int button) {
+        (void)local; (void)button;
+        shortNodeMouseBaseCalled_ = true;
+        return false;
+    }
 
     virtual bool onMouseMove(const MouseMoveEventArgs& e) { return onMouseMove(e.pos); }
     virtual bool onMouseMove(Vec2 local) { (void)local; return false; }
 
-    virtual bool onMouseDrag(const MouseDragEventArgs& e) { return onMouseDrag(e.pos, e.button); }
-    virtual bool onMouseDrag(Vec2 local, int button) { (void)local; (void)button; return false; }
+    virtual bool onMouseDrag(const MouseDragEventArgs& e) {
+        shortNodeMouseBaseCalled_ = false;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        const bool handled = onMouseDrag(e.pos, static_cast<int>(e.button));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+        if (!shortNodeMouseBaseCalled_) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("Node") << "onMouseDrag(Vec2, int) is deprecated and will be removed in v1.0. Use onMouseDrag(const MouseDragEventArgs& e) and e.button (MouseButton).";
+        }
+        return handled;
+    }
+    [[deprecated("onMouseDrag(Vec2, int) is deprecated and will be removed in v1.0. Use onMouseDrag(const MouseDragEventArgs& e) and e.button (MouseButton).")]]
+    virtual bool onMouseDrag(Vec2 local, int button) {
+        (void)local; (void)button;
+        shortNodeMouseBaseCalled_ = true;
+        return false;
+    }
 
     virtual bool onMouseScroll(const ScrollEventArgs& e) { return onMouseScroll(e.pos, e.scroll); }
     virtual bool onMouseScroll(Vec2 local, Vec2 scroll) { (void)local; (void)scroll; return false; }

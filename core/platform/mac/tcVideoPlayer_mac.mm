@@ -761,10 +761,9 @@ bool VideoPlayer::loadPreparedPlatform(const fs::path& path, void* asset) {
     rotationDeg_ = impl.rotationDeg;
 
     // Allocate pixel buffer
-    size_t bufferSize = impl.pixelBufferSize;
-    pixels_ = new (std::nothrow) unsigned char[bufferSize];
-    if (!pixels_) { closePlatform(); return false; }
-    memset(pixels_, 0, bufferSize);
+    try { pixels_.allocate(width_, height_, 4); }
+    catch (const std::bad_alloc&) { pixels_.clear(); }
+    if (!pixels_.isAllocated()) { closePlatform(); return false; }
 
     return true;
 }
@@ -811,7 +810,7 @@ void VideoPlayer::updatePlatform() {
     [impl update];
 
     // Copy pixels from Objective-C side
-    if (impl.hasNewFrame && impl.pixelBuffer && pixels_) {
+    if (impl.hasNewFrame && impl.pixelBuffer && pixels_.isAllocated()) {
         std::lock_guard<std::mutex> lock(mutex_);
         
         size_t numPixels = size_t(width_) * height_;
@@ -827,7 +826,7 @@ void VideoPlayer::updatePlatform() {
             }
             
             unsigned char* src = impl.pixelBuffer;
-            unsigned char* dst = pixels_;
+            unsigned char* dst = pixels_.getData();
             
             for (size_t i = 0; i < numPixels; i++) {
                 dst[i*4 + 0] = lut[src[i*4 + 0]]; // R
@@ -836,7 +835,7 @@ void VideoPlayer::updatePlatform() {
                 dst[i*4 + 3] = src[i*4 + 3];      // A
             }
         } else {
-            memcpy(pixels_, impl.pixelBuffer, numPixels * 4);
+            memcpy(pixels_.getData(), impl.pixelBuffer, numPixels * 4);
         }
     }
 }

@@ -656,7 +656,7 @@ void TCVideoPlayerImpl::presentDueFrames(VideoPlayer* player, double targetPts) 
                 currentPts_ = newest.pts;
             }
         } else {
-            auto* pixels = player->getPixels();
+            auto* pixels = internal::VideoPlayerPlatformAccess::getPixelBuffer(*player);
             if (pixels && newest.pixels.size() == size_t(width_) * height_ * 4) {
                 memcpy(pixels, newest.pixels.data(), newest.pixels.size());
                 hasNewFrame_ = true;
@@ -1577,9 +1577,9 @@ bool VideoPlayer::loadPlatform(const fs::path& path, bool createShader) {
                 nv12ShaderHandle_ = shader;
             }
         } else {
-            pixels_ = new (std::nothrow) unsigned char[size_t(width_) * height_ * 4];
-            if (!pixels_) { closePlatform(); return false; }
-            std::memset(pixels_, 0, size_t(width_) * height_ * 4);
+            try { pixels_.allocate(width_, height_, 4); }
+            catch (const std::bad_alloc&) { pixels_.clear(); }
+            if (!pixels_.isAllocated()) { closePlatform(); return false; }
         }
     }
 

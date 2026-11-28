@@ -116,16 +116,16 @@ void tcApp::keyPressed(int key) {
     }
 }
 
-void tcApp::filesDropped(const vector<string>& files) {
+void tcApp::filesDropped(const vector<fs::path>& files) {
     if (files.empty()) return;
 
-    const string& path = files[0];
+    const auto& path = files[0];
     logNotice("tcApp") << "Loading: " << path;
 
     if (player_.load(path)) {
         player_.play();
-        statusText_ = "Loaded: " + path;
+        statusText_ = "Loaded: " + pathToUtf8(path);
     } else {
-        statusText_ = "Failed to load (not HAP?): " + path;
+        statusText_ = "Failed to load (not HAP?): " + pathToUtf8(path);
     }
 }

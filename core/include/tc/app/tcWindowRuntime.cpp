@@ -79,10 +79,11 @@ bool Window::injectInput(const InputEvent& input, const std::string& tag) {
             else event.modifiers &= ~(SAPP_MODIFIER_LMB << button);
         }
     }
-    event.num_touches = input.touch_.numTouches;
-    // Bound (platform): copy at most MAX_TOUCHES array entries; the gate rejects the unchanged invalid count.
-    for (int i = 0; i < event.num_touches && i < TouchEventArgs::MAX_TOUCHES; ++i) {
-        const auto& touch = input.touch_.touches[i];
+    if (input.touch_.touches.size() > TouchEventArgs::MAX_TOUCHES) return false;
+    event.num_touches = static_cast<int>(input.touch_.touches.size());
+    auto point = input.touch_.touches.begin();
+    for (int i = 0; i < event.num_touches; ++i, ++point) {
+        const auto& touch = *point;
         event.touches[i].identifier = static_cast<uintptr_t>(touch.id);
         event.touches[i].pos_x = touch.x * factor;
         event.touches[i].pos_y = touch.y * factor;
@@ -1227,6 +1228,10 @@ sg_swapchain acquireSwapchain(sapp_tc_window handle, void*) {
     if (!sc.metal.current_drawable) return {};
     sc.metal.depth_stencil_texture = sapp_tc_window_metal_depth_stencil_texture(handle);
     sc.metal.msaa_color_texture = sapp_tc_window_metal_msaa_color_texture(handle);
+#elif defined(SOKOL_VULKAN)
+    // Step 2a has one native window; glue acquires its Vulkan image and semaphores.
+    sc = sglue_swapchain();
+    if (sc.invalid) return sc;
 #elif defined(SOKOL_D3D11)
     sc.d3d11.render_view = sapp_tc_window_d3d11_render_view(handle);
     if (!sc.d3d11.render_view) return {};
@@ -1353,7 +1358,7 @@ bool bindNativeWindow(uint32_t id, void* user) noexcept {
     try {
         auto& window = *static_cast<Window*>(user);
         if (!bindWindow(window, {id}, productionWindowOperations(), nullptr)) return false;
-#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN))
         nativeWindowSetClass(id);
 #endif
         // Preserve native first-tick admission, but admit new hidden windows
@@ -1854,7 +1859,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             args.injected = delivery.injected;
             args.sourceTag = delivery.sourceTag;
             args.pos = args.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
-            args.button = button;
+            args.button = static_cast<MouseButton>(button);
             args.shift = hasModShift;
             args.ctrl = hasModCtrl;
             args.alt = hasModAlt;
@@ -1957,7 +1962,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 args.injected = delivery.injected;
                 args.sourceTag = delivery.sourceTag;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-                args.button = ev->mouse_button;
+                args.button = static_cast<MouseButton>(ev->mouse_button);
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
@@ -2042,16 +2047,19 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 TouchEventArgs touchArgs;
                 touchArgs.injected = delivery.injected;
                 touchArgs.sourceTag = delivery.sourceTag;
-                touchArgs.numTouches = std::max(0, ev->num_touches);
-                // Bound (platform): OS touch events must fit the SDK-sized event array. Overflow clamps the delivered touch count.
-                if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
-                    touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
-                for (int i = 0; i < touchArgs.numTouches; i++) {
-                    touchArgs.touches[i].id = (int)ev->touches[i].identifier;
-                    touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
-                    touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
-                    touchArgs.touches[i].changed = ev->touches[i].changed;
-                    if (delivery.touch) touchArgs.touches[i].pressure = delivery.touch->touches[i].pressure;
+                // Bound (platform): only the backend's valid touch slots are delivered.
+                const int touchCount = std::clamp(ev->num_touches, 0, TouchEventArgs::MAX_TOUCHES);
+                touchArgs.touches.reserve(touchCount);
+                for (int i = 0; i < touchCount; ++i) {
+                    const auto& point = ev->touches[i];
+                    TouchPoint touch;
+                    touch.id = static_cast<int>(point.identifier);
+                    touch.x = point.pos_x * scale;
+                    touch.y = point.pos_y * scale;
+                    touch.changed = point.changed;
+                    if (delivery.touch && i < (int)delivery.touch->touches.size())
+                        touch.pressure = delivery.touch->touches[i].pressure;
+                    touchArgs.touches.push_back(touch);
                 }
 
                 if (phase == internal::TouchPhase::Began) window.events().touchPressed.notify(touchArgs);
@@ -2089,7 +2097,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     margs.injected = delivery.injected;
                     margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.button = MouseButton::Left;
                     margs.syncLegacy();
                     window.events().mousePressed.notify(margs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
@@ -2100,7 +2108,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.delta = margs.globalDelta = delta;
-                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.button = static_cast<int>(MouseButton::Left);
                     MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
                     window.events().mouseDragged.notify(dragArgs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
@@ -2114,7 +2122,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     margs.injected = delivery.injected;
                     margs.sourceTag = delivery.sourceTag;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.button = MouseButton::Left;
                     margs.syncLegacy();
                     window.events().mouseReleased.notify(margs);
                 }
@@ -2134,7 +2142,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     args.y = ctx.mouseY;
                     int numFiles = sapp_get_num_dropped_files();
                     for (int i = 0; i < numFiles; i++) {
-                        args.files.push_back(sapp_get_dropped_file_path(i));
+                        args.files.push_back(utf8ToPath(sapp_get_dropped_file_path(i)));
                     }
                 }
                 window.events().filesDropped.notify(args);

@@ -154,6 +154,7 @@ src/                  # Platform-specific implementations
 ## Documentation
 
 - [GET_STARTED.md](docs/GET_STARTED.md) - Getting started guide
+- [MIGRATION_0.9.md](docs/guides/MIGRATION_0.9.md) - Migrating apps and addons to v0.9.0
 - [Recipes](docs/RECIPES.md) / [日本語](docs/RECIPES_jp.md) - Phone control panel, resident app, and CLI tool
 - [DEBUGGING.md](docs/guides/DEBUGGING.md) - Logs, common symptoms, and crash debugging
 - [API Reference](https://trussc.org/reference/) - Full API reference (web)

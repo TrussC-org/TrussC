@@ -1,3 +1,14 @@
+# Experimental backend override. Empty preserves the platform default.
+set(TC_GFX_BACKEND "" CACHE STRING "Graphics backend override (empty or vulkan; Vulkan is Linux/Windows only)")
+set_property(CACHE TC_GFX_BACKEND PROPERTY STRINGS "" vulkan)
+if(NOT TC_GFX_BACKEND STREQUAL "" AND NOT TC_GFX_BACKEND STREQUAL "vulkan")
+    message(FATAL_ERROR "Unknown TC_GFX_BACKEND='${TC_GFX_BACKEND}'; use empty (platform default) or vulkan")
+endif()
+if(TC_GFX_BACKEND STREQUAL "vulkan" AND
+        ((NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows") OR ANDROID OR EMSCRIPTEN))
+    message(FATAL_ERROR "TC_GFX_BACKEND=vulkan is experimental and supported only on Linux and Windows desktop")
+endif()
+
 # Shared platform/backend selection for the core and standalone native tests.
 if(EMSCRIPTEN)
     # Emscripten sets UNIX=TRUE, so check it before UNIX
@@ -45,4 +56,14 @@ elseif(UNIX)
         set(TC_GRAPHICS_BACKEND "GLCORE")
         message(STATUS "[TrussC] Platform: Linux (OpenGL Core)")
     endif()
+endif()
+
+if(TC_GFX_BACKEND STREQUAL "vulkan")
+    # Pi's default remains GLES3; the explicit Linux override uses the desktop adapter.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(TC_PLATFORM_RASPBIAN FALSE)
+        set(TC_PLATFORM_LINUX TRUE)
+    endif()
+    set(TC_GRAPHICS_BACKEND "VULKAN")
+    message(STATUS "[TrussC] Experimental Vulkan backend (single window)")
 endif()

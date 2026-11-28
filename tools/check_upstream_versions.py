@@ -69,7 +69,6 @@ UPSTREAM = {
     # tcxBox2d is frozen on v2; tcxBox2d3 tracks v3 separately.
     "Box2D": {"series": "2.4"},
     "libcurl": {"tag_prefix": "curl-"},
-    "bcdec": {"file": "bcdec.h", "macros": ["BCDEC_VERSION_MAJOR", "BCDEC_VERSION_MINOR"]},
 }
 
 # OSV's commit query accepts a full git SHA (no repository field). Keep the
@@ -98,7 +97,6 @@ OSV = {
     "dr_wav": {"skip": "bundled component has no recorded standalone git commit"},
     "dr_mp3": {"skip": "bundled component has no recorded standalone git commit"},
     "dr_flac": {"skip": "bundled component has no recorded standalone git commit"},
-    "bcdec": {"skip": "file version only; no recorded git commit or supported package mapping"},
     "LuaJIT": {"skip": "rolling version without a recorded git commit"},
     "Bitmap ASCII glyph data": {"skip": "source version/commit not recorded"},
     "ofxMidi helper ports": {"skip": "source version/commit not recorded"},

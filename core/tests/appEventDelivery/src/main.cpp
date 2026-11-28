@@ -143,7 +143,7 @@ struct DeliveryApp : App {
     void touchMoved(const TouchEventArgs&) override { ++touches; order["touchMoved"] += 'a'; }
     void touchReleased(const TouchEventArgs&) override { ++touches; order["touchReleased"] += 'a'; }
     void windowResized(int, int) override { order["windowResized"] += 'a'; }
-    void filesDropped(const std::vector<std::string>&) override { order["filesDropped"] += 'a'; }
+    void filesDropped(const std::vector<std::filesystem::path>&) override { order["filesDropped"] += 'a'; }
     using App::onMousePress;
     bool onMousePress(Vec2, int) override { return rootConsumes; }
     MouseMoveEventArgs lastMove;
@@ -315,8 +315,8 @@ void cameraChecks() {
     buttonEvent(SAPP_EVENTTYPE_MOUSE_UP, SAPP_MOUSEBUTTON_LEFT);
     buttonEvent(SAPP_EVENTTYPE_MOUSE_UP, SAPP_MOUSEBUTTON_MIDDLE);
     position = cam.getPosition();
-    cam.mouseDragged(95, 25, MOUSE_BUTTON_LEFT);
-    cam.mouseDragged(95, 25, MOUSE_BUTTON_MIDDLE);
+    cam.mouseDragged(95, 25, static_cast<int>(MouseButton::Left));
+    cam.mouseDragged(95, 25, static_cast<int>(MouseButton::Middle));
     check("each owned button release ends its gesture", cam.getPosition() == position);
     feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 20);
     cam.disableMouseInput(); cam.enableMouseInput();

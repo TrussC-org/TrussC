@@ -24,8 +24,7 @@ inline Json touch(const tc::TouchEventArgs& e) {
     auto j = provenance(e);
     j["canceled"] = e.cancelled;
     j["touches"] = Json::array();
-    for (int i = 0; i < e.numTouches; ++i) {
-        const auto& p = e.touches[i];
+    for (const auto& p : e.touches) {
         j["touches"].push_back({{"id", p.id}, {"x", p.x}, {"y", p.y},
             {"pressure", p.pressure}, {"changed", p.changed}});
     }
@@ -49,7 +48,7 @@ public:
         auto button = [this](const char* type, const tc::MouseEventArgs& v) {
             if (v.injected || touchDispatch_) return;
             auto j = detail::pointer(v);
-            j["button"] = v.button;
+            j["button"] = static_cast<int>(v.button); // Keep the JSONL v1 numeric button format.
             write(std::move(j), type);
         };
         listeners_.push_back(e.mousePressed.listen([button](const auto& v) { button("mousePressed", v); }));
@@ -89,7 +88,9 @@ public:
         listeners_.push_back(e.filesDropped.listen([this](const tc::DragDropEventArgs& v) {
             if (!nativeDrop_) return;
             nativeDrop_ = false;
-            write({{"x", v.x}, {"y", v.y}, {"files", v.files}, {"injected", false}, {"tag", ""}}, "filesDropped");
+            auto files = detail::Json::array();
+            for (const auto& path : v.files) files.push_back(tc::pathToUtf8(path));
+            write({{"x", v.x}, {"y", v.y}, {"files", std::move(files)}, {"injected", false}, {"tag", ""}}, "filesDropped");
         }));
     }
     ~Recorder() { stop(); }
@@ -163,7 +164,7 @@ private:
         const auto size = detail::windowSize(window_);
         // pixelPerfect has no public getter; the setting is shared by all windows.
         return {{"type", "header"}, {"version", 1}, {"app", window_.getTitle()}, {"trussc", tc::getVersion()},
-            {"fps", (std::max)(0.0, tc::getFrameRate())}, {"started", std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count())},
+            {"fps", (std::max)(0.0f, tc::getFps())}, {"started", std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count())},
             {"windows", detail::Json::array({{{"key", "main"}, {"width", size.width}, {"height", size.height},
                 {"dpi", context().dpiScale}, {"pixelPerfect", tc::internal::pixelPerfectMode()}}})}};
     }

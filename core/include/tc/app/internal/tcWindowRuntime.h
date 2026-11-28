@@ -185,7 +185,7 @@ void nativeWindowBringToFront(Window&);
 const WindowNativeOperations& productionWindowOperations();
 bool bindWindow(Window& window, sapp_tc_window handle, const WindowNativeOperations& operations, void* user);
 bool bindNativeWindow(uint32_t id, void* window) noexcept;
-#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN))
 void nativeWindowSetClass(uint32_t id);
 #endif
 bool refreshWindowMetadata(Window& window);

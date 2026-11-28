@@ -81,6 +81,7 @@ def macros(configuration):
         'SOKOL_METAL': platform in ('macOS', 'iOS'),
         'SOKOL_D3D11': platform == 'Win32',
         'SOKOL_GLCORE': configuration == 'X11 GLCORE',
+        'SOKOL_VULKAN': False,  # This probe models the existing GL/GLES builds.
         # Web backend selection stays unknown; X11 has two explicit builds.
         'SOKOL_GLES3': (None if platform == 'Web' else
                         configuration == 'X11 GLES3' or platform == 'Android'),

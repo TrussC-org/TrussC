@@ -524,6 +524,10 @@ private:
 
     internal::RenderTarget target_;
     mutable bool warnedActiveSampling_ = false;
+#if defined(SOKOL_VULKAN) || (defined(__EMSCRIPTEN__) && !defined(SOKOL_GLES3))
+    mutable OnceGate readPixelsWarning_{5.0};
+    mutable OnceGate readPixelsFloatWarning_{5.0};
+#endif
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
     mutable std::unique_ptr<Fbo> stencilCache_;

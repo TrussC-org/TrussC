@@ -285,8 +285,8 @@ class BrowserAacApp : public App {
             const auto videoUrl = utf8ToPath(fixtureBase + "/clip.webm");
             check("setup Video URL returns decoded dimensions and name", video.load(videoUrl).ok() &&
                   video.getWidth() == 16 && video.getHeight() == 16 && video.getPath() == videoUrl);
-            check("Video URL first frame is ready at load", video.isReady() && video.getPixels() &&
-                  any_of(video.getPixels(), video.getPixels() + 16 * 16 * 4, [](unsigned char value) { return value != 0; }));
+            check("Video URL first frame is ready at load", video.isReady() && video.getPixels().isAllocated() &&
+                  any_of(video.getPixels().getData(), video.getPixels().getData() + 16 * 16 * 4, [](unsigned char value) { return value != 0; }));
             check("Video URL fetch failure clears name", !video.load(utf8ToPath(fixtureBase + "/missing.webm")) && video.getPath().empty());
 
             if (emscripten_run_script_int("new URLSearchParams(location.search).has('timeout-checks')")) {

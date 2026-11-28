@@ -5,12 +5,14 @@
 // =============================================================================
 // Common interface and state management for VideoPlayer and HapPlayer.
 
+#include "tc/utils/tcAnnotations.h"
 #include <string>
 #include <cmath>
 #include <atomic>
 #include <mutex>
 #include <filesystem>
 #include "tc/gpu/tcHasTexture.h"
+#include "tc/graphics/tcPixels.h"
 #include "tc/events/tcEvent.h"
 #include "tc/utils/tcLoadResult.h"
 #include "tc/utils/tcLog.h"
@@ -237,10 +239,10 @@ public:
     // Pixel access
     // =========================================================================
 
-    // Get raw RGBA pixel data (for encoding workflows)
-    // Returns nullptr if no frame has been decoded yet
-    virtual unsigned char* getPixels() = 0;
-    virtual const unsigned char* getPixels() const = 0;
+    // Read-only RGBA storage: resizing it would make backend writes go out of bounds.
+    // Empty before load/after close; may be empty on any platform during hardware decode.
+    // For pixels, draw into an Fbo and call readPixels(); access does not convert or read back.
+    TC_LUA_SKIP virtual const Pixels& getPixels() const = 0;
 
     // =========================================================================
     // Audio access (for encoding workflows)
@@ -297,6 +299,7 @@ public:
     // HasTexture implementation
     // =========================================================================
 
+    // May be empty on any platform during hardware decode; use draw() into an Fbo.
     Texture& getTexture() override { return texture_; }
     const Texture& getTexture() const override { return texture_; }
 

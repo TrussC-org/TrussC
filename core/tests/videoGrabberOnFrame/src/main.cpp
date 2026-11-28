@@ -24,8 +24,8 @@ void publish(const std::shared_ptr<internal::GrabberSharedState>& state,
     state->notifyFrame(rgba, width, height, stamp);
     {
         std::lock_guard<std::mutex> lock(state->mtx);
-        if (state->pixels && state->width == width && state->height == height) {
-            std::memcpy(state->pixels.get(), rgba, size_t(width) * height * 4);
+        if (state->pixels.isAllocated() && state->width == width && state->height == height) {
+            std::memcpy(state->pixels.getData(), rgba, size_t(width) * height * 4);
             state->dirty.store(true);
         }
     }

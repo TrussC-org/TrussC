@@ -27,6 +27,7 @@ class Window;
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 inline constexpr bool supportsSecondaryWindows();
+double measuredWindowRate(const WindowContext& ctx);
 // One control entry for explicit handles and context-aware globals.
 enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery, BringToFront };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -171,7 +172,10 @@ public:
     // Set separate update/draw rates for this window from anywhere, including
     // another window's callbacks. Rate values follow trussc::setIndependentFps.
     void setIndependentFps(float updateFps, float drawFps);
-    float getFps() const { return ctx_.loop.drawTargetFps; }
+    // Measured update rate, matching global getFps() for this window.
+    float getFps() const { return static_cast<float>(internal::measuredWindowRate(ctx_)); }
+    // Configured draw target, including VSYNC and EVENT_DRIVEN.
+    float getTargetFps() const { return ctx_.loop.drawTargetFps; }
 
     // Keep drawing this window while minimized, covered or hidden (hidden frames
     // come at about the display's base rate). The last global or per-window call
@@ -188,7 +192,7 @@ private:
     // The root is locked once per call, so it stays alive for the whole call
     // even if a handler detaches the window's App (destroyApp()).
     TC_LUA_SKIP void dispatchMousePressToTree(const MouseEventArgs& e) {
-        internal::MouseDispatchScope dispatch(ctx_, e.button, true);
+        internal::MouseDispatchScope dispatch(ctx_, static_cast<int>(e.button), true);
         if (auto root = ctx_.rootNode.lock()) root->dispatchMousePress(e);
     }
     TC_LUA_SKIP void dispatchMouseReleaseToTree(const MouseEventArgs& e) {
@@ -646,7 +650,7 @@ inline void App::setSize(float w, float h) {
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
-#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)))
+#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_VULKAN)))
 namespace internal {
 // Keep the capability check and the single-window stubs under one platform rule.
 inline constexpr bool supportsSecondaryWindows() { return false; }
@@ -925,6 +929,14 @@ inline sapp_tc_window resolveParentWindow(const WindowSettings& settings) {
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
+#if defined(SOKOL_VULKAN)
+    // createWindow is the secondary-window API; the launch window is prepared
+    // separately. Warn for every rejected request, including hidden windows.
+    if (sapp_isvalid() || !internal::openWindows().empty()) {
+        logWarning("Window") << "Vulkan backend supports one window for now; this window was not created";
+        return nullptr;
+    }
+#endif
     if (internal::runtimeEnding()) return nullptr;
     if constexpr (!internal::supportsSecondaryWindows()) {
         logError("Window") << "createWindow(): secondary windows are supported on "

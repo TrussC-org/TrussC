@@ -129,6 +129,8 @@ public:
     Window* getWindow() const;
 
 private:
+    bool shortAppMouseBaseCalled_ = false; // Set only by the deprecated base short forms.
+
     std::atomic<bool> exitRequested_{false}; // Legacy observation only; requestExit routes through exitApp().
     bool unownedSetSizeWarned_ = false;   // setSize() warned once: no shared_ptr owns this App
 
@@ -160,19 +162,88 @@ public:
     // modifiers. See MouseEventArgs / ScrollEventArgs for the coordinate rules.
 
     // Rich form (canonical) + simple form (convenience, oF-style). The default
-    // rich impl forwards to the simple one — override either. The simple form
+    // rich impl forwards to the deprecated simple one until v1.0. The simple form
     // gets screen-space pos (== e.pos at app level) and an int button.
-    virtual void mousePressed(const MouseEventArgs& e) { mousePressed(e.pos, e.button); }
-    virtual void mousePressed(Vec2 pos, int button) { (void)pos; (void)button; }
+    virtual void mousePressed(const MouseEventArgs& e) {
+        shortAppMouseBaseCalled_ = false;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        mousePressed(e.pos, static_cast<int>(e.button));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+        if (!shortAppMouseBaseCalled_) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("App") << "mousePressed(Vec2, int) is deprecated and will be removed in v1.0. Use mousePressed(const MouseEventArgs& e) and e.button (MouseButton).";
+        }
+    }
+    [[deprecated("mousePressed(Vec2, int) is deprecated and will be removed in v1.0. Use mousePressed(const MouseEventArgs& e) and e.button (MouseButton).")]]
+    virtual void mousePressed(Vec2 pos, int button) {
+        (void)pos; (void)button;
+        shortAppMouseBaseCalled_ = true;
+    }
 
-    virtual void mouseReleased(const MouseEventArgs& e) { mouseReleased(e.pos, e.button); }
-    virtual void mouseReleased(Vec2 pos, int button) { (void)pos; (void)button; }
+    virtual void mouseReleased(const MouseEventArgs& e) {
+        shortAppMouseBaseCalled_ = false;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        mouseReleased(e.pos, static_cast<int>(e.button));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+        if (!shortAppMouseBaseCalled_) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("App") << "mouseReleased(Vec2, int) is deprecated and will be removed in v1.0. Use mouseReleased(const MouseEventArgs& e) and e.button (MouseButton).";
+        }
+    }
+    [[deprecated("mouseReleased(Vec2, int) is deprecated and will be removed in v1.0. Use mouseReleased(const MouseEventArgs& e) and e.button (MouseButton).")]]
+    virtual void mouseReleased(Vec2 pos, int button) {
+        (void)pos; (void)button;
+        shortAppMouseBaseCalled_ = true;
+    }
 
     virtual void mouseMoved(const MouseMoveEventArgs& e) { mouseMoved(e.pos); }
     virtual void mouseMoved(Vec2 pos) { (void)pos; }
 
-    virtual void mouseDragged(const MouseDragEventArgs& e) { mouseDragged(e.pos, e.button); }
-    virtual void mouseDragged(Vec2 pos, int button) { (void)pos; (void)button; }
+    virtual void mouseDragged(const MouseDragEventArgs& e) {
+        shortAppMouseBaseCalled_ = false;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        mouseDragged(e.pos, static_cast<int>(e.button));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+        if (!shortAppMouseBaseCalled_) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("App") << "mouseDragged(Vec2, int) is deprecated and will be removed in v1.0. Use mouseDragged(const MouseDragEventArgs& e) and e.button (MouseButton).";
+        }
+    }
+    [[deprecated("mouseDragged(Vec2, int) is deprecated and will be removed in v1.0. Use mouseDragged(const MouseDragEventArgs& e) and e.button (MouseButton).")]]
+    virtual void mouseDragged(Vec2 pos, int button) {
+        (void)pos; (void)button;
+        shortAppMouseBaseCalled_ = true;
+    }
 
     virtual void mouseScrolled(const ScrollEventArgs& e) { mouseScrolled(e.scroll); }
     virtual void mouseScrolled(Vec2 delta) { (void)delta; }
@@ -205,9 +276,12 @@ public:
     // -------------------------------------------------------------------------
 
     virtual void filesDropped(const DragDropEventArgs& e) { filesDropped(e.files); }
-    virtual void filesDropped(const std::vector<std::string>& files) {
+    virtual void filesDropped(const std::vector<std::filesystem::path>& files) {
         (void)files;
     }
+
+    // v0.9: reject old callbacks even when the user's declaration omits override.
+    TC_LUA_SKIP virtual void filesDropped(const std::vector<std::string>&) = delete;
 
     // -------------------------------------------------------------------------
     // Exit event
@@ -318,17 +392,17 @@ public:
     }
 
     bool handleMousePressed(const MouseEventArgs& e) {
-        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
-        if (!dispatch.current(e.button)) return false;
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), static_cast<int>(e.button));
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
         mousePressed(e);
-        return dispatch.current(e.button) && !e.consumed && bool(dispatchMousePress(e));
+        return dispatch.current(static_cast<int>(e.button)) && !e.consumed && bool(dispatchMousePress(e));
     }
 
     bool handleMouseReleased(const MouseEventArgs& e) {
         internal::MouseDispatchScope dispatch(internal::currentWindowContext());
-        if (!dispatch.current(e.button)) return false;
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
         mouseReleased(e);
-        return dispatch.current(e.button) && !e.consumed && bool(dispatchMouseRelease(e));
+        return dispatch.current(static_cast<int>(e.button)) && !e.consumed && bool(dispatchMouseRelease(e));
     }
 
     bool handleMouseMoved(const MouseMoveEventArgs& e) {
@@ -365,20 +439,20 @@ protected:
     using RectNode::onMouseRelease;
     using RectNode::onMouseDrag;
     bool onMousePress(const MouseEventArgs& e) override {
-        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
-        if (!dispatch.current(e.button)) return false;
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), static_cast<int>(e.button));
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
         MouseEventArgs args = e;
         RectNode::mousePressed.notify(args);
-        if (!dispatch.current(e.button)) return false;
-        return onMousePress(e.pos, e.button) || args.consumed;
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
+        return Node::onMousePress(e) || args.consumed;
     }
     bool onMouseRelease(const MouseEventArgs& e) override {
         internal::MouseDispatchScope dispatch(internal::currentWindowContext());
-        if (!dispatch.current(e.button)) return false;
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
         MouseEventArgs args = e;
         RectNode::mouseReleased.notify(args);
-        if (!dispatch.current(e.button)) return false;
-        return onMouseRelease(e.pos, e.button) || args.consumed;
+        if (!dispatch.current(static_cast<int>(e.button))) return false;
+        return Node::onMouseRelease(e) || args.consumed;
     }
     bool onMouseDrag(const MouseDragEventArgs& e) override {
         internal::MouseDispatchScope dispatch(internal::currentWindowContext());
@@ -386,7 +460,7 @@ protected:
         MouseDragEventArgs args = e;
         RectNode::mouseDragged.notify(args);
         if (!dispatch.current()) return false;
-        return onMouseDrag(e.pos, e.button) || args.consumed;
+        return Node::onMouseDrag(e) || args.consumed;
     }
 
 public:

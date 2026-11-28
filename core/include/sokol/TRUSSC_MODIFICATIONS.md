@@ -69,6 +69,84 @@ follow the settled event boundary. R1/R2/R4 rollback slices and iOS BC removal
 are canceled. V3D has only the conditional future removal stated below.
 Each implementation slice must fit 1–2 days; stop if it needs a new engine.
 
+## Linux Vulkan host (step 2a, 2026-11-17)
+
+`sokol_app_tc.h` ports the Vulkan device, Xlib surface, swapchain, depth/MSAA,
+acquire and present code from upstream `93aa187b`. The existing Vulkan gfx
+backend submits rendering; `sapp_get_environment()` and `sapp_acquire_swapchain()`
+provide its real device, images, views and semaphores through sokol glue.
+
+TrussC shares its X11 window/event loop and native metadata with GL. Vulkan
+surface operations replace only the GL context/drawable operations; the Runtime
+uses glue for the launch window. Acquisition is cached within a frame, and
+resize/out-of-date/suboptimal results recreate the swapchain. Shutdown waits
+for the device before releasing swapchain resources. Bound images are destroyed
+before their memory is freed. The step 2b host enables `VK_EXT_debug_utils` in
+debug builds, as required by sokol-gfx's object naming function lookup. Validation
+layers can be enabled with `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`.
+
+Limits: one native window. The production Runtime smoke now links and passes
+16 frames on lavapipe/Xvfb at 1 sample and 4x MSAA, including second-window
+refusal; emptyExample presents for three seconds and exits cleanly on a
+scripted close.
+The Linux X11 adapter and class metadata guards include Vulkan, with matching
+adapter/stub selection. GL readback includes remain selected only for GL/GLES.
+
+Not supported on Vulkan yet (step 4): StorageBuffer readback, byte/float
+Fbo readback and screenshot/window capture, including dependent MCP capture,
+recording and image analysis. No API enables these features yet. StorageBuffer
+retains its synchronous failure and deferred asynchronous failure. Linux Fbo
+readback and window capture warn on every call and return false; recording
+stops at the first readback failure. Default GL/GLES paths are retained.
+
+The existing #1543 guard refuses additional windows. Step 2b adds a test-only
+Vulkan loader observer and extends `vulkanSingleWindow` with 24 resizes, stable
+sokol resource counts, stencil references 1/73/255, and WM_DELETE/exitApp close.
+The observer forwards real calls and can inject acquire OUT_OF_DATE/SUBOPTIMAL
+and present SUBOPTIMAL; it checks native references and object teardown through
+device destruction. Pixel-level stencil verification still needs Vulkan readback
+(step 4). Real GPUs/displays use the step 2b run sheet; multiwindow is deferred.
+
+## Windows Vulkan host (step 3, 2026-11-22)
+
+- `sokol_app_tc.h` shares the step 2a/2b Vulkan lifecycle through the internal
+  `util/sokol_app_vulkan.h` (types, device, depth/MSAA, swapchain, cached
+  acquisition, WSI recreation and teardown). The extracted X11 implementation
+  retains its existing behavior and markers; its extension-property allocation
+  remains malloc/free. The helper retains upstream `93aa187b` lineage/license.
+- The Win32 surface uses upstream's `VkWin32SurfaceCreateInfoKHR`, with the
+  fork's main HWND and module instance. Initialization follows native window
+  publication. The existing Win32 message loop and timer fallback pace Vulkan;
+  D3D11 device/swapchain operations and occlusion probes are excluded. Resize
+  recreates at the admitted tick, and every acquired frame finishes presentation,
+  including a frame hidden inside draw. WM_CLOSE and exitApp keep the Runtime's
+  existing close/cleanup sequence; the main HWND stays alive when Runtime
+  releases its Window backing, with client callbacks detached, until gfx cleanup
+  and Vulkan teardown finish.
+  Vulkan waits idle and releases the swapchain, device, surface and instance
+  after client cleanup, then Win32 destroys the retained HWND. Secondary native windows
+  remain refused, matching X11 and the common Runtime warning.
+- Environment/swapchain glue returns Vulkan device, queue, native images, views
+  and semaphores; metadata is sampled after acquisition. Debug enables
+  `VK_EXT_debug_utils`, as in 2b. Win32 host logs identify the chosen GPU, each
+  completed swapchain creation, non-success acquire/present results and completed
+  teardown for device verification.
+  These logs do not claim native object leak counts; Khronos validation observes
+  device destruction. D3D11 stays the default; the explicit Vulkan build switch
+  selects Windows sources and links the installed Vulkan loader. No gfx change.
+- Win32 Vulkan normalizes `no_high_dpi` to false at window creation, with one
+  Warning when requested. Surface extents and dimension polling then both use
+  client pixels, preventing repeated recreation on scaled displays. X11 already
+  polls framebuffer dimensions in window pixels and needs no normalization.
+- Windows StorageBuffer/Fbo/window readback explicitly returns unsupported,
+  matching Linux; implementations remain deferred to step 4. The Windows smoke
+  posts real WM_CLOSE after resize completion and logs stencil draw references.
+  Its validator checks app live-resource counts and host recreations, with
+  native object counts, WSI injection and native stencil observation Linux-only.
+  A plain-main mock fixture executes the production destroy-window body and
+  sapp_run cleanup sequence to check callback detachment and HWND lifetime.
+  Real Windows Intel/NVIDIA verification uses the step 3 device run sheet.
+
 ## Files and platform scope
 
 | File | Ownership |
@@ -1107,6 +1185,26 @@ once-only `bindgroup_error_logged`. Default direct-mapped cache is 1024 slots
 (`Bound (cache)`): never cache null, release failed native pool slots, evict
 normal collisions without Warning/loss counter. Representation/device arithmetic
 bounds and `Bound` annotations remain with this feature.
+
+### Vulkan unsigned limit clamps (2026-11-24)
+
+**Classification:** KEEP until upstream; upstream fix candidate (upstream issue in progress).
+
+**Code locations:** `_sg_vk_init_caps` (`[TrussC fork] Clamp in unsigned` marker).
+
+**Planned slice:** drop when upstream clamps these limits in unsigned.
+
+`_sg_vk_init_caps` cast five `VkPhysicalDeviceLimits` fields to `int` before
+clamping them with `_sg_min`: maxVertexInputAttributes, maxFragmentOutputAttachments,
+maxPerStageDescriptorSampledImages, maxPerStageDescriptorStorageBuffers and
+maxPerStageDescriptorStorageImages. A driver that reports `UINT32_MAX` (AMD Radeon
+iGPU on Windows reports it for the per-stage descriptor limits) turned into `-1`,
+so every shader failed `SHADERDESC_TOO_MANY_*` and pipelines failed validation.
+The fork clamps in `uint32_t` against the `SG_MAX_*` constant and casts the
+result. Upstream 3833b018 still has the same three per-stage lines. The plain
+image-size casts and the WebGPU init's equivalent lines are left as they are
+(real values are far below `INT_MAX`; rare-case rule).
+Anchor: Windows AMD iGPU run of `core/tests/vulkanSingleWindow` (8 modes).
 
 ### Core integration and pool configuration (not vendor patches)
 

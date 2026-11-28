@@ -2,6 +2,44 @@
 
 HAP video playback addon. Add `tcxHap` to your project's `addons.make`.
 
+## Read Hap frames as pixels
+
+`HapPlayer::getPixels()` is always empty: frames stay BC/DXT-compressed on the
+GPU, and the call performs no CPU decode. For pixels, allocate an Fbo at the
+loaded video's size, draw into it, and call `readPixels()`. With `hap`, `fbo`,
+and `pixels` declared as `HapPlayer`, `Fbo`, and `Pixels` members of `tcApp`:
+
+```cpp
+void tcApp::setup() {
+    if (hap.load("video.mov")) {
+        fbo.allocate(hap.getWidth(), hap.getHeight());
+        hap.play();
+    }
+}
+
+void tcApp::update() {
+    hap.update();
+    if (hap.isFrameNew()) {
+        fbo.begin();
+        hap.draw(0, 0);
+        fbo.end();
+        if (fbo.readPixels(pixels)) {
+            // use pixels
+        }
+    }
+}
+```
+
+`readPixels()` returns false on WebGPU, where synchronous readback is
+unsupported, and when called inside another active Fbo; check its return
+value as above. On WebGPU, use the frame on the GPU:
+
+```cpp
+void tcApp::draw() {
+    fbo.getTexture().draw(0, 0);
+}
+```
+
 ## Hot reload on Windows
 
 Windows hot-reload guests do not link tcxHap's snappy dependency.

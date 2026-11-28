@@ -17,8 +17,8 @@ public:
     void update() override;
     void draw() override;
     void mouseMoved(Vec2 pos) override;
-    void mouseDragged(Vec2 pos, int button) override;
-    void mousePressed(Vec2 pos, int button) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
+    void mousePressed(const MouseEventArgs& e) override;
     shared_ptr<inputreplay::Toolbar> replay;
     deque<Mark> trail;    // mouse path, oldest first
     deque<Mark> clicks;   // click points, oldest first

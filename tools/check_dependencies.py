@@ -93,7 +93,6 @@ VENDORED_VERSIONS = {
         ("addons/tcxImGui/src/imgui/imgui.h", _line(r'define IMGUI_VERSION\s+"([^"]+)"')),
         ("addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md", _line(r"\*\*Upstream base:\*\*.*?tag `v?([^`]+)`")),
     ],
-    "bcdec": [("addons/tcxHap/src/impl/bcdec.h", _macros("BCDEC_VERSION_MAJOR", "BCDEC_VERSION_MINOR"))],
     "Lua": [
         ("addons/tcxLua/lua/include/lua.h", _macros("LUA_VERSION_MAJOR", "LUA_VERSION_MINOR", "LUA_VERSION_RELEASE")),
         ("addons/tcxLua/lua/src/lua.h", _macros("LUA_VERSION_MAJOR", "LUA_VERSION_MINOR", "LUA_VERSION_RELEASE")),
