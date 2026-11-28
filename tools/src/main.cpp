@@ -3588,7 +3588,9 @@ static void printRunHelp() {
          << "Without a terminal on stdin, use --yes or run trusscli update first.\n"
          << "\n"
          << "Options:\n"
-         << "      --web                  Build WASM and start a local HTTP server\n"
+         << "      --web                  Build WASM and serve on localhost\n"
+         << "      --host [addr]          With --web: listen on all interfaces, or only addr\n"
+         << "                            Native runs warn and ignore this option\n"
          << "      --android              Build, adb install, and launch    [not yet implemented]\n"
          << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
          << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
@@ -3613,6 +3615,8 @@ static void printRunHelp() {
 static int cmdRun(const vector<string>& args) {
     string explicitPath;
     string target; // "", "web", "android", "ios"
+    string host = "127.0.0.1";
+    bool hostSpecified = false;
     string session; // display session backend: "labwc", "x11", ""
     string buildType;  // "" = default; else Debug/Release/RelWithDebInfo
     bool mcp = false;
@@ -3639,6 +3643,13 @@ static int cmdRun(const vector<string>& args) {
         else if (a == "-y" || a == "--yes") yes = true;
         else if (a == "--verbose")  verbose = true;
         else if (a == "--web")      target = "web";
+        else if (a == "--host") {
+            hostSpecified = true;
+            host = "0.0.0.0";
+            if (i + 1 < args.size() && !args[i + 1].empty() && args[i + 1][0] != '-') {
+                host = args[++i];
+            }
+        }
         else if (a == "--android")  target = "android";
         else if (a == "--ios")      target = "ios";
         else if (a == "--session") {
@@ -3667,6 +3678,10 @@ static int cmdRun(const vector<string>& args) {
                  << "Run 'trusscli run --help' for usage.\n";
             return 1;
         }
+    }
+
+    if (hostSpecified && target != "web") {
+        cerr << "Warning: --host is only valid with --web; ignoring it.\n";
     }
 
     if (target.empty()) {
@@ -3740,16 +3755,39 @@ static int cmdRun(const vector<string>& args) {
             return 1;
         }
         cout << "Launching web server for " << htmlPath << " ...\n";
+        auto printNetworkUrl = [&](int port) {
+            if (host == "localhost" || isLoopback(host)) return;
+            vector<string> addresses;
+            if (host == "0.0.0.0" || host == "::") {
+                // One line per usable address, like Vite; no guessing which adapter is the LAN.
+                for (const auto& entry : listNetworkInterfaces()) {
+                    if (entry.isUp && !entry.isLoopback && !isLinkLocal(entry.address)
+                        && entry.isIPv4 == (host == "0.0.0.0")) {
+                        addresses.push_back(entry.address);
+                    }
+                }
+            } else {
+                addresses.push_back(host);
+            }
+            for (auto address : addresses) {
+                if (address.find(':') != string::npos) address = "[" + address + "]";
+                cout << "Network: http://" << address << ":" << port << "/"
+                     << projectName << ".html\n";
+            }
+            cout << flush;
+        };
         // Try emrun first (Emscripten's built-in server)
         auto [emrunCode, emrunOut] = captureCommand(TC_WHICH " emrun 2>" TC_DEV_NULL);
         if (emrunCode == 0 && !emrunOut.empty()) {
-            return runInherited({"emrun", htmlPath});
+            printNetworkUrl(6931);
+            return runInherited({"emrun", "--hostname", host, htmlPath});
         }
         // Fallback: python3 http.server
         cout << "emrun not found, using python3 http.server ...\n";
         string binDir = projectPath + "/bin";
         cout << "Open http://localhost:8000/" << projectName << ".html in your browser.\n";
-        return runInherited({"python3", "-m", "http.server", "8000", "-d", binDir});
+        printNetworkUrl(8000);
+        return runInherited({"python3", "-m", "http.server", "8000", "--bind", host, "-d", binDir});
     }
     return 1;
 }
