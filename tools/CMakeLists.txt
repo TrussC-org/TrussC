@@ -81,3 +81,6 @@ elseif(MSVC)
 elseif(UNIX)
     target_link_options(trusscli PRIVATE "$<$<CONFIG:MinSizeRel>:-s>")
 endif()
+
+# v0.9.1 Home/Hub shell, alongside the existing GUI.
+add_subdirectory(gui2)
