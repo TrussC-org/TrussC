@@ -6,6 +6,7 @@
 #include "ProcessCapture.h"
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,18 @@ struct RunInput {
     bool inheritOutput = false; // CLI apps keep their terminal streams.
 };
 
+// Native distribution settings. Front ends supply interactive --init prompts.
+struct DistInput {
+    BuildInput build; // Includes optional confirmFetch and CancelHandle hooks.
+    std::string outputDir;
+    std::string appName, appVersion, appAuthor;
+    bool appAuthorGiven = false;
+    bool release = false, archive = false, noBuild = false, dryRun = false, installer = false;
+    bool inheritOutput = false; // CLI packaging tools keep their terminal streams.
+    bool init = false;
+    std::function<std::string(const std::string&)> prompt; // Empty uses --init defaults.
+};
+
 struct Result {
     bool success = false;
     bool stopped = false;
@@ -86,6 +99,11 @@ Result build(const BuildInput& input, const LogCallback& log = {});
 // Supplying a cancel handle isolates the build and app process groups/jobs.
 // StillRunning on that handle asks the caller to confirm forceStop().
 Result run(const RunInput& input, const LogCallback& log = {}, CancelHandle* cancel = nullptr);
+Result dist(const DistInput& input, const LogCallback& log = {});
+void collectAddonDependencies(const std::string& root, const std::string& name,
+    std::set<std::string>& seen, std::vector<std::string>& out);
+std::vector<std::pair<std::string, std::filesystem::path>> projectAddonDirs(
+    const std::string& project, const std::string& root);
 std::string findCMake();
 std::string detectProjectRoot(const std::string& startPath = "");
 std::string detectTcRoot(const std::filesystem::path& executablePath);
