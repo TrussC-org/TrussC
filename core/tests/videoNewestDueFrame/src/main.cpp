@@ -133,7 +133,7 @@ void workerSeekChecks(const tc::fs::path& path, bool audio = false) {
         check("worker initial paused seek", waitFor(player, [&] { return atFrame(player, 30); }));
         for (int target : {106, 46}) {
             player.setPaused(true);
-            const auto pixel = player.getPixels()[0];
+            const auto pixel = player.getPixels().getData()[0];
             const auto shown = player.getCurrentTime();
             if (target == 106) player.setPosition(target / 300.0f);
             else player.setFrame(target);
@@ -144,7 +144,7 @@ void workerSeekChecks(const tc::fs::path& path, bool audio = false) {
                 preroll |= pts != shown && !atFrame(player, target);
                 return atFrame(player, target);
             }));
-            check("paused seek changes pixels without preroll", !preroll && player.getPixels()[0] != pixel);
+            check("paused seek changes pixels without preroll", !preroll && player.getPixels().getData()[0] != pixel);
             for (int i = 0; i < 20; ++i) {
                 Access::updateHeadlessForTests(player);
                 check("seek stays paused at target", player.isPaused() && atFrame(player, target));
@@ -219,7 +219,7 @@ public:
         check("read uploaded paused seek texture", fbo.readPixels(pixels));
         if (!pixels.isAllocated()) { tc::exitApp(1); return; }
         const int pixel = pixels.getData()[0];
-        check("GPU texture matches decoded seek pixels", std::abs(pixel - int(player.getPixels()[0])) <= 2);
+        check("GPU texture matches decoded seek pixels", std::abs(pixel - int(player.getPixels().getData()[0])) <= 2);
         if (phase++ == 0) {
             firstPixel = pixel;
             player.setFrame(106);
