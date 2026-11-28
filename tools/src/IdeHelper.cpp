@@ -47,22 +47,24 @@ string IdeHelper::openInIde(IdeType ideType, const string& projectPath) {
     }
 #elif defined(_WIN32)
     options.waitForExit = false;
+    // Windows programs such as explorer.exe ignore mixed-slash paths, so pass backslashes.
+    const fs::path nativePath = fs::path(path).make_preferred();
     switch (ideType) {
         case IdeType::VSCode:
         case IdeType::Cursor:
             options.hideConsole = true;
-            projectOps::runProcess({(ideType == IdeType::VSCode) ? "code" : "cursor", path}, {}, options);
+            projectOps::runProcess({(ideType == IdeType::VSCode) ? "code" : "cursor", nativePath.string()}, {}, options);
             return "";
         case IdeType::Xcode:
             return "Xcode is not available on Windows";
         case IdeType::VisualStudio: {
             // Open the solution with its registered application.
-            string vsPath = path + "/vs";
+            fs::path vsPath = nativePath / "vs";
             if (fs::exists(vsPath)) {
                 for (const auto& entry : fs::directory_iterator(vsPath)) {
                     string name = entry.path().filename().string();
                     if (name.find(".sln") != string::npos) {
-                        projectOps::runProcess({"explorer.exe", entry.path().string()}, {}, options);
+                        projectOps::runProcess({"explorer.exe", fs::path(entry.path()).make_preferred().string()}, {}, options);
                         return "";
                     }
                 }
