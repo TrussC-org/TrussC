@@ -13,6 +13,7 @@
 #include "Dist.h"
 #include "TrussCVersion.h"
 #include "AddonVersions.h"
+#include "PromptInput.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -2200,7 +2201,7 @@ static int cmdAddonAddLocal(const vector<string>& args) {
 static bool promptYesNo(const string& msg, bool defaultYes) {
     cout << msg << (defaultYes ? " [Y/n] " : " [y/N] ") << flush;
     string line;
-    if (!getline(cin, line)) return defaultYes;
+    if (!trusscli::readPromptLine(line)) return defaultYes;
     if (line.empty()) return defaultYes;
     char c = static_cast<char>(tolower(static_cast<unsigned char>(line[0])));
     return c == 'y';
@@ -2209,7 +2210,7 @@ static bool promptYesNo(const string& msg, bool defaultYes) {
 static string promptString(const string& msg) {
     cout << msg << flush;
     string line;
-    getline(cin, line);
+    trusscli::readPromptLine(line);
     return line;
 }
 
@@ -3487,7 +3488,7 @@ static auto confirmBuildFetch(bool yes) {
         for (;;) {
             cout << "Download now? [Y/n] " << flush;
             string answer;
-            if (!getline(cin, answer)) return false;
+            if (!trusscli::readPromptLine(answer)) return false;
             if (answer.empty() || answer == "y" || answer == "Y") return true;
             if (answer == "n" || answer == "N") return false;
         }
