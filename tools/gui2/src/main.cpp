@@ -71,7 +71,7 @@ class HubApp : public App {
     projectOps::OperationPhase phase = projectOps::OperationPhase::Building;
     std::optional<std::chrono::steady_clock::time_point> runStarted;
     double runSeconds = 0;
-    bool ranApp = false;
+    bool ranApp = false, forceDeclined = false;
     size_t consoleBytes = 0;
     float consoleScrollY = 0;
     std::mutex logMutex;
@@ -166,6 +166,7 @@ class HubApp : public App {
     }
     void start(std::function<projectOps::Result()> action) {
         failed = false;
+        forceDeclined = false;
         showDetails = true;
         monitor = true;
         home = false;
@@ -249,8 +250,9 @@ class HubApp : public App {
             ImGui::BeginDisabled(busy());
             if (button("project.change")) home = true;
             ImGui::EndDisabled();
+            if (busy() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", text("project.busy"));
         }
-        if (busy()) wrapped(text("project.busy"));
         if (!home && !monitor) caption("project.drop");
         ImGui::Separator();
         caption("project.current");
@@ -362,13 +364,11 @@ class HubApp : public App {
         if (wide) ImGui::SameLine(0, 12);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 3));
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.88f);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         if (wide) ImGui::SetCursorPosY(runY + (runHeight - ImGui::GetFrameHeight()) * 0.5f);
         if (ImGui::Checkbox(text("hub.mcp"), &mcp)) {
             preferences["monitor"][project.path] = mcp;
             savePreferences();
         }
-        ImGui::PopStyleColor();
         ImGui::PopFont();
         ImGui::PopStyleVar();
         if (button("hub.edit")) {
@@ -400,7 +400,7 @@ class HubApp : public App {
         const bool resumed = ImGui::Checkbox(text("monitor.follow"), &followLatest) && followLatest;
         ImGui::SameLine();
         if (button("common.copy_details")) ImGui::SetClipboardText(logText().c_str());
-        ImGui::BeginChild("##console", ImVec2(0, 0), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("##console", ImVec2(0, (std::max)(160.0f, ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_Borders);
         auto output = logText();
         if (output.empty()) label("common.no_operations"); else wrapped(output);
         const float scrollY = ImGui::GetScrollY();
@@ -427,17 +427,67 @@ class HubApp : public App {
         caption("advanced.update_hint");
     }
     void monitorView() {
+        BuildOutputFilter::Progress progress;
+        projectOps::OperationPhase current;
+        std::optional<std::chrono::steady_clock::time_point> started;
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            progress = buildProgress;
+            current = phase;
+            started = runStarted;
+        }
+        // Keep the console visible while long diagnostics/recovery controls scroll.
+        const float consoleHeight = 160 + ImGui::GetTextLineHeightWithSpacing()
+            + ImGui::GetFrameHeightWithSpacing() + 2 * ImGui::GetStyle().ItemSpacing.y;
+        const float summaryHeight = (std::max)(100.0f, ImGui::GetContentRegionAvail().y - consoleHeight);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(ImGui::GetContentRegionAvail().x, summaryHeight));
+        ImGui::BeginChild("##operation-summary", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
+        const ImVec4 failureRed(0.78f, 0.22f, 0.22f, 1);
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
+        if (failed) ImGui::PushStyleColor(ImGuiCol_Text, failureRed);
         wrapped(status);
+        if (failed) ImGui::PopStyleColor();
+        ImGui::PopFont();
+        if (operation.valid() && cancel && current == projectOps::OperationPhase::Building && !cancel->stopRequested()) {
+            if (progress.totalFiles > 0) {
+                std::string counts = text("monitor.progress");
+                counts.replace(counts.find("{compiledFiles}"), 15, std::to_string(progress.compiledFiles));
+                counts.replace(counts.find("{totalFiles}"), 12, std::to_string(progress.totalFiles));
+                ImGui::ProgressBar((std::min)(1.0f, float(progress.compiledFiles) / float(progress.totalFiles)), ImVec2(-1, 0), counts.c_str());
+            } else {
+                // Unknown totals stay indeterminate; never infer counts from screen dots.
+                const char* frames[] = {"|", "/", "-", "\\"};
+                ImGui::TextUnformatted(frames[int(ImGui::GetTime() * 5) % 4]);
+            }
+        }
         if (operation.valid()) {
-            ImGui::BeginDisabled(!cancel || cancel->stopRequested());
-            if (button("monitor.stop")) stop();
-            ImGui::EndDisabled();
+            if (current == projectOps::OperationPhase::Running && started && cancel && !cancel->stopRequested()) {
+                std::string elapsed = text("monitor.running_time");
+                elapsed.replace(elapsed.find("{elapsed}"), 9,
+                    formatElapsed(std::chrono::duration<double>(std::chrono::steady_clock::now() - *started).count()));
+                wrapped(elapsed);
+                wrapped(text("monitor.app"));
+            }
+            if (!forceDeclined) {
+                ImGui::BeginDisabled(!cancel || cancel->stopRequested());
+                if (button("monitor.stop")) stop();
+                ImGui::EndDisabled();
+            }
             if (!cancel) wrapped(text("update.no_cancel"));
             if (cancel && cancel->state() == projectOps::ProcessState::StillRunning) {
-                wrapped(text("monitor.force_prompt"));
+                if (!forceDeclined) {
+                    wrapped(text("monitor.force_prompt"));
+                    if (button("monitor.wait")) {
+                        forceDeclined = true;
+                        status = text("monitor.waiting");
+                    }
+                    ImGui::SameLine();
+                }
+                ImGui::PushStyleColor(ImGuiCol_Button, failureRed);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.88f, 0.28f, 0.28f, 1));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.63f, 0.15f, 0.15f, 1));
                 if (button("monitor.force")) cancel->forceStop();
-                ImGui::SameLine();
-                if (button("monitor.wait")) status = text("monitor.waiting");
+                ImGui::PopStyleColor(3);
             }
         } else {
             if (ranApp) {
@@ -450,31 +500,21 @@ class HubApp : public App {
                 home = project.path.empty();
             }
         }
-        BuildOutputFilter::Progress progress;
-        projectOps::OperationPhase current;
-        {
-            std::lock_guard<std::mutex> lock(logMutex);
-            progress = buildProgress;
-            current = phase;
-        }
-        if (operation.valid() && cancel && current == projectOps::OperationPhase::Building && !cancel->stopRequested()) {
-            if (progress.totalFiles > 0) {
-                const auto counts = std::to_string(progress.compiledFiles) + " / " + std::to_string(progress.totalFiles);
-                ImGui::ProgressBar((std::min)(1.0f, float(progress.compiledFiles) / float(progress.totalFiles)), ImVec2(-1, 0), counts.c_str());
-            } else {
-                // Unknown totals stay indeterminate; never infer counts from screen dots.
-                const char* frames[] = {"|", "/", "-", "\\"};
-                ImGui::TextUnformatted(frames[int(ImGui::GetTime() * 5) % 4]);
-            }
-        }
         if (failed) {
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.45f, 0.08f, 0.08f, 1));
-            ImGui::BeginChild("##failure", ImVec2(0, 90), ImGuiChildFlags_Borders);
-            wrapped(progress.firstError.empty() ? failureMessage : progress.firstError);
+            const auto& diagnostic = progress.firstError.empty() ? failureMessage : progress.firstError;
+            const int lines = wrapped(diagnostic, true, ImGui::GetContentRegionAvail().x - 24);
+            const float height = (std::min)(5, (std::max)(1, lines)) * ImGui::GetTextLineHeightWithSpacing()
+                - ImGui::GetStyle().ItemSpacing.y + 14;
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 7));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, failureRed);
+            ImGui::BeginChild("##failure", ImVec2(0, height), ImGuiChildFlags_Borders);
+            wrapped(diagnostic);
             ImGui::EndChild();
             ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
             recovery();
         }
+        ImGui::EndChild();
         console();
     }
     std::string failureMessage;
@@ -506,6 +546,7 @@ public:
         style.Colors[ImGuiCol_Button] = ImVec4(0.20f, 0.21f, 0.23f, 1);
         style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.29f, 0.31f, 1);
         style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.16f, 0.17f, 0.19f, 1);
+        style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.16f, 0.40f, 0.60f, 1);
         style.Colors[ImGuiCol_Border] = ImVec4(0.50f, 0.52f, 0.55f, 0.35f);
         try {
             std::ifstream file(projectHub::preferencesPath());
