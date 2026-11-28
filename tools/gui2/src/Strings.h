@@ -1,0 +1,65 @@
+#pragma once
+#include <map>
+#include <string>
+
+namespace gui2 {
+// English table keyed for future locale selection. User data is never translated.
+inline const char* text(const std::string& id) {
+    static const std::map<std::string, std::string> strings = {
+        {"app.title", "TrussC"},
+        {"nav.home", "Home"},
+        {"nav.hub", "Hub"},
+        {"project.current", "Current project"},
+        {"project.none", "No project selected"},
+        {"project.change", "Choose another project"},
+        {"project.copy_path", "Copy path"},
+        {"project.summary", "TrussC {version} ({source}) - {count} addons"},
+        {"project.drop", "Drop a project folder here to open it"},
+        {"project.busy", "Stop the current operation before switching projects"},
+        {"home.open", "Open project..."},
+        {"home.new", "New project..."},
+        {"home.recents", "Recent projects"},
+        {"home.empty", "No recent projects yet. Open a folder or create your first project."},
+        {"home.missing", "Folder not found"},
+        {"home.choose_root", "Choose TrussC folder"},
+        {"home.root_missing", "TrussC not found. Choose your TrussC folder to create or build projects."},
+        {"home.creating", "Creating project..."},
+        {"home.default_name", "MyProject"},
+        {"home.framework_folder", "Documents/trussc-projects is the TrussC framework folder. Choose where to keep your projects."},
+        {"hub.run", "Run"},
+        {"hub.build", "Build"},
+        {"hub.shift", "Shift: Build only"},
+        {"hub.mcp", "MCP monitor"},
+        {"hub.edit", "Edit code"},
+        {"hub.open_folder", "Open Folder"},
+        {"hub.edit_hint", "Edit src/tcApp.cpp in any editor, then Run"},
+        {"hub.ready", "Ready to build"},
+        {"hub.app_hint", "Your app opens in its own window. Stop returns here."},
+        {"hub.built", "Built; app has not been started"},
+        {"common.details", "Details"},
+        {"common.copy_details", "Copy details"},
+        {"common.no_operations", "No operations yet"},
+        {"common.recovery", "Something wrong? Try Update, then Run."},
+        {"common.update", "Update"},
+        {"source.pinned", "pinned"},
+        {"advanced.override", "Local override"},
+        {"advanced.update_hint", "Update may download sources and regenerate project files."},
+        {"advanced.cache", "Cache availability"},
+        {"advanced.missing", "missing"},
+        {"advanced.fallback", "Detected local fallback"},
+        {"update.no_cancel", "This operation cannot be canceled yet"},
+        {"monitor.stopped", "Stopped"},
+        {"update.status", "Updating..."},
+        {"monitor.console", "Console"},
+        {"monitor.building", "Building..."},
+        {"monitor.stopping", "Stopping..."},
+        {"monitor.finished", "Finished"},
+        {"monitor.failed", "Failed"},
+        {"monitor.stop", "Stop"},
+        {"monitor.force_prompt", "Not exiting. Force quit?"},
+        {"monitor.force", "Force quit"},
+        {"monitor.no_sample", "unavailable"},
+    };
+    return strings.at(id).c_str();
+}
+}

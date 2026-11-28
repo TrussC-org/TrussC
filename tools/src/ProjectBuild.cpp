@@ -1,4 +1,5 @@
 #include "ProjectOps.h"
+#include "PresetRoot.h"
 #include "BuildSetup.h"
 #include "BuildPreferences.h"
 #include "BuildOutputFilter.h"
@@ -19,15 +20,6 @@ namespace fs = std::filesystem;
 namespace projectOps {
 // Shared parser implemented in ProjectOps.cpp.
 vector<string> readProjectAddons(const string& projectPath);
-#ifdef __APPLE__
-static constexpr const char* kNativePreset = "macos";
-#elif defined(_WIN32)
-static constexpr const char* kNativePreset = "windows";
-#elif defined(__linux__)
-static constexpr const char* kNativePreset = "linux";
-#else
-static constexpr const char* kNativePreset = nullptr;
-#endif
 
 string findCMake() {
 #ifdef __APPLE__
@@ -135,27 +127,6 @@ protected:
 private:
     function<void(const string&)> callback_;
 };
-
-// Resolve the concrete preset core without changing project metadata.
-static string presetAddonRoot(const string& projectPath, const string& targetPreset,
-                              string root, const Json& data) {
-    if (root.empty() && data.is_object() && data.contains("configurePresets")) {
-        for (const auto& preset : data["configurePresets"]) {
-            if (preset.value("name", "") != targetPreset || !preset.contains("cacheVariables")) continue;
-            auto core = preset["cacheVariables"].value("TRUSSC_DIR", Json());
-            if (core.is_object()) core = core.value("value", Json());
-            if (!core.is_string()) continue;
-            string path = core.get<string>();
-            const string macro = "${sourceDir}";
-            if (path.compare(0, macro.size(), macro) == 0) path.replace(0, macro.size(), fs::absolute(projectPath).generic_string());
-            if (path.find('$') != string::npos) continue;
-            fs::path corePath(path);
-            if (corePath.is_relative()) corePath = fs::path(projectPath) / corePath;
-            root = fs::absolute(corePath).lexically_normal().parent_path().string();
-        }
-    }
-    return root;
-}
 
 static int executeBuild(const BuildInput& input, Result& result, const LogCallback& log,
                         ostream& out, ostream& err) {
