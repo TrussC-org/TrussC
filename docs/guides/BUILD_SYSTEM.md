@@ -166,6 +166,13 @@ trusscli run --web --host 127.0.0.1
 The server uses emrun when available, otherwise Python's HTTP server. A `Network:`
 URL is printed for a non-loopback host when an address can be determined.
 
+emrun listens on IPv4 only, so with emrun installed an IPv6 `--host` value such as
+`::1` fails to start. Pass an IPv4 address instead:
+
+```bash
+trusscli run --web --host 192.168.1.20
+```
+
 ### Build a cloned project and download missing sources
 
 `trusscli build` checks the selected TrussC version and external addon refs before
