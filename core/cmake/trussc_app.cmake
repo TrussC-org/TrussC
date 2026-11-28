@@ -205,7 +205,8 @@ macro(trussc_app)
     # TRUSSC_DIR may be relative or use backslashes; the generated check below
     # runs from the build directory, so give it an absolute path.
     string(REPLACE "\\" "/" _TC_HR_TRUSSC_DIR "${TRUSSC_DIR}")
-    cmake_path(ABSOLUTE_PATH _TC_HR_TRUSSC_DIR BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
+    # cmake_path(ABSOLUTE_PATH) crashes on some non-ASCII paths on Windows.
+    get_filename_component(_TC_HR_TRUSSC_DIR "${_TC_HR_TRUSSC_DIR}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     include("${_TC_HR_TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake")
     # Hot reload is unavailable on Android / Emscripten / iOS: TC_HOT_RELOAD in
     # source is a no-op there. Computed once here and baked into the pre-build

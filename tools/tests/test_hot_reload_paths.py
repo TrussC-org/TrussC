@@ -23,7 +23,7 @@ class HotReloadPathTests(unittest.TestCase):
         for spelling in ('backslashes', 'relative'):
             for layout in ('nested', 'explicit', 'explicit_without_macro'):
                 with self.subTest(spelling=spelling, layout=layout), tempfile.TemporaryDirectory(
-                        dir=scratch, prefix='tc paths $literal ') as temporary:
+                        dir=scratch, prefix='tc paths テスト あ 한 $literal ') as temporary:
                     project = Path(temporary).resolve()
                     src = project / 'src/app'
                     src.mkdir(parents=True)
@@ -53,6 +53,8 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/verdict.txt" "${{_TC_HOT_RELOAD}}")
                     expected = 'OFF' if layout == 'explicit_without_macro' else 'ON'
                     self.assertEqual((build / 'verdict.txt').read_text(encoding='utf-8'), expected)
                     script = build / '_tc_check_hot_reload.cmake'
+                    self.assertIn(core + '/cmake/tc_hot_reload_scan.cmake',
+                                  script.read_text(encoding='utf-8'))
                     result = subprocess.run(['cmake', '-P', str(script)], cwd=other,
                                             capture_output=True, text=True, encoding='utf-8')
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

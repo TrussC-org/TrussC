@@ -151,7 +151,9 @@ endforeach()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.selection = (self.build / 'selection.txt').read_text(encoding='utf-8')
         if platform == 'windows':
-            self.selection += (self.build / 'app_icon.rc').read_text(encoding='utf-8')
+            resource = (self.build / 'app_icon.rc').read_text(encoding='utf-8')
+            self.assertEqual(resource.splitlines()[0], '#pragma code_page(65001)')
+            self.selection += resource
         return result.stdout + result.stderr
 
     def png(self):
