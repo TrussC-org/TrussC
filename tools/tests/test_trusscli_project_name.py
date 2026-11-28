@@ -84,10 +84,15 @@ int main() {
             # generator on a fixture .xcodeproj without requiring Apple tools.
             source.write_text(r'''
 #include "IdeHelper.h"
+#include "ProcessCapture.h"
 #include "GeneratedFile.h"
 #include <fstream>
 void writeGeneratedFile(const fs::path& path, const std::string& text) {
     std::ofstream(path) << text;
+}
+projectOps::ProcessResult projectOps::runProcess(const std::vector<std::string>&,
+    const std::function<void(const char*, size_t)>&, const projectOps::ProcessOptions&) {
+    return {};
 }
 int main(int argc, char** argv) {
     if (argc != 2) return 1;

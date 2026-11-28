@@ -166,26 +166,18 @@ static int executeBuild(const BuildInput& input, Result& result, const LogCallba
         ProjectGenerator::CommandRunner previous;
         ~RestoreCommands() { ProjectGenerator::commandRunner = std::move(previous); }
     } restore{std::move(ProjectGenerator::commandRunner)};
-    ProjectGenerator::commandRunner = [&](const string& command) -> pair<int, string> {
+    ProjectGenerator::commandRunner = [&](const vector<string>& arguments,
+                                           const ProcessOptions& commandOptions) -> pair<int, string> {
         if (result.stopped) return {-1, ""};
         string output;
-        auto options = processOptions;
-#ifdef _WIN32
-        options.windowsCommandLine = windowsShellCommandLine(command);
-        const vector<string> arguments = {"cmd.exe"};
-#else
-        const vector<string> arguments = {"/bin/sh", "-c", command};
-#endif
+        auto options = commandOptions;
+        options.cancel = processOptions.cancel;
+        options.hideConsole = processOptions.hideConsole;
         const auto child = runProcess(arguments, [&](const char* data, size_t size) {
             output.append(data, size);
         }, options);
         result.stopped |= child.stopped;
-        int code = child.exitCode;
-#ifndef _WIN32
-        // The generator's existing popen adapter returns a wait status.
-        if (code >= 0) code <<= 8;
-#endif
-        return {code, std::move(output)};
+        return {child.exitCode, std::move(output)};
     };
     const auto& explicitPath = input.update.projectPath;
     const auto& explicitTcRoot = input.update.tcRoot;

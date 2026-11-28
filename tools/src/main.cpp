@@ -223,6 +223,17 @@ static CaptureResult captureCommand(const string& cmd) {
 #endif
 }
 
+static CaptureResult captureCommand(const vector<string>& argv) {
+    auto closeFile = [](FILE* file) { fclose(file); };
+    unique_ptr<FILE, decltype(closeFile)> errors(fopen(TC_DEV_NULL, "w"), closeFile);
+    if (!errors) return {-1, ""};
+    string output;
+    const int code = runCaptured(argv, [&](const char* data, size_t size) {
+        output.append(data, size);
+    }, errors.get());
+    return {code, std::move(output)};
+}
+
 enum class CheckStatus { OK, Warning, Error, Skipped };
 
 struct CheckResult {
@@ -243,9 +254,7 @@ static CheckResult checkWindowsHeaderDependencies(const string& projectPath) {
 
     string ninja = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_MAKE_PROGRAM");
     if (ninja.empty()) ninja = "ninja";
-    // Outer quotes preserve a quoted executable path when _popen invokes cmd.
-    auto [code, output] = captureCommand("\"\"" + ninja + "\" -C \"" +
-        dir.string() + "\" -t deps 2>NUL\"");
+    auto [code, output] = captureCommand(vector<string>{ninja, "-C", dir.string(), "-t", "deps"});
     if (code != 0) {
         r.status = CheckStatus::Warning;
         r.detail = "unknown (could not read Ninja dependencies)";
@@ -521,8 +530,7 @@ static string queryTrussCVersion(const string& tcRoot) {
     if (tcRoot.empty()) return "";
     // Match only proper version tags (v1.2.3) to avoid stray tags
     auto [code, out] = captureCommand(
-        "git -C \"" + tcRoot + "\" describe --tags --always --dirty --match \"v[0-9]*\" 2>"
-        TC_DEV_NULL);
+        vector<string>{"git", "-C", tcRoot, "describe", "--tags", "--always", "--dirty", "--match", "v[0-9]*"});
     if (code != 0) return "";
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
     return out;
@@ -927,8 +935,8 @@ static bool isSkippedInCp(const string& name) {
 
 // Returns true if `path` sits inside a git work tree.
 static bool isGitWorkTree(const fs::path& path) {
-    string cmd = "git -C \"" + path.string() + "\" rev-parse --is-inside-work-tree 2>" TC_DEV_NULL;
-    auto [code, out] = captureCommand(cmd);
+    auto [code, out] = captureCommand(vector<string>{"git", "-C", path.string(),
+        "rev-parse", "--is-inside-work-tree"});
     if (code != 0) return false;
     // Expect "true\n"
     return out.rfind("true", 0) == 0;
@@ -938,13 +946,11 @@ static bool isGitWorkTree(const fs::path& path) {
 // --exclude-standard, and includes both tracked and untracked (but not ignored)
 // files. Caller must ensure srcRoot is a git work tree.
 // Paths containing newlines would break this parser, but TrussC projects are
-// not expected to have such paths (and captureCommand() reads line-by-line via
-// fgets(), which can't safely handle NUL-separated output from `ls-files -z`).
+// not expected to have such paths.
 static vector<string> gitListFiles(const fs::path& srcRoot) {
     // -c: cached (tracked), -o: others (untracked), --exclude-standard: honor .gitignore
-    string cmd = "git -C \"" + srcRoot.string() +
-                 "\" ls-files -co --exclude-standard 2>" TC_DEV_NULL;
-    auto [code, out] = captureCommand(cmd);
+    auto [code, out] = captureCommand(vector<string>{"git", "-C", srcRoot.string(),
+        "ls-files", "-co", "--exclude-standard"});
     vector<string> files;
     if (code != 0) return files;
     size_t start = 0;

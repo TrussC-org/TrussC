@@ -39,6 +39,9 @@ struct ProcessOptions {
     bool inheritOutput = false;
     bool hideConsole = false; // Known console tools only: SW_HIDE also hides an app's first window, so Stop would send CTRL_BREAK instead of WM_CLOSE.
 #ifdef _WIN32
+    bool noConsole = false; // Generator configure keeps the default console code page.
+    bool waitForExit = true; // IDE open commands return after launch.
+    bool newConsole = false; // Interactive terminal launch.
     std::string windowsCommandLine; // Existing generator shell commands, already quoted for cmd.exe.
 #endif
     FILE* stderrFile = nullptr;

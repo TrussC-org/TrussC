@@ -131,8 +131,8 @@ class BuildOperationTests(unittest.TestCase):
         self.assertIn("error:", (self.build_dir / "build.log").read_text(encoding="utf-8"))
 
     @unittest.skipUnless(sys.platform == "linux", "fake tools on PATH")
-    def test_update_build_and_run_in_ampersand_path(self):
-        folder = self.base / "a&b space 日本語"
+    def test_update_build_and_run_in_special_character_path(self):
+        folder = self.base / "a&b space 日本語 $(touch MARKER) `touch MARKER`"
         folder.mkdir()
         self.project = self.project.rename(folder / "sample")
         (self.project / "CMakeLists.txt").write_text("# TRUSSC_DIR\n", encoding="utf-8")
@@ -176,6 +176,8 @@ elif "--build" not in sys.argv:
             self.assertTrue(report["success"], report)
             if mode == "run":
                 self.assertIn("app ran", report["output"])
+        self.assertFalse((self.base / "MARKER").exists())
+        self.assertFalse((self.project / "MARKER").exists())
         calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(len(calls), 4, calls)
         self.assertTrue(all(cwd == str(self.project) for cwd, _ in calls), calls)
