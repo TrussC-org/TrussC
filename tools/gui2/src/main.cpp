@@ -222,8 +222,13 @@ class HubApp : public App {
         ImGui::PopFont();
         // Header has its own scrolling region; the copy action never scrolls out.
         const int lines = wrapped(project.path, true, ImGui::GetContentRegionAvail().x - 24);
-        const float pathHeight = (std::min)(lines * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetStyle().ItemSpacing.y + 14, 130.0f);
+        const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+        const float lineSpacing = ImGui::GetStyle().ItemSpacing.y;
+        const int visibleLines = (std::min)(lines, (std::max)(1, int((130 - 14 + lineSpacing) / lineHeight)));
+        const float pathHeight = visibleLines * lineHeight - lineSpacing + 14;
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 7));
+        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarPadding, 4.0f);
+        ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, ImVec4(0, 0, 0, 0));
         ImGui::BeginChild("##project-path", ImVec2(0, pathHeight), ImGuiChildFlags_Borders);
         const auto pathOrigin = ImGui::GetCursorScreenPos();
         const float textHeight = wrapped(project.path, true) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetStyle().ItemSpacing.y;
@@ -239,7 +244,8 @@ class HubApp : public App {
         ImGui::SetCursorScreenPos(pathOrigin);
         wrapped(project.path);
         ImGui::EndChild();
-        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar(2);
         if (button("project.copy_path")) ImGui::SetClipboardText(project.path.c_str());
         std::string summary = text("project.summary");
         auto replace = [&](const std::string& key, const std::string& value) { summary.replace(summary.find(key), key.size(), value); };
@@ -292,9 +298,12 @@ class HubApp : public App {
         for (const auto& path : rows) {
             ImGui::PushID(path.c_str());
             ImGui::BeginChild("##recent", ImVec2(0, 105), ImGuiChildFlags_Borders);
+            const float openWidth = ImGui::CalcTextSize(text("home.recent_open")).x + ImGui::GetStyle().FramePadding.x * 2;
+            const float openX = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - openWidth;
+            ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(pathToUtf8(utf8ToPath(path).filename()).c_str());
-            ImGui::SameLine();
-            if (button("home.open")) select(utf8ToPath(path));
+            ImGui::SameLine(openX);
+            if (button("home.recent_open")) select(utf8ToPath(path));
             wrapped(path);
             if (!fs::is_directory(utf8ToPath(path))) label("home.missing");
             ImGui::EndChild();

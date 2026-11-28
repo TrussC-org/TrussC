@@ -20,6 +20,7 @@ inline const char* text(const std::string& id) {
         {"home.open", "Open project..."},
         {"home.new", "New project..."},
         {"home.recents", "Recent projects"},
+        {"home.recent_open", "Open"},
         {"home.empty", "No recent projects yet. Open a folder or create your first project."},
         {"home.missing", "Folder not found"},
         {"home.choose_root", "Choose TrussC folder"},
